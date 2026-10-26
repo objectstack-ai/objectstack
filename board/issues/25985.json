@@ -1,0 +1,33 @@
+{
+  "number": 25985,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a failed flow run reads userMessage and the inner refusal by the record-save rule",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:03:30Z",
+  "updated_at": "2026-10-26T08:34:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25985",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WN247kMgZ857N2j9A7tAwf)_\n\nFixes #25938\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n`ui/packages/app-shell/src/utils/flowResponse.ts`, `flowFailureMessage`: a failed flow run is now rendered by the record-save rule (objectstack#24914 ruling B′, premise corrected in the card's comment 6410213338). Both failure arms read the same four rungs, in order:\n\n1. the flow's authored `errorMessage` (translated through the flows bundle, unchanged);\n2. the producer-marked `userMessage`, through `declaredUserMessage` from `@object-ui/react`: the envelope's top level on `400 FLOW_FAILED` (`ApiErrorSchema.userMessage`), `AutomationResult.userMessage` on the `200` failed run;\n3. the inner refusal the run's write node met (`error.details.innerRefusal` on the 400, `AutomationResult.innerRefusal` on the 200): a permission denial (`isPermissionError`, the record form's own predicate) shows the record form's localized line `form.noPermissionToSave`; anything else shows `innerRefusal.message`, which the spec serves without the node and operation prefixes, so no stripping;\n4. the run's `message` (`error.message` / `AutomationResult.error`), so an envelope without the members still says something.\n\nThe wire `message` is not touched, nothing parses it, no copy is added, and the refusing-`end` path and the FlowRunner layout do not move.\n\n**Where the permission line comes from.** `flowResponse.ts` holds no `t()`: its callers hand it a `FlowCopyLocale` (flow name, flows bundle, locale). Threading a translator through `FlowRunner` and both launch hosts would leave the claimed file surface, so the line is read from the resident built-in catalogue at `FlowCopyLocale.locale` (exact tag, then base language, then `en`), the same read `LoadingScreen` and `outboundAgentText` already make. The active language's catalogue is resident whenever the console runs in it. Bound: an app bundle that overrides `form.noPermissionToSave` through i18next is not consulted here, while the record form's `t()` would consult it.\n\n## Tests\n\n`ui/packages/app-shell/src/utils/__tests__/flowResponse.test.ts`, new describe `a refusal met inside the run, by the record-save rule`. The `400 FLOW_FAILED` fixtures reproduce the door's own constants (`packages/runtime/src/flow-failed-inner-refusal.test.ts`) and are parsed by the spec's `ApiErrorSchema` and `FlowFailureDetailsSchema` before use. Cases: unique refusal shows the inner sentence; validation refusal shows the rule text; permission refusal shows the localized line (en and zh-CN, never the server prose); a marked `userMessage` wins over the inner refusal; the authored `errorMessage` wins over both; no members falls back to `message`; the 200 failed arm follows the same order.\n\n- `pnpm exec vitest run` on `flowResponse.test.ts`, `FlowRunner.resumeResult.test.tsx`, `flowLaunch.translation-12075.test.tsx`: Test Files 3 passed, Tests 71 passed.\n- Ablation, fix committed first, mutation through `scripts/ablation-replace.mjs` (anchor hit 1 to 0, restore proved by blob equal to HEAD and an empty `git diff HEAD`):\n  - inner-refusal rung removed: 4 failed, 54 passed (unique, validation, permission, 200 arm);\n  - `userMessage` rung removed: 2 failed, 56 passed (marked-wins, 200 arm).\n\n## Acceptance notes\n\n- `isPermissionError` is reused as-is, so a non-permission code whose inner message matches its text heuristic (row-level security, access denied, permission denied, not permitted) also gets the permission line. That is the record form's behaviour for the same refusal on a save; the code check covers `PERMISSION_DENIED` and `FORBIDDEN`.\n- The developer console keeps the raw `message` in the sense that the wire is unchanged; this PR adds no `console.warn` beside the substitution (the record form logs one on a permission denial).\n- Local `pnpm --filter @object-ui/app-shell type-check` needs every ui workspace dependency built first; see the report for what was measured. `Type Check UI` in CI is the verdict.\n- Commits on this branch before the last one carry no trailer pair; the branch is the platform-assigned card-thread branch, so history is not rewritten.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01U1cBh9Krc319ezzP6FXDTj)_\n"
+}

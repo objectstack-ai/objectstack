@@ -1,0 +1,32 @@
+{
+  "number": 25892,
+  "kind": "issue",
+  "title": "Studio evaluates the browsed app's navigation `visible` predicates with no `current_user.positions` and a `can()` that cannot answer, logging ten \"visibility predicate could not be evaluated\" warnings per page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:57:48Z",
+  "updated_at": "2026-10-26T02:55:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25892",
+  "body": "Filing gate **① a defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (`@objectstack/console` 18.1.0)\n\nOpening `/_console/studio` and any Studio page of the HotCRM package as the dev admin logs, per page load, one warning per HotCRM navigation entry that carries a `visible` predicate (ten in the pass):\n\n```\n[ObjectUI] A visibility predicate could not be evaluated - node \"app-shell:visible\"\n  visible: \"!(\\\"sales_rep\\\" in current_user.positions)\"\n  Reason: [runtime] No such key: positions\n[ObjectUI] A visibility predicate could not be evaluated - node \"app-shell:visible\"\n  visible: \"current_user.can(\\\"crm_lead\\\", \\\"read\\\")\"\n  Reason: [runtime] can('crm_lead', 'read') cannot b…\n```\n\nThe same predicates evaluate cleanly inside the HotCRM app (objectui#12700 landed the permissions map there, and the rep's sidebar hides the right entries). Studio's shell evaluates them against a `current_user` without `positions` and without the permissions map, so every evaluation falls to the safe default and logs.\n\n`reach:` the public UI (browser console), measured once; no user-visible breakage. The cost is noise that hides real predicate faults, and a Studio author reading the console learns that their app's navigation is broken when it is not.\n\n## Expected\n\nStudio either does not evaluate the browsed app's `visible` predicates (it is designing, not rendering, the navigation — the Interfaces rail already lists hidden entries), or it evaluates them with the same `current_user` the app shell builds.\n\n## Dedupe\n\nMCP `search_issues` objectui \"Studio app shell evaluates navigation visible predicates without current_user positions warning\" → 6 hits (#12700, objectstack-ai/objectui#12426, objectstack-ai/objectui#11167, objectstack-ai/objectui#11153, objectstack-ai/objectui#10743, objectstack-ai/objectui#11203), none about Studio's evaluation context. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §7 S4."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25934,
+  "kind": "issue",
+  "title": "console: a non-participant reader is offered inline edit on a record whose pending approval locks it (lockRecord: true), and the save answers 409 RECORD_LOCKED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:40:31Z",
+  "updated_at": "2026-10-26T07:02:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25934",
+  "body": "QA-source: objectstack-ai/objectstack#25479 · approvals.record-page-decisions · negative[1]\n\n## What happens\n\nA member can read a record that has a pending `lockRecord: true` approval, but is not on the request's slate, did not submit it, and holds no override. On that record's page the console offers inline edit. The save is then refused with `409 RECORD_LOCKED`. The admin sees the same record correctly locked: no inline edit, Edit greyed, and the \"Locked for approval\" band. So the lock is drawn only for viewers the approvals door answers with a row.\n\nMeasured on `main` 77392e90 with the console at pin `5fef032b1ada` (built from `f0fdd45b`; see objectstack-ai/objectstack#25478). Reproduced on 3 fresh loads. The resolver below is unchanged at objectui `origin/main` `3a73c07`.\n\n## Reproduction\n\n1. On a stock showcase boot, as admin, mint a contributor member: `POST /api/v1/auth/organization/invite-member {\"email\":E,\"role\":\"member\"}`, then `POST /api/v1/auth/sign-up/email` as E, then `POST /api/v1/data/sys_user_position {\"user_id\":U,\"position\":\"contributor\",\"organization_id\":ORG}`.\n2. As admin, `PATCH /api/v1/data/showcase_project/ID {\"budget\":600000}`. This opens `showcase_budget_approval` at `manager_review`.\n3. As admin, `POST /api/v1/approvals/requests/MGR/approve`. The run moves to `exec_review`, and the new request row reads `lock_record: true`.\n4. As the member, sign in through the console form and open `/_console/apps/showcase_app/showcase_project/record/ID`.\n5. **Expected:** no inline-edit affordance (the record is locked). **Actual:** Edit is enabled, 12 fields show \"Double-click to edit\", and there is no lock band. Saving Health sends `PATCH /api/v1/data/showcase_project/ID {\"health\":\"yellow\"}` and gets `409 RECORD_LOCKED`.\n\nThe member's own `GET /api/v1/approvals/requests?object=showcase_project&recordId=ID` answers `200 {\"data\":[]}`.\n\n## Mechanism\n\nobjectui `packages/react/src/context/InlineEditContext.tsx` `resolveApprovalLock` (rule 2, objectui#12220) reads an answered approvals read with no open request as \"no approval running\":\n\n```\nif (openApproval) return { pending: true, locked: openApproval.locked };\nif (readAnswered) return { pending: false, locked: false };\n```\n\nThe approvals door serves a request only to its participants and the override actor (`plugin-approvals` request read gate; the record-reader tier is off on stock). So for a non-participant, an empty read does not mean \"no approval running\". The console unlocks the record, and the server then refuses the write. Nothing the non-participant can read tells them the record is locked.\n\nThe fix is a decision. One option is a lock signal a record reader can see without seeing the request. The other is the console refusing to infer \"unlocked\" from an empty read on an approval-enabled object. Either way the console stops offering an edit the server will refuse (objectui#2902's mislabel, for this persona)."
+}

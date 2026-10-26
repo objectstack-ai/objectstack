@@ -1,0 +1,32 @@
+{
+  "number": 25886,
+  "kind": "issue",
+  "title": "Invitation link while signed out: the generic 欢迎回来 login page with no inviter or organization, no prefilled email, and a second verification mail after sign-up",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T13:42:08Z",
+  "updated_at": "2026-10-26T07:04:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25886",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the invitation link in the mail). `reach:` local stack, cloud `main` `36b07fdf` + objectui pin `6f629a7` + framework pin `888d686`, zh-CN, 2026-10-25. A signed-out person opening `/_console/accept-invitation/<id>` from the invitation mail is sent to the generic login page 「欢迎回来 / 登录后继续你的工作」. That page never says who invited them or to what, and their address is not filled in. Filed at the maintainer's request in this session: 「还需要测试验证邀请注册、邀请之后登录的完整流程和用户体验……必要的合理的建议都可以立卡」.\n\nBatch-of: 10 · 2026-10-25 desktop E2E (signup · magic flow · invite).\n\n**Business reason.** The invitation is how a customer's colleagues arrive: every seat after the first comes through it. The invitee has never heard of the product. Today the first screen greets them as a returning user, the action they need (注册) is the small link, and nothing ties the page to the mail they just clicked. Each extra moment of \"is this the right site?\" costs invitations that are never accepted. The owner's checklist step 「邀请一位同事」 stays open.\n\n**Reader who acts.** The `repo:objectui` ui seat, in `packages/app-shell/src/console/organizations/manage/AcceptInvitationPage.tsx` and the login/register pages it redirects to. If the anonymous invitation preview needs a server read, the seat files the cloud/framework half.\n\n## Measured (in order)\n1. The mail reads 「陈静（chenjing…）邀请您以 Member 的身份加入 ObjectOS Cloud 上的 静安家居设计。接受邀请：http://localhost:4600/_console/accept-invitation/yzDo…」. The English role word is a separate card.\n2. The link lands on `/_console/login?redirect=/accept-invitation/…`: 「欢迎回来」, empty email field, 注册 as a text link. `AcceptInvitationPage.tsx:58` does `navigate('/login?redirect=…')` for any unauthenticated visitor.\n3. 注册 keeps the redirect (objectui#10893 fixed that ✓). The page is the generic 「创建账户 · 创建账号，开始搭建。」 and the invited address is again not prefilled. An invitee can register a different address than the one invited.\n4. After registering, the invitee must **verify the same address again** with a second mail, although they arrived by clicking a link sent to that address. The verify link carries `callbackURL=/_console/accept-invitation/…` ✓.\n5. The accept page itself is clear: organization, role 成员, expiry 2026/10/27, 拒绝 / 接受邀请. It does not name the inviter.\n\n## Expected\n- Opening an invitation link signed-out shows the invitation: who invited, which organization, which role. It offers 「注册并加入」 as the primary action and 「已有账号？登录」 second, with the invited email prefilled (and locked or warned on change).\n- The accept page names the inviter.\n- Optional, needs a server decision: skip the second verification mail when the registering address equals the invitation's address and the invitation link was just used. If the seat finds this needs a framework change, file it there as ② rather than build it here.\n\n## Dedupe\n`gh api search/issues`, repos cloud / objectui / objectstack, incl. closed:\n- `accept-invitation login register prefill`: 0 / 0 / 2, unrelated QA runs.\n- `邀请 注册 验证邮箱`: 5 / 1 / 5. objectui#10893 (closed) fixed the lost redirect, not the landing. cloud#3113 (closed) is signup security. objectstack#25040 (closed) is signup existence/verification posture.\n- `invitee verify email twice`: 1 / 0 / 8, unrelated.\n- `invitation landing login page context`: 4 / 5 / 26, none on the landing."
+}

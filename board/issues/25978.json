@@ -1,0 +1,32 @@
+{
+  "number": 25978,
+  "kind": "pull_request",
+  "title": "fix(i18n): localise the console's round-3 leftovers — data table titles, chart fallback, react pages, References columns, Flow Runs diagnostics",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T07:41:44Z",
+  "updated_at": "2026-10-26T08:08:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25978",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96SEbBcSNaduu5xfTJgz2Y7)_\n\nPart of #25916\n\nClause-②: no\nMetadata-protocol: none\n\nThird pass on the card's leftover list (the second pass's hand-back, comment 6407864045), under claim 6410094565. Implemented by the card-thread session `https://claude.ai/code/session_01C6T942afhqAP5w9XBmfTDC`.\n\n## What changes\n\n| Surface | Before | Now reads |\n|---|---|---|\n| `data-table` (components) | hover affordance title \"Open record\"; inline-edit row buttons \"Cancel changes\" / \"Save row\" | `table.openRecord`, `table.cancelChanges`, `table.saveRow` (also in the renderer's provider-less defaults table) |\n| Chart view fallback (`ObjectView.tsx`, Loading-chart region only) | \"Loading chart…\" twice | the existing `chart.loading` row |\n| `kind:'react'` page renderer (`react-page.tsx`, no `t(` before) | capability notice, empty-source refusal, \"Loading react runtime…\", two error titles | `reactPage.*` (new namespace, six rows) |\n| Studio References sheet (`ResourceEditPage.tsx`) | column headers From type / From name / Path | `engine.edit.refsColFromType`, `refsColFromName`, `refsColPath` in the Studio's own `engine.*` table (en-US + zh-CN), per the carve-out the first pass used |\n| Flow Runs (`FlowRunsPage.tsx`) | three English \"X is not available on this client\" diagnostics stored in error state | error state keeps the missing method's NAME; each panel words it at render through `console.developer.flowRuns.clientMethodUnavailable` (method interpolated). A message the call threw is still drawn verbatim |\n\n- New pack rows are in all ten packs (`en` plus nine real translations); each call carries the `en` value as its inline default, so provider-less mounts and existing English tests are unchanged.\n- The two `reactPage` sentences with inline code chips are ONE translated string each: the chips' slots are interpolated with private-use marks and the translated sentence is split on them, so each language decides where the chip sits. Same technique as `element:metadata_viewer` (a local copy of its `CHIP` / `withChips` helper, in the same package).\n- `scripts/sdui-manifest.record.json`: `check-sdui-manifest` went red because `data-table.tsx` and `react-page.tsx` are registry sources. Regenerated with `node scripts/gen-sdui-manifest-node.mjs`: `sdui.manifest.json` is byte-unchanged (106 components); only the recorded source hash moved.\n\n## Tests\n\nNew, through the real renderers / pages and a real `I18nProvider` (zh expectations read from the packs and guarded as real Han rows, plus provider-less English controls):\n\n- `ui/packages/components/src/__tests__/renderer-copy-locale-25916.test.tsx`: data-table titles; react-page notice and empty-source refusal with chips in the zh position and no slot leak. 7/7.\n- `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.referencesColumns-25916.test.tsx`: References column headers zh / en. 3/3.\n- `ui/apps/console/src/pages/developer/flowRunsClientDiagnostic-25916.test.tsx`: the three diagnostics in zh with the method name, a thrown message verbatim, English controls. 6/6.\n\nAffected set (195 files: every test naming the touched titles, strings or components, plus all of `ui/packages/i18n` and the i18n script tests), under the verify lock at `962206c5`: Test Files 195 passed (195), Tests 3305 passed, 13 skipped. The References-columns file was re-run (3/3) after its typing fix in `522c33d6`. Type-check of `@object-ui/i18n`, `components`, `app-shell`, `console` (turbo, with `^build`): green after one test-typing fix.\n\n## Gates\n\nLocal: the 34 commands `dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived, plus `check-changeset-fixed` (its roster sits under `.changeset`): all exit 0 except `check-sdui-manifest` (cleared by the re-record above, now exit 0) and `check:type-check-debt` (timed out under the 300 s per-command cap; re-run reported in the os-dev report). ui scripts: `check-i18n-call-site-keys`, `check-i18n-en-drift`, `check-i18n-dead-keys` (none of the new keys listed), `check-i18n-designer-table-parity`, `check-new-cross-file-line-citations` (0 new): all exit 0. Repo-wide lint and the full ui shard battery are CI's.\n\n## Acceptance notes\n\n- **Dev-only harnesses left English.** `ui/apps/console/src/dev/*` (Dev · … headings, `PerformanceDashboard`) and the console `*-preview.tsx` entries are developer harnesses, moved under `dev/` by the second pass precisely so a census can exclude them by path; translating their headings buys no user-facing language. Not done here; this is why the PR says `Part of`.\n- **Out of scope by the dispatch ruling, untouched:** ShareDialog audience / permission badges (raw enum values, objectstack-ai/objectui#13353), the three `formatDate` helpers (objectstack-ai/objectui#13458), the Agent key-name prefill (kept by decision), `ConnectAgentWidget` product names (proper nouns).\n- **`StudioDesignSurface` placeholder:** already localised on `main`; its only remaining literal is `placeholder=\"https://\"`, a URL scheme, not copy.\n- **`ObjectView.tsx`:** only the Loading-chart region changed; the view-tab regions belong to #25901.\n- No new lint gate (triage ruling 6407863382).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01C6T942afhqAP5w9XBmfTDC)_\n"
+}

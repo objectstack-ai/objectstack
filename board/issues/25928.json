@@ -1,0 +1,36 @@
+{
+  "number": 25928,
+  "kind": "pull_request",
+  "title": "test(rest): sandbox crash leak checks match a long unique marker, not the short word boom",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T04:23:36Z",
+  "updated_at": "2026-10-26T06:23:48Z",
+  "closed_at": "2026-10-26T06:23:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T06:23:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25928",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DGwpW37CMTDznXmHEda2Sn2)_\n\nFixes #25714\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nTest-only. The sandbox-crash leak checks matched the short word `boom` (plus `TypeError`) against the whole serialized response, and the import job id (base36 timestamp plus random tail) can spell `boom` by chance. The injected crash now carries a long unique marker, and the leak pattern matches that marker plus `TypeError` (a lowercase base36 id cannot spell `TypeError`). The check is no looser: any leak of the fault's words still fails it; no retry, no skip.\n\n- `packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts`: new `CRASH_WORDS` / `CRASH_LEAK`; `sandboxCrash`, the `sandboxOwnFault` inner-hook row, and the three former `TypeError-or-boom` patterns (the CRASHED rows of the two tables and the inner-hook row) use them.\n- `packages/rest/src/rest-sandbox-declared-status.test.ts`: same family (the `mapDataError` crash row); same marker.\n\nProducer check: the real producer is the test sentinel itself (id from `rest-server.ts` import job creation); no product code changes.\n\n## Verification\n\n- `git grep -n` for the old whole-body short-sentinel pattern in `packages/rest/src`: no hits (exit 1).\n- Both files via vitest at head 0728391a: `Test Files 2 passed (2)`, `Tests 589 passed (589)`.\n- Ablation (committed fix first; mutation of `sandboxFaultAnswer` in `error-response.ts` so the fault's `.message` reaches the body; anchor hit 1 to 0, blob 77862fd5 to 25c0c58f; the mutated line read back from disk; source-resolved, no dist involved): `Tests  46 failed | 543 passed (589)`, e.g. `Expected: \"Internal server error\"  Received: \"hook 'mz_guard' threw: TypeError: __OS_SANDBOX_FAULT_7f3a9c__\"`. Restored with `git checkout HEAD`; `git status --porcelain` empty and the file blob hash equals the HEAD blob (77862fd5).\n- `dispatch-gates --ran`: 56 derived, 55 run exit 0, 1 NOT-MEASURED (`pnpm check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET: only the rest closure is built locally). `check-plugin-teardown-shape --self-test` first exited 3 on a shallow clone, then 0 after `git fetch --unshallow`.\n- `pnpm lint`: exit 0.\n\n## Acceptance notes\n\n- Both acceptance lines hold (see Verification). Test-only, so `skip-changeset`, no changeset.\n- No out-of-scope findings.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TFnDdepdwyDJeM2kJ4GtMy\n"
+}

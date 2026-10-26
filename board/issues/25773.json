@@ -2,8 +2,8 @@
   "number": 25773,
   "kind": "issue",
   "title": "skills: `skills/objectstack-data/rules/security.md` states what `isDefault: true` means but not the marketplace requirement that every published package declares one anchor-safe default set (ruling 6341690661 on #25083, consequence ii)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T09:52:37Z",
-  "updated_at": "2026-10-25T11:55:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T05:34:43Z",
+  "closed_at": "2026-10-26T05:33:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25773",
   "body": "Filing gate: ③ a consequence the maintainer's ruling ordered, quoted verbatim below. Carried to this lane by hand-off 6349675664 on seat post #19287 (`domain:services` seat 1, 2026-10-22T19:40Z): the ruling asks the claiming seat to file a skills-lane child card, and that project holds no skills lane.\nReader: `domain:skills` seat, next PR on `skills/objectstack-data/rules/security.md` (the `isDefault: true` bullet under the permission-set section, L30–L32 on `origin/main` `5874d253`) plus the marketplace page that states what a published package must declare. `content/docs/references/marketplace/*.mdx` is AUTO-GEN from spec TSDoc (AGENTS.md Documentation Guardrails), so a change there lands in the `.describe()` / TSDoc source and is regenerated, ⛔ never hand-edited; the dev names the exact source sentence in the PR.\nDedupe (open AND closed), MCP semantic search 2026-10-25T09:45Z, \"every published package declares one anchor-safe isDefault true permission set skills objectstack-data rules security.md marketplace requirement\" → 27 hits, none asks for the requirement. Nearest: #17359 (closed — whether the published guidance must teach the `isDefault` → `everyone` binding rule; it now does, which is what L30 states today), #22658 / #22659 / #22668 (the skills package channel), #24974 / #24929 (the install line), #18202 (cross-package permission references).\n\n## The ruling\n\nDirector seat, ruling record 6341690661 on #25083 (batch #385 item 1, 2026-10-22T13:15Z). The maintainer's words recorded there, verbatim and untranslated: 「Q1 B，四题一起录入卡片，并立 hotcrm 卡声明默认权限集」 · 「其他同意」. The consequence this card carries, quoted from that record:\n\n> (ii) the marketplace rule 「every published package declares one anchor-safe `isDefault: true` set」 — a governed-text change to `skills/objectstack-data/rules/security.md` (today it states the semantics, not the requirement) and the marketplace docs, filed by the claiming seat to the skills lane as a child card.\n\nThe sibling consequence (i) is objectstack-ai/hotcrm#2231 (HotCRM declares one anchor-safe default set). The ruling's reason, same record: default access reaches the people an organisation invites through ONE mechanism (ADR-0090 D5, a permission set with `isDefault: true` bound to the `everyone` anchor); a package that declares no such set reaches no invited member until an admin assigns per person.\n\n## What the text says today (read at `origin/main` `5874d253`)\n\n`skills/objectstack-data/rules/security.md` L30–L32:\n\n> - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** It may carry app capabilities declared under `capabilities:` (`defineCapability`) and granted via `systemPermissions`; lint and boot refuse a platform capability or undeclared name there.\n\nThat is the semantics (what the flag binds to). Nothing in `skills/**` says a published package must declare one such set.\n\n## What to change\n\n1. `skills/objectstack-data/rules/security.md`: the requirement, written as a rule an author can check — every published package declares exactly one permission set with `isDefault: true` that is anchor-safe (bindable to the `everyone` anchor). The dev reads the anchor-safe predicate from the lint and boot refusal it cites (the rule names the symbol, not a paraphrase). The published skill ships verbatim (`npx skills add`), so this sentence is the contract an author reads.\n2. The marketplace docs: the same requirement where a publisher reads what a package must declare — at the TSDoc / `.describe()` source the generated page comes from, or a hand-written page if one exists; the PR says which and shows the regenerated page.\n3. `skills/**` token ratchet: the file's ceiling is read at dispatch; new text is paid by deletion in the same file.\n\n## Boundary\n\n- `skills/**` is Tier H (the maintainer's hand or an authorized approval) and `CONTRACT_REVIEW_TIER` is mandatory for it (`dispatch-gates --tier skills/objectstack-data/rules/security.md` answers MANDATORY).\n- Whether a gate should ENFORCE the requirement at publish time (lint or `os package publish` refusing a package with no anchor-safe default set) is not this card: the ruling orders the text; a new gate needs the maintainer's own word. If the dev finds such a refusal already exists, the text cites it.\n- Not in scope: HotCRM's own default set (hotcrm#2231); the ruling's other consequences on #25083.\n\nSession: `session_01TsiNYHjuek413vNgFHqcAm`"

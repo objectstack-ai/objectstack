@@ -2,8 +2,8 @@
   "number": 25863,
   "kind": "issue",
   "title": "Queue-flake anchor: scripts/__tests__/check-pre-install-import-graph.test.ts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "github-actions[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:blocked",
     "priority:p1",
     "queue-flake-anchor"
   ],
@@ -22,12 +21,16 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T01:21:52Z",
-  "updated_at": "2026-10-26T01:58:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T07:46:06Z",
+  "closed_at": "2026-10-26T07:46:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25863",
-  "body": "`scripts/__tests__/check-pre-install-import-graph.test.ts` has ejected **5 pull requests** from the merge\nqueue within a rolling 24 hours — **1 independent hit** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #25852 | S1 · root | [40251505048](https://github.com/objectstack-ai/objectstack/actions/runs/40251505048) |\n| #25856 | S1 · inherited | [40252576788](https://github.com/objectstack-ai/objectstack/actions/runs/40252576788) |\n| #25857 | S1 · inherited | [40255236454](https://github.com/objectstack-ai/objectstack/actions/runs/40255236454) |\n| #25861 | S1 · inherited | [40255506383](https://github.com/objectstack-ai/objectstack/actions/runs/40255506383) |\n| #25865 | S1 · inherited | [40255280821](https://github.com/objectstack-ai/objectstack/actions/runs/40255280821) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the root above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [40255506383](https://github.com/objectstack-ai/objectstack/actions/runs/40255506383) (PR #25861).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:scripts/__tests__/check-pre-install-import-graph.test.ts -->"
+  "body": "`scripts/__tests__/check-pre-install-import-graph.test.ts` has ejected **12 pull requests** from the merge\nqueue within a rolling 24 hours — **3 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #25826 | S1 · inherited | [40271237932](https://github.com/objectstack-ai/objectstack/actions/runs/40271237932) · [40265890690](https://github.com/objectstack-ai/objectstack/actions/runs/40265890690) |\n| #25852 | S2 · root | [40251505048](https://github.com/objectstack-ai/objectstack/actions/runs/40251505048) |\n| #25856 | S2 · inherited | [40252576788](https://github.com/objectstack-ai/objectstack/actions/runs/40252576788) |\n| #25857 | S2 · inherited | [40255236454](https://github.com/objectstack-ai/objectstack/actions/runs/40255236454) |\n| #25861 | S2 · inherited | [40255506383](https://github.com/objectstack-ai/objectstack/actions/runs/40255506383) |\n| #25865 | S2 · inherited | [40255280821](https://github.com/objectstack-ai/objectstack/actions/runs/40255280821) |\n| #25878 | S2 · inherited | [40262786432](https://github.com/objectstack-ai/objectstack/actions/runs/40262786432) |\n| #25879 | S2 · inherited | [40261620902](https://github.com/objectstack-ai/objectstack/actions/runs/40261620902) |\n| #25881 | S2 · inherited | [40263232770](https://github.com/objectstack-ai/objectstack/actions/runs/40263232770) |\n| #25882 | S2 · inherited | [40263268635](https://github.com/objectstack-ai/objectstack/actions/runs/40263268635) |\n| #25904 | S1 · inherited | [40268208875](https://github.com/objectstack-ai/objectstack/actions/runs/40268208875) · [40267487698](https://github.com/objectstack-ai/objectstack/actions/runs/40267487698) |\n| #25940 | independent | [40271867662](https://github.com/objectstack-ai/objectstack/actions/runs/40271867662) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [40271237932](https://github.com/objectstack-ai/objectstack/actions/runs/40271237932) (PR #25826).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:scripts/__tests__/check-pre-install-import-graph.test.ts -->"
 }

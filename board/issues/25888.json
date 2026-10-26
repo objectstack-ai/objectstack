@@ -1,0 +1,34 @@
+{
+  "number": 25888,
+  "kind": "issue",
+  "title": "record:related_list View all drops the list's object_name filter, so a reader admitted by approvalsVisibleToReaders sees 0 approval requests on the full list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T12:38:18Z",
+  "updated_at": "2026-10-26T07:42:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25888",
+  "body": "Filing class: ① product defect (user-visible) — reach: browser, measured on `@objectstack/*` 18.1.0 in objectstack-ai/hotclm (PR objectstack-ai/hotclm#114, `main` `f5ad133`).\n\n## Symptom\nOn a record page whose object sets `enable.approvalsVisibleToReaders: true`, a reader who is not an approval participant (hotclm: a requester on their own contract) sees the **Approvals** related list with its rows (e.g. *Approvals 2*). The list's **View all** link opens `/_console/apps/<app>/sys_approval_request/data?filter[record_id]=<id>` — it carries `record_id` only and drops the related list's `object_name` filter. The data page then reads `GET …/sys_approval_request?filter=[[\"record_id\",\"=\",<id>]]` → `total=0` and shows *No matching records*, while the tab above it shows 2.\n\n## Why\nThe platform's record-reader tier (`plugin-approvals` request read gate, `requestReadTarget`) admits a reader only on a read that pins **both** `object_name` and `record_id`. The View all URL builder in the Console's `record:related_list` keeps only the relationship key, not the list's full `properties.filter`, so the reader's read loses its object pin and the gate answers with the participant slice (empty).\n\n## Expected\n*View all* carries every filter the related list itself applied (here `object_name` + `record_id`), so the full list shows the same rows the tab showed.\n\n## Repro\n1. An object with `enable.approvalsVisibleToReaders: true` and a reader grant on `sys_approval_request` (hotclm `clm_contract` + `clm_requester` after objectstack-ai/hotclm#114).\n2. A record with ≥1 approval request; sign in as a reader who is not a participant.\n3. Record page → Approvals tab shows N rows → click *View all* → 0 rows.\n\nSeam: `renderer:console record:related_list` View all URL (omits `properties.filter`) → `runtime:plugin-approvals` request read gate. Not worked around in hotclm (metadata-only app; platform gaps wait for the platform).\n\nDedupe: objectui issues searched for `View all` / related list filter / `approvalsVisibleToReaders` — closest are objectstack-ai/objectui#12741 (View all link drawn) and objectstack-ai/objectui#13310 (data filter bar), neither covers the dropped filter.\n\n---\n_Filed by the objectstack-ai/hotclm PM seat from the hotclm#86 dev report._\n"
+}

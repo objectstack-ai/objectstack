@@ -1,0 +1,38 @@
+{
+  "number": 25907,
+  "kind": "issue",
+  "title": "analytics native SQL: an all-NULL `sum` group is folded to 0 after ORDER BY / LIMIT ran on the NULL, so SQLite and PostgreSQL return different sorted pages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T03:34:12Z",
+  "updated_at": "2026-10-26T06:33:51Z",
+  "closed_at": "2026-10-26T06:33:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25907",
+  "body": "Filing gate: ① product defect, a driver-dependent answer at a named location.\nBusiness reason: a dashboard \"top N by sum\" widget (ORDER BY a summed measure plus LIMIT) shows different rows on SQLite and PostgreSQL for the same data whenever one group's aggregand is NULL in every row. On one driver it also lists a `0` group in a position the sort doesn't allow. People who develop on SQLite and deploy on PG see a different page in production. If nothing is done, every sorted and paged analytics widget over a sparse column carries this.\nReader: domain:spec / analytics seat, the next PR touching `packages/services/service-analytics/src/strategies/native-sql-strategy.ts`, the #21042 empty-group fold (`folds`, after `executeRawSql`).\nDedupe (open AND closed): \"analytics sum null group ORDER BY LIMIT differs between SQLite and PostgreSQL nulls first nulls last\" → 10 shown of 16, none on this. The nearest is #21042 (closed), which added the fold this defect follows from. \"native sql empty group fold after order by limit\" was checked as well; it found no open card on it.\nreach: observed through `AnalyticsService.query`, the service the `POST /analytics/query` handler calls (`packages/runtime/src/domains/analytics.ts`), on the native-SQL strategy, on both SQLite and PostgreSQL, by the PR #25903 (#25778) dev while writing `dataset-duration-measure.test.ts`. That test now excludes the all-NULL group for this reason. In-process at the service, not over HTTP.\ntype: Bug\n\n## What happens\n\nA cube query that orders by a `sum` measure and has a `limit`, over data where one group's summed field is NULL in every row:\n\n- The statement computes `SUM(...)` as NULL for that group, then `ORDER BY` places it. SQLite sorts NULL first in ascending order, and PostgreSQL sorts NULL last (the reverse holds for descending).\n- `LIMIT` / `OFFSET` cut the page on that ordering.\n- After the rows come back, the #21042 fold (native-sql-strategy.ts, the `folds` loop after `executeRawSql`) rewrites the NULL to `0`, the identity `emptyGroupValueFor` declares for `sum`.\n\nSo the two drivers return different pages for the same query. On at least one driver the folded `0` sits where a `0` cannot sort, for example after positive values in an ascending order.\n\n## Why\n\nThe fold applies the platform's empty-group identity in JavaScript, after the database has already ordered and paged on the unfolded NULL. The value is folded, but the ordering that SQL computed from it is not.\n\n## Expected\n\nThe order and the page agree with the folded value, the same on every dialect. One way is to apply the identity inside the statement (`COALESCE(SUM(x), 0)` for an aggregate with an identity), so `ORDER BY` sees `0`. Another is to give the ordering an explicit null placement that matches the fold. Measures without an identity (`avg`, `min`, `max`) keep NULL, and their NULL placement should then be stated, not left to the driver.\n\nFound by the dev of PR #25903 (dataset duration measure). It is outside that card's scope."
+}

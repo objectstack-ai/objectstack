@@ -1,0 +1,32 @@
+{
+  "number": 25896,
+  "kind": "issue",
+  "title": "plugin-charts: a line / area dashboard widget draws a Brush range slider under a 7–12 point series, taking a quarter of the card and unusable at phone width",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:55:18Z",
+  "updated_at": "2026-10-26T03:01:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25896",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0)\n\nThree dashboard widgets, each a monthly or weekly series of 7–12 points, render a recharts Brush (the grey range slider with two handles) under the x-axis:\n\n- 销售业绩 → 月度收入趋势 (7 monthly points): [30-dashboard_sales_dashboard.png](``https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/30-dashboard_sales_dashboard.png``)\n- 销售活动 → 每周活动量 (8 weekly points): [41-dashboard_sales_activity_dashboard.png](```https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/41-dashboard_sales_activity_dashboard.png)```\n- CRM 总览 → 收入趋势 (7 points): [44-dashboard_crm_overview_dashboard.png](````https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/44-dashboard_crm_overview_dashboard.png)````\n\nThe same series on 高管总览 → 收入趋势 (the `executive_dashboard`, an area chart) renders without a brush, so it is a per-widget default, not a global one. With 7 points there is nothing to zoom; the slider costs about 40 px of a 400 px card, and on a 390 px phone the handles are a touch target over the axis labels.\n\n`reach:` the public UI, measured once as the dev admin at 1440×900 and 390×844.\n\n## Expected\n\nThe brush is off unless the widget asks for it (`brush: true`), or at least off below a point threshold (say 24). The dashboard widget and the executive dashboard's area widget should agree.\n\n## Dedupe\n\nMCP `search_issues` objectui \"dashboard chart brush range slider on small time series\" → 6 hits (#13390, objectstack-ai/objectui#13403, objectstack-ai/objectui#13241, objectstack-ai/objectui#13129, objectstack-ai/objectui#7248, objectstack-ai/objectui#7250), none about the brush. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.8."
+}

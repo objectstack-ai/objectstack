@@ -2,8 +2,8 @@
   "number": 25819,
   "kind": "issue",
   "title": "aggregate query: an empty `aggregations: []` answers 404 OBJECT_NOT_FOUND \"Object … is not registered\" for a registered object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T15:37:10Z",
-  "updated_at": "2026-10-25T16:03:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T05:56:35Z",
+  "closed_at": "2026-10-26T05:52:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25819",
   "body": "Filing gate: ① a product defect with a live reproduction. The answer names the wrong cause, finding class (a).\nBusiness reason: a caller building an aggregate incrementally (a report designer, an SDK, an AI agent) sends an empty measure list and is told the object does not exist. It then debugs metadata that is fine, and the 404 says nothing about the request shape.\nReader: the `packages/objectql` / protocol aggregate lane; the same PR as the aggregate-validation refusals is a natural home.\nDedupe (open AND closed): \"empty aggregations array OBJECT_NOT_FOUND not registered\" → 12 hits, none of them this one (all are `having` or analytics comparand cards).\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 6679644a, as admin. Reproduced twice.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25817 · api-backend.aggregate-contract-matrix · observed beside the clauses\n\nReproduction:\n1. As admin, send `POST /api/v1/data/showcase_account/query` with body `{\"aggregations\":[]}`. It answers `404 OBJECT_NOT_FOUND`, \"Object 'showcase_account' is not registered\".\n2. The same body with a `where` gives the same answer.\n3. Control: `{\"aggregations\":[{\"function\":\"count\",\"alias\":\"n\"}]}` on the same object answers 200.\n\n**Expected:** a 400 that names `query.aggregations` as empty, or, if empty is meant to mean \"no aggregation\", the plain row answer. Never a not-registered claim about a registered object.\n\n**Mechanism (not traced to the line):** an `OBJECT_NOT_FOUND` is thrown on the empty-aggregations path, and `data-error-classification.ts` maps it to its fixed sentence."

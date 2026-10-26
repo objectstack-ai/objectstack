@@ -2,9 +2,9 @@
   "number": 25878,
   "kind": "pull_request",
   "title": "ci(ui-merge): register `Type Check UI` in REQUIRED_CONTEXTS",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T02:09:17Z",
-  "updated_at": "2026-10-26T02:10:03Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-10-26T03:23:40Z",
+  "closed_at": "2026-10-26T03:20:16Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T03:20:16Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25878",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoVor7wZeUGoT2cwA6ZNospy)_\n\nPart of #25752 (cutover step 6, the registry half). Part of #25677.\n\nClause-②: no\nMetadata-protocol: none\n\nThis follows #25857 (merged as 3fca5996), which registered `Lint UI` and `Build & E2E UI`. It has no closing keyword: #25853 closed with #25857, and #25855 closed with #25856.\n\n**Tier H.** `AGENTS.md` and `.claude/**` change because the registry's `statesTheSet` rule makes both instruction surfaces name the registry exactly. `check-governed-merges --test` reads GOVERNED, landing tier H(人合). Draft; the seat lands it once the ruling is on record.\n\n## What changed\n\n- `scripts/check-required-contexts.mjs`: one `REQUIRED_CONTEXTS` row, the same shape as the two #25857 added. `ci.yml` job `type-check-ui` publishes `Type Check UI`, and `carries` says: the type-check + vitest-setup type-check family of the `ui/` workspace. The two `statesTheSet` surfaces' `mustName` arrays gain the literal, and the history comments now read 7→8.\n- `AGENTS.md`, the merge-queue sentence: \"seven contexts block\" becomes \"eight\" and names `Type Check UI`; \"those seven\" becomes \"those eight\" twice. The five lines are re-filled in place, so the file stays at 1117 lines with no clause dropped and no ceiling raised. The widest touched line is 109 bytes.\n- `.claude/skills/pm-dispatch/references/platform-readings.md`: 七个 becomes 八个 and the reading names `Type Check UI`. The file stays at 460 lines; the widest touched line is 95 bytes, under the 120-byte cap.\n\n`Test UI` is not added; it was ruled out at the sitting (item 30 B).\n\n## The `authorized` field (open until the ruling is relayed)\n\nThe row's `authorized` currently reads `PENDING the maintainer ruling — asked 2026-10-26T01:42Z …`. The maintainer was asked to add `Type Check UI` to the `main` ruleset after #25856 closed bill item 49. Once the director relays his words, the field will quote them verbatim and this PR gets a push. It stays draft until then.\n\n## Deviation from the card\n\n#25853 item 4 said \"⛔ Do not add `Type Check UI`\", and gave the reason: it joins after bill item 49. Item 49 is now closed. #25856 merged as fc2aaaec52, and `Type Check UI` was green on the main push run 40253800516 (job 121351290708). The epic PM ordered this row on 2026-10-26 at 01:42Z, so it is recorded here as a deviation that the epic PM ordered.\n\n## Verification (head 4a5dec34, base `main` `c475b45b`)\n\n- `node scripts/check-required-contexts.mjs` exits 0: `8 required context name(s) pinned across 3 workflow(s); 6 instruction surface(s) scanned`.\n- `node scripts/check-required-contexts.mjs --self-test` exits 0.\n- `NODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set` on the branch exits 0. It is report-only. Direction A reads **1**, because the ruleset click has not happened yet; direction B reads 0:\n\n```text\nrequired-set sweep: 7 live required context(s) on main, 1 registered-but-not-required, 0 required-but-unpinned.\n    • ruleset main (id 12119582, Repository-sourced — objectstack-ai/objectstack)\n    required: TypeScript Type Check\n    required: Test Core\n    required: Build Core\n    required: Lint & Repo Gates\n    required: Governed Surface Queue Guard\n    required: Lint UI\n    required: Build & E2E UI\n\n  ⛔ direction A — registered here, NOT in the live required set (1).\n       • Type Check UI — ci.yml job 'type-check-ui'\n```\n\n  Once `Type Check UI` is in the ruleset, the same command reads 0 / 0. That reading will be re-taken and posted here before landing.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`): 44 commands, all exit 0 on 4a5dec34 after `pnpm install --frozen-lockfile` and `pnpm --filter '@objectstack/lint...' build`; `--ran` reconciles 44 derived, 44 run, 0 NOT-MEASURED, 0 UNRUN.\n- Changeset: none. Every path is repo-root tooling or instruction text and ships in no package (`skip-changeset`).\n\n## 维护者速读(草稿)\n\n**改了什么:** 把 `Type Check UI` 登记进仓库的必过检查注册表；AGENTS.md 和 pm-dispatch 读数表里的名单同步从七个改成八个。\n\n**为什么改:** bill 49 已由 #25856 修好：没改 `ui/` 包的 PR 上，这个检查不会再莫名变红，所以可以把它设为必过。这个 PR 是仓库这一半的改动；规则集那一半要你在设置里点。\n\n**风险与代价(含回滚):** 只改登记和说明文字，不动 CI job 本身。你点之前，注册表多出一行，核对脚本会报“已登记、未设为必过”，只报告、不变红。回滚就是 revert 本 PR。\n\n**席位意见:**\n\n**你要做的:** 1) 在 `main` 规则集里加上 `Type Check UI`,并说一句（例如「加上了」）,原话会写进这一行的 `authorized` 字段；2) 批准本 PR(os-zhuang)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012CB8WDTpTbuW2XrEyjKHVo)_\n"

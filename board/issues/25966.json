@@ -1,0 +1,30 @@
+{
+  "number": 25966,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T06:24:48Z",
+  "updated_at": "2026-10-26T06:57:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**, the lane's first post on this board: objectui became this repository's `ui/` workspace (#25825), and the lane's former post lived on the objectui board, which this seat cannot reach. No `domain:ui` post existed in the `pm:seat` index here (open or closed) when this one was raised.\n\n- **Current PM:** 🟢 `os-steve` · 由 os-steve 账户的项目负责 (the Claude Code project \"objectstack\", seat thread \"接管 ui 车道派发\") · `session_017iXjUm1rujwDk7f3KT1Pkk`, seated on the maintainer's word in that project (「你开始负责 ui 车道，并发10」, 2026-10-26T06:20Z). Mutex readings at seating: no prior `domain:ui` post, no open `pm:dispatched` card in the lane, no assignee on any open lane card.\n- **Hot-file serial queue:** `ui/.github/**` and the root `ci.yml` — ⛔ out of bounds for every ui card for now (the ui-merge `pm:epic` subtree under #25677 is editing them; maintainer's word in the project). `ui/packages/app-shell/src/views/ObjectView.tsx` — split by REGION: #25901 the view-tab regions, #25916 the Loading-chart region. `ui/packages/plugin-grid/src/ObjectGrid.tsx` — split by REGION: #25898 the empty-state region, #25858 the group-header read. `ui/packages/i18n/src/locales/*.ts` — #25916 and #25898 append keys in parallel; the later lander merges. Every other lane file is FREE.\n- **In flight (round 1, 2026-10-26T06:57Z):** #25890 · #25858 · #25888 · #25899 · #25901 · #25916 · #25897 · #25898, one card thread each; readings on the cards.\n- **Standing constraints (maintainer, project chat):** changesets for ui cards go to the root `.changeset/`; no PR is opened on the objectui repository.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments + `head:claude/` PRs, read by `assignee:os-steve`.\n- **Wall:** none.\n"
+}

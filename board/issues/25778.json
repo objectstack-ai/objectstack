@@ -2,8 +2,8 @@
   "number": 25778,
   "kind": "issue",
   "title": "Analytics datasets: no measure for the difference between two datetime columns (cycle time, per-stage duration, SLA overrun) — #16737 refused the wrong path, nothing provides the right one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "zhuangjianguo",
@@ -14,7 +14,6 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T10:09:48Z",
-  "updated_at": "2026-10-25T13:35:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T08:02:15Z",
+  "closed_at": "2026-10-26T08:00:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25778",
   "body": "Filing class: ③ platform gap, filed at destination from an app ruling. Reader: `domain:server` / `area:records` analytics triage. Unlabelled, no assignee. Origin: objectstack-ai/hotclm#31, ruled **C** by the maintainer on 2026-10-25 (ruling comment https://github.com/objectstack-ai/hotclm/issues/31#issuecomment-6396322580): keep the goal, file the capability, do not stamp durations app-side.\n\n## Context\n\nhotclm's `DESIGN.md` §09 wants two numbers every CLM buyer asks for: **average cycle / per-stage duration** (`submitted_at → review_started_at → approved_at → activated_at`) and **review SLA overrun** (`review_started_at` compared against `clm_contract_type.review_sla_days`, 2/3/5/10 days by type). The semantic layer takes no SQL and no expressions (ADR-0021), so there is nowhere to subtract two timestamps, and a dataset filter cannot compare a column against another object's column.\n\n## Measured\n\n- 17.3.0/17.4.0: `derived: { op: 'difference', of: [avg_activated, avg_submitted] }` validated, ran and rendered `-0.85` — the difference of two average **years**, because `AVG()` over an ISO-text datetime coerces to the leading number on SQLite (#16737).\n- 17.7.0 (#16737 fixed by **refusing**): `os validate` exits 1 (`measure-aggregate-field-type-refused`), `PUT /api/v1/meta/dataset/…` → 422, `POST /api/v1/analytics/query` `avg(submitted_at)` → 400. The trap is closed. The capability is still absent: `DerivedMeasureOp` is `ratio | sum | difference | product` over other measures (`packages/spec/src/ui/dataset.zod.ts:208`), and no measure function takes two datetime columns.\n\nhotclm therefore ships stage-arrival counts, approval throughput (`compareTo: previousPeriod`) and a fixed 30-day review-age tile whose title states the threshold, and its §09 records both metrics as \"waiting on the platform's date capability\". The maintainer ruled in September that the app must not stamp durations with a daily job (that would re-implement a platform rule in the app), and reaffirmed it today.\n\n## What is asked\n\n1. A dataset measure that yields the duration between two datetime columns of the same row, aggregated — shape the platform's to choose, e.g. `measure: { fn: 'avgDuration', from: 'submitted_at', to: 'activated_at', unit: 'days' }` (with `min`/`max`/`sum` variants), with `null` rows excluded and the result typed as a number of the declared unit so the tile cannot be misread. Must work on SQLite and Postgres alike (the two backends diverge today: epoch mean vs error).\n2. A per-row comparison of a datetime column against \"now minus N days\" where N comes from a related object's column (SLA by type) — or, failing that, a documented statement that this needs a stamped column, so apps know which half is theirs.\n\nCross-app pull: CRM (lead-to-close days, stage ageing), SRM (PO cycle, supplier onboarding time) need the same measure.\n\n## Dedupe\n\n`search_issues` on this repo for datetime difference / duration / cycle-time measure: **0** results. Related, not the same: #16737 (closed; refuse `avg` over datetime), #16099 (no layer refuses inconsistent aggregate/field pairs), #15768 (datetime measure typed as number).\n\n## Not asked\n\n- No expression language or raw SQL in datasets (ADR-0021 stands).\n- No app-side stamping in hotclm; hotclm#31's `Blocked-by` moves from #16737 to this card."

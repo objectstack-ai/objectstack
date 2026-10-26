@@ -1,0 +1,37 @@
+{
+  "number": 25952,
+  "kind": "pull_request",
+  "title": "feat(runtime,cli): a hook body reads ctx.provenance, so a flow-vs-user guard ships as metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T05:10:22Z",
+  "updated_at": "2026-10-26T06:44:53Z",
+  "closed_at": "2026-10-26T06:44:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T06:44:50Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25952",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DJpRLxH24N6TCGQQWmVvX3L)_\n\nFixes #25905\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## What changed\n\nA sandboxed hook body now reads the declared `HookContext.provenance`, the same server-stamped write provenance an in-process handler reads. A guard that tells a flow data node's write from a user's own write (hotcrm#2285's account-approval guard) can ship as a metadata-only body instead of being bundled.\n\n- **Runtime, `buildSandboxContext`** (`packages/runtime/src/sandbox/body-runner.ts`, hook face only): projects `provenance` member by member: `flowRunId`, `attributedUserId`, `performedByClientId`. Each member is copied only as a string. The whole key is absent when none survives, which is what the engine face carries on a plain REST write. The source is objectql's `buildProvenance()` output on the hook context, never the payload. The action face (`buildActionSandboxContext`) is untouched.\n- **Runtime, `installCtx`** (`quickjs-runner.ts`): grafts `ctx.provenance` frozen and non-writable, the same way `ctx.dispatch` is grafted, so a body cannot drift its own copy. It is installed only when the host side carried one.\n- **Runtime, `ScriptContext`** (`script-runner.ts`): the `provenance` member is typed and documented.\n- **CLI, `extract-hook-body`**: the `ctx.provenance` forbidden pattern is removed. A handler reading it lowers, and `os lint` no longer reports `hook-body/bundled-fallback` for it.\n- **Docs**: `content/docs/automation/hook-bodies.mdx` gets a sandbox-surface row, a \"Write provenance\" section (members, absence semantics, a guard example, the two guarantees), and drops provenance from the forbidden list.\n- **Changesets**: two patch entries. `@objectstack/runtime` declares `Clause-②: yes (widening)`: `ScriptContext` (a barrel export) gains the optional `provenance?` member; `dist/index.d.ts` goes 338119 → 339467 bytes, its export list is byte-identical (184 names), and that member is the only declaration that changed. `@objectstack/cli` declares `Clause-②: no`: its three `dist/*.d.ts` are byte-identical.\n- **No `packages/spec` change.** The key was already declared on `HookContextSchema`. This PR makes the sandbox honour it.\n\n## Tests\n\n- New `packages/runtime/src/sandbox/hook-provenance-signal.integration.test.ts` runs on real ObjectQL, real SqlDriver (better-sqlite3), real QuickJS and `hookBodyRunnerFactory`. Under the same caller identity it checks three things:\n  - the flow-shaped write (execution context carries `flowRunId`) reads `ctx.provenance.flowRunId === 'run_25905'`, with keys `['flowRunId']`, after the body tried to drift the member and replace the key;\n  - the REST write reads `typeof ctx.provenance === 'undefined'`;\n  - a REST write whose payload carries a field `provenance` holding a forged JSON value shows it on `ctx.input.provenance` only, while `ctx.provenance` stays absent.\n- `packages/cli/test/lowered-body-face-enumeration.test.ts`: `provenance` leaves the absent set (it now reads 4 refusals and 1 exception). Both faces are pinned to the three declared members.\n- `packages/cli/test/hook-body-parameter-rebind.test.ts`: the three `ctx.provenance` spellings move from \"refused\" to \"lowers\".\n- `packages/cli/src/lint/hook-body-lowering.test.ts`: a guard on `ctx.provenance?.flowRunId` gets no lint issue, and the build lowers it (`bodyExtracted: 1`, no warnings).\n\n### Ablations (two, both via `scripts/ablation-replace.mjs`, restore proven by blob == HEAD and an empty `git diff HEAD`)\n\n1. **Negative (forgery) pin.** `buildSandboxContext` was mutated to fall back to `JSON.parse(engineCtx.input.provenance)`, i.e. a consumer reading the payload. The pin went red at `hook-provenance-signal.integration.test.ts:165` (`expected 'object' to be 'undefined'`). Anchor 1 to 0, blob `58df4905a51e` to `81882a7eb7e0`, restored to `58df4905a51e`.\n2. **Freeze.** The graft's `Object.freeze(p)` / `writable: false` was mutated to a plain writable value. The test went red at `:139` (`expected 'replaced' to be 'run_25905'`). Blob `04f49a96f07d` to `7c20c0ada09a`, restored.\n\nThe test imports `./body-runner.js` and `./quickjs-runner.js` from `src`, so no dist rebuild was involved.\n\n## Local verification (head `df1c7164`; `256f0583` adds changesets only)\n\n- `pnpm --filter @objectstack/runtime exec vitest run`: Test Files 449 passed (449), Tests 8015 passed, 19 skipped.\n- `pnpm --filter @objectstack/cli exec vitest run --project unit`: 330 of 332 files passed on the first run. The two failures were `published-subpath-console.pin` and `published-subpath-hook-body.pin`, which threw \"packages/cli is not built\". After `pnpm --filter @objectstack/cli build` both passed (29 tests). The integration tier is declared to CI.\n- `pnpm --filter @objectstack/runtime --filter @objectstack/cli typecheck`: exit 0.\n- `pnpm lint` (repo-wide eslint): exit 0.\n- Derived gates (`dispatch-gates --commands`, 98 families): 95 exit 0. `check:i18n`, `check:i18n-coverage` and `check:i18n-walk-parity` first exited 3 (CLI dist absent) and exit 0 after the CLI build. `--ran` reconciliation: 98 derived, 98 run.\n- NOT MEASURED (exit 3, prerequisite only, none reads a changed file):\n  - `check:dual-build-cjs-loads`: unbuilt plugin dists;\n  - `@objectstack/spec check:skill-examples`: client-react dist absent;\n  - `check-plugin-teardown-shape --self-test`: shallow clone, fixture commit unreachable.\n\n  CI runs all three.\n\n## Acceptance notes\n\n- A body may still define `ctx.provenance` itself on a write that carries none (the key is absent there, as with `ctx.dispatch`). That only affects the body's own VM. Nothing is written back from it, and it cannot reach another hook or the engine.\n- `attributedUserId` and `performedByClientId` are exposed alongside `flowRunId`. All three are declared, server-stamped attribution marks. `session.userId` is already on the body face.\n- #25653 (seat 1) edits the action face of `body-runner.ts`. This PR touches only the hook face's `buildSandboxContext` plus a new helper below it. Whichever lands second merges `main`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0144xurUaQ5v2UtFYLpYp28J)_\n"
+}

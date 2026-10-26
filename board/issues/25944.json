@@ -1,0 +1,37 @@
+{
+  "number": 25944,
+  "kind": "pull_request",
+  "title": "fix(runtime): the automation run doors answer another flow's run as an unknown one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T04:56:08Z",
+  "updated_at": "2026-10-26T05:59:18Z",
+  "closed_at": "2026-10-26T05:59:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T05:59:16Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25944",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XQva2z8vP7oShKLska8DrgP)_\nFixes #25820\n\nClause-②: no\nMetadata-protocol: none\n\nContract review owed (packages/spec/src/** diff): one ledger row, `RUN_NOT_FOUND` under `@objectstack/runtime` in `packages/spec/src/api/error-code-ledger.zod.ts`, per surface amendment 6407846633.\n\n## What changed\n\nEvery `/automation/:name/runs/:runId/*` door read the run by `runId` alone, so the `:name` segment was accepted and ignored. `packages/runtime/src/domains/automation.ts` now checks that the path's flow owns the run (`runIsOutsideFlow`). A flow that exists but does not own the run, and an unknown flow name, both get the door's own answer for a run nobody holds:\n\n| Door | Read by id alone on main? | Mismatch answer now |\n|---|---|---|\n| `POST /:name/runs/:runId/resume` | yes, resumed the other flow's run | `404 RUN_NOT_FOUND`, `No suspended run 'RUNID'` (the engine's unknown-run answer, through the same `classifyResumeResult` table) |\n| `GET /:name/runs/:runId` | yes, served it | `404 RUN_NOT_FOUND`, `Execution not found` |\n| `GET /:name/runs/:runId/screen` | yes, served the screen | `404 No pending screen for run` (unchanged not-found answer) |\n| `POST /:name/runs/:runId/cancel` | yes, cancelled it | `200 { cancelled: false }` with the not-found notice, the verb's contract answer for no run |\n| `POST /:name/runs/:runId/restore-suspension` | yes, re-armed it | `404`, `refusal: RUN_NOT_FOUND`, `No run 'RUNID' is known` (the engine's unknown-run answer) |\n| `GET /:name/runs` | no, already reads by flow (`listRunsPage(name)`) | not touched |\n| MCP `resume_run` | takes no flow name | not applicable |\n\n- **Order.** The check runs after each door's existing gates (`refuseUnrelatedResume`, the #7900 read gate, the #13953 operator gate) and immediately before the verb, so a mismatched resume, cancel or restore consumes nothing and the run stays as it was. Authorization is unchanged. On the screen door it sits beside the existing not-found check, ahead of the gate, so the 404 is the same for every caller.\n- **Owner.** `ExecutionLog.flowName` from `getRun`, else `listSuspendedRuns`, which still names a parked run when `getRun` answers `null`. A service with neither probe, or a run neither can see, keeps the previous answer: the door cannot prove a mismatch.\n- **Run-read code.** The run-read door's not-found answer now carries `RUN_NOT_FOUND` for an unknown run too (it was the status-derived `RESOURCE_NOT_FOUND`), so \"another flow's run\" and \"no such run\" are one answer on that door, as on resume.\n- **Ledger.** The door now stamps `RUN_NOT_FOUND` itself before the engine is asked, so `check:error-code-provenance` needs the code under `@objectstack/runtime`; it was listed under `@objectstack/service-automation` only.\n\n## Tests\n\n- New `packages/runtime/src/domains/automation-run-flow-scope.test.ts`, for each of the five doors: the mismatched answer deep-equals the unknown-flow answer; it equals the door's answer for a run nobody holds (runId masked); no state-changing verb is called; the owning flow is still served; the owner is still found through the suspended-run list when `getRun` is blind. Plus the ruling's code and status on resume and run-read, and the no-probe pass-through.\n- Red first on main (test commit `3f5e709d` against unmodified `automation.ts`): 13 failed, 12 passed. The 12 that passed are the comparisons main already satisfies by ignoring the name for both sides.\n- Two existing pins assumed the door reads `getRun` once and were adjusted, with comments: `automation-resume-caller-gate.test.ts` (a system context: the gate still asks nothing, the one `getRun` is the scope check) and `automation-screen-read-gate.test.ts` (a throwing store now throws on every read, not only the first).\n\nMeasured at head `e88a8ecb3` (the final commit):\n\n- `pnpm --filter @objectstack/runtime test` at this head: 445/445 files, 7125 passed, 19 skipped (lock VERDICT command-exit 0). The first full run, before the two pin adjustments, was 7123 passed and 2 failed (those two pins).\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0. `pnpm --filter @objectstack/spec test`: 720 files, 21840 tests pass. `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- `eslint --no-inline-config` on the five touched source and test files: exit 0.\n- Derived gates (`dispatch-gates.mjs --commands`): 93 run, every exit 0, `--ran` reconciliation 93 derived, 0 NOT-MEASURED, 0 UNRUN. `check-plugin-teardown-shape --self-test` and `check:dual-build-cjs-loads` first answered exit 3 (shallow clone, no full build); rerun after fetching the fixture commit and a full build, both exit 0. Includes `check:error-code-provenance` (exit 0 with the new ledger row) and `check:error-code-casing`.\n- Ablation (one, on the predicate): `return owner !== undefined && owner !== flowName;` replaced with `return false;` via `scripts/ablation-replace.mjs` (anchor 1 to 0, blob changed): the new suite went 11 failed, 14 passed. Restored: `git diff HEAD` empty and the file's hash equals the HEAD blob. The suite imports the dispatcher from source, so no rebuild was needed for either leg.\n\n## Acceptance notes\n\n- The resume and restore mismatch messages repeat the engine's sentences (`run-resume.ts`, `consumed-suspension-restore.ts`) in the runtime. The runtime tests pin them against a fake that answers in the same spelling, not against the real engine, so an engine rewording would make the two answers differ by message. Carrier: none.\n- `content/docs/automation/flows.mdx` (the route table) does not say the `:name` segment is checked. Docs follow the implementation; not edited here (outside the claimed surface).\n- Sibling #25821 (same file) is not addressed here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GZJEQmPZSkLhXy1w9yVMM2\n"
+}

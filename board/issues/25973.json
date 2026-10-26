@@ -1,0 +1,32 @@
+{
+  "number": 25973,
+  "kind": "pull_request",
+  "title": "docs(changeset): 25610 notify email-field note says delivery ships in the same release",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T07:06:02Z",
+  "updated_at": "2026-10-26T07:21:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25973",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbWjYFBwPKy4wWAQDz2ZW8py)_\n\nCloses #25754 (ruling A, comment 6398564883).\n\n## What changed\n\nOnly the last prose paragraph of `.changeset/25610-notify-email-field-recipient.md`. It said delivery \"lands separately; until it does, a run that reaches such a node fails at the node\". #25721 delivered it, and `.changeset/25571-notify-email-field-delivery.md` ships in the same release. The paragraph now ends \"ships in the same release in `@objectstack/service-automation`.\" Frontmatter, `Clause-②:` and `Metadata-protocol:` are byte-identical.\n\n## Landing point\n\nThe expected one, `.changeset/25610-notify-email-field-recipient.md`. The sentence is the changeset's own text, so there is no other producer.\n\n## Expected red\n\n`Check Changeset` stays red by design (#17712 ruling D: correcting a pending release note is a release decision). The maintainer confirms and merges past it. This must land before #25640 (Version Packages) consumes the changeset. #25640 is untouched.\n\n## Acceptance notes\n\nNo `skip-changeset` label: the edit changes published CHANGELOG text.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BPTrzMQwkEcdhpQaa8xuRj\n"
+}

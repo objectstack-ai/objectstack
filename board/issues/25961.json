@@ -1,0 +1,32 @@
+{
+  "number": 25961,
+  "kind": "issue",
+  "title": "create-objectstack: add a `compliance-calendar` template that scaffolds objectstack-ai/duly",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "enhancement",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T05:47:49Z",
+  "updated_at": "2026-10-26T05:55:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25961",
+  "body": "Context: objectstack-ai/duly#127 positions Duly (recurring obligation / compliance-calendar app, `objectstack-ai/duly`) as the standard ObjectStack template app. The duly side (template-shaped repo, catalog packs, canary workflow, docs) is tracked there. This is the objectstack side.\n\n## Ask\n\n`create-objectstack` offers a `duly` template (working name `compliance-calendar`) that scaffolds the duly repository at a pinned tag, so `npm create objectstack@latest my-app -- --template compliance-calendar` yields an app that boots empty on `pnpm dev`, has `pnpm demo` for the worked example, and passes its own four gates on the platform version the scaffold pins.\n\n## Measured facts the implementer needs\n\n- duly's four gates (`validate`, `typecheck`, `test` 897 cases, `build`) are green on `@objectstack/*` 17.3.0 (`main` 74342a1, 2026-10-26).\n- It depends on `requires: ['automation', 'triggers', 'hierarchy-security']`; the hierarchy capability warns on the open edition by design and must not be silenced by the scaffold.\n- It carries its own `AGENTS.md` / `CLAUDE.md` with app-authoring rules (worktree-first, CEL predicates, write-once exception); the scaffold should keep them — they are the template's documentation for the next agent.\n- The demo script currently boots twice because of #14157; when that lands the template shrinks to one boot.\n\n## Open points for triage (not for this card to decide)\n\n- Pin strategy: does the scaffold vendor a snapshot of duly at a tag, or fetch it at scaffold time? Snapshot keeps `create-objectstack` self-contained; fetch keeps it current.\n- Whether the template ships the demo seed and catalog packs, or only links to them.\n\nFiled by the duly PM seat for objectstack triage; no domain label pre-applied."
+}

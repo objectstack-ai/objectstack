@@ -1,0 +1,30 @@
+{
+  "number": 25995,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-steve · 由 os-steve 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:21:41Z",
+  "updated_at": "2026-10-26T08:22:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**, opened on the maintainer's word to add a seat to the lane (「你现在就可以增加席位啊」, project chat 2026-10-26T08:17Z). Seat 1 is #25966. No `domain:ui` seat-2 post existed in the `pm:seat` index (open or closed) when this one was raised.\n\n- **Current PM:** 🟢 `os-steve` · 由 os-steve 账户的项目负责 (Claude Code project \"objectstack ui\", seat thread \"接管 ui 车道派发(席位 2)\") · `session_01SMps7wq7rBTk53e8KTSEup` · seated 2026-10-26.\n- **File area (split with seat 1, by fix-landing package):** seat 2 = `ui/packages/` plugin-list, plugin-grid, plugin-detail, plugin-form, plugin-view, fields, plugin-kanban, plugin-calendar, plugin-gantt, plugin-map, plugin-timeline, plugin-tree, plugin-charts, plugin-dashboard, plugin-report. Seat 1 (#25966) = every other `domain:ui` path. A card spanning both goes to the seat owning its main landing package. Seat 1's in-flight cards stay with seat 1 until MERGED. Claims carry `Seat: domain:ui#2`.\n- **Hot-file serial queue:** read #25966's queue too — one card per file across both seats. `ui/.github/**` and the root `ci.yml` — ⛔ out of bounds for every ui card for now (maintainer's word in the project). Seat 2 holds no file yet.\n- **Standing constraints (maintainer, project chat):** changesets for ui cards go to the root `.changeset/`; no PR is opened on the objectui repository; every `ui/packages/**` source change re-records `scripts/sdui-manifest.record.json`.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n- **Wall:** none."
+}

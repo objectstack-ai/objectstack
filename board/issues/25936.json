@@ -1,0 +1,34 @@
+{
+  "number": 25936,
+  "kind": "issue",
+  "title": "ci(test-shard-timings-refresh): the weekly refresh opens its PR with the Actions token, so the PR gets no CI and waits for a human push — #13028 has sat since 10-19 with 585 newly measured files while the shards run 1.3–1.8× unbalanced",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:39:14Z",
+  "updated_at": "2026-10-26T08:18:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25936",
+  "body": "Filing gate: ③ maintainer-directed task (CI performance programme, 2026-10-23). Reader: the `domain:ui` execution seat — step 1 is a one-time landing of PR objectstack-ai/objectui#13028 the seat drives for its author, step 2 is one os-dev PR. Dedup: `search_issues` on objectstack-ai/objectui, closed included, \"test shard timings refresh PR no CI Actions token push stale timings\" → 23 hits, none on the refresh PR's missing CI; the refresh itself is objectstack-ai/objectui#12208's lineage. None open. Session: `session_01GVTBi44LAWbPWg4evKfE1T`.\n\n## One-sentence problem\n\nobjectui balances its 16 test shards from a per-file timings dataset that a weekly workflow refreshes by opening a pull request — but that PR is opened with the workflow's own Actions token, GitHub starts no CI for it, and nobody pushes to it, so the dataset in use is from 2026-10-12, 764 of 5,718 test files are missing from it, and the shards run up to 1.8× apart while a correct refresh has been waiting as PR objectstack-ai/objectui#13028 since 2026-10-19.\n\n## Evidence (objectui commit 5fef032; PR read 2026-10-23)\n\n- `.github/workflows/test-shard-timings-refresh.yml:41` (the comment: \"The pull request is opened with this run's GITHUB_TOKEN, and GitHub starts …\"), `:128`, `:145`, `:164` — `GH_TOKEN: secrets.GITHUB_TOKEN`; `:189` — `gh pr create --repo … --base main --head \"$BRANCH\"`; `:182` — the workflow writes into its own PR body: \"This pull request has no CI of its own yet. It was opened with the Actions token, and GitHub starts no workflow for an event that token raised. Push to its branch once …\".\n- objectui#13028: opened 2026-10-19T07:14Z by `github-actions[bot]`, open, `mergeable_state: behind`, 1 commit, +5229/−4639 in `scripts/test-shard-timings.json`, no check runs; its body lists 585 files measured for the first time and 17 no longer measured.\n- Dataset in use: `measured.at` 2026-10-12 (bootstrap from two runs, marked PARTIAL); 764 of 5,718 test files absent and assigned the 4,490 ms median. Measured imbalance on current runs: full battery 8.5–11.2 min per shard (1.3×), PR runs 6.5–12.0 (1.8×); the `Test` aggregator's headroom notice reads 56–60%.\n- Once the affected fast path runs (sibling card), small PRs carry ≈ 2 min of weight per leg and a stale dataset mis-sorts them harder.\n\n## Governing text\n\n- `test-shard-timings-refresh.yml:39-48` documents the token limitation and the manual push as the accepted workaround; objectui#5397 (closed) refused a personal access token for automation — the fix must not reintroduce one.\n- objectui AGENTS.md §9 (merge-queue and changeset discipline) governs how step 1 lands.\n\n## Change\n\n1. One-time: the lane seat drives objectstack-ai/objectui#13028 for its author — merge `main` into `ci/test-shard-timings-refresh` (that push starts its CI; the dataset is in the root vitest config import closure, so the full suite runs on the new split), then land it through the queue under the repo's own conventions.\n2. Structural, dev picks one and cites objectstack-ai/objectui#5397: (a) have the refresh raise its PR through an identity whose events start workflows — the fleet App token via the objectstack fleet-write relay (`pr_create` op; `scripts/pm/**` has a single writer on the objectstack side, so if the op or a cross-repo route is missing, the dev files the upstream card and links it here with `Blocked-by:`); or (b) keep `GITHUB_TOKEN` for the PR and immediately `workflow_dispatch` `ci.yml` on the new branch (ci.yml:4-65 already declares `workflow_dispatch`), accepting that the dispatched run is not a `pull_request` event and checking that the required contexts still attach to the PR head.\n3. Remove or rewrite the \"no CI of its own yet\" paragraph at `:182` once it is no longer true.\n\n## Acceptance\n\n- objectstack-ai/objectui#13028 (or its successor) is merged and the next Monday's refresh PR shows check runs within 10 minutes of opening without a human push.\n- The first PR run after the merge shows the `Test` aggregator headroom notice with per-shard spread ≤ 1.2× on a full-battery run.\n\n## Work estimate\n\nLane `domain:ui` · 1 PR (.github/workflows/test-shard-timings-refresh.yml) + the one-time objectstack-ai/objectui#13028 landing · precedent: the refresh workflow itself (lineage objectui#12208; its PR beyond this depth-50 clone). `Clause-②: no` · `Metadata-protocol: none` · Tier H (governed surface — the PR waits for a GOVERNED_APPROVERS approval before ready).\n\nPrior rulings read: shard, partition → objectstack docs/adr 3 hits, AGENTS.md 0; objectui thread: objectstack-ai/objectui#5397 (closed, PAT refused), objectstack-ai/objectui#12208; ADR none.\n\nRelated: objectui#13028 (open PR), objectui#12208, objectui#5397 (closed), the affected-fast-path and Repo Gates cards filed alongside this one.\n\n## Maintainer directive (verbatim, untranslated)\n\n> 同意，立卡\n\n— the maintainer, 2026-10-23, in reply to the director seat's offer 「(a) 我按 PM 流程把 A1–A5、B1–B3 立成卡进队列(英文卡面、带 Governing text: 与工作量列),由 os-dev 派发」. The CI performance analysis those letters index is the seat's 2026-10-23 five-line audit (objectstack ci.yml + lint.yml; the other 39 workflows; the repo-side turbo/vitest/gate configuration; objectui's 28 workflows; GitHub Actions run data for the preceding 5–55 hours). The maintainer's stated goal, verbatim: 「我希望优化的是性能和效率速度」."
+}

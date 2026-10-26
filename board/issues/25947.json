@@ -1,0 +1,29 @@
+{
+  "number": 25947,
+  "kind": "issue",
+  "title": "finding: 未使用的具名导入/局部变量在本仓结构上不可能让 CI 变红 —— no-unused-vars 是 warn(无 --max-warnings),且 38 个包 extends 的根 tsconfig 关着 noUnusedLocals(base 里开着的那条 0 个包在用)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T09:15:29Z",
+  "updated_at": "2026-10-26T04:59:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25947",
+  "body": "发现于 objectstack-ai/objectui#3947 的实施(PR objectstack-ai/objectui#4805,分支 `claude/issue-3946-appshell-docs-toggle`)。#3947 正文点名要「顺带看一眼 `no-unused-vars` 对 import 的覆盖是不是被关掉了,那才是真正会重复发生的部分」,分诊也裁「该结论由 dev 在 PR 里记一笔,不 gate 那一行修复」—— 这里把查证结论独立留档。observation-class:今天没有用户会因此出错,**且两处配置都像是有意为之**,所以只记现象与量,不预判该不该改。\n\n在 `origin/main` @ `8a9deceea` 实测(#3947 那行 dead import 加回去,亲跑两道门)。\n\n## 现象:两道门都不会红\n\n### 1. eslint 规则在跑,但严重度是 `warn`,而 lint 门有意不设 `--max-warnings`\n\n`eslint.config.js:45`:\n\n```\n'@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],\n```\n\n把 `packages/layout/src/AppShell.tsx` 的 `Sidebar` dead import 加回去后实测:\n\n```\n  5:3  warning  'Sidebar' is defined but never used  @typescript-eslint/no-unused-vars\n✖ 2 problems (0 errors, 2 warnings)\nexit 0\n```\n\n规则**报了**,报成 warning。`.github/workflows/lint.yml:20-28` 又明确写了不设 `--max-warnings`,并给了理由(仓内 warning 数以千计,主体是 `no-explicit-any` 与被有意降级的 React Compiler 规则,「known historical debt, not a signal. This gate is about errors」)。两条合起来:**任何未使用的导入/变量都不可能让 lint 门变红**。\n\n### 2. type-check 也不会红,而且开着的那条设置没有任何包在用\n\n`packages/layout/tsconfig.json` extends 仓根 `tsconfig.json`,后者 `:18` 是 `\"noUnusedLocals\": false`。实测同一状态下 `pnpm --filter @object-ui/layout run type-check`(`tsc --noEmit` + `tsc -p tsconfig.test.json`)exit 0。\n\n有意思的是仓里另有一份反向配置:`tsconfig.base.json:14` 设的是 `\"noUnusedLocals\": true`。实测覆盖面:\n\n- `packages/*/tsconfig.json` + `apps/*/tsconfig.json` 中 extends 仓根 `tsconfig.json` 的:**38 个**\n- 同一批里 extends `tsconfig.base.json` 的:**0 个**\n- `tsconfig.base.json` 的真实使用者只有 `tsconfig.node.json`、`tsconfig.scripts.json`、`tsconfig.react.json` 与 `examples/byo-backend-console/tsconfig.json`\n\n也就是说 base 里那条 `true` 对**包源码**是休眠的,两份根配置在同一个开关上给出相反的值,而实际生效的永远是 `false` 那份。\n\n## 影响与非影响\n\n- **无运行时影响**:未使用的具名导入会被 tree-shake,bundle 不受影响 —— 这也是它能长期存活的原因。\n- **会重复发生**:#3947 那一处是被人眼在读文档时顺手发现的,不是被门禁发现的。在当前配置下,下一处同样不会被发现。\n- **不是漏配**:`--max-warnings` 那段注释与两份 tsconfig 的分工都写得很明白,像是取舍而非疏忽。所以本条不主张「把 `no-unused-vars` 提成 error」—— 仓内现存 warning 基数未知,贸然提级大概率一次红几百处。\n\n## 可能的处置方向(仅列,不预判)\n\n1. 维持现状,接受 dead import 靠人眼捞;\n2. 只对 `no-unused-vars` 的 **import 子类**做窄门禁(如仅 `vars: 'all'` 的导入位提级,或写一条 `object-ui/*` 局部规则),先量一次全仓命中数再定;\n3. 把包源码切到 `noUnusedLocals: true`(等价先量命中数),并顺手解决两份根 tsconfig 在同一开关上互相矛盾的问题;\n4. 只清理 `tsconfig.base.json` 与根 `tsconfig.json` 的分歧(至少让休眠的那条不再误导读者)。\n\n任一方向的第一步都应该是**先量命中数**,这也是本条不带 `pm:queue` 的原因。\n\n## 参考位置\n\n- `eslint.config.js:45`\n- `.github/workflows/lint.yml:20-28`\n- `tsconfig.json:18`(`false`,38 个包在用)、`tsconfig.base.json:14`(`true`,0 个包在用)\n- `packages/layout/src/AppShell.tsx:5`(被删掉的那行,PR objectstack-ai/objectui#4805)\n\n关联:#3947(发现于此)、PR objectstack-ai/objectui#4805、#4804(同一个根 `tsconfig.json` 的另一处休眠内容:指向不存在目录的 `paths` 死条目 —— 相邻但不同事实,互不包含)"
+}

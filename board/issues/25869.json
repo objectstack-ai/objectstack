@@ -2,8 +2,8 @@
   "number": 25869,
   "kind": "issue",
   "title": "ci(ui-merge): twenty ui jobs each rebuild the same seven @objectstack packages (1.6–2.5 min apiece, mostly turbo cache misses on PRs) — build them once per run and hand the dists to the ui lanes (parent #25677)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T01:51:05Z",
-  "updated_at": "2026-10-26T02:24:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T08:33:53Z",
+  "closed_at": "2026-10-26T07:04:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25869",
   "body": "Filing gate ③ (maintainer-directed) + ④: aftercare of the ui/ merge (#25752), part of #25677. Touches `.github/workflows/ci.yml` = Tier H: GOVERNED_APPROVERS review, the PR stops at draft.\n\nMaintainer, 2026-10-26 01:45Z, in the project thread that measured post-merge CI speed: 「创建issue」 (asked after reading the ranked fix list; this is item 3).\n\n**谁付代价（业务筛）:** the fleet's runner budget, and the wall clock of ui PRs. Every run that schedules the ui lanes repeats one build 20 times (Test UI ×16, Type Check UI, Lint UI, Build & E2E UI): `turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... …` for the seven packages objectui consumes. When cardholders are running in parallel, this is ~40 runner-min per run, plus 1.6–2.5 min on the critical path of a ui-only PR.\n\n## Measured (run 40248884869, 2026-10-26)\n\n- The step \"Build the @objectstack packages objectui consumes\" took 1.6–2.5 min in each of the 20 ui jobs.\n- Turbo cache: Build & E2E UI had 13 hits and 20+ misses. Type Check UI's turbo run had 45 cached out of 104 tasks. The same task hashes (e.g. `98223300f02b7bf4`, `7454d81e14530f86`) are a miss in one job and a hit in another: each job restores its own `actions/cache` key (`turbo-<job>-<ref>-`), falling back to `turbo-build-core-`.\n- `pull_request` runs get no `TURBO_TOKEN` (it is set only for `merge_group` and `refs/heads/main`), so PRs do not read the remote cache from #21186 / #22077.\n- Caveat: main's per-job caches were cold right after the cutover. Re-read the hit rate on a run from the same day before choosing.\n\n## Wanted\n\nThe seat measures two options and picks the cheaper one per run:\n- (a) one `ui-deps` job builds the seven packages once and uploads their `dist/` as an artifact, and the ui lanes download it;\n- (b) `pull_request` runs read the signed turbo remote cache, still with no write.\n\n⛔ Do not change what the ui lanes test, or their `if:`.\n\n## Acceptance\n\n- On the card: total ui-lane runner-min and Test UI shard wall time, before and after, on comparable PRs.\n- The gate rosters follow; each `--self-test` exits 0.\n\n**Expected saving:** ~40 runner-min per ui-scheduling run, 1–2 min per ui lane. **Size:** S–M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Dedupe\n\n`search_issues` 2026-10-26 01:50Z 「ui jobs build objectstack packages once artifact turbo remote cache pull_request」: 20 hits. The relevant ones are closed: #21186 (wire the remote cache) and #22077 (extend it to Lint / Test Core). Neither covers the ui lanes added at cutover. **New.**\n\nMeasurement report: `/mnt/project-files/d1-merge/out/ci-speed/post-merge-pr-ci-speed.md`."

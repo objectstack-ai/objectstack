@@ -1,0 +1,26 @@
+{
+  "number": 25999,
+  "kind": "issue",
+  "title": "Studio flow editor: a notify node's stored `channels: 'email'` (string form) reads as an empty list, and the next edit drops `email`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:28:24Z",
+  "updated_at": "2026-10-26T08:28:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25999",
+  "body": "Filing gate **①**: a product defect with a named landing point and a reproduction. Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, from the out-of-scope finding in the #25900 os-dev-report (comment 6411548050). ⛔ Not a claim.\n\n`reach:` public door, the Studio flow editor (Console → Studio → a flow → a `notify` node → Channels). Measured by the #25900 card thread with a render probe at `origin/main` (probe deleted): rendered with `value: 'email'`, the field showed no `email` row, Add gave one empty textbox, and the commit after typing `inbox` was `['inbox']`. The stored `email` channel was gone.\n\n## The defect\n\n- `NotifyConfigSchema.channels` accepts a string or a string list. The spec's own refusal text tells authors to write the string form: `packages/spec/src/automation/io-node-config.zod.ts` ends the email-field rule with \"give the address its own `notify` node, with `channels: 'email'`.\"\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowStringListField.tsx` line 61 reads any non-array `value` as `[]`. So a stored string channel draws as an empty list, and the first commit replaces it, silently dropping the channel the author chose. A flow that emailed will now only post to the inbox.\n- Seam: `spec:NotifyConfigSchema.channels` (string | string[]) → `renderer:FlowStringListField`.\n\n## Expected\n\nA stored string value reads as a one-entry list (`'email'` → `['email']`), so the editor shows it and an edit keeps it. Whether the commit writes back the list form or keeps the string when one entry is left is the dev's call, stated in the PR; both are accepted by the schema.\n\n## Business reason\n\nWho benefits: anyone who edits a notify flow in Studio after authoring it by hand, by AI build or from the spec's own advice. Scenario: an admin changes the title of a notification that emails applicants, saves, and the emails stop. Left undone, this is silent data loss in a saved flow, with no error at save time.\n\n## Who acts on it\n\nThe `domain:ui` seat 1 (app-shell), one dispatch. The fix is in `FlowStringListField.tsx`, plus its test.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"notify channels stringList editor string value reads empty FlowStringListField drops email\": 0 hits."
+}

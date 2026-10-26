@@ -1,0 +1,37 @@
+{
+  "number": 25958,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): the generic activity entry for an update names the fields that changed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T05:43:57Z",
+  "updated_at": "2026-10-26T07:04:40Z",
+  "closed_at": "2026-10-26T07:04:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T07:04:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25958",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DUJM4Nrn5kmLCwNBJDQeHpe)_\n\nFixes #25787\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThe activity mirror in `plugin-audit` (`audit-writers.ts`, ADR-0052 §5b) writes an update entry in one of three shapes: a fired milestone's sentence, a `trackHistory` diff (`Stage: Proposal → Closed Won`), or a generic fallback. The fallback said `Updated OBJECT \"LABEL\"` and nothing else. On HotCRM 18.1.0 the campaign roll-up counters (`num_sent`, `num_responses`, … — plain `number` fields, none tracked, bumped once per enrolled member by `campaign_member.hook.ts`) produced thirteen identical entries in a row.\n\nThe fallback now names the changed fields by label, in declaration order:\n\n`Updated Campaign \"CPG-0001\": Number Sent, Responses, and Leads`\n\n- **Labels only, never values.** `trackHistory` still decides whether old → new VALUES are rendered; an untracked field's value (or a credential's) never reaches the text. The ADR-0052 §5b.1 opt-in is unchanged.\n- **Bounded.** At most five fields are named and the rest counted (`…, Field 5, and 3 more`). When `sys_activity.summary` declares `maxLength` (500 today; the SQL driver sizes the column `varchar(500)` from it, so an over-long text fails the whole activity insert), fewer fields are named until the text fits; if not even one name fits, the field-less frame is written as before.\n- **Redaction still applies.** Every named or counted field is recorded in the row's summary-source declaration (`text_sources.summary`), so `activity-field-redaction.ts` drops the summary for a reader not served one of them, exactly as for a tracked-change summary.\n- **Localized.** Two message keys in the plugin's own en / zh-CN / ja-JP / es-ES bundles (`translations/messages.ts`): `messages.activityUpdatedFields` (frame with `{{fields}}`) and `messages.activityMoreFields` (`{{count}} more`). The list is joined with `Intl.ListFormat` in the frame's locale (zh-CN: `F1、F2、F3、F4、F5和另外 2 个字段`). A locale bundle that has only the older `messages.activityUpdated` (an app-shipped locale) keeps its own field-less sentence rather than an English one.\n- Unchanged: which rows are written (no input refused, no event dropped), the milestone and tracked branches, create/delete summaries, `metadata.old/new`, `changed_fields`.\n\nFolding consecutive same-actor entries is the renderer's half (objectui) and is not in this PR; #25787's triage routes it to its own card.\n\n## Evidence\n\n- Red first: the new and updated cases in `audit-writers.test.ts` run against `origin/main` `2a728ba2`'s `audit-writers.ts` + `messages.ts` (restored into the tree, then `git checkout HEAD --` back; `git diff HEAD` 0 bytes after): `Tests 8 failed | 108 passed (116)`. With the fix: all pass.\n- `pnpm --filter @objectstack/plugin-audit test`: `Test Files 60 passed (60)`, `Tests 993 passed (993)` (before the last two commits; `audit-writers.test.ts` re-run at head: 117 passed).\n- `pnpm --filter @objectstack/plugin-audit typecheck`: exit 0.\n- Pins: declaration order; no value (untracked or `secret`) in the text; source declaration; five-name cap with count; 40 long labels under a declared 500 bound (length at most 500, count still present); field-less frame when nothing fits; zh-CN list; an app locale with only `activityUpdated` keeps its sentence. `audit-milestone-summary.test.ts` and `audit-option-label-summary.test.ts` pass unchanged.\n\n## Gates (local subset, at head `cebc2d01`)\n\n- `pnpm --filter @objectstack/plugin-audit test` at `cebc2d01`: `Test Files 60 passed (60)`, `Tests 993 passed (993)`; `pnpm --filter @objectstack/plugin-audit typecheck`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` (72 families, merge base `2a728ba2a`), reconciled with `--ran`: 71 run, all exit 0; 1 NOT MEASURED: `pnpm check:dual-build-cjs-loads` (exit 3, needs a whole-tree build; CI's lint lane owns it). `check:i18n` was run after its declared CLI closure build (10 packages in sync, `plugins/plugin-audit` 7 bundles); `check-plugin-teardown-shape --self-test` after fetching its pinned fixture commit.\n- `check:commit-card-trailers --range origin/main..HEAD`: 4 commits clean. `check:nul-bytes`: exit 0.\n- `origin/main` moved 5 commits since the base; none touches `packages/plugins/plugin-audit`, so no merge was taken.\n- CI's own families are read from this PR's check-runs.\n\n## Acceptance notes\n\n- An update that changes only computed fields (`formula`, `summary`, `rollup`, `autonumber`) writes no activity row at all: `diff()` drops those types and the writer returns on an empty diff. Unchanged here, noted by the seat on the claim.\n- The 500 bound is guaranteed for the field list this PR adds. A record label or object label that alone exceeds it overflows every branch (create, delete, generic), and a `trackHistory` diff of long values is unbounded too; both predate this PR. Not measured against a SQL driver here.\n- A changed key the object does not declare is named by its machine key (the tracked branch's existing label fallback).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0166WnEHW3hURHjBf9cLK32f)_\n"
+}

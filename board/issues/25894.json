@@ -1,0 +1,32 @@
+{
+  "number": 25894,
+  "kind": "issue",
+  "title": "console issues requests it cannot use: GET /api/v1/meta/_drafts (403) for a member without metadata edit on every record page, and Studio GET /api/v1/meta/object/<name>?package= (404) for a draft object it just created",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:56:45Z",
+  "updated_at": "2026-10-26T02:58:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25894",
+  "body": "Filing gate **① a defect with a named landing site** (two stray requests, one family: the console asks the runtime for things the runtime answers 4xx by design). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (`@objectstack/console` 18.1.0)\n\n1. Signed in as `sales.manager@objectos.ai` (a member, no metadata edit), opening an opportunity record from the approvals inbox fires `GET /api/v1/meta/_drafts` → **403**, logged as a resource error in the browser console. The page is fine; the request has no reader for this member. Observed on every record page open in that session (the pass's network log, `failed=403 GET …/api/v1/meta/_drafts`).\n2. In Studio, after 新建对象 → 存为草稿 on a writable package (`com.default.com-test-browser`), the object page fires `GET /api/v1/meta/object/com_test_browser_repair_ticket?package=com.default.com-test-browser` → **404** (the draft is not published, so the runtime meta endpoint has no such object). The Studio page renders from the draft store regardless. [u11-object-created.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/u11-object-created.png).\n\n`reach:` the public UI, each measured once; no user-visible breakage, but each is a red request in every session's console and one more call per page.\n\n## Expected\n\n- The drafts probe runs only for a session that holds metadata edit (the capability the console already reads for the Studio entry), or the runtime answers 200 with an empty list for others.\n- Studio's object page reads a draft object from the draft store only, and asks the runtime meta endpoint only for a published object.\n\n## Dedupe\n\nMCP `search_issues` objectui \"meta drafts request returns 403 for non admin user\" → 0 hits; the 404 half: none found in the Studio searches run for this batch (#13125, objectstack-ai/objectui#12965 are unrelated). Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §4.6, §7 S5."
+}

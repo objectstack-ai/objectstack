@@ -1,0 +1,32 @@
+{
+  "number": 25987,
+  "kind": "pull_request",
+  "title": "fix(plugin-list,plugin-grid): list empty state tells no-access and \"mine\" apart from no records",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:05:08Z",
+  "updated_at": "2026-10-26T08:24:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25987",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96DHp4dBaqUvVq8hBV3bCkw)_\nFixes #25898\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nAn empty list chose its copy from the user's query and the view's declared filter alone. Two cases from the card's table were wrong:\n\n- **No filter, caller may not create.** A member who may read none of an object's records and holds no create grant was told \"Nothing here yet / Create your first record to get started.\" beside no Create button. Once the permission answer has loaded, a caller without the `listNew` verdict of the affordance-to-grant map (managed-object policy, effective API operations and the caller's create grant, the same verdict the page's own New reads) now gets \"No records you can see / There are no records here that you have access to. If you expected to see some, ask your administrator for access.\" The add-record action is not drawn for that caller, even on a view whose `addRecord` is enabled.\n- **A \"my\" view.** When the view's declared filter names the signed-in user (a comparand equal to the caller's id, which is what a host-resolved `{current_user_id}` becomes, or the placeholder itself), the empty state reads \"Nothing of yours yet / This view lists only records that are yours, and you don't have any yet.\" instead of \"No records match this view's filter.\", with the add-record action only under the create grant.\n\nUnchanged: the first-run copy and action for a caller who may create, the user-query copy, the plain view-filter copy, an authored `emptyState` (it still wins), the 403 error panel (its own state, untouched), and every surface with no permission provider mounted (fail-open, as the affordance map is).\n\nWhere it lands, following the card's measured producers:\n\n- `ListEmptyState` (plugin-list, module-internal) makes the decision: two new optional props, `baseFilterNamesCurrentUser` and `mayCreate` (`false` is a known denial, absent is \"not known\"), and the exported helper `filterNamesCurrentUser`.\n- `ListView` (grid and gallery visualizations) passes both from the empty-state call site: the resolved declared filter against the session scope's `currentUserId`, and `resolveAffordance('listNew', …)` once `usePermissions().isLoaded`.\n- `ObjectGallery` (standalone) passes the same two facts.\n- `ObjectGrid`'s default empty state makes the same decision in its own empty-state region (it draws no add-record action, as before). plugin-grid and plugin-list do not depend on each other, so the filter walk is restated there in a few lines.\n- `@object-ui/i18n`: `list.ownedNoneTitle`, `list.ownedNoneMessage`, `list.noneVisibleTitle`, `list.noneVisibleMessage` in all ten packs, and in the two in-code English fallback tables (`LIST_DEFAULT_TRANSLATIONS`, ObjectGrid's).\n- `scripts/sdui-manifest.record.json`: the registry-source hash re-recorded by `node scripts/gen-sdui-manifest-node.mjs`, which every `ui/packages/**` source change requires (`check-sdui-manifest`); the manifest itself is byte-identical.\n\nThe copy is generic rather than naming the object (\"你没有可查看的工单\" in the card) so it needs no plural forms across ten locales; the zh pack reads 「没有你可查看的记录」 and 「你还没有负责的记录」.\n\n## Tests\n\nAt head `8878ebe8` (implementation unchanged since `be788ede`; later commits are the main merge and the manifest record):\n\n- New: `ListView.emptyStateAccess-25898.test.tsx` (9), `ObjectGallery.emptyStateAccess-25898.test.tsx` (4), `ObjectGrid.emptyStateAccess-25898.test.tsx` (5), through the real `MePermissionsProvider` and `FilterScopeProvider`: 3 files, 18 tests passed.\n- Reverse verification: the four source files and the locale packs restored to the base commit `38050ced` with the tests kept: 11 failed / 7 passed, exactly the predicted split (every no-access, \"mine\" and zh row red; the create-grant, no-provider and plain-filter controls green). Restored from `HEAD` afterwards, `git diff HEAD` empty.\n- `vitest run packages/plugin-list/ packages/plugin-grid/ packages/i18n/ packages/plugin-form/src/affordanceGrantMap-12082.test.tsx` (the affordance census included): 498 files passed, 5253 tests passed, 13 skipped.\n- `type-check` for `@object-ui/plugin-list`, `@object-ui/plugin-grid`, `@object-ui/i18n`: clean.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 47 derived families run locally, all exit 0 (`check-sdui-manifest` exited 1 before the record was regenerated and 0 after); `--ran` reconciliation: 47 accounted, 0 not measured.\n\n## Acceptance notes\n\n- The `{current_user_id}` walk is shape-agnostic: any string comparand equal to the caller's id counts, so a filter like `owner = me OR status = open` also reads \"Nothing of yours yet\". Views of that shape are rare; the copy is still true of the caller's own records.\n- The toolbar's add-record buttons (top and bottom) still follow `addRecord.enabled` alone inside `ListView`; the console host already withholds `addRecord` without the create grant, so only a non-console host could show them to a caller without the grant. Left out of this card's empty-state scope; noted, not filed.\n- A shared home for the decision in `@object-ui/core` would let `ObjectGrid` and `ListEmptyState` share one function; core is outside this card's claimed surface, so the grid restates it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RYq63NT6L4eGmQNvE9e7D8)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 25970,
+  "kind": "issue",
+  "title": "dashboard: a KPI tile with compareTo errors (\"compareTo needs a dated window to shift\") instead of showing its number when the reader picks All time, because DatasetWidget sends compareTo with no window",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T06:50:19Z",
+  "updated_at": "2026-10-26T08:35:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25970",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Moved from objectstack-ai/hotcrm#2296 (add `compareTo` to HotCRM's KPI tiles), whose premise did not hold on the installed 18.1.0; the readings below are the os-dev measurement on that card (report comment 6410009110), re-read by the seat on objectstack `origin/main` `38050ced7b`.\n\n## What happens\n\nA dataset metric widget that declares `compareTo` renders its comparison only while its filter resolves to a closed two-bound date window. Otherwise the tile's number is replaced by an error:\n\n```\nDataset query failed: 400 Bad Request — [dataset-executor] compareTo needs a dated window to shift…\n```\n\nMeasured in a browser (`@objectstack/console` 18.1.0, HotCRM seed, 1440×1000, a temporary `compareTo: { kind: 'previousPeriod' }` on the tile, reverted afterwards):\n\n- CRM Overview, Total Revenue (Selected Period), date filter at its default (this quarter): `610,000 Total Amount 16% vs previous period`, correct.\n- Same tile after the reader picks **All time** in the dashboard filter bar: the 400 error above. Without `compareTo` the same tile shows its number under All time today, so declaring a comparison makes a normal filter choice break the tile.\n- Executive Overview, Total Revenue (YTD), filter `close_date: { $gte: '{current_year_start}' }` (one bound): the same 400 error on every load.\n\nThe request body in the failing cases carried `compareTo` and no `timeDimensions`.\n\n## Why (objectstack `origin/main` `38050ced7b`)\n\n`ui/packages/plugin-dashboard/src/DatasetWidget.tsx`: `extractDateWindows` lowers only filter keys holding exactly `{ $gte, $lte }` into `compareWindows`. The query then sends `...(compareWindows.length > 0 ? { timeDimensions: compareWindows } : {})` but `...(compareTo ? { compareTo } : {})` unconditionally (line ~878), so a widget whose filter states no closed window still asks the executor to shift one. The executor (`resolveCompareDimension`) refuses, by design.\n\nThe comment on `extractDateWindows` says zero or two windows is \"the executor's error to raise\", so that an author mistake stays loud. That reasoning fits two windows (ambiguous) and an author who wrote no window at all. It does not fit a window the **reader** removed at runtime: All time on the dashboard date filter is a supported choice that the author cannot prevent, and with no window there is nothing to compare against.\n\n## Business reason\n\n`compareTo` is the platform's answer to \"is it going well, not just how much\" on a KPI tile. Today an app that adopts it on a picker-bound tile ships a tile that breaks when a manager widens the date range, so the safe choice for an app author is not to use the capability. HotCRM held its adoption (hotcrm#2296) for this reason.\n\n## Landing and reader\n\n- Reader: the `domain:ui` seat (plugin-dashboard), at first touch after triage.\n- `DatasetWidget.tsx`: when the window lowering yields no window *because the runtime filter carries none* (for example the date filter set to All time), send no `compareTo` and render the base number with no comparison badge. Keep the loud error for two candidate windows. Whether an author-declared one-bound window (`$gte` only) should stay an error or lower as `[$gte, today]` is the seat's call; please state it in the fix, since HotCRM's YTD / QTD / 12M tiles are written that way.\n- A test beside it: a metric widget with `compareTo` and a filter with no date window issues a query with no `compareTo` and renders the number.\n\n## Done when\n\nOn a console built from the fix, a `compareTo` tile on a dashboard whose date filter is set to All time shows its number with no badge and no error; the two-window case still errors.\n\nDedupe: REST list of objectstack issues (622 newest, open and closed) grepped locally for `compareTo` + `window` / `All time` / `dated window`, and for `DatasetWidget compareTo` → 0 hits; control: the same corpus finds #25778, which mentions compareTo, so the instrument reaches. `reach:` the public UI, any dashboard KPI tile with `compareTo` when the reader picks All time.\n\nFiled by the `repo:hotcrm` seat, `os-project-manager`, session `session_016AYFEQGMzwZqJxBYr2AKWr`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

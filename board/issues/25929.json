@@ -1,0 +1,37 @@
+{
+  "number": 25929,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a flow write node's refusal is worded in the run's locale, as the record doors word it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T04:31:48Z",
+  "updated_at": "2026-10-26T05:16:04Z",
+  "closed_at": "2026-10-26T05:16:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T05:16:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25929",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XFgtJRPVDMB5VczqNK3rf7s)_\n\nFixes #25809\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA refusal a flow's write node meets is now worded in the language of the person who started the run, as their own record save is.\n\nThe run already carries that language (`AutomationContext.locale`, seeded by the `/actions` door at `packages/runtime/src/action-execution.ts` and by the trigger door). `resolveRunDataContext` (`packages/services/service-automation/src/runtime-identity.ts`), the one place that maps a run to the ObjectQL `context` its data nodes pass, dropped it. It now carries `locale` on both `runAs` arms (`RunDataContext.locale`). The engine's existing translation hook (`ObjectQL#validationMessageContext`, bridged to the i18n service) does the rest: an authored rule's `objects.OBJECT._validations.RULE.message`, the built-in catalog, a `DELETE_RESTRICTED` sentence's labels. The translated text reaches the caller through the path the inner-refusal ruling added: the crud node's catch arm puts it on `innerRefusal.message`, and the four doors emit it in the `FLOW_FAILED` details.\n\nNo second translation path: nothing in service-automation translates anything. A run no person started (record-change, schedule, webhook) has no locale and keeps the authored text, as before.\n\n## Measurement — red first\n\n`packages/services/service-automation/src/flow-write-refusal-locale.integration.test.ts`: a real kernel (ObjectQL + better-sqlite3), an object with an authored `script` rule, and a zh-CN bundle on the engine's i18n service. Each case first asserts the record door's own answer for the same write (`ql.insert` with `locale: 'zh-CN'` answers `金额不能为负数。`).\n\n- At `cb0a2fcf4` (origin/main) plus the test alone: **6 failed / 2 passed (8)**. `create_record` and `update_record` returned `innerRefusal.message: \"Amount must not be negative.\"` under both `runAs` arms; `delete_record` returned `This Account is still referenced by 1 Deal record(s) through “Account”. Delete or reassign them first.` (English labels). The two passing cases are the no-locale controls.\n- With the fix (`447414c4`): **8 passed (8)**.\n\n## Every flow write node, with a verdict\n\n| Node | Verdict |\n|:--|:--|\n| `create_record` | Gap (measured red: authored rule message in English). Fixed. |\n| `update_record` | Same gap (measured red). Fixed. |\n| `delete_record` | Same gap on `DELETE_RESTRICTED`: the sentence named objects by their English labels (measured red). Fixed. |\n| `get_record` | Read. ObjectQL reads `context.locale` only for refusal wording (validation messages, delete restriction), so a read has nothing to word. Carries the locale; no behaviour change. |\n| lookup expander (`plugin.ts`, `setRecordExpander`) | Read through `resolveRunDataContext`; same as `get_record`. |\n| `approval` / `approval_revise` (`plugin-approvals`) | Not a flow-generic data write: they write through the approval service under its own context, not through `resolveRunDataContext`. Out of this card's file surface; not measured. |\n| `connector_action`, `http_*`, `notify`, `screen` | No ObjectQL write. |\n\nAll four data nodes take their context from `resolveRunDataContext` (`DATA_NODE_TYPES`), so the fix is one place and cannot drift between node types.\n\n## Tests\n\n- New: `flow-write-refusal-locale.integration.test.ts` — 8 cases: create / update / delete under `runAs: 'user'` and `'system'` in zh-CN, plus the no-locale control per arm.\n- Ablation, one per arm, with the fix committed (`447414c4`), via `scripts/ablation-replace.mjs` (anchor 1 → 0, blob moved; restore: blob == HEAD `d5d8492ba58e`, `git diff HEAD` empty). The subject is imported from source (`./plugin.js`), so no `dist/` leg applies.\n  - delete `...(locale ? { locale } : {}),` (system arm): 3 failed / 5 passed — the three `runAs: 'system'` zh-CN cases.\n  - delete `if (locale) out.locale = locale;` (user arm): 3 failed / 5 passed — the three `runAs: 'user'` zh-CN cases.\n- `pnpm --filter @objectstack/service-automation test`: Test Files 203 passed (203), Tests 2667 passed (2667).\n- `pnpm --filter @objectstack/service-automation typecheck`: exit 0 (incl. `check:test-typecheck`).\n- `eslint --no-inline-config packages/services/service-automation`: exit 0.\n\n## Gates (local subset)\n\n`node scripts/pm/dispatch-gates.mjs --commands` at `ba44680f4` derives 68 families for this diff (3 paths). All 68 ran with exit 0; `--ran` reconciliation: `68 derived, 68 run, 0 NOT-MEASURED, 0 UNRUN` (exit 0).\n\n- Two families answered exit 3 on the first pass for shallow-clone prerequisites, the known pair: `check-plugin-teardown-shape --self-test` (re-run after fetching its fixture commit) and `check:dual-build-cjs-loads` (re-run after a full `pnpm build`, lock VERDICT exit 0). Both re-ran to exit 0.\n- The first 56 families ran at `447414c4` (the code at its final bytes, before the changeset commit); the 12 the changeset added to the derivation ran at `ba44680f4`.\n- Every family CI runs is CI's verdict on this PR's check-runs; none is re-run here. `test:repo` and the repo-wide `pnpm lint` are CI's.\n\n## Acceptance notes\n\n- `AutomationContext.locale`'s docblock (`packages/spec/src/contracts/automation-service.ts`) lists its readers as the refusing `end` node and the `screen` executor; the data nodes are now a third reader. Not edited here: `packages/spec/**` is outside this claim's file surface. Carrier: none.\n- Hooks fired by a flow's write now see the starter's `locale` on their session, as the same user's record-door write already gives them. Presentation only: no security middleware keys on it.\n- The `/actions` door's half (`ec.locale` → `AutomationContext.locale`) and the details carriage (`flowFailureDetails`) were already on main and are unchanged; this PR pins the engine leg, where the gap was.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011W59GGh1a3YnDbRLcBJYxe)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011W59GGh1a3YnDbRLcBJYxe\n"
+}

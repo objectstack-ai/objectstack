@@ -2,8 +2,8 @@
   "number": 25821,
   "kind": "issue",
   "title": "automation trigger door silently drops a non-object `params` (string or array) and dispatches the flow with an empty params bag",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:automation",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T15:38:24Z",
-  "updated_at": "2026-10-25T16:03:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T08:27:18Z",
+  "closed_at": "2026-10-26T08:06:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25821",
   "body": "Filing gate: ① a product defect with a live reproduction. Silent input coercion, finding class (a).\nBusiness reason: a caller that sends `params` in the wrong shape gets the flow run anyway with no inputs. Either it fails later with a misleading \"Unknown variable\" or, worse, it succeeds doing the wrong thing. The resume door already refuses the same value-shape class (#9416), so the two doors of one engine disagree.\nReader: the `packages/runtime` automation domain (`buildAutomationContext` drops the value); the next PR touching trigger input handling.\nDedupe (open AND closed): \"trigger params non-object silently dropped flow dispatch\" → 6 hits, none of them this one.\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 6679644a, as admin.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25817 · automation.trigger-status-contract · observed beside the clauses\n\nReproduction:\n1. As admin, send `POST /api/v1/automation/showcase_notify_owner/trigger` with `{\"params\":\"oops\"}`. The flow dispatches with an empty params bag and fails with `400 FLOW_FAILED`, \"Unknown variable: ownerId\".\n2. `{\"params\":[1,2]}` behaves the same way.\n3. Contrast: the resume door, given a non-object `inputs`, answers `400 VALIDATION_FAILED` before anything runs.\n\n**Expected:** `400 VALIDATION_FAILED` that names `params` as not an object, before dispatch, and no run row."

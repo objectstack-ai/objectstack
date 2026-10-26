@@ -1,0 +1,34 @@
+{
+  "number": 25897,
+  "kind": "issue",
+  "title": "record page read mode truncates text instead of wrapping: a case subject reads \"Data export timing out for large...\", an article summary \"A five-minute tour of accounts,...\", and the highlights strip shows SLA due as \"2026/10/2…\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:54:31Z",
+  "updated_at": "2026-10-26T08:31:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25897",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0, 1440×900)\n\n| place | field | shown | full value |\n|---|---|---|---|\n| case record, 工单信息 section, read mode | `subject` (text) | `Data export timing out for large...` | `Data export timing out for large datasets` |\n| knowledge article, 文章信息 section | `summary` (textarea) | `A five-minute tour of accounts,...` | the whole two-line summary |\n| case record, highlights strip | `sla_due_date` (datetime) | `2026/10/2…` | `2026/10/26 上午10:00` |\n| case record, page title | `display_title` | `CASE-00002 · Data export timing out for large …` | (title truncation is fine; the body field is not) |\n\nThe section field sits in a two-column grid with room to its right; the value is clipped to one line with an ellipsis instead of wrapping. On the highlight strip the date loses its day. [52-case-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/52-case-tall.png), [57-article-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/57-article-tall.png).\n\n`reach:` the public UI, measured once as the dev admin.\n\n## Expected\n\n- `record:details` read mode wraps `text` and `textarea` values (the textarea case is objectstack-ai/objectui#11577's family, closed; this is its 18.1.0 reading on a plain `text` field too).\n- The highlights strip shortens a datetime by format (drop the time, then the year) before it ellipsizes, or lets the cell grow; a date that loses its day is worse than a wider cell.\n\n## Dedupe\n\nMCP `search_issues` objectui \"record detail text field truncated with ellipsis instead of wrapping\" → 6 hits: objectstack-ai/objectui#11577 (closed, textarea one line in read mode), objectstack-ai/objectui#11684 (closed, drawer highlight truncation), objectstack-ai/objectui#12506, objectstack-ai/objectui#13149, objectstack-ai/objectui#12618, objectstack-ai/objectui#13292 — none open, none covers the plain-text section field or the datetime highlight. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.6."
+}

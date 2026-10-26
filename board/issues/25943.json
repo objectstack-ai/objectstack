@@ -1,0 +1,32 @@
+{
+  "number": 25943,
+  "kind": "issue",
+  "title": "Studio copilot: one right slot that shows either the properties or the copilot — properties follow the selection and mark the copilot's drafts; the copilot folds to a strip while properties show; change card v2; the 变更 badge in sync; no 源码 tab; pillar labels kept",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-16T15:29:12Z",
+  "updated_at": "2026-10-26T04:55:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 40,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25943",
+  "body": "## Source\n\nWalked on 2026-10-16 at 1010 × 1119 in Studio › app.hcpl › Interfaces with the AI 副驾 open: the panel takes about 330 px on the right, the properties fold into a 画布 / 属性 tab pair in the canvas, and the record-list preview is left with one and a half columns. `StudioAiCopilot.tsx` mounts the panel; `StudioDesignSurface.tsx` line 1758 hides the pillar labels below `xl` (`sr-only xl:not-sr-only`).\n\n## Rulings (2026-10-16, the epic PM session, verbatim)\n\n1. 「studio 中其他的设计面板属性都是右侧打开的，你换到 tab 会不会改动太大，是否考虑浮出」 and 「属性好需要考虑选中每个元素的时候也要显示。」 — the properties stay on the right and follow the selection.\n2. 「ai 副驾或者属性面板是否能切换隐藏，这个宽屏的界面好乱。还有我在和ai 讨论的时候估计也不会看属性吧？」 — the floating panel beside a permanent rail was rejected; one right slot shows either the properties or the copilot.\n3. 「源码的选项卡有必要保留吗？未来还有人看吗」 — the canvas has no 源码 tab.\n4. 「按「右栏二选一」定稿」.\n\n## Target (StudioRailCopilot and StudioRailProps artboards)\n\n1. One right slot (360 px at ≥ 1280, 300 px at 1010) with a segmented header 属性 | AI 副驾 (the copilot segment carries a count badge of pending items). `⌘.` toggles the slot between the two; the top bar's right-most icon collapses the slot entirely. No floating panel, no overlay dock, no fourth column at any width.\n2. Switching by intent: clicking any canvas element (column, card, field, button) switches the slot to 属性 for that element; Esc or a click on empty canvas returns to the item's own properties. While 属性 shows, the copilot is a 40 px strip at the slot's foot 「AI 副驾 · N 项待确认 · 回到对话 →」; while the copilot shows, the canvas hint reads 「点元素 → 右栏切到属性」.\n3. Properties follow the selection in every pillar; a field or view setting the copilot changed carries a 草稿 chip and a 来源 line (「由 AI 副驾在 2 分钟前作为草稿加入」). The canvas's own tabs go: no 画布 / 源码 / 属性 tabs; one status line above the canvas (「运行态预览 · 含未发布改动」). The item's definition is reachable from its ⋯ menu (查看定义 · 复制 JSON · 重命名 · 删除) and as a diff in the 变更 drawer.\n4. Change card v2 inside the copilot: 「修改方案 · N 项」 with one row per change (＋ / ✎ symbol, kind, object · field, machine name and parameters in small type), the amber posture note for a live app with data, 存为草稿 (primary) / 调整; the applied card 「已存为草稿 · N 项」 with 查看变更并发布 / 撤销; the composer with the 「借阅看板 ×」 context chip and the placeholder 「问问数据，或让我改改这个应用…」. Data from objectstack-ai/cloud#2924.\n5. The top bar's 变更 badge counts the copilot's drafts the moment they land; the item header shows 「草稿 · N 项未发布」.\n6. The pillar switcher keeps its labels (数据 / 自动化 / 界面 / 权限) from 1024 px up (`lg:not-sr-only` instead of `xl:`); below that, icons with tooltips.\n\n## File surface\n\n`packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx`, `StudioDesignSurface.tsx` (the right slot, the pillar labels, the canvas status line, the item ⋯ menu), `packages/app-shell/src/layout/ChatDock.tsx`, the Interfaces preview's selection → properties wiring, tests beside.\n\n## Acceptance\n\n1. Tests: the slot shows the copilot with no properties; selecting a card switches it to that card's properties with the copilot strip at the foot; Esc returns to the view's properties; the 变更 badge equals the draft count; no 源码 tab; pillar labels visible at 1024.\n2. Screenshots at 1010 and 1280 px in both slot modes.\n3. `pnpm --filter @object-ui/app-shell test` green.\n\n## Design\n\nArtboards on the temporary branch `claude/console-home-login-design-20261016` of objectstack-ai/objectui, commit `98aab506a` (never merged; `*.preview.html` opens in a browser, `*.dc.html` is the canvas source): [StudioRailCopilot](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/artboards/StudioRailCopilot.preview.html?raw=true) ([source](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/artboards/StudioRailCopilot.dc.html)) · [StudioRailProps](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/artboards/StudioRailProps.preview.html?raw=true) ([source](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/artboards/StudioRailProps.dc.html)). The rejected alternative (the floating panel) stays beside them as [StudioCopilot](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/artboards/StudioCopilot.preview.html?raw=true) for the record. The README beside them records the rulings.\n\n## Evidence\n\nScreenshots on the same branch and commit: [ai-studio-books-21-rows-1010px.jpg](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/ai-studio-books-21-rows-1010px.jpg?raw=true) · [ai-studio-kanban-preview.jpg](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/ai-studio-kanban-preview.jpg?raw=true) · [ai-copilot-modify-plan.jpg](https://github.com/objectstack-ai/objectui/blob/98aab506a/docs/design/ai-build-2026-10-16/ai-copilot-modify-plan.jpg?raw=true).\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` from the 2026-10-16 build of a library-lending app (package `app.hcpl`) on the test1016 tenant at https://os-4e4qa4.objectos.app (staging, zh-CN, the maintainer's browser pane at 1010 × 1119). The maintainer named the repositories, verbatim: 「部分前端功能代码在 objectui 后端在 onjectstack」.</sub>\n\n<sub>Body refreshed 2026-10-16T15:56Z: the floating-panel design this card was filed with was replaced by the right-slot design per the maintainer's rulings above; title, Target, File surface, Acceptance and Design rewritten; Source and Evidence unchanged.</sub>\n"
+}

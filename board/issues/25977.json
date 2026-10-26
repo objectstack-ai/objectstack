@@ -1,0 +1,36 @@
+{
+  "number": 25977,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): order a grouped grid's groups by the level's orderBy",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T07:36:36Z",
+  "updated_at": "2026-10-26T08:35:42Z",
+  "closed_at": "2026-10-26T08:35:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T08:35:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25977",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9MGufFRaP71H4Vn7WRVFLTN)_\n\nFixes #25858\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA grouped grid now orders a level's groups by the level's `grouping.fields[].orderBy` (the spec key landed in #25828), while the group label still comes from `field`. A list grouped by `period_label` with `orderBy: 'period_start', order: 'desc'` renders one header per label in descending `period_start` order, the undated group last.\n\nMeasured on `origin/main` before the change, the key was dropped in three places, not one:\n\n1. `ObjectGrid.tsx` (`serverGroupingKey`): the server grouping entries were rebuilt as field, order and collapsed only, so `orderBy` never left the grid.\n2. `useServerGrouping.ts` (`groupingOf`): the header query was compiled from field names alone, so `compileListViewGroupQuery` never added the `min_FIELD` / `max_FIELD` node and the header rows never carried an order value.\n3. `useGroupedData.ts` (`compareGroupEntries`): no `orderBy` handling on either sort path.\n\nThe card named (3) and allowed (1) and (2) \"if the header column is not forwarded\"; it was not, so all three are fixed here.\n\n- **Server path.** `ObjectGrid` forwards `orderBy`; `useServerGroupHeaders` compiles each level with its `orderBy` and `order` (a level ordered by its own key still carries the name alone, so flipping its `order` re-asks nothing; a changed `orderBy` re-asks, since it changes the answer's columns). `useGroupedData` reads each level's order value off the column `listViewGroupOrderColumn(grouping, depth)` names, never a re-derived alias.\n- **Client path** (rows handed in whole). Each group's order value is the `min` (asc) or `max` (desc) of `orderBy` over its rows, folded once before the sort.\n- **One comparator for both.** `compareGroupEntries` orders by the order value first, in `order`; a `null` value sorts last in both directions; equal values fall back to the existing key comparison (declared option order, then label) in the same direction. A level without `orderBy`, or with `orderBy` naming the grouping field, is unchanged. Values are reduced with `@object-ui/core`'s `getSortValue` / `compareSortValues`; a numeric string (a driver's decimal) is read as the number it spells, so `3.10` does not sort after `3.9`.\n- **Read gate.** An `orderBy` the principal may not read (`groupingKeyReadable`, the gate the grouping key already passes) is not forwarded, and that level orders by its own key: the header row would otherwise carry the hidden field's min/max and the group order would disclose it.\n- **Type mirror (card item 4).** None to change: `UsableGroupingField` derives from `@objectstack/spec/ui`'s `GroupingConfig`, and the `@object-ui/types` zod faces take `GroupingConfigSchema` by reference, so `orderBy` was already on both.\n\n`scripts/sdui-manifest.record.json` is re-recorded because `check-sdui-manifest` hashes the `ui/packages` registry sources; `sdui.manifest.json` itself is byte-identical (106 components, sha256 1f6e1ccb925a…).\n\n## Tests\n\nNew `ui/packages/plugin-grid/src/__tests__/groupOrderBy-25858.test.tsx`, 18 tests:\n\n- the card's acceptance set (`Q4 2025`, `Sep 2026`, `Oct 2026`, `Q4 2026`, `Nov 2026`, `Q1 2027`, plus an undated period) on header rows produced by answering `compileListViewGroupQuery`'s own output, both directions, the undated group last in both; an outer level of a two-level grouping; counts unchanged;\n- the client path on the same rows, plus `min`-for-asc / `max`-for-desc over a group whose rows span values, and numeric-string values;\n- precedence over a declared option order, with ties falling back to it in the same direction;\n- through `ObjectGrid`: the header query carries `max_period_start` and the painted headers read in descending start; rows handed in order the same way;\n- controls: no `orderBy` (label order, option order, and a header query whose only aggregation is `count`), and `orderBy` naming the grouping field itself.\n\nRuns (code tree `b3b58b69`; the final head `19f3f573` adds only the sdui record file):\n\n- `pnpm exec vitest run packages/plugin-grid/src/__tests__/groupOrderBy-25858.test.tsx` (from `ui/`): Test Files 1 passed, Tests 18 passed.\n- `pnpm exec vitest run packages/plugin-grid/` (from `ui/`): Test Files 248 passed (248), Tests 2222 passed (2222).\n- `pnpm --filter @object-ui/plugin-grid run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n\nAblations, each through `scripts/ablation-replace.mjs` (anchor hit 1, restored blob equal to HEAD, `git diff HEAD` empty), none left in the tree:\n\n- the order-value arm of `compareGroupEntries` disabled: 10 failed / 8 passed (every `orderBy` assertion red, every control green);\n- the numeric-string reading disabled: 1 failed (the numeric-string test);\n- `headerLevelOf` forwarding no `orderBy`: 1 failed (the `ObjectGrid` server-path test);\n- `ObjectGrid` forwarding no `orderBy`: 1 failed (the same test).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `19f3f573` derives 47 families; all 47 were run and exited 0, and `--ran` with per-command exit codes answers \"47 run, 0 NOT-MEASURED (a DERIVED zero)\". `check-sdui-manifest` was red before the record was regenerated (`node scripts/gen-sdui-manifest-node.mjs`) and is green after. The type-check lanes and the CI-owned whole-tree families are left to this PR's checks.\n\n## Acceptance notes\n\n- The client path is live only for rows handed in whole (inline rows or a `value` provider): a grid or `ListView` that fetches its own rows over a source with no header query refuses grouping (objectui#10881), so no projection change is needed for `orderBy` there; such hosts' rows already carry every field.\n- ⛔ Not this PR: the HotCRM `forecast.view.ts` edit. Its follow-up is to drop the outer `period_start` level once this lands.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Baqv5mDLFH63hvh9G4YGn5\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Baqv5mDLFH63hvh9G4YGn5)_\n\n<!-- seat domain:ui#1: the claim on #25858 was reworded so the Closing-Target Claim Guard reads it; this edit re-runs that guard -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 6024,
   "kind": "issue",
   "title": "[PM seat] domain:cli — ⏳ vacant · archive of domain:server seat 1 (#6367)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:31Z",
-  "updated_at": "2026-10-24T13:45:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T06:05:31Z",
+  "closed_at": "2026-10-26T06:05:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 477,
+  "comments": 478,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6024",
   "body": "⚠️ **This post is the RECORD of state, not the state.** Every fire re-reads the labels. ⛔ Never read a count here as current.\n\n📌 **Archive.** The `domain:cli` lane folded into `domain:server`. This post is an archive of **`domain:server` seat 1, which now sits on #6367**; ⛔ do not sit here. Seat 2 is #20966.\n\n<sub>Refreshed 2026-10-24T13:32Z by the `domain:server` seat 1 incumbent (same account) on takeover.</sub>\n\n## 1. Current PM — ⏳ vacant\n\n- **Last incumbent:** `os-sales` · `session_01CxBKycaiUpA1yGx1XyoGqX` (the Sales account's project). The maintainer voided this seat in that project at 2026-10-24T13:23Z; the session stopped writing and left no sign-off brief.\n- **Successor:** `domain:server` seat 1 on #6367 (`session_01JrXUZYyTV4i588KLZRxSvJ`, same account), which took over this seat's in-hand cards. The body revision before this edit holds the last term's ledger.\n\n## 2. Ledger\n\n- Moved to #6367. Claims this session held are released and re-claimed on their cards; card-thread claims that named this post now report to #6367.\n\n## 3. Hot-file serial queue\n\n- Moved to #6367.\n\n## 4. Notes\n\n- none.\n"

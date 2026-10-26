@@ -2,8 +2,8 @@
   "number": 25858,
   "kind": "issue",
   "title": "plugin-grid: order a grouped grid's groups by the level's `orderBy` (spec `grouping.fields[].orderBy`), the label still from `field`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T16:32:09Z",
-  "updated_at": "2026-10-26T01:58:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T08:37:49Z",
+  "closed_at": "2026-10-26T08:35:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25858",
   "body": "Filing gate: ④ coordination node. This is the objectui layer child of objectstack-ai/objectstack#25786 (the parent card); the spec key and its lint land in objectstack-ai/objectstack#25828.\nBlocked-by: objectstack-ai/objectstack#25828\nReader: the objectui plugin-grid lane, in `packages/plugin-grid/src/useGroupedData.ts` (`compareGroupEntries`) and `packages/plugin-grid/src/useServerGrouping.ts`. The work is the next plugin-grid PR once objectui's `@objectstack/spec` pin covers objectstack-ai/objectstack#25828.\nDedupe (open AND closed): \"grouped grid order groups by another field orderBy grouping header sort\" → 6 hits, none this one (the closest is objectstack-ai/objectui#11809, a select grouping field's option order, closed). \"GroupingFieldSchema orderBy objectui child render group label order\" → 19 hits, none this one.\nBusiness reason: inherited from the parent. HotCRM's forecast list (`src/sales/views/forecast.view.ts`) groups by `period_start` and then by `period_label` because a `period_label` grouping sorts as text. That prints two header rows for every forecast. The spec key retires the workaround, but only once the grid reads it.\n\n## The contract this layer reads (spec, `@objectstack/spec/ui`)\n\n- `GroupingFieldSchema.orderBy?: string` names a field of the same object whose value orders this level's groups. When it is absent, or names the grouping field itself, the level orders by its own key exactly as today.\n- `compileListViewGroupQuery` now adds one aggregation node per ordered level, `min` over `orderBy` for `order: 'asc'` and `max` for `'desc'`. The node is aliased `min_FIELD` / `max_FIELD`. The grouping key stays the only `groupBy` column, so there is still one header per label.\n- `listViewGroupOrderColumn(grouping, level)` names the header-row column a level sorts by: the grouping field itself, or that node's alias. Read it from there instead of rebuilding the alias.\n- What the consumer owes, as stated on the key:\n  - a group whose order value is `null` sorts last in both directions;\n  - equal order values fall back to the group key, compared in the same direction.\n- The header set is sorted whole. The header query is compiled unpaged, and a `limit` on it would be sliced by the server before any sort.\n\n## What this card does\n\n1. **Server-grouped grid.** When a level has an `orderBy` that differs from its `field`, sort that level's header rows by the column `listViewGroupOrderColumn` names. The direction is `order`, nulls go last, and ties fall back to the existing key comparison in the same direction. The group label is still rendered from the `field` value (one header per `period_label`), resolved as today.\n2. **Client-side grouping path** (`useGroupedData` over fetched rows, where it is still live). Apply the same rule from the rows: each group's order value is the `min` (asc) or `max` (desc) of `orderBy` over its rows. Each group then sits where its first row would sit if the rows were sorted by `orderBy`.\n3. **Precedence.** A level with `orderBy` orders by it, ahead of the declared option order (#11809) and the label order. A level without one is unchanged.\n4. **Type mirror.** If objectui mirrors `GroupingField`, it gains `orderBy?: string`.\n\n## Acceptance\n\n- Take a list grouped by `period_label` with `orderBy: 'period_start', order: 'desc'`, over rows whose labels sort differently as text (`Q4 2025`, `Sep 2026`, `Oct 2026`, `Q4 2026`, `Nov 2026`, `Q1 2027`, plus one with no `period_start`). It renders one header per label, in descending `period_start` order, with the undated group last.\n- A test feeds header rows shaped as `compileListViewGroupQuery` compiles them and asserts the order. A control with no `orderBy` asserts today's label or option order unchanged.\n- ⛔ Not this card: HotCRM's view edit. Its follow-up is to drop the outer `period_start` level in `forecast.view.ts` once this lands."

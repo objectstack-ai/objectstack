@@ -1,0 +1,34 @@
+{
+  "number": 25898,
+  "kind": "issue",
+  "title": "console list empty states: a member with no visible records reads \"这里还没有数据 — 创建第一条记录即可开始\" beside no Create button, and every \"my …\" view says only \"没有匹配的记录\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:53:45Z",
+  "updated_at": "2026-10-26T08:24:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25898",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0, demo org)\n\n1. Signed in as a sales rep (`sales_rep` set, no case read), open `/_console/apps/app.objectstack.hotcrm/crm_case`. The list renders the object's seven view tabs, no 新建 button, and the empty state 「这里还没有数据 / 创建第一条记录即可开始。」. The database holds 38 cases; the member may read none. The text tells him the desk is empty and invites him to create a record he cannot create. [r6-rep-cases.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/r6-rep-cases.png).\n2. As the dev admin (owns nothing after `demo:staff`), 我的商机 / 我的线索 / 我的工单 and the Sales Home 「My Leads」 tab all show 「没有匹配的记录 / 没有符合该视图筛选条件的记录。」 — correct, and useless: the view's filter is `owner = current user`, so the message a user needs is \"you own no opportunities yet\" with the create action. [35-crm_opportunity_view_my_open_deals.png](``https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/35-crm_opportunity_view_my_open_deals.png),`` [39-crm_case_view_my_open_cases.png](```https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/39-crm_case_view_my_open_cases.png).```\n\n`reach:` the public UI, measured once per case above.\n\n## Expected\n\nThree empty states, chosen by what the list knows:\n\n| situation | the list knows | text |\n|---|---|---|\n| the object has no records the caller may create into | count 0 and the caller has create | \"no records yet\" + Create |\n| the caller may read none (count 0, no create, or a 403 on the read) | no create permission / forbidden | \"你没有可查看的工单\" + who to ask; never \"create the first one\" |\n| the view's own filter matches nothing | the view's filter is non-empty | today's text; when the filter is on `current_user`, \"你还没有负责的 …\" + Create when allowed |\n\nThe third row is what hotcrm AGENTS.md rule 4 asks for: a default, not an `emptyState` authored on every \"my\" view.\n\n## Dedupe\n\nMCP `search_issues` objectui \"list empty state no data yet create first record shown when user lacks visibility permission\" → 1 hit, objectstack-ai/objectui#11687 (closed: the invite / filter wording), which fixed two other contradictions and did not cover the no-visibility case or the owner-filter case. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §2.2–2.3."
+}

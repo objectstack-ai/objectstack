@@ -1,0 +1,32 @@
+{
+  "number": 25965,
+  "kind": "pull_request",
+  "title": "ci(release): the hotcrm downstream smoke resolves hotcrm's latest release tag at run time",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T06:21:33Z",
+  "updated_at": "2026-10-26T06:31:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25965",
+  "body": "Fixes #25770\n\nClaim: #25770 comment 6409515497 (Branch `claude/project-thread-beijtf`, the devx seat's in-seat S card).\n\n## What\n\nThe release lane's **Downstream backward-compat smoke (live hotcrm)** step no longer hard-codes `HOTCRM_REF: v2.1.0`, an ObjectStack 14.7-era hotcrm that sits four majors behind. At run time it resolves hotcrm's **latest published release** (`repos/objectstack-ai/hotcrm/releases/latest` → `tag_name`) and runs the smoke against it. This implements the maintainer's ruling D10 = A.\n\n- Still **advisory**: `BLOCKING: '0'` is unchanged. No new gate and no new dispatch lane.\n- **Fail-soft:** on a network error, a non-200 response, or an empty or malformed `tag_name`, the step emits `::notice::` and skips. It never fails.\n- The lookup authenticates with the job's `GITHUB_TOKEN`, so it isn't subject to the anonymous per-IP rate limit. The token is `unset` before hotcrm's install runs its third-party lifecycle scripts.\n- The \"TO RE-ARM\" comment is rewritten as a ruling, not a pending to-do. The final warning names `@objectstack/downstream-contract` as the blocking floor.\n- The Node-floor comment cited \"hotcrm@v1.2.0 … engines.node >=22\", which was stale. It now cites `.nvmrc` plus the cloned release's `engines.node` (v6.0.0: `^22.11 || ^24 || >=26`). `node-version: '22'` is unchanged.\n\n## Verified (the step's `run:` extracted, with the smoke call stubbed)\n\n```\nlive:            Resolved hotcrm's latest published release: v6.0.0   (GH_TOKEN cleared before the smoke)   exit 0\nmissing repo:    ::notice::could not resolve … (HTTP 403, no usable tag_name) — skipping the advisory downstream smoke. The publish continues.   exit 0\nunreachable:     ::notice::… https://nonexistent.invalid/… (HTTP 000, no usable tag_name) — skipping …   exit 0\n200, no tag:     ::notice::… (HTTP 200, no usable tag_name) — skipping …   exit 0\n```\n\n`grep -n \"HOTCRM_REF:\\|BLOCKING:\" .github/workflows/release.yml` → only `BLOCKING: '0'`.\n\n`--self-test` exited 0 on every script that reads release.yml: scheduled-full-run, check-changeset-no-major, check-self-test-wired, check-skill-compatibility-version, check-stall-guard-budget, release-dist-tags, release-github-releases, release-pending-publish, release-verify-npm, sync-docs-image-tags and sync-release-index-currency. Also exit 0: `check-node-version`, `check:workflow-status-functions`, `check:workflow-step-name-quoting` and `check:pm-governed-prose`.\n\n## Left out (out of the card's scope)\n\n- `.github/workflows/cut-rc.yml:757` still pins `HOTCRM_REF: v2.1.0`. The card keeps cut-rc out of scope.\n- `scripts/downstream-smoke.sh` still defaults to `v1.2.0` when `HOTCRM_REF` is unset. release.yml always sets it now, and `dispatch-gates.self-test.mjs` reads the script byte for byte.\n\n`skip-changeset`: a root-workflow change that publishes nothing. Clause-②: no. Metadata-protocol: none. **Tier H** (`.github/workflows/release.yml`): it lands after a GOVERNED_APPROVERS approval.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LKHDniRQSWjRJyDtacwpEd\n"
+}

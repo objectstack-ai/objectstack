@@ -1,0 +1,37 @@
+{
+  "number": 25969,
+  "kind": "pull_request",
+  "title": "ci: run main's full battery every 4 hours and CodeQL daily (maintainer ruling Q6 = C)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T06:45:57Z",
+  "updated_at": "2026-10-26T07:13:00Z",
+  "closed_at": "2026-10-26T07:12:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T07:12:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25969",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DVbbHyHMZtUJMt5EUYKRYE5)_\n\nFixes #25771\n\nMaintainer ruling Q6 = C: the scheduled full battery of `CI` and `Lint & Type Check` runs every 4 hours instead of hourly, and CodeQL runs daily instead of on every push to `main`. Job logic is unchanged: the scheduled run is still the full battery. Dropping the push-to-main CI/Lint runs is out of scope, per the card.\n\n## The change\n\n- `ci.yml`, `lint.yml`: `on.schedule` `'0 * * * *'` → `'0 */4 * * *'`. `workflow_dispatch` kept.\n- `codeql.yml`: `push: main` dropped; schedule `'0 2 * * 1'` (Monday deep pass) → `'0 2 * * *'` (daily, same query suite, so the Monday pass folds in); `workflow_dispatch` added so a fix can be re-analyzed on demand.\n\n## The scheduled-full-run card identity (the part that is not S)\n\n**Choice: the identity moves to the new cadence, and the hourly spellings stay readable.** `CARD_CADENCES` names `4-hourly` for both workflows, so a newly filed card is titled `4-hourly full run: red on main (CI)` with marker `os-4-hourly-full-run-ci`, and its body says \"every 4 hours\". A new `CADENCE_PREDECESSORS` map (`'4-hourly': ['hourly']`) gives each identity a `legacy` title and marker that `matchesCard` still reads. So the open card #25438 (`hourly full run: red on main (CI)` / `os-hourly-full-run-ci`) is found by its old title or old marker, refreshed in place, and never duplicated. A refresh rewrites the body with the current marker and leaves the title alone (`updateIssue` writes only the body). A legacy spelling is read, never filed.\n\nPinned in `scheduled-full-run.mjs --self-test` (card identity battery floor 34 → 42):\n- #25438's real title and real first body line are found by title, and by marker alone after a rename;\n- a red 4-hourly run refreshes #25438, files no second card, and leaves the current marker in the body (found by that afterwards too);\n- an empty board files under the new title, not the legacy one;\n- Lint's identity does not match CI's hourly card;\n- each watched workflow declares exactly `'0 */4 * * *'`, so the cadence on the card is the cadence the workflow runs.\n\nMutation checks: emptying `CADENCE_PREDECESSORS` reds the self-test (\"#25438 would be orphaned\"); reverting `lint.yml` to `'0 * * * *'` reds it too.\n\n## Readers of the cadence\n\n- **Release gate** (`--release-gate`, `releaseGateVerdict`): no clock anywhere in it. It reads the nearest completed `schedule` or `push` run at or before the version commit, so nothing reads a 4-hour gap as missing. The window constants (400 commits, 3 × 100 runs) cover 50 days of scheduled runs. `docs/releases-maintenance.md` now says that a version commit can wait up to 4 hours for its first scheduled full run, that the gate does not wait for it (the version commit's own push run usually decides), and when a dispatched run helps.\n- **Shard-timings refresh**: the weekly lane accumulates scheduled runs whose `test-core-run-summary-*` / `test-core-timings-*` artifacts are still downloadable. With 1-day retention, hourly gave 24 of them; at every 4 hours it would give 6. The two uploads now use `retention-days: ${{ github.event_name == 'schedule' && 4 || 1 }}`, which keeps about 24 in the window and leaves every other event at 1 day. This is the one change outside \"cron + words\"; drop it if the reviewer prefers fewer samples to longer retention. The `PREVIOUS_FILE_SHARDED_PACKAGES` comment in `partition-test-shards.mjs` follows the new window.\n- Prose and messages that said \"hourly\" in `ci.yml`, `lint.yml`, `release.yml`, `scheduled-full-run-card.yml` (job display name included), `shard-timings-refresh.yml`, `select-shard-timings-run.mjs`, `select-gate-families.sh`, `select-shard-packages.sh`, their self-test case names, and one `AGENTS.md` sentence. The lint step `Hourly full run self-test and concurrency gate` was renamed `Scheduled full run …` (id too; nothing else reads it). Historical measurements that describe the hourly era are left as written.\n\n## Verification\n\n- `node scripts/ci/scheduled-full-run.mjs --self-test` OK; `--check-concurrency` OK for both files.\n- `select-shard-timings-run.mjs --self-test`, `partition-test-shards.mjs --self-test`, `select-gate-families.selftest.sh` (59 cases), `select-shard-packages.selftest.sh` (32 cases) all pass.\n- `grep -n cron .github/workflows/ci.yml .github/workflows/lint.yml .github/workflows/codeql.yml` → `'0 */4 * * *'`, `'0 */4 * * *'`, `'0 2 * * *'`.\n- Derived gate families (`dispatch-gates.mjs --commands`, 82 commands on the pre-merge tree): 77 exit 0. 5 exit 3 (NOT MEASURED, they need every package's `dist/`): `check:doc-formula-expressions`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. CI's lanes own those.\n\nTier H (`.github/workflows/**`): lands after a GOVERNED_APPROVERS approval.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AjoNWTpihGQZrTamr1vd4W\n"
+}

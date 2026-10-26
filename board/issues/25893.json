@@ -1,0 +1,34 @@
+{
+  "number": 25893,
+  "kind": "issue",
+  "title": "Setup under zh-CN still draws English on Audit Log (title, presets, filters, columns, \"Open as list\"), Datasources (title) and System Overview (KPI subtitles Users / Sessions / Events); Feature Flags title reads \"功能开关Beta\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T10:57:35Z",
+  "updated_at": "2026-10-26T08:14:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25893",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (`@objectstack/console` 18.1.0, browser locale zh-CN, every other Setup page translated)\n\n| page | English strings |\n|---|---|\n| 诊断 → 审计日志 (`component/audit/log`) | title \"Audit Log\", subtitle \"Read-only system activity and record changes. Newest first.\", button \"Open as list\", \"Presets\", filter labels Action / Object / Actor / From / To, placeholders \"All actions\" / \"Any object\" / \"Any user\", column headers Timestamp / Action / Object / Record / Actor / IP, actor \"System\" — [t33-审计日志.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t33-审计日志.png) |\n| 集成 → 数据源 (`component/metadata/resource?type=datasource`) | title \"Datasources\" — [t36-数据源.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t36-数据源.png) |\n| 总览 → 系统概览 | KPI subtitles \"Users\", \"Sessions\", \"Events\" under translated titles — [t00-系统概览.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t00-系统概览.png) |\n| 配置 → 功能开关 | page title renders as one word 「功能开关Beta」: the Beta badge has no gap from the title — [t29-功能开关.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t29-功能开关.png) |\n\n`reach:` the public UI, each measured once as the dev admin; the same strings in the English bundle are, of course, fine.\n\n## Expected\n\nBundle keys for the audit log component, the datasource admin page title and the system-overview KPI subtitles (the KPI subtitles may be the dashboard's `subtitle` strings in `@objectstack/setup`, in which case that half is an objectstack card; triage decides from the component source). A space or badge margin on the Feature Flags title.\n\n## Dedupe\n\nMCP `search_issues` objectui \"Setup audit log page untranslated English title columns in Chinese locale\" → 6 hits (#13405, objectstack-ai/objectui#12924, objectstack-ai/objectui#12762, objectstack-ai/objectui#12333, objectstack-ai/objectui#10835, objectstack-ai/objectui#10748), all closed and none covering the audit log, datasources or system overview. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §7 S2, S7."
+}

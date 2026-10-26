@@ -1,0 +1,32 @@
+{
+  "number": 25946,
+  "kind": "issue",
+  "title": "finding(core,plugin-list,plugin-grid): a named view's `data` picks a different object in `ListView` and in `ObjectGrid` when `data.object` differs from the node's `objectName`, so `object-view` route 2 does not relay it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-28T11:58:53Z",
+  "updated_at": "2026-10-26T04:58:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25946",
+  "body": "Filing-gate category: ② two readers of one declared member disagree, with no in-tree producer yet. Reader: triage first (grade and route). Filed by `domain:ui` seat 2, `session_014mXUNuFomfj24w7s1pZzhN`, from the member-4 dev report on objectui#10885 (PR objectui#10967, `open_questions[1]`). ⛔ Not graded here.\n\n## What was measured\nThe same named view was measured on a node with `objectName: probe_task`, through the delegation's `ListView` and through route 2 with a scratch relay of `data` into the grid schema. The branch does not carry that relay.\n\n| named view `data` | `ListView` (host `renderListView`) | `ObjectGrid` with the relay |\n|:--|:--|:--|\n| `{ provider: 'value', items }` | draws the items | draws the items |\n| `{ provider: 'object', object: other_obj }` | fetches **probe_task** | fetches **other_obj** |\n| `api` / `schema` | fetches probe_task | fetches probe_task |\n\nWhy the object row splits:\n- `normalizeListViewSchema` folds `data: { provider: 'object', object }` into `objectName` only as a gap-fill (objectui#7477, released by objectstack#14791 ruling B). A node that already names `objectName` keeps it.\n- `resolveRecordSourceObjectName` in `@object-ui/core` (`record-source.ts`) returns `data.object` first when `data.provider === 'object'`, then `objectName`. `ObjectGrid`'s fetch goes through `resolveRecordSourceConfig(schema, 'view-data')`.\n\n## What ships instead\nPR objectui#10967 does not relay `data` on route 2, by seat ruling.\n- The Studio's view preview and the console fetch the same object for every provider except `value`.\n- On route 2, a named view's `value` provider is ignored: the grid fetches `objectName`, where `ListView` draws the items.\n- The plugin-view README and docs page say `data` is not read off the named view on that path.\n\n## Reach\n- 0 in-tree named views author `data`. The `listViews` authors are `examples/byo-backend-console` and the schema-catalog named-views JSON, and neither the docs examples nor these carry `data`.\n- Stored-view usage is not measured.\n\n## Direction (for triage to grade)\nFirst rule which name wins when a named view's `data.object` differs from the node's `objectName`, then relay `data` on route 2. Apply one rule to both readers, either:\n- **(a)** `data.object` wins in both, or\n- **(b)** the node's `objectName` wins in both, or\n- **(c)** refuse at authoring a named view whose `data.object` differs from the node's `objectName`.\n\n⛔ Relaying `data` on route 2 before that rule exists would make the Studio preview and the console fetch different objects for the same stored view. Filtering providers on the consumer side (relaying `value` only) is also ruled out (AGENTS.md #0.1). Startup focus: with no producer today, triage may park this until one appears.\n\n## Dedupe\nA semantic search of objectui issues (named view `data`, object provider, precedence, `objectName`, gap-fill, record-source ladder) returned nothing on this conflict. objectui#7477 is closed, and its gap-fill is one side of it.\n\n<sub>`domain:ui` seat 2 · finding · 2026-09-28</sub>"
+}

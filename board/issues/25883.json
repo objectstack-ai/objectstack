@@ -1,0 +1,32 @@
+{
+  "number": 25883,
+  "kind": "issue",
+  "title": "record page read mode: inline edit exists only as an invisible \"双击编辑\" affordance, and each section's \"显示 N 个空字段\" toggle is separate and forgets its state on reload",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:05:24Z",
+  "updated_at": "2026-10-26T02:42:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25883",
+  "body": "Filing gate **① a user-visible defect with a named landing site** (two read-mode affordances on the same page; split if triage prefers). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0)\n\n1. **Inline edit is undiscoverable.** On an account record the DOM carries a `双击编辑` button per field (the pass counted 11 on Acme Corporation), but nothing on screen says so: no pencil on hover, no hint in the section header, no cursor change. A user who wants to change the phone number opens 编辑 and the whole five-tab form. The one visible pencil is on the Markdown description (the rich-text widget draws its own). [50-account-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/50-account-tall.png).\n2. **Empty-field toggles are per section and volatile.** An opportunity page shows 「显示 2 个空字段」, 「显示 9 个空字段」, 「显示 5 个空字段」 in three sections; a user who wants to see the whole record clicks three times, and after a reload (or opening the next opportunity) all three are folded again. [51-opportunity-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/51-opportunity-tall.png).\n\n`reach:` the public UI, measured once as the dev admin; every record page shows both.\n\n## Expected\n\n- A visible inline-edit cue: a pencil on field hover (and focus), or a one-line hint under the tab bar the first time; the double-click stays.\n- One page-level 「显示空字段」 control (or the section toggles) remembered per user and object in the `sys_user_preference` `ui.*` keys the list page already uses (#12418).\n\n## Dedupe\n\nMCP `search_issues` objectui \"inline edit double click to edit has no visible affordance pencil hover on record details\" → 24 hits, none about the affordance (#13292 save-bar label, objectstack-ai/objectui#12303 save feedback, objectstack-ai/objectui#12933, objectstack-ai/objectui#12642 …); \"show N empty fields toggle per section resets on reload remember\" → 4 hits (#12618, objectstack-ai/objectui#7064, objectstack-ai/objectui#8376, objectstack-ai/objectui#10291) about what counts as empty, not about remembering the toggle. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md)."
+}

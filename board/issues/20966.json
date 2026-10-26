@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 2 — 🟢 os-project-manager",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -11,19 +11,21 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:engine",
+    "domain:server",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-10-25T06:03:21Z",
+  "updated_at": "2026-10-26T08:26:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 74,
+  "comments": 77,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "⚠️ **This post is the RECORD of state, not the state.** Every fire re-reads the labels. ⛔ Never read a count here as current.\n\n📌 Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. ⛔ Not hand-copied per term. This post is **`domain:server` seat 2**. It was the `domain:engine · seat 2` post until the engine, services and cli lanes folded into `domain:server`. The services and cli seat-2 posts (#21118, #22648) are archives of the same seat; ⛔ do not sit there. Seat 1's posts are #6021, #6024 and #6367.\n\n<sub>Refreshed 2026-10-25T06:02Z: signed off on the maintainer's word, 「当前任务处理完，合并后就下班」. The previous body revision holds the term's in-flight ledger.</sub>\n\n## 1. Current PM: ⏳ vacant\n\n- **Last PM:** `sunhaolin`, session `session_01JVTd3PprStGa26aez5omLB` (Claude Code cloud), seated 2026-10-24T08:36Z (opening marker 6382076542), signed off at this refresh. The sign-off brief is the comment after this refresh.\n- **Next seat:** `/pm-dispatch server`, then 接手; read this post first. Nothing of this seat's is in flight, and no stay-behind tail.\n\n## 2. Ledger (⛔ re-read the labels before acting)\n\n- **Landed this term:** #25521 cuts 1–4 (PRs #25614, #25630, #25655, #25698); #25522 cuts 1–3 (PRs #25615, #25636, #25686); #23181 slice 8 (PR #25633); #25495 (PR #25621); #25576 (PR #25627); #25611 (PR #25646); #25648 (PR #25684); #25486 (PR #25628); #25622 + #25572 (PR #25682, folded); #25693 (PR #25704); #25649 (PR #25699); #25651 (PR #25706); #25634 (PR #25690); #25672 (PR #25705). Each card carries its own landing comment.\n- **Next, in `pm:queue`, unclaimed:**\n  - #25692 (p1) then #25694 (p2), serial on the same seam (`file-reference-lifecycle.ts`); unblocked since PR #25682 landed. Security: detail withheld from GitHub.\n  - #25653 (p1, security), graded since this seat's last refresh.\n  - #25521 cut 5: the cut 4 dev proposes `introspectIndexes` (Schema sync) into the same module (cut 4 landing comment on #25521).\n  - #25522 cut 4: the cut 3 dev proposes Realtime publish, `publishDataEvent` and `publishBulkDataEvent` (cut 3 landing comment on #25522).\n- **Filed this term:** #25609, #25610, #25622, #25650, #25651, #25692, #25693, #25694, #25742, #25744, #25749.\n- **Filed at sign-off, not yet triaged:** #25749 first: `plugin-pinyin-search`'s `boot-reconcile.integration.test.ts`, which landed with PR #25690, times out at vitest's 5 s default under merge-queue load and dequeued PR #25705 once. A one-call `bulkCreate` patch is proposed. Then #25744: an object's own actions registered from a raw manifest stay unparsed (sibling of #25649).\n- **Not this seat's:** #25742 (main red, `Spec property liveness`) is claimed by `domain:spec` seat 2. #25571 is dispatched by `os-project-manager`; #25573 is closed.\n- **Open question for the maintainer:** carried off GitHub in this session (#25693's landing comment names it).\n\n## 3. Hot-file serial queue (regions, ⛔ not files)\n\n- `packages/drivers/driver-sql/src/sql-driver.ts`: #25521, move-only slices, one in flight at a time. The next is cut 5.\n- `packages/objectql/src/engine.ts`: #25522, move-only slices, one in flight at a time. The next is cut 4.\n- `packages/services/service-storage/src/file-reference-lifecycle.ts`: #25692, then #25694.\n- `packages/metadata-protocol/src/protocol.ts`: seat 1's #25467 slices (PR #25740 open). Stay out of every region an open slice moves.\n- `packages/plugins/plugin-auth/src/auth-manager.ts`: free. PR #25594 (seat 1's #25224 cut 15) has landed.\n\n## 4. Notes\n\n- **Contract-tier reviews go to the director seat** (maintainer, verbatim: 「后续复审可以叫给总监」, 「你没有fable，可以让总监复审」). A PR whose face owes `CONTRACT_REVIEW_TIER` gets the seat's `TIER_DEFAULT` ACCEPT with `needs:contract-review` hung in the same act. It stays draft, outside the queue, until a same-form PASS at that tier is on its current head. The forced tier is not lowered for a temporary shortage. This lapses when a contract-tier subagent starts in this seat again.\n- **Terms of this term, verbatim:** 「并发加到5，可以用云卡片」; 「等待契约复审的，不占用你的并发名额」; 「你按照 pm-dispatch 技能审核过的pr你都可以落地」. They were said to this session and do not carry to the next seat.\n- **Rulings recorded this term:** 「25619 C 25495 B」. The security findings of PR #25682's measurement were split into #25692, #25693 and #25694 on the maintainer's word. Their detail is kept off GitHub.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 2** (the former `domain:engine · seat 2` post; #21118 and #22648 are archives of it, ⛔ do not sit there). Seat 1 is #6367.\n\n<sub>Refreshed 2026-10-26T08:24Z (seated).</sub>\n\n- **Current PM:** 🟢 `os-project-manager` · the Claude Code project \"Objectstack server\", seat thread \"运行 server 车道 2 号席位\" · `session_0186vfjHHMsRXC9EUT9hTFMo`, seated on the maintainer's word in that project (「同意接管」, after 「elon 已经下班了」). Seated on the release marker `6410340278` (the previous seat's sign-off, newest event on this post). The same account holds seat 1 (#6367) from a separate thread; the lane's development cap (「server 并发加到10」) is shared by both seats.\n- **Hot-file serial queue:** `packages/drivers/driver-sql/src/sql-driver.ts` — #25521 cut 6 next (Release `6409882266`). `packages/objectql/src/engine.ts` — #25522 cut 5 next; measure a fresh seam table first (Release `6409887459`). `packages/services/service-storage/src/file-reference-lifecycle.ts` — #25694 next; re-read its premise against #25951 before claiming. `packages/metadata-protocol/src/protocol.ts` — seat 1's #25467, stay out. Every other lane file is FREE.\n- **Taken over from the previous term:** the stay-behind #25971 (Tier H ADR-0104 D3 docs PR, contract review PASS `6410217722`). The previous seat is off work, so this seat lands it after a governed approval.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` / `Release:` comments + `head:claude/` PRs, read by `assignee:os-project-manager`. The previous term's ledger is in the body revision of 2026-10-26T07:10Z.\n- **Wall:** none.\n"
 }

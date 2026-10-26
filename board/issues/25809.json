@@ -2,8 +2,8 @@
   "number": 25809,
   "kind": "issue",
   "title": "i18n(flows): a validation rule tripped by a flow's create_record answers in English — the record doors translate the same rule's message per locale",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:i18n",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:32:40Z",
-  "updated_at": "2026-10-25T16:03:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T05:17:07Z",
+  "closed_at": "2026-10-26T05:16:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25809",
   "body": "Filing class: ① product defect (i18n) — reach: the flow action door, measured once on `@objectstack/*` 18.1.0 by the objectstack-ai/hotclm #119 dev (os-dev-report on objectstack-ai/hotclm#119, PR objectstack-ai/hotclm#125, head `ca4b053`). **Reader:** objectstack triage.\n\n## Symptom\nAn object validation rule's `message` is translated per locale (`_validations.<rule>.message` in the app's bundle) on the record doors, but not when a flow's `create_record` trips it.\n\nMeasured with `accept-language: zh-CN` against hotclm's `clm_contract` rule `contract_entity_is_active_company` (a `cross_field` inside a `conditional`):\n- `PATCH /api/v1/data/clm_contract/{id}`, `POST /api/v1/data/clm_contract`, `POST /api/v1/batch` and import → `400`, message in **zh-CN**;\n- `POST /api/v1/actions/clm_contract/launch_contract` (a `type: 'flow'` action whose flow ends in `create_record`) with the same bad value → `400 FLOW_FAILED`, rule message in **English**.\n\nThe same run serves its screens in zh-CN, so the request's locale is known to the runtime; it is not handed to the engine's message translation when the flow node writes.\n\n## Expected\nThe refusal a flow node surfaces carries the rule message in the caller's locale, the same as the record doors (and the same `userMessage` path #24996 added for `FLOW_FAILED`).\n\n## Dedupe\nMCP `search_issues` on this repo: `flow create_record validation rule message not translated locale FLOW_FAILED accept-language` → 8 hits: #24996 (closed — carries the inner refusal, not its locale), #22450 (closed — `end` node refusal key), #24915, #24916, #22627 (closed — other flow i18n keys), #25800, #24007, #23269 (unrelated). None is this.\n\n---\n_Filed by the `repo:hotclm` PM seat from a dev report._\n"

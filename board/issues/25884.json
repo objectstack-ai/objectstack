@@ -1,0 +1,32 @@
+{
+  "number": 25884,
+  "kind": "issue",
+  "title": "list grid: a date column mixes relative and absolute formats in the same column (\"昨天 / 3天前 / 7天前 / 9月25日 / 2025年9月20日\"), so a sorted column cannot be read as sorted",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-25T14:05:09Z",
+  "updated_at": "2026-10-26T02:43:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25884",
+  "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0, zh-CN)\n\n| list | column | values top to bottom |\n|---|---|---|\n| 报价单 (sorted by 报价日期 desc) | 报价日期 | 昨天 · 3天前 · 7天前 · 9月25日 · 9月10日 · 8月26日 |\n| 报价单 | 到期日期 | 11月23日 · 11月21日 · 11月17日 · 昨天 · 10月10日 · 9月25日 |\n| 合同 | 开始日期 / 结束日期 | 2025年9月20日 · 昨天 · 11月24日 · 11月8日 / 2027年10月24日 … |\n| 营销活动 | 开始日期 / 结束日期 | 9月20日 · 10月10日 · 10月13日 · 后天 · 6天后 · 11月13日 / 4天前 · 11月15日 … |\n\n[31-crm_quote.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/31-crm_quote.png), [32-crm_contract.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/32-crm_contract.png), [43-crm_campaign.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/43-crm_campaign.png). The 活动 list, by contrast, prints `2026/11/1 上午9:30` on every row and reads cleanly.\n\nWithin ±7 days a date becomes a relative word, beyond that a month-day, beyond the year a full date. Three formats in one column: the eye cannot scan it, a sorted column does not look sorted, and \"昨天\" in an expiry column reads as a status. Relative time is right for an activity feed, not for a grid cell that is compared with its neighbours.\n\n`reach:` the public UI, measured once as the dev admin; every date column on every list shows it.\n\n## Expected\n\nGrid cells render dates in one absolute format per column (the locale's short date, year included when it is not the current year); relative wording stays in feeds, timelines and highlight strips if desired. If the relative style is wanted somewhere in lists, it is a column option, not the default.\n\n## Dedupe\n\nMCP `search_issues` objectui \"list date column mixes relative dates yesterday 3 days ago with absolute dates in the same column\" → 0 hits. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md)."
+}

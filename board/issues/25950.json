@@ -1,0 +1,32 @@
+{
+  "number": 25950,
+  "kind": "issue",
+  "title": "架构:把审批 UI 重建在标准 SDUI 渲染器上(ListView + RecordDetailView + ApiDataSource + 多态记录预览组件)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:ui",
+    "enhancement",
+    "priority:p3",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:25:23Z",
+  "updated_at": "2026-10-26T05:02:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25950",
+  "body": "Ruled: 6006187681 · letter 停放 · 2026-10-06T00:15Z\nRestart-when: closed objectstack-ai/objectstack#15193\nHold: 「2763 要等 v18再启动」 — the maintainer, live director chat, summon objectstack-ai/objectui#34; record 6006187681. The 2026-08-03 direction (5166015115) stands; at restart the `domain:ui` lane splits this card A2 → A1 / A3 → B1–B3, ⛔ never dispatched whole.\n\n## Problem\n\nThe Approval Center is **hand-rolled**: a bespoke inbox page (`/apps/setup/system/approvals`, wired from `HomePage.onOpenApprovals`) plus a bespoke decision drawer. It re-implements list/detail machinery (search, filter, sort, pagination, keyboard nav, bulk-select, status badges, responsive, the record layout) that the platform's own metadata-driven renderers already provide — and does several of them *worse*. Every polish defect in objectstack-ai/objectui#2762 (vertical status badge, flat action hierarchy, whitespace, the i18n split where bespoke buttons are localized but `DeclaredActionsBar` labels aren't) is a symptom of diverging from the standard renderers.\n\nFor a metadata-driven platform, the approval surface should **be metadata**, not a special-case page.\n\n**Relationship:** objectstack-ai/objectui#2762 is the polish/stopgap (fix the defects in place). **This issue is the root cure** (rebuild both surfaces on the standard renderers so those defects can't recur). Discovered while dogfooding v16.0 approvals; the surface is demonstrable via objectstack-ai/framework#3364 (part of the objectstack-ai/framework#3358 sweep).\n\n## Target architecture\n\nBoth standard renderers are already **page/view-metadata + data-source driven** and already accept an `ApiDataSource`:\n- `plugin-list/src/ListView.tsx` — list, api-backed.\n- `app-shell/src/views/RecordDetailView.tsx` — detail; takes a `dataSource` prop, renders an `effectivePage`, uses `dataSource.findOne(...)`, and has an `embedded` mode (renders inside a drawer).\n- `core/src/adapters/ApiDataSource.ts` + `resolveDataSource.ts` — the `provider:'api'` primitive.\n- `views/DeclaredActionsBar.tsx` — metadata-driven decision actions (already used).\n\nSo the entire approval UI can collapse to: **a `sys_approval_request` list view + a detail page**, backed by an **ApiDataSource** pointed at the approvals endpoints, plus **one reusable polymorphic record-preview component** (+ a progress widget). The bespoke inbox page and drawer get **deleted**.\n\n### Decision drawer → standard mechanisms\n\n| Drawer element | Standard SDUI mechanism | Status |\n|---|---|---|\n| Request's own fields | detail-page sections / field groups | exists |\n| Timeline (审批动态) | related list on `sys_approval_action` | exists |\n| Decision composer (comment + attachments) | declared action's `ActionParamDialog` (ADR-0059 file/richtext params; framework#3332 attachments param) | exists |\n| Action bar (approve/reject/reassign/…) | `DeclaredActionsBar` | already used |\n| Progress / `viewer` (0-of-N, `can_act`) | computed fields via `ApiDataSource` → `getRequest` | primitive exists, not wired |\n| Target-record card (invoice/expense fields) | **polymorphic reference-preview component** | **missing** |\n\n### Inbox list → standard mechanisms\nSame story: a standard `ListView` fed an `ApiDataSource` → `/approvals/requests` (`listRequests`), so **待我审批 / 我发起的 / 全部** become server-side scopes (not client filters), and it inherits badges/columns/i18n/light-mode/responsive/pagination/a11y/keyboard for free. The target-record columns use the same polymorphic component.\n\n## Scope — the two reusable primitives (shared by list + detail)\n\n- [ ] **A1 · ApiDataSource for approvals** — wire `ListView`/`RecordDetailView` to read from the approvals endpoints (`/approvals/requests`, `/approvals/requests/:id`) so `viewer` + `decision_progress` come down as fields. Needs a small **framework-side contract**: the approvals api data source shape (list + get returning the computed fields) — track in objectstack-ai/framework.\n- [ ] **A2 · Polymorphic record-preview component** — render a compact card for a `(object_name, record_id)` pair, resolving the target object + its display fields. Reusable well beyond approvals (audit rows, activity, comments all reference polymorphic targets).\n- [ ] **A3 · Progress/quorum widget** — a segmented indicator (unanimous / M-of-N / per-group 会签 ticks) bound to `decision_progress`. (Half a primitive; could be a component or a chart.)\n\n## Then compose as metadata\n- [ ] **B1 · `sys_approval_request` detail page** — sections (request fields), the polymorphic target-record card (A2), the progress widget (A3), a `sys_approval_action` related-list (timeline), and `DeclaredActionsBar`; data via A1.\n- [ ] **B2 · `sys_approval_request` list view** — columns incl. the polymorphic target-record + a key field (amount/urgency); scopes via A1; row + drawer actions via `DeclaredActionsBar`.\n- [ ] **B3 · Delete the bespoke** `审批中心` page + decision drawer once B1/B2 reach parity; keep `?request=` deep-link semantics.\n\n## Honest caveat\nRelease notes deliberately keep approve/reject in a **richer inline composer** (`exclude`d from the bar) so a reviewer can stage attachments while reading the timeline. Either prove `ActionParamDialog` can host that (comment + multi-file + inline context), or keep **one thin custom approve/reject action** — a component-level exception, not a hand-rolled page.\n\n## Why it's worth it\nApprovals stop being a special case: new decision capabilities already ship as backend metadata (`DeclaredActionsBar`), and after this the *whole* surface is metadata + 2 reusable components. A2 (polymorphic preview) and A1 (api-backed standard views) pay off across the console.\n\nRefs: objectstack-ai/objectui#2762 (polish), objectstack-ai/framework#3364, objectstack-ai/framework#3358.\n"
+}

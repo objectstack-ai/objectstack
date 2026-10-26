@@ -1,0 +1,33 @@
+{
+  "number": 25997,
+  "kind": "pull_request",
+  "title": "fix(app-shell): resolve inline locale-map view and page labels; a map view label no longer blanks the Console",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:25:59Z",
+  "updated_at": "2026-10-26T08:26:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25997",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9DkV74BzcJoE2chDHKmDXba)_\nFixes #25901\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\n`@objectstack/spec` types a list view's `label`, and a page's `label` / `description`, as `I18nLabel`: a string or an inline locale map. Two Console readers did not handle the map.\n\n1. **View labels (p1, measured).** `viewTabLabel` returned `view.label` untouched. On the served branch it was drawn as given. On the other branch it was handed to the bundle's `viewLabel` as the fallback, and the bundle returns the fallback unchanged on a miss. The server does not stop a map from reaching it: `translateObjectListViews` / `translateView` only overlay catalog text, so a map with no `_views.KEY.label` entry is served as authored. On a `/view/NAME` route the app header rendered that object as a React child and threw `Objects are not valid as a React child (found: object with keys {en, zh-CN})`. `AppHeader` is mounted by `ConsoleLayout`, outside the only route `ErrorBoundary` in `AppContent`, so the throw unmounted the whole Console. That held for a served view and for a client-derived one alike. Measurement posted on the card before any code: https://github.com/objectstack-ai/objectstack/issues/25901#issuecomment-6410211342 The same value also fed the object page's tab bar, the mobile view switcher and the record page's way back.\n2. **Interface list page (p2).** The heading and the record drawer's title read `typeof page.label === 'string' ? page.label : page.name`, so a map label showed the machine name. A map `description` was dropped.\n\n## The fix (producer side)\n\n- `viewTabLabel` (`ui/packages/app-shell/src/views/viewTabLabel.ts`) takes the viewer's `language` and resolves the label with `metadataText` before either branch. This is the app-shell helper objectstack-ai/objectui#13501 used. The served/derived split is unchanged: a served view's resolved text is drawn as given, and any other view's resolved text becomes `viewLabel`'s fallback, so a catalog entry still wins there. A map that resolves to no text counts as no `label` and is drawn as the object's plural label, like a label-less view.\n- Its five call sites pass `language` from `useObjectTranslation()`, the same channel the header's other `metadataText` titles use, so the header and the tab agree. Four are in `ObjectView.tsx`, in the view-tab regions only (mobile switcher, record way back twice, tab bar), plus the hook destructure. The fifth is the `AppHeader.tsx` view-route title.\n- `InterfaceListPage` resolves `page.label` and `page.description` with `metadataText`. The machine name is the heading, and `cfg.source || 'Record'` the drawer title, only when no label resolves.\n- `plugin-view`'s `ViewTabBar` is **not** changed. Its `ViewTabItem.label` is typed `string`, and the producer now honours that type.\n\n## Tests\n\n- `AppHeader.inlineViewLabel-25901.test.tsx`: a served map view and a derived map view, each in `en` and `zh-CN`, plus an empty map, with an empty bundle so no catalog entry can stand in for the map.\n- `viewTabLabel.inlineLabel-25901.test.ts`: the served branch never asks the bundle; the derived branch hands the bundle the resolved text; a catalog entry still wins; an empty or blank map gives the unlabelled text; string controls.\n- `InterfaceListPage.inlineLabel-25901.test.tsx`: the real `MetadataProvider` under a real `I18nProvider`. Map heading and description in `en` and `zh-CN`, an empty map falls back to the machine name, and a string control.\n- **Ablation** (fix committed first; `viewTabLabel.ts` and `InterfaceListPage.tsx` restored to base `0c372288`, with a trap restoring from `HEAD`): `12 failed | 4 passed (16)`. The 4 that stayed green are the controls (catalog wins, string control, empty-map machine-name fallback, string page). Restore was proven by an empty `git diff HEAD`.\n- Local: the three new files `16 passed (16)`. At head `615a9c05`, the 119 app-shell test files whose names match `ObjectView` / `AppHeader` / `InterfaceListPage` / `viewTabLabel` / `ServedView` / `servedLabels`: `Test Files 119 passed (119)`, `Tests 995 passed (995)`. **Declared narrowing:** the whole app-shell suite (1725 files) did not finish in 40 minutes under the shared verify lock and was stopped, so it is left to CI (`Test Core`).\n- `pnpm --filter @object-ui/app-shell type-check` (both `tsc` projects) exit 0.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 families at `615a9c05`. All 34 ran locally with exit 0. `--ran` reconciliation: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero, with every exit code recorded). Everything else is CI's.\n\n## Acceptance notes\n\n- `ObjectView`'s delete-view confirmation interpolates `targetView?.label || vid` into its prompt. A map label there would read `[object Object]`. It is reachable only for saved (`sys_view`-backed) views, whose labels come from the Console's own add and rename inputs as strings. This is outside the view-tab regions and was left alone. Carrier: none.\n- `AppHeader` sits outside every error boundary, so any render throw in the header blanks the whole Console, not just the route. This PR removes the trigger that was measured. The boundary placement itself is unchanged. Noted, not filed. Carrier: none.\n- Scope of the measurement: the header crash was rendered (harness above). The tab-bar, mobile-switcher and record way-back surfaces were read from the code, not rendered, and share the fixed producer.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WVwANq56oyBZtcDWbWGfva)_\n"
+}

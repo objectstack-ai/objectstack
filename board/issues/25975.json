@@ -1,0 +1,36 @@
+{
+  "number": 25975,
+  "kind": "pull_request",
+  "title": "docs(spec): describe the shared-chunk bundle layout in three source comments",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T07:25:24Z",
+  "updated_at": "2026-10-26T08:35:42Z",
+  "closed_at": "2026-10-26T08:35:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T08:35:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25975",
+  "body": "Fixes #25811\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThree source comments in `@objectstack/spec` still described the per-entry, self-contained bundle layout that the one-module-graph build replaced. They now describe the shared-chunk layout stated in `packages/spec/README.md` (Export surfaces) and the `oneModuleGraph` docblock in `packages/spec/tsup.config.ts`: a module two entries reach ships once, in a shared chunk, and an entry links every chunk its own module graph touches.\n\n- `packages/spec/src/index.ts`: the standing-principle paragraph no longer says \"self-contained bundle\"; it keeps the cost rule and dates the +60.1 KB `/shared` measurement to the former per-entry bundles.\n- `packages/spec/src/conversions/registry.ts`: only the `@__PURE__` note (the sentence that cited `splitting: false`). The PURE-annotation reasoning is unchanged and still holds per chunk.\n- `packages/spec/src/api/package-api-assembled.zod.ts`: the module TSDoc.\n- `content/docs/references/api/package-api-assembled.mdx`: regenerated with the spec package's `gen:docs` script, never hand-edited; the diff is the same sentence, two lines.\n\nLanding point matches the claimed file surface exactly; the real producer of all four lines was in those files (measured on origin/main, `grep` for the three stale phrases found them only there).\n\n## Not changed\n\nNo code, key, export or behaviour. Hunks elsewhere in `registry.ts` belong to other in-flight cards and were not touched.\n\n## Changeset rule\n\nA changeset is included (`patch`, `@objectstack/spec`). The os-dev fast lane lists comments as not publishing, but the measured criterion is what `files[]` ships: after a build, the new sentences are present in `packages/spec/dist/index.d.ts` and `dist/api-assembled/index.d.ts` (TSDoc rides in the declaration files), so the published content moved and `skip-changeset` does not apply.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build` exit 0, then `gen:docs` exit 0: 229 files generated, exactly one tracked file changed.\n- Local gate list from `dispatch-gates.mjs --commands` (108 families): 105 run, all exit 0. Three are NOT MEASURED, reason: `check:dual-build-cjs-loads` and `check:lean-entry-closure` exit 3 (PREREQUISITE NOT MET, they read built dist of packages this card does not touch), `check-plugin-teardown-shape --self-test` needs an unshallowed clone. CI runs the full farm.\n\n## Acceptance notes\n\nThe branch is `claude/project-thread-mybepv`, a platform-assigned branch (this session can push only that one), not the usual issue-named branch.\n"
+}

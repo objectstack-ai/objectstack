@@ -1,0 +1,36 @@
+{
+  "number": 25881,
+  "kind": "pull_request",
+  "title": "ci(ui-merge): queue builds decide the four ui lanes from the merged diff against merge_group.base_sha",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T02:36:55Z",
+  "updated_at": "2026-10-26T03:28:30Z",
+  "closed_at": "2026-10-26T03:27:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T03:27:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25881",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoMenwthdt1JYWvY79ZDjVL8)_\n\nFixes #25867\nPart of #25677 (post-cutover CI speed, item 1).\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\n`ci.yml` `filter` job, nothing else in the workflow:\n\n- The `dorny/paths-filter` step's allow-list gains `merge_group`. At the pinned v4.0.3 (`ceb8a2b8`) the action resolves that event itself: `src/main.ts` takes `merge_group.base_sha` / `merge_group.head_sha` from the payload when `base` / `ref` are unset, and `src/git.ts` fetches the base sha at depth 1 and diffs the two trees (`base..head`). So the queue build reads the same filter block, with the same globs, as the `pull_request` run. There is no second copy of the globs to keep in step.\n- On `merge_group` the step is `continue-on-error`, so a base that cannot be fetched leaves the outputs empty, `|| 'true'` fills them in and every ui lane runs (fail-open). On `pull_request` / `push` a failure stays red, as before.\n- `docs`, `core` and `crosspkg` ignore the step on `merge_group`: they are spelled `github.event_name != 'merge_group' && steps.changes.outputs.X || 'true'`, so Build Core, Build Docs and Test Core keep running on every queue entry exactly as today. Only `ui` and `ui_consumers` read the queue diff.\n- `schedule` / `workflow_dispatch` still skip the step and widen everything to `'true'` (full battery, ruling Q6-b). `push` is unchanged.\n\nThe four ui lanes' `if:` lines are untouched.\n\n`scripts/pm/check-expected-skips.mjs`: the header and the four ui roster reasons now say that a queue build skips the ui lanes when the merged diff touches no ui path, rather than \"every output widens to 'true' on merge_group\". `scripts/pm/dispatch-gates.self-test.mjs`: the marker-census row for that file moves 133 to 137 (the header grew four lines).\n\nResulting outputs per event (step value, then output):\n\n| event | step `ui` | `ui` | step `core` | `core` |\n|---|---|---|---|---|\n| pull_request / push | from the diff | as the step said | from the diff | as the step said |\n| merge_group | from base_sha..head_sha | as the step said | ignored | `'true'` |\n| merge_group, step failed | empty | `'true'` | ignored | `'true'` |\n| schedule / workflow_dispatch | step skipped | `'true'` | step skipped | `'true'` |\n\n## Verification\n\nReplayed the pinned action's `dist/index.js` locally with a synthetic `merge_group` event payload (`GITHUB_EVENT_NAME=merge_group`, `base_sha` / `head_sha` set, `INPUT_FILTERS` = the filter block read out of this branch's `ci.yml`):\n\n| entry | base..head | `ui` | `ui_consumers` | ui lanes |\n|---|---|---|---|---|\n| `.claude/` + `scripts/` only (abebc4e1) | 17f8217b..abebc4e1 | false | false | all four skip |\n| spec + lint (b00fc55c) | abebc4e1..b00fc55c | false | true | Type Check UI and Build & E2E UI run; Test UI and Lint UI skip |\n| `ui/` scripts (12105449) | 3fca5996..12105449 | true | false | all four run |\n| three-commit group, ui + scripts | 3fca5996..c475b45b | true | false | all four run |\n| depth-1 checkout, base absent locally | 12105449..5aa9fcb3 | true | false | the action fetched the base by sha at depth 1, then diffed |\n| unfetchable base | 000…001..c475b45b | (none) | (none) | action exits 1 with no outputs; with continue-on-error the `'true'` fallback runs all four |\n\nThis PR's own queue entry changes `ci.yml`, which is in the `ui` filter, so it runs all four ui lanes. The first non-ui entry after it lands is the live evidence the card asks for (four ui lanes `skipped`, `Lint UI` and `Build & E2E UI` reported as skipped, which a required check accepts). It will be posted on #25867.\n\nLocal gates at head `be2cff5e`: `node scripts/pm/dispatch-gates.mjs --commands` derives 67 commands; all 67 exit 0, and `--ran` reconciles 67 derived, 67 run, 0 NOT-MEASURED (a derived zero: every row carries its exit code). That includes `check:pm-dispatch-gates` (fast tier, 1917 cases) and the four `dist/`-reading Build Core guards, which ran after that battery's build. The gates the card names: `check-ci-filter-parity` (scan and `--self-test`), `check:pm-expected-skips`, `check-step-collectors` (scan and `--self-test`) all exit 0. The only failure on the way was the `dispatch-gates` marker census pinning `check-expected-skips.mjs:133`, fixed in the second commit.\n\n## Acceptance notes\n\n- Route differs from the card's wording: the card says `git diff --name-only` with the same globs. Running the action itself on the event gives the same globs by construction and keeps `check-ci-filter-parity`'s one-step rule intact.\n- `docs` / `core` / `crosspkg` could read the queue diff the same way (Build Core and Build Docs would then skip on queue entries outside their paths). Not done here: the card scopes the ui outputs only, and the filter comment's \"the queue build is the last validation before main\" reasoning still governs those jobs. Carrier: none.\n\n## 维护者速读(草稿)\n\n**改了什么:** 合并队列里，ui 的四个作业(Test UI、Type Check UI、Build & E2E UI、Lint UI)改成按\"这批改动相对队列基点到底动没动 ui\"来决定跑不跑。判定用的是 PR 上同一套路径规则。core、docs 那几个作业在队列里照旧全跑。\n\n**为什么改:** 合并 ui 之后，每个排队条目都会把四个 ui 作业跑一遍，哪怕只改了文档或脚本。小条目从 4–10 分钟变成 16–18 分钟，每条多花约 220 runner-min。\n\n**风险与代价(含回滚):** 判定失败(比如取不到基点)时按\"全跑\"处理，不会因此漏跑。动了 ui 或那七个被 ui 使用的包，队列里照样会跑 ui 作业。回滚只需 revert 这一个 PR。\n\n**席位意见:**\n\n**你要做的:** 这个 PR 改了 `.github/workflows/ci.yml`，属于 Tier H，需要你批准后由席位落地。落地后第一个非 ui 条目进队时，席位会在 #25867 贴出前后耗时对比。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Suqt7vsGh5kE2NhDZyqeh6)_\n"
+}

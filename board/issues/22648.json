@@ -2,8 +2,8 @@
   "number": 22648,
   "kind": "issue",
   "title": "[PM seat] domain:cli · seat 2 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T08:42:27Z",
-  "updated_at": "2026-10-24T08:38:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T06:05:57Z",
+  "closed_at": "2026-10-26T06:05:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 85,
+  "comments": 86,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22648",
   "body": "**Sole authority for the `domain:cli` seat 2.** Single writer: only the sitting PM edits the body. Read side: **body + comments newer than the body's last edit**. Seat 1 is #6024; the two seats share one lane and one hot-file queue.\n\n<sub>Body refreshed 2026-10-22T11:54Z · ⛔ not a claim.</sub>\n\n## 1. 当前 PM\n\n**⏳ vacant.** The last holder, `os-bill` · session `session_01AFrKwndmrCLtF5V9hNtrw3`, sat from 2026-10-21T22:16Z (takeover of `os-justin` · `session_01LmjU2x1faLZ39DVTFyVca6`, out of tokens) and signed off at this refresh on the maintainer's order, verbatim 「当前任务处理完，合并后就下班」. Its sign-off brief is the comment posted right after this refresh. Its standing terms (`batch` 3, every priority) were said to that session only and do not carry. The seat Routine `trig_01XoJ6kEUMj1XxXXsPV2Udvb` is deleted. Next holder: `/pm-dispatch cli seat 2`, read this post first.\n\n## 2. 接任台账\n\n**Landed last shift** (merge queue, landing comment, `pm:dispatched` removed):\n\n| Card | PR | Merge commit |\n|:--|:--|:--|\n| #25119 (p2) + #25113 (p3, folded) | PR #25143 | `c71d03a5a` |\n| objectstack-ai/objectui#13315 (p1) | objectstack-ai/objectui#13316 | objectui `56cf4d8e89` |\n| #25151 (p1, `.objectui-sha` bump) | PR #25160 | `06900c9c2` |\n| #24916 (p3) | PR #25157 | `2a2f5c200` |\n| #24993 (p3) | PR #25171 | `68a57ad99` |\n| #25078 (p1, `security`) | PR #25130 | `c4b49c31c` |\n| #25165 (p2, `security`) | PR #25173 | `b6e870707` |\n| #25120 (p1, `mcp`) | PR #25136 | `a1e51d644` |\n| #25174 (p2, `security`) | PR #25197 | `d0c56a21c` |\n| #25175, the `os init -t plugin` half only | PR #25196 (`Part of`) | `9c431bad3` |\n\n**In flight:** none. **Released to the queue:** #25175 (the `os create plugin` half; `Release:` comment on the card names the remainder, the three docs pages its surface needs, and the dev's measured options S1–S4, S2 recommended).\n\n**Lane queue at sign-off** (REST `issues?state=open&labels=domain:cli`):\n- **p1:** #25138 (MCP stdio half of #25120; pointer `6328231985`: refuse a disabled package's object, do not copy the old reading). Then #25139 (p2, `list_actions` / `run_action`), serial after it (same seam).\n- **p2:** #25175 (remainder, above), #25158, #24768 (waits on triage's route), #24586 (`[Decision]` card).\n- **p3:** #25123 (serial after #25175, same file `init.ts`), #25195, #23181 (`tooling`, waits on PR #24467).\n- **`pm:epic`:** #25206. **`pm:blocked`:** #24638. **Off the queue:** #20791, #20470, #9559.\n\n**With the maintainer (not filed as decision cards; put in the final report):**\n- #25174's remainder: non-scaffold npm consumers of `@objectstack/rest` still audit GHSA-w5hq-g745-h8pq until they add the override the changeset documents; only replacing `exceljs` reaches them (a maintained fork measured working). The dev recommends waiting for upstream.\n- `packages/cloud-connection`'s `POST /install` and three read routes take any signed-in session (pre-existing `TODO`, review `6329791200`); no public-door reading; not filed.\n\n**Owed elsewhere (each for the next touch of its file):**\n- PR #25136's review `6329661857`: spell `refuseUnexposedDataAction`'s default `'refuse'` with `domains/data.ts`'s three early asks opting out; a one-shot warn on the no-copy outage fallback; an `isSystem` principal still bypasses the exposure gate (pre-existing).\n- PR #25171: `@objectstack/lint`'s `contributedNavItemsByApp` is module-private; `i18n-extract.ts` carries a parity-pinned copy to drop once it is exported.\n- PR #25197: the `vitest` stamp-row comment in `scripts/sync-scaffold-emission-policy.mjs` still says `~4.0.0`; `pnpm-workspace.yaml` labels GHSA-w5hq-g745-h8pq high where the npm record says moderate.\n- PR #25130's review `6333696207`: a loose comment near `packages/rest/src/data-action-routes.ts:1104`.\n- objectstack-ai/objectui#13317: a scheduled-run flake on `SettingsView.leaveGuard-13163.test.tsx`, filed for objectui triage.\n\n## 3. 热文件串行队\n\n- **This seat's holds:** none (all released at landing).\n- **Serial order to keep:** #25138 → #25139 (MCP seam, `packages/mcp` / `action-execution.ts`); #25175 → #25123 (`packages/cli/src/commands/init.ts`).\n- **Other lanes' declarations into this lane** (no objection given; whichever lands second merges `main`): `domain:services` seat 2, #24914 / PR #25147 (`6327941244`, `6329705008`), #24895 / PR #25178 (`6331427821`, `6334455088`), #24837 / PR #25167 (`6332535245`).\n- **`scripts/check-cli-test-child-env.mjs`'s built-entrypoint population** (carried): two in-flight PRs that add a `bin/run.js` spawner land serially.\n\n## 4. 说明\n\n- **Seat 1** (#6024) is `⏳ vacant`; the lane has no seated executor.\n- **Lessons recorded for the next holder:** a PR body missing the line-initial `Metadata-protocol:` line reds `Check Changeset`'s major-bump guard (fixed by a body edit, no push); scratch npm installs filled the shared disk twice (dispatch a disk-discipline clause); a GitHub check-run can stay `in_progress` after its job's steps all succeeded (PR #25136, a lost completion).\n- **Earlier ledger:** the previous holder's body revision of 2026-10-21T19:43Z holds its own carry-overs, each named with its card or file.\n- **`main`:** `e5f194ba1` at sign-off.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
