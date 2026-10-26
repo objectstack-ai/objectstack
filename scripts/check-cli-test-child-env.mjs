@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the sixteen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the seventeen files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
@@ -2662,6 +2662,13 @@ export function selfTest() {
         // `NODE_ENV=development` before argv is parsed. Every spawn hands its
         // child `NODE_ENV: undefined`.
         'packages/cli/test/serve-datasource-mapping-before-sync.integration.test.ts',
+        // [#26242] Joined the population deliberately, beside
+        // `dev-connector-env-parity`: its subject is a direct `os serve --dev`
+        // that compiles before its artifact door serves, and the compile child
+        // must see the launch environment a real boot has, while
+        // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed.
+        // Every spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/serve-dev-connector-env-parity.integration.test.ts',
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
         // [#24191] Joined the population deliberately: its subject is `os serve`

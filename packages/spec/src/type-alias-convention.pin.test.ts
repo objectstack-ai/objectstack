@@ -280,7 +280,7 @@ import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
 import type * as M192 from './data/column-apply-on.zod.js';
 
 // ---------------------------------------------------------------------------
-// 790 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 791 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -879,6 +879,7 @@ export type Iso_data_field__LocationCoordinatesSchema = Assert<Eq< z.input< type
 // data/filter.zod.ts
 export type Iso_data_filter__FieldOperatorsSchema = Assert<Eq< z.input< typeof M67.FieldOperatorsSchema >, z.infer< typeof M67.FieldOperatorsSchema > >>;
 export type Iso_data_filter__FieldReferenceSchema = Assert<Eq< z.input< typeof M67.FieldReferenceSchema >, z.infer< typeof M67.FieldReferenceSchema > >>;
+export type Iso_data_filter__NowAnchorSchema = Assert<Eq< z.input< typeof M67.NowAnchorSchema >, z.infer< typeof M67.NowAnchorSchema > >>;
 export type Iso_data_filter__QueryFilterSchema = Assert<Eq< z.input< typeof M67.QueryFilterSchema >, z.infer< typeof M67.QueryFilterSchema > >>;
 
 // data/hook-body.zod.ts
@@ -1713,7 +1714,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 790 isomorphic pins', () => {
+  it('still declares all 791 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2604,13 +2605,19 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso_ui_dataset__DatasetDurationUnit) rather than given `…Parsed`
     // synonyms. +2 added.
     //
-    // 789 -> 790 is #25785: `ServedTranslationDataSchema`
+    // 789 -> 790 is #25808: `NowAnchorSchema` (`data/filter.zod.ts`), the
+    // `{ $now: true, addDays }` now-anchored comparand — a literal flag and
+    // the `addDays` union `FieldReferenceSchema` already carries, no default
+    // and no transform — so it is pinned here (Iso_data_filter__NowAnchorSchema)
+    // rather than given a `…Parsed` synonym. +1 added.
+    //
+    // 790 -> 791 is #25785: `ServedTranslationDataSchema`
     // (`system/translation.zod.ts`, module slot M152), the served face of the
     // translation document — the platform face less the server-resolved
     // `metadataForms` group, so it gains no default or transform and is pinned
     // here (Iso_system_translation__ServedTranslationDataSchema) beside its
     // platform sibling rather than given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(790);
+    expect(pins).toHaveLength(791);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

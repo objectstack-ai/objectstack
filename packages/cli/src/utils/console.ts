@@ -826,8 +826,10 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   when the operator names one in `OS_CONSOLE_MAP_STYLE_URL` (the URL
  *   `GET /api/v1/runtime/config` serves as `mapStyleUrl`), the
  *   error-reporting endpoint when the runtime serves a DSN
- *   (`telemetry.errorReporting.dsn` from the same door), and the hosts an
- *   operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
+ *   (`telemetry.errorReporting.dsn` from the same door), the store the
+ *   deployment's storage presigns browser uploads to (S3 and S3-compatible
+ *   stores; `readStorageUploadOrigin`), and the hosts an operator names in
+ *   `OS_CONSOLE_CSP_CONNECT_SRC`.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
  *   maplibre starts from its own file, the PWA manifest, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
@@ -842,6 +844,7 @@ function consoleContentSecurityPolicy(input: {
   reactPages: boolean;
   errorReportingOrigin: string | undefined;
   mapStyleOrigin: string | undefined;
+  storageUploadOrigin: string | undefined;
   extraConnectSources: readonly string[];
   embeddable: boolean;
 }): string {
@@ -850,6 +853,7 @@ function consoleContentSecurityPolicy(input: {
   const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
   if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
+  if (input.storageUploadOrigin !== undefined) connectSrc.push(input.storageUploadOrigin);
   connectSrc.push(...input.extraConnectSources);
   const directives: string[][] = [
     ['default-src', "'self'"],
@@ -1030,6 +1034,21 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         );
       };
 
+      // A storage service that cannot say where its presigned uploads go leaves
+      // the store out of the policy, so browser uploads to it are refused while
+      // every other part of the page works: said once, at `warn`.
+      let reportedStorageUploadOriginFailure = false;
+      const reportStorageUploadOriginFailure = (cause: string) => {
+        if (reportedStorageUploadOriginFailure) return;
+        reportedStorageUploadOriginFailure = true;
+        ctx.logger?.warn?.(
+          `Console static: the storage service could not name the host it presigns uploads to (${cause}), so the `
+          + "console document's content-security-policy does not allow it and browser file uploads to that store "
+          + `are blocked. Check the storage settings, or name the store's origin in ${CONSOLE_CSP_CONNECT_SRC_ENV}. `
+          + 'Reported once; every later console document reads it again.',
+        );
+      };
+
       const readIndexHtml = (reactPages: boolean, nonce: string): string => {
         const raw = fs.readFileSync(indexPath, 'utf-8');
         // Inject <base href="${CONSOLE_PATH}/"> so:
@@ -1068,6 +1087,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           reactPages,
           errorReportingOrigin: shell?.errorReportingOrigin,
           mapStyleOrigin,
+          storageUploadOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),
           extraConnectSources,
           embeddable: reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`),
         });
@@ -1496,6 +1516,53 @@ async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<
     // The body is never read; a stream that cannot be cancelled changes nothing.
   }
   return res.status === 200;
+}
+
+/**
+ * The origin the kernel's `storage` service presigns browser uploads to, for
+ * the console document's `connect-src`; `undefined` when there is none.
+ *
+ * With S3 or an S3-compatible store (R2, MinIO) the Console uploads a file by
+ * `PUT`ting it straight to the URL `POST /api/v1/storage/upload/presigned`
+ * answers, on the store's host. The service names that host itself
+ * (`getPresignedUploadOrigin` on `@objectstack/service-storage`'s
+ * `SwappableStorageService`, which asks the active adapter's presigner), so
+ * the policy allows exactly the origin the upload URL carries, and the rule
+ * for building it lives in one place. The service is read off the kernel by
+ * name, not imported, because this module imports Node built-ins only
+ * (`test/published-subpath-console.pin.test.ts`).
+ *
+ * Read per document, as the shell config is: a storage settings change swaps
+ * the adapter without a restart, and the next document follows it. A
+ * deployment without the service, or whose adapter answers no origin (the
+ * local adapter's uploads go to this server, which `'self'` covers), adds
+ * nothing. An answer that is not a `connect-src` source, or a failure to
+ * answer, adds nothing either and is reported through `onFailure`.
+ */
+async function readStorageUploadOrigin(
+  ctx: any,
+  onFailure: (cause: string) => void,
+): Promise<string | undefined> {
+  let storage: { getPresignedUploadOrigin?: () => Promise<unknown> } | undefined;
+  try {
+    storage = ctx.getService?.('storage');
+  } catch {
+    return undefined;
+  }
+  if (typeof storage?.getPresignedUploadOrigin !== 'function') return undefined;
+  let origin: unknown;
+  try {
+    origin = await storage.getPresignedUploadOrigin();
+  } catch (e: any) {
+    onFailure(e?.message ?? String(e));
+    return undefined;
+  }
+  if (origin === undefined) return undefined;
+  if (typeof origin !== 'string' || !CONNECT_SOURCE.test(origin)) {
+    onFailure(`it answered ${JSON.stringify(origin)}, which is not a connect-src source`);
+    return undefined;
+  }
+  return origin;
 }
 
 /** What the console document is written from, read from {@link RUNTIME_CONFIG_DOOR}. */

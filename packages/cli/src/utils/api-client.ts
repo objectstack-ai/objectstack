@@ -222,7 +222,7 @@ export function requireAuth(token?: string): void {
 export function requireControlPlaneAuth(token?: string): void {
   if (!token) {
     throw new Error(
-      'Authentication required. Run `os cloud login` for ObjectStack Cloud or `os login` for a '
+      'Authentication required. Run `os cloud login` for ObjectOS Cloud or `os login` for a '
         + 'self-hosted control plane, or set OS_TOKEN.'
     );
   }

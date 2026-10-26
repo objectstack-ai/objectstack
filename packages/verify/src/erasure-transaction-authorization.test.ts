@@ -63,7 +63,6 @@ interface Answer { status: number; code?: string; ms: number; body: string }
 
 describe('#10792 — the erasure route answers authorization on a pool max=1 dialect', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let priorScim: string | undefined;
   let admittedAdminToken = '';

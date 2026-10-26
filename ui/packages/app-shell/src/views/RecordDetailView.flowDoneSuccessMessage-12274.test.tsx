@@ -223,7 +223,7 @@ describe('objectui#12274 — a straight-through record-page launch closes by the
       success: true, status: 'refused', refusalMessage: 'Refused: already escalated', successMessage: FLOW_MESSAGE,
     });
 
-    expect(result).toEqual({ success: true, silent: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true });
     expect(await screen.findByText('Refused: already escalated')).toBeTruthy();
     expect((toast as any).success).not.toHaveBeenCalled();
   });

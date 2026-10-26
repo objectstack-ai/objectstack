@@ -208,7 +208,6 @@ describe.each(DRIVERS)('dogfood: analytics counts a $contains policy on a multi-
   it('premise: the policy admits only the row holding the member through the data door, and the other rows exist', async () => {
     expect(await namesFor(memberToken, 'mbr_tagged')).toEqual(['t1']);
     // Ground truth under a system context: every row was stored.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const all = (await ql.find('mbr_tagged', { context: { isSystem: true } })) as Array<{ name: string }>;
     expect(all.map((r) => r.name).sort()).toEqual(['t1', 't2', 't3', 't4']);

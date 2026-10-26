@@ -23,6 +23,9 @@
  *    verification mail's link so it survives the inbox (objectui#10893).
  *  - Replays an `/oauth2/authorize` query string when the user landed
  *    here mid-SSO so the IdP can continue the flow post-signup.
+ *  - Draws `/login`'s footer under the form — the locale switch and the
+ *    privacy / terms links the server's auth config serves, from the same
+ *    reader (#25885): sign-up is where a visitor accepts the terms.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -44,6 +47,7 @@ import { followOauthAuthorize } from './followAuthorize';
 // implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
 import { ServerUnreachable } from './LoginPage';
+import { AuthFooter, readLegalLinks } from './AuthFooter';
 
 function isSafeRedirect(target: string | null): target is string {
   return !!target && target.startsWith('/') && !target.startsWith('//');
@@ -215,6 +219,7 @@ export function RegisterPage() {
   }
 
   const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  const legalLinks = readLegalLinks(authConfig);
   // objectui#10893 — when the server gates sign-in on email verification, the
   // mail's link is the only road back, so it must carry `?redirect=` (e.g. the
   // invitation the user registered from). Only a safe in-app target is
@@ -318,6 +323,7 @@ export function RegisterPage() {
         }}
       />
       </Card>
+      <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
     </AuthLayout>
   );
 }

@@ -47,8 +47,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { readEnvWithDeprecation } from '@objectstack/types';
-import { parseRequestedPort } from '../utils/port-contract.js';
-import { childPortEnv } from './start.js';
+import { parseRequestedPort, portFlagEnv } from '../utils/port-contract.js';
 
 /** The operator's own value, inherited by `start` and passed down. */
 const OPERATOR_OS_PORT = '41077';
@@ -68,7 +67,7 @@ afterEach(() => {
  * about: an inherited environment, plus whatever the port channel contributes.
  */
 function composeChildEnv(flagPort: number | undefined, inherited: Record<string, string> = {}) {
-  return { ...inherited, ...childPortEnv(flagPort) };
+  return { ...inherited, ...portFlagEnv(flagPort) };
 }
 
 /**
@@ -92,7 +91,7 @@ describe('`os start` forwards --port on the channel its child reads first', () =
   });
 
   it('states the one value on the canonical name AND its legacy alias', () => {
-    const env = childPortEnv(FLAG_PORT);
+    const env = portFlagEnv(FLAG_PORT);
 
     // Exact values, never containment — see the instrument note in the header.
     expect(env.OS_PORT).toBe(String(FLAG_PORT));
@@ -134,8 +133,8 @@ describe('`os start` forwards --port on the channel its child reads first', () =
     // ⭐ POSITIVE CONTROL first: the same probe, on the same helper, DOES see
     // the keys when a flag is given. Without this line the assertion below
     // would pass just as happily against a probe that can never see anything.
-    expect(hasPortKey(childPortEnv(FLAG_PORT))).toBe(true);
-    expect(hasPortKey(childPortEnv(undefined))).toBe(false);
+    expect(hasPortKey(portFlagEnv(FLAG_PORT))).toBe(true);
+    expect(hasPortKey(portFlagEnv(undefined))).toBe(false);
 
     // …so an operator's own environment reaches the child untouched, under its
     // own names, which is what `start`'s refusal door one process earlier

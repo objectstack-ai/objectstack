@@ -57,6 +57,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { createMemoryI18n } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
+import { summaryAsRead } from './__tests__/summary-as-read.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -343,6 +344,17 @@ const lastSummary = (storeFor: (o: string) => Map<string, Record<string, unknown
   return all.length > 0 ? String(all[all.length - 1].summary) : undefined;
 };
 
+/** [#26167] The last summary as a reader in `locale` is served it (`summary-as-read.ts`). */
+const lastSummaryAsRead = (
+  storeFor: (o: string) => Map<string, Record<string, unknown>>,
+  i18n: unknown,
+  locale: string,
+  engine: unknown,
+) => {
+  const all = Array.from(storeFor('sys_activity').values());
+  return summaryAsRead(all[all.length - 1], i18n, locale, engine as any);
+};
+
 const lastType = (storeFor: (o: string) => Map<string, Record<string, unknown>>) => {
   const all = Array.from(storeFor('sys_activity').values());
   return all.length > 0 ? String(all[all.length - 1].type) : undefined;
@@ -534,7 +546,8 @@ describe('[#7290] precedence and locale behaviour are unchanged', () => {
   });
 
   it('a milestone template is the author’s sentence and is NOT translated', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const i18n = makeI18n();
+    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n });
     await seed(engine);
 
     await moveStage(engine, 'deal_2', 'closed_won');
@@ -543,18 +556,23 @@ describe('[#7290] precedence and locale behaviour are unchanged', () => {
     // and it must NOT leak into the milestone sentence: milestone summaries have
     // never been localized, and this card does not change what a template says.
     expect(lastSummary(storeFor)).toBe('Deal won by 张伟');
+    // [#26167] Nor for a zh-CN READER: a milestone row stores no summary code.
+    expect(lastSummaryAsRead(storeFor, i18n, 'zh-CN', engine)).toBe('Deal won by 张伟');
   });
 
   it('the generic verb branch still localizes around it (the bundle really is live)', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const i18n = makeI18n();
+    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n });
     await seed(engine);
 
     // A write that fires no milestone and moves no tracked field falls through
-    // to `messages.activityUpdated`. If this stayed English the bundle above
-    // would be inert and the previous case would prove nothing.
+    // to the generic update summary. If a zh-CN reader were served English the
+    // bundle above would be inert and the previous case would prove nothing.
+    // [#26167] This bundle has only the field-less `messages.activityUpdated`,
+    // so the reader is served that frame.
     await engine.update('biz_deal', { priority: 'p2' }, { where: { id: 'deal_2' } } as any);
 
-    expect(lastSummary(storeFor)).toBe('已更新商机"Already linked"');
+    expect(lastSummaryAsRead(storeFor, i18n, 'zh-CN', engine)).toBe('已更新商机"Already linked"');
   });
 });
 
