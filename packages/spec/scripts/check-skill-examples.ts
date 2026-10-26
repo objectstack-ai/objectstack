@@ -415,7 +415,18 @@ const DOCS_DIR = path.resolve(REPO_ROOT, 'content/docs');
 const SDK_DOCS_PAGES = ['api/client-sdk.mdx', 'kernel/runtime-services/data-service.mdx'];
 
 const SKILLS_DOCS_ROOTS: SourceRoot[] = [
-  { dir: path.resolve(REPO_ROOT, 'skills'), ext: '.md', label: 'skills', marker: '<!-- os:check -->' },
+  {
+    dir: path.resolve(REPO_ROOT, 'skills'),
+    ext: '.md',
+    label: 'skills',
+    marker: '<!-- os:check -->',
+    // The objectui bundle joined this catalog at the cutover (objectstack#25803)
+    // with its own reading of the same marker: it marks `json` fences as well as
+    // `ts`/`tsx`, and compiles them against `@object-ui/*`. Its gate is
+    // `ui/scripts/check-skill-examples.mjs`, which still judges every marked fence
+    // in it; read here, its 70 `json` markers are orphans by this gate's rule.
+    exclude: [path.resolve(REPO_ROOT, 'skills/objectui')],
+  },
   {
     dir: DOCS_DIR,
     ext: '.mdx',

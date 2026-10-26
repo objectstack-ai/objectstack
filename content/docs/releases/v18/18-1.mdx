@@ -83,13 +83,15 @@ Read with `npm view` and `npm pack` on 2026-10-24, after the publish:
 
 Read the 18.1.0 CHANGELOGs with two cautions:
 
-- **The commit beside an entry is mostly not its own.** 260 of the 265 entries
-  open with `3937697`, the commit of #25605 that reverted the first cut and
-  re-added every pending changeset; only the five changesets merged after it
-  carry their own commit. The same is true in the published tarballs: all 34
-  entries of `@objectstack/cli@18.1.0`'s `## 18.1.0` section read `3937697`.
-  To find the change behind an entry, search its headline in the repository's
-  history; this page cites each entry's own commit.
+- **In the published tarballs, the commit beside an entry is mostly not its
+  own.** 260 of the 265 entries open with `3937697`, the commit of #25605 that
+  reverted the first cut and re-added every pending changeset; only the five
+  changesets merged after it carry their own commit. All 34 entries of
+  `@objectstack/cli@18.1.0`'s `## 18.1.0` section read `3937697`. Published
+  tarballs are never republished, so they keep it. The CHANGELOGs in the
+  repository name each entry's own commit since #25804; read those, or search
+  an entry's headline in the repository's history. This page cites each
+  entry's own commit.
 - **A pinned `@objectstack/cli` still ranges.** The published CLI declares
   eight of its `@objectstack/*` dependencies as caret ranges: `core`,
   `driver-memory`, `driver-mongodb`, `driver-sql`, `driver-sqlite-wasm`,

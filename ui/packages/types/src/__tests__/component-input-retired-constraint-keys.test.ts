@@ -228,10 +228,12 @@ describe('the zod tombstones REFUSE, loudly (objectui#5905)', () => {
 /* ── the contrast a deletion would have produced ─────────────────────────── */
 
 describe('a tombstone is not a deletion — the contrast, measured in one run', () => {
-  it('an UNDECLARED key is silently stripped, which is what deleting these four would have bought', () => {
+  it('an UNDECLARED key is silently accepted, which is what deleting these four would have bought', () => {
+    // Stripped while the mirror was strip mode; kept since objectstack#25923
+    // (`.passthrough()`). Either way it is not refused — the contrast stands.
     const result = ComponentInputSchema.safeParse({ ...LIVE_INPUT, notAKeyAtAll: 'anything' });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data).not.toHaveProperty('notAKeyAtAll');
+    if (result.success) expect(result.data).toHaveProperty('notAKeyAtAll', 'anything');
   });
 
   it('the five stay in the mirror\'s shape — a tombstone is DECLARED, just unwritable', () => {

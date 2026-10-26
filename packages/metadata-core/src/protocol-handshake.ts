@@ -735,11 +735,6 @@ export interface DeclaredDependencyCheck {
    * single-package door; every package of an artifact for an artifact door.
    */
   delivered: readonly DependencyDeclaringManifest[];
-  /**
-   * Further ids the same act delivers without being judged itself (an
-   * artifact's own identity). Every `delivered` id counts already.
-   */
-  deliveredIds?: readonly string[];
   /** The installed package record for an id (`SchemaRegistry.getPackage`), or `undefined`. */
   getInstalled: (id: string) => InstalledDependencyRecord | undefined;
 }
@@ -767,7 +762,10 @@ function deliveredId(manifest: DependencyDeclaringManifest): string | undefined 
  * Pure: no throwing, no I/O. Doors call {@link assertDeclaredDependencies}.
  */
 export function checkDeclaredDependencies(check: DeclaredDependencyCheck): UnmetDependency[] {
-  const delivered = new Set<string>(check.deliveredIds ?? []);
+  // Packages only: an artifact wrapper's own id names no package unless one of
+  // `delivered` carries it, and a module declaring it would pass here and be
+  // `absent` on its first standalone install.
+  const delivered = new Set<string>();
   for (const manifest of check.delivered) {
     const id = deliveredId(manifest);
     if (id !== undefined) delivered.add(id);
@@ -804,7 +802,13 @@ export function checkDeclaredDependencies(check: DeclaredDependencyCheck): Unmet
       }
       const admits = typeof stored === 'string' ? rangeAdmitsVersion(range, stored) : null;
       if (admits === null) {
-        unmet.push({ packageId, dependency, range, found: 'unreadable-version', ...withVersion });
+        // Undecided. The `0.0.0` probe above only shows SOME alternative reads:
+        // a union whose readable alternatives refuse a readable version and
+        // whose other alternative cannot be read (`<5 || latest` against
+        // 7.0.0) is undecided because of the range, and naming the version
+        // would send the author to fix the wrong side.
+        const versionReadable = typeof stored === 'string' && readExactVersion(stored) !== null;
+        unmet.push({ packageId, dependency, range, found: versionReadable ? 'unreadable-range' : 'unreadable-version', ...withVersion });
       } else if (!admits) {
         unmet.push({ packageId, dependency, range, found: 'out-of-range', ...withVersion });
       }

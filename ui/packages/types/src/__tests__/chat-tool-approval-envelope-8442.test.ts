@@ -68,15 +68,18 @@ describe('ChatToolInvocation.approval — the mirror declares it', () => {
     expect(parsed.success && parsed.data.approval).toEqual(ENVELOPE);
   });
 
-  it('CONTROL — an undeclared sibling key is stripped while `success` stays true', () => {
-    // Same instrument, same fixture shape, a key nothing declares. This is what
-    // the assertion above would read if `approval` were still unmirrored, and it
-    // is why `success` alone proves nothing here.
+  it('CONTROL — an undeclared sibling key is accepted while `success` stays true', () => {
+    // Same instrument, same fixture shape, a key nothing declares, so `success`
+    // alone proves nothing here. While the mirror was strip mode the key was
+    // dropped — what the assertion above read before `approval` was mirrored.
+    // Since objectstack#25923 the mirror is `.passthrough()` and keeps it, so
+    // the load-bearing line above is now the DECLARED `approval` key's type check
+    // (a malformed envelope is refused below), not its survival.
     const parsed = ChatToolInvocationSchema.safeParse(
       invocation({ approvalEnvelope: ENVELOPE }),
     );
     expect(parsed.success).toBe(true);
-    expect(parsed.success && 'approvalEnvelope' in parsed.data).toBe(false);
+    expect(parsed.success && 'approvalEnvelope' in parsed.data).toBe(true);
   });
 
   it('keeps a MINIMAL envelope — only `id` is required', () => {

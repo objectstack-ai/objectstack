@@ -168,7 +168,13 @@ describe('DatasetWidget — no dated window: an ignoring family draws its chart 
    * The dataset executor refuses a `compareTo` it has no dated window to shift
    * (a dataset-invalid error). A widget that forwarded `compareTo` showed that
    * refusal in place of its chart; one that forwards nothing is never refused.
+   *
+   * The filter dates its field with ONE bound, so it is a date condition that is
+   * no closed window: a filter that dates nothing at all is asked no comparison
+   * by every family (objectstack#25970), which would leave the control below
+   * nothing to refuse.
    */
+  const ONE_BOUND = { owner: 'u1', close_date: { $gte: '2026-01-01' } };
   const refusingSource = () => ({
     queryDataset: vi.fn(async (_dataset: string, selection: any) => {
       if (selection?.compareTo && !selection?.timeDimensions?.length) {
@@ -181,10 +187,10 @@ describe('DatasetWidget — no dated window: an ignoring family draws its chart 
     }),
   });
 
-  it('a pie with compareTo and an undated filter renders the pie', async () => {
+  it('a pie with compareTo and no closed window renders the pie', async () => {
     const src = refusingSource();
     const { queryByRole } = renderWidget(
-      { type: 'pie', dataset: 'sales', dimensions: ['stage'], values: ['revenue'], filter: { owner: 'u1' }, compareTo: { kind: 'previousYear' } },
+      { type: 'pie', dataset: 'sales', dimensions: ['stage'], values: ['revenue'], filter: ONE_BOUND, compareTo: { kind: 'previousYear' } },
       src,
     );
 
@@ -196,7 +202,7 @@ describe('DatasetWidget — no dated window: an ignoring family draws its chart 
   it('CONTROL: a bar with the same compareTo and filter still asks, and shows the refusal', async () => {
     const src = refusingSource();
     const { findByRole } = renderWidget(
-      { type: 'bar', dataset: 'sales', dimensions: ['stage'], values: ['revenue'], filter: { owner: 'u1' }, compareTo: { kind: 'previousYear' } },
+      { type: 'bar', dataset: 'sales', dimensions: ['stage'], values: ['revenue'], filter: ONE_BOUND, compareTo: { kind: 'previousYear' } },
       src,
     );
 

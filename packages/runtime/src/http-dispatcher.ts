@@ -17,7 +17,7 @@ import {
     AuthzStoreUnavailableError,
     type AuthGate,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer, driverNotNullRefusalAnswer } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -71,6 +71,7 @@ import {
 import {
     permissionDeniedErrorDetails,
     describeDeniedDiagnostics,
+    routeObjectFromPath,
 } from './security/permission-denied-envelope.js';
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
@@ -3166,6 +3167,24 @@ export class HttpDispatcher {
                         userMessage !== undefined ? { userMessage } : undefined,
                     ),
                 };
+            }
+            // [#26031] A driver's NOT NULL refusal that the engine let out (a
+            // column no field declares, i.e. drift) is answered HERE, with
+            // `RestServer`'s body for it. Thrown on, it reached the Hono exits,
+            // which serve only a throw that declares its status and code, and
+            // `dispatcher-plugin`'s, which reads the validation shape: both
+            // answered `500` where `RestServer` answers
+            // `400 VALIDATION_FAILED`. The body is the classification's own
+            // NOT NULL arm (`driverNotNullRefusalAnswer`), never a reading of
+            // the driver's text here, and its object is the route's, as
+            // `RestServer`'s is. Only the `/data/:object` routes ask: they are
+            // the routes `RestServer` answers this arm for, and every other
+            // throw leaves exactly as before.
+            const routeObject = routeObjectFromPath(cleanPath);
+            const notNullRefusal = routeObject !== undefined ? driverNotNullRefusalAnswer(e, routeObject) : undefined;
+            if (notNullRefusal) {
+                const { error: message, ...details } = notNullRefusal.body;
+                return { handled: true, response: this.error(String(message), notNullRefusal.status, details) };
             }
             throw e;
         }

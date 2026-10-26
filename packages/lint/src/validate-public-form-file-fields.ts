@@ -42,11 +42,14 @@
  */
 
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
-import { anonymousFormIntakeCandidates, type AnonymousFormIntakeCandidate } from '@objectstack/spec/ui';
+import {
+  anonymousFormIntakeCandidates,
+  anonymousFormObjectName,
+  type AnonymousFormIntakeCandidate,
+} from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
 import { recordsOf } from './object-graph.js';
-import { viewObjectName } from './view-walk.js';
 
 export const PUBLIC_FORM_FILE_FIELD = 'public-form-file-field';
 
@@ -98,21 +101,6 @@ function candidateSlot(view: AnyRec, candidate: AnonymousFormIntakeCandidate): s
   return 'config';
 }
 
-/**
- * The object an open candidate submits into, in the order the anonymous doors
- * resolve it (`anonymousFormObjectName`, `@objectstack/metadata-core`): the
- * form's own binding, then the view's list block, its default form, and the
- * view itself.
- */
-function candidateObjectName(view: AnyRec, form: AnyRec): string | undefined {
-  return (
-    viewObjectName(form) ??
-    (isRec(view.list) ? viewObjectName(view.list) : undefined) ??
-    (isRec(view.form) ? viewObjectName(view.form) : undefined) ??
-    viewObjectName(view)
-  );
-}
-
 /** A section field entry is a bare field name or `{ field, … }`. */
 function fieldNameOf(entry: unknown): string | undefined {
   if (typeof entry === 'string') return strName(entry);
@@ -127,7 +115,7 @@ export function validatePublicFormFileFields(stack: AnyRec): PublicFormFileField
   for (const { rec: view, path: viewPath } of collectionEntries(stack.views, 'views')) {
     const viewName = strName(view.name) ?? strName(view.object) ?? viewPath;
     for (const candidate of anonymousFormIntakeCandidates(view)) {
-      const objectName = candidateObjectName(view, candidate.form);
+      const objectName = anonymousFormObjectName(view, candidate.form);
       const types = objectName ? fieldTypes.get(objectName) : undefined;
       if (!types) continue;
       const slot = candidateSlot(view, candidate);

@@ -6,7 +6,15 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, isSymbolNamed, scanEvidence } from './evidence.mts';
+import {
+  checkCitationLines,
+  checkEvidence,
+  checkEvidenceAnchors,
+  countLines,
+  isSymbolNamed,
+  RETIRED_REALMS,
+  scanEvidence,
+} from './evidence.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..');
@@ -39,32 +47,39 @@ describe('scanEvidence — path extraction', () => {
   });
 
   it('ignores prose that merely contains a slash', () => {
-    const r = scanEvidence('objectui: components action-button/-group/-icon/-menu gate the Button');
+    const r = scanEvidence('cloud: components action-button/-group/-icon/-menu gate the Button');
     expect(r.local).toEqual([]);
     expect(r.foreign).toEqual([]);
   });
 
   it('ignores a path that is not repo-rooted (another repo\'s internal layout)', () => {
-    expect(scanEvidence('objectui: app-shell/MetadataProvider.tsx reads it').local).toEqual([]);
+    expect(scanEvidence('cloud: app-shell/MetadataProvider.tsx reads it').local).toEqual([]);
+  });
+
+  it('reads `ui/` as a root of THIS repo — the renderer merged in from objectui (#25677)', () => {
+    const r = scanEvidence('ui/packages/app-shell/src/x.tsx#XView');
+    expect(r.local).toEqual(['ui/packages/app-shell/src/x.tsx']);
+    expect(r.localAnchors).toEqual([{ path: 'ui/packages/app-shell/src/x.tsx', symbol: 'XView' }]);
+    expect(r.foreign).toEqual([]);
   });
 });
 
 describe('scanEvidence — cross-repo attribution', () => {
-  it('attributes paths after an `objectui:` marker to objectui', () => {
-    const r = scanEvidence('objectui: packages/app-shell/src/views/RecordDetailView.tsx:573');
-    expect(r.foreign).toEqual(['packages/app-shell/src/views/RecordDetailView.tsx']);
+  it('attributes paths after a `cloud:` marker to cloud', () => {
+    const r = scanEvidence('cloud: packages/marketplace/src/publish-gate.ts:573');
+    expect(r.foreign).toEqual(['packages/marketplace/src/publish-gate.ts']);
     expect(r.local).toEqual([]);
   });
 
   it('handles the parenthesised marker form', () => {
-    const r = scanEvidence('registered into ActionEngine.shortcuts[] (objectui packages/core/src/actions/ActionEngine.ts:150) but no caller');
-    expect(r.foreign).toEqual(['packages/core/src/actions/ActionEngine.ts']);
+    const r = scanEvidence('enforced at publish (cloud packages/marketplace/src/publish-gate.ts:150) but not at load');
+    expect(r.foreign).toEqual(['packages/marketplace/src/publish-gate.ts']);
     expect(r.local).toEqual([]);
   });
 
   it('ends a realm at the clause boundary so a later framework path is still resolved', () => {
     const r = scanEvidence(
-      'objectui RecordDetailView gates the tab (historyEnabled memo); pairs with packages/plugins/plugin-audit/src/audit-writers.ts',
+      'cloud PublishGate refuses the tier (HTTP 422); pairs with packages/plugins/plugin-audit/src/audit-writers.ts',
     );
     expect(r.foreign).toEqual([]);
     expect(r.local).toEqual(['packages/plugins/plugin-audit/src/audit-writers.ts']);
@@ -79,16 +94,59 @@ describe('scanEvidence — cross-repo attribution', () => {
   });
 
   it('lets `framework` switch attribution back explicitly', () => {
-    const r = scanEvidence('objectui packages/app-shell/src/x.tsx framework packages/runtime/src/y.ts');
-    expect(r.foreign).toEqual(['packages/app-shell/src/x.tsx']);
+    const r = scanEvidence('cloud packages/marketplace/src/x.ts framework packages/runtime/src/y.ts');
+    expect(r.foreign).toEqual(['packages/marketplace/src/x.ts']);
     expect(r.local).toEqual(['packages/runtime/src/y.ts']);
+  });
+});
+
+// #25712: objectui merged into this repo as `ui/` (#25677). Its marker is RETIRED,
+// not deleted: a path still attributed to it lands in a bucket of its own that
+// the gate fails on, because neither of the other two readings is safe — foreign
+// never fails, and local would resolve `packages/core/…` against this repo's own
+// `packages/core/`, a file that never was the reader.
+describe('scanEvidence — the retired objectui realm (#25712)', () => {
+  it('maps objectui onto ui/ — the one retired realm', () => {
+    expect(RETIRED_REALMS).toEqual({ objectui: 'ui' });
+  });
+
+  it('puts a path attributed to objectui in `retired`, with its in-repo spelling — never in `local` or `foreign`', () => {
+    for (const ev of [
+      'objectui: packages/core/src/actions/x.ts:573',
+      'objectui @f8a9d0fb: packages/core/src/actions/x.ts#XRunner',
+      'registered into ActionEngine (objectui packages/core/src/actions/x.ts:150) but no caller',
+    ]) {
+      const r = scanEvidence(ev);
+      expect(r.retired, ev).toEqual([
+        { realm: 'objectui', path: 'packages/core/src/actions/x.ts', inRepo: 'ui/packages/core/src/actions/x.ts' },
+      ]);
+      expect(r.local, ev).toEqual([]);
+      expect(r.foreign, ev).toEqual([]);
+      expect(r.localCitations, ev).toEqual([]);
+      expect(r.localAnchors, ev).toEqual([]);
+    }
+  });
+
+  it('reads a `ui/` path as local even after the word objectui — history prose must not re-attribute it', () => {
+    const r = scanEvidence('ui/packages/layout/src/x.tsx (:316 at objectui @940ba24) and objectui ui/packages/layout/src/y.tsx#YShell');
+    expect(r.local).toEqual(['ui/packages/layout/src/x.tsx', 'ui/packages/layout/src/y.tsx']);
+    expect(r.retired).toEqual([]);
+    expect(r.localCitations).toEqual([]);
+  });
+
+  it('ends the retired realm at the clause boundary like any other', () => {
+    const r = scanEvidence('objectui RecordDetailView gates the tab (historyEnabled memo); pairs with packages/plugins/plugin-audit/src/audit-writers.ts');
+    expect(r.retired).toEqual([]);
+    expect(r.local).toEqual(['packages/plugins/plugin-audit/src/audit-writers.ts']);
   });
 });
 
 describe('checkEvidence', () => {
   it('reports only unresolvable LOCAL paths', () => {
-    const r = checkEvidence('packages/a/src/x.ts (prose) objectui: packages/b/src/y.tsx', none);
+    const r = checkEvidence('packages/a/src/x.ts (prose) cloud: packages/b/src/y.tsx', none);
     expect(r.missing).toEqual(['packages/a/src/x.ts']);
+    // A retired-realm path is not resolved either — the gate fails it on its own list.
+    expect(checkEvidence('objectui: packages/b/src/y.tsx', none).missing).toEqual([]);
   });
 
   it('is silent when every local path resolves', () => {
@@ -96,7 +154,7 @@ describe('checkEvidence', () => {
   });
 
   it('tolerates a non-string evidence value', () => {
-    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], localCitations: [], localAnchors: [], missing: [] });
+    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], retired: [], localCitations: [], localAnchors: [], missing: [] });
     expect(checkEvidence(42, none).missing).toEqual([]);
   });
 });
@@ -149,14 +207,14 @@ describe('scanEvidence — line citations', () => {
   });
 
   it('never bounds a FOREIGN citation — those files are legitimately absent here', () => {
-    const r = scanEvidence('objectui: packages/app-shell/src/views/RecordDetailView.tsx:573');
+    const r = scanEvidence('cloud: packages/marketplace/src/publish-gate.ts:573');
     expect(r.localCitations).toEqual([]);
   });
 
-  it('still reduces a realm marker written `objectui:` rather than reading it as a line', () => {
+  it('still reduces a realm marker written `cloud:` rather than reading it as a line', () => {
     // The trailing-punctuation pass strips `:`; only a digit suffix is a line.
-    const r = scanEvidence('objectui: packages/app-shell/src/x.tsx:12');
-    expect(r.foreign).toEqual(['packages/app-shell/src/x.tsx']);
+    const r = scanEvidence('cloud: packages/marketplace/src/x.ts:12');
+    expect(r.foreign).toEqual(['packages/marketplace/src/x.ts']);
     expect(r.localCitations).toEqual([]);
   });
 
@@ -196,8 +254,8 @@ describe('scanEvidence — symbol anchors (#12516)', () => {
   });
 
   it('never collects a FOREIGN anchor — the file is legitimately absent here', () => {
-    const r = scanEvidence('objectui: packages/app-shell/src/x.tsx#RecordDetailView');
-    expect(r.foreign).toEqual(['packages/app-shell/src/x.tsx']);
+    const r = scanEvidence('cloud: packages/marketplace/src/x.ts#PublishGate');
+    expect(r.foreign).toEqual(['packages/marketplace/src/x.ts']);
     expect(r.localAnchors).toEqual([]);
   });
 
@@ -370,6 +428,43 @@ describe('shipped ledgers', () => {
   // two-number line stays pinned in check-liveness.test.ts. If a `path:NNN`
   // citation is ever written again the ledger has a new population — restore a
   // contract test here rather than trusting the unit tests to cover shipped data.
+  //
+  // Restored 2026-10-26 (#25712) on exactly that instruction: re-rooting the
+  // objectui pointers under `ui/` brought `path:NNN` citations back into the
+  // LOCAL population — only the ones whose cited block is byte-identical at one
+  // offset of today's file, relocated there; the rest dropped the line and keep
+  // the old reading as prose. Both fields are walked, as the gate walks them.
+  it('every local `path:NNN` citation is inside its file (#11210, restored by #25712)', () => {
+    const outOfRange: string[] = [];
+    let citations = 0;
+    const lineCount = (p: string): number | null => {
+      const f = join(repoRoot, p);
+      return existsSync(f) ? countLines(readFileSync(f, 'utf8')) : null;
+    };
+    for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
+      const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
+      const visit = (key: string, entry: any) => {
+        for (const field of ['evidence', 'producer']) {
+          if (typeof entry?.[field] !== 'string') continue;
+          const scan = scanEvidence(entry[field]);
+          citations += scan.localCitations.length;
+          checkCitationLines(scan, lineCount).forEach((c) =>
+            outOfRange.push(`${ledger.type}/${key} → ${c.path}:${c.line} (file has ${c.lines})`),
+          );
+        }
+      };
+      for (const [key, entry] of Object.entries<any>(ledger.props || {})) {
+        visit(key, entry);
+        for (const [ck, centry] of Object.entries<any>(entry?.children || {})) visit(`${key}.${ck}`, centry);
+      }
+    }
+    expect(outOfRange).toEqual([]);
+    // Non-vacuity, and NOT a pin on the population: the floor is the one shape
+    // a degraded parser cannot fake. When a later sweep converts these to
+    // `#symbol` anchors and the count reaches zero, retire this case the way
+    // #13043 did, rather than parking a citation to keep it green.
+    expect(citations).toBeGreaterThan(0);
+  });
 
   it('every local `path#symbol` anchor names a symbol its file contains (#12516)', () => {
     const bad: string[] = [];

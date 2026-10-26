@@ -78,7 +78,7 @@ import { stripImportedDefaults } from './imported-defaults.js';
  * objectstack#9925 made both limbs `never` on its type axis for the same
  * reason. The shape here mirrors `KeyedI18nLabel` limb-for-limb.
  */
-export const KeyedI18nLabelSchema = z.object({
+export const KeyedI18nLabelSchema = z.looseObject({
   key: z.string().describe('Translation-bundle key, e.g. `dialog.close`'),
   defaultValue: z.string().optional().describe('Rendered when the key is missing from the bundle'),
   params: z.record(z.string(), z.any()).optional().describe("Interpolation values for the key's placeholders"),
@@ -617,7 +617,7 @@ export function specFieldsExcept<T extends z.ZodRawShape, K extends keyof T & st
   const kept = Object.fromEntries(
     Object.entries(shape).filter(([key]) => !omit.includes(key as K)),
   ) as Omit<T, K>;
-  return z.object(kept).partial();
+  return z.looseObject(kept).partial();
 }
 
 /**
@@ -643,7 +643,7 @@ export const ComponentInputControlTypeSchema = z.enum([
 /**
  * Component Input Configuration
  */
-export const ComponentInputSchema = z.object({
+export const ComponentInputSchema = z.looseObject({
   name: z.string().describe('Property name'),
   /**
    * One coarse kind, or a NON-EMPTY array of distinct kinds for a key whose
@@ -708,7 +708,7 @@ export const ComponentInputSchema = z.object({
   required: z.boolean().optional().describe('Required flag'),
   enum: z.union([
     z.array(z.string()),
-    z.array(z.object({
+    z.array(z.looseObject({
       label: z.string(),
       value: z.any(),
     })),
@@ -785,7 +785,7 @@ export const ComponentInputSchema = z.object({
 /**
  * Component Metadata
  */
-export const ComponentMetaSchema = z.object({
+export const ComponentMetaSchema = z.looseObject({
   label: z.string().optional().describe('Display name'),
   icon: z.string().optional().describe('Icon name or SVG'),
   category: z.string().optional().describe('Component category'),
@@ -794,7 +794,7 @@ export const ComponentMetaSchema = z.object({
   examples: z.record(z.string(), z.any()).optional().describe('Example configurations'),
   isContainer: z.boolean().optional().describe('Layout container (skipped by the react-page JSX scope, listed in the public layout ledger); not "can have children" — a renderer that puts `children` on the page declares a `children` slot input (objectui#9910)'),
   resizable: z.boolean().optional().describe('Can be resized'),
-  resizeConstraints: z.object({
+  resizeConstraints: z.looseObject({
     width: z.boolean().optional(),
     height: z.boolean().optional(),
     minWidth: z.number().optional(),
@@ -890,7 +890,7 @@ export const HTMLAttributesSchema = z.record(z.string(), z.any()).describe('HTML
  * from, and it left a reader hunting `padding` or `gap` under this schema in
  * exactly the confusion #5928 was filed about, one layer down.
  */
-export const ClassNameStylePropsSchema = z.object({
+export const ClassNameStylePropsSchema = z.looseObject({
   className: z.string().optional(),
   style: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
 }).describe('className and inline style');

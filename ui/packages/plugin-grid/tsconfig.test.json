@@ -24,7 +24,6 @@
     // The package build emits `dist`; this project emits nothing, so it must
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
-    "jsx": "react-jsx",
     // One notch above the root `lib` (ES2020), and only here: the tests use
     // `Array.prototype.at` (ES2022) — `column-features.test.tsx`,
     // `columnIdentity.test.tsx` — which shipped SOURCE must not, so raising it

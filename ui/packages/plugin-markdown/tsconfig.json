@@ -2,7 +2,6 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
@@ -18,8 +17,7 @@
     // package so the location is a decision, not a side effect of an unrelated option.
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
     "composite": true,
-    "declarationMap": true,
-    "skipLibCheck": true
+    "declarationMap": true
   },
   "include": ["src"],
   // Tooling is excluded by DIRECTORY, not just by file NAME. A helper under

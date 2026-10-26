@@ -198,6 +198,26 @@ export interface InlineEditContextValue {
    */
   approvalIsSubmitter?: boolean;
   /**
+   * Whether the HOST already draws the recall lever for the pending approval
+   * itself, so the band must not draw a second one (objectstack#25877).
+   *
+   * The record page host mounts `sys_approval_request`'s declared decision
+   * actions above the page, and the declared `approval_recall` is among them.
+   * A band that also drew its own recall put two Recall buttons on one page
+   * for the same request. When `true`, the band keeps only its status badge
+   * and tally; the host's lever is the one recall on the page.
+   *
+   * Optional, and absent means `false`: the band draws its recall exactly as
+   * before, gated by {@link approvalIsSubmitter}. A host that never learns of
+   * this prop, or one that draws no declared actions (a bare DetailView, a
+   * backend with no approvals API), keeps the band as the only recall lever,
+   * which is why the default must be "draw it" rather than "hide it".
+   *
+   * ⚠️ PLACEMENT ONLY, like {@link approvalIsSubmitter}: it decides where the
+   * lever is drawn, never who may recall.
+   */
+  approvalRecallDrawnByHost?: boolean;
+  /**
    * Human-readable reason for the approval lock, surfaced as the band's
    * tooltip. Optional — consumers fall back to their own localized default
    * when omitted.
@@ -313,6 +333,12 @@ export interface InlineEditProviderProps {
    * that resolves no approval identity is unchanged.
    */
   approvalIsSubmitter?: boolean;
+  /**
+   * The host draws the pending approval's recall lever itself
+   * (objectstack#25877), so the band omits its own. Omitted ⇒ `false` ⇒ the
+   * band draws its recall as before (see `InlineEditContextValue`).
+   */
+  approvalRecallDrawnByHost?: boolean;
   /** Optional human-readable lock reason, surfaced as the band tooltip. */
   lockedReason?: string;
   children: React.ReactNode;
@@ -325,6 +351,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
   approvalReadAnswered = false,
   approvalProgress,
   approvalIsSubmitter,
+  approvalRecallDrawnByHost = false,
   lockedReason,
   children,
 }) => {
@@ -378,6 +405,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
       approvalReadAnswered,
       approvalProgress,
       approvalIsSubmitter,
+      approvalRecallDrawnByHost,
       lockedReason,
       draft,
       autoFocusField,
@@ -392,7 +420,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
       setError,
       setFieldErrors,
     }),
-    [editing, canEdit, locked, pending, approvalReadAnswered, approvalProgress, approvalIsSubmitter, lockedReason, draft, autoFocusField, saving, error, fieldErrors, enter, setField, teardown],
+    [editing, canEdit, locked, pending, approvalReadAnswered, approvalProgress, approvalIsSubmitter, approvalRecallDrawnByHost, lockedReason, draft, autoFocusField, saving, error, fieldErrors, enter, setField, teardown],
   );
 
   return <InlineEditContext.Provider value={value}>{children}</InlineEditContext.Provider>;

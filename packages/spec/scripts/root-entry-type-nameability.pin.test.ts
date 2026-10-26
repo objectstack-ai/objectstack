@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — compiles the package type graph once: the consumer program is one tsc run over the BUILT root entry's declarations, and the canary is one more tsc run over a one-line fixture; slowest CI reading 12.92 s (run 40214410982, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 
 /**
  * Root-entry nameability pin (#11350) — the consumer shape, verbatim.

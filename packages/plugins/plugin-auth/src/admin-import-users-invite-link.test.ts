@@ -209,6 +209,7 @@ describe('[#23152] the identity import invitation link', () => {
     const email = 'invitee-direct@acme.example.com';
     const deps: IdentityImportDeps = {
       getAuthApi: () => manager.getApi(),
+      getAuthContext: () => manager.getAuthContext(),
       getDataEngine: () => manager.getDataEngine() as never,
       phoneNumberEnabled: () => manager.isPhoneNumberEnabled(),
       emailServiceAvailable: () => manager.isEmailServiceAvailable(),
