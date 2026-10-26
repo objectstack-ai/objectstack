@@ -62,7 +62,7 @@
       "status": "live",
       "verifiedAt": "2026-10-26",
       "evidenceScope": "in-repo",
-      "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `Object.prototype.hasOwnProperty.call(this.files, path)` — the bundled bytes a `seedFile(path)` reference is stored from, decoded once per dataset and checked against their recorded size and SHA-256); packages/cli/src/utils/bundle-seed-files.ts#bundleSeedFiles (the producer: `os build` writes each referenced file's bytes here, read relative to the package root)",
+      "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `Object.prototype.hasOwnProperty.call(this.files, path)` — the bundled bytes a `seedFile(path)` reference is stored from, decoded once per dataset and checked against their recorded size and SHA-256); packages/cli/src/utils/bundle-seed-files.ts#placeSeedFiles (the producer: `os build` writes each referenced file's bytes here, after `collectSeedFiles` reads them relative to the package root)",
       "note": "Seeded 2026-10-26 (#25779, ruled on hotclm#19 letter D). The bytes of the package files the records name with `seedFile(path)`, keyed by that path; written by `os build`, never by an author. The keys are package-relative paths (the `records` walk boundary's rule applies to the records, not to this map), so the ledger drills only the bundled file's own keys.",
       "children": {
         "contentType": {
