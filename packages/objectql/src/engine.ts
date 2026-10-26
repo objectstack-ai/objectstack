@@ -141,11 +141,6 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
-  // The one write-response non-exposure helper (credential mask + `internal`
-  // omission); a record-change event body is an external exit of the same
-  // write, so it is projected through the same rule — see
-  // `projectEventRecordBody` in `engine-realtime-publish.ts`.
-  omitInternalFieldsFromWriteResponse,
   // [#22637] The caller's envelope, stripped of the operation-private `__`
   // keys, before file-field hydration forwards it to the download door's
   // field-owned verdict — see `readParentDerivedFiles`.
