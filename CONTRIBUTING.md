@@ -316,8 +316,8 @@ verified it.
 This repository is the one public issue tracker for every ObjectOS edition: Community
 (the code in this repository), Cloud and Enterprise. Say which edition you run when you
 open an issue; the Bug report and Feature request forms ask for it. Cloud and Enterprise
-reports are triaged by the cloud seat, which owns that code, and may be moved to the
-repository where it lives.
+reports are triaged by the ObjectOS Cloud team and may be moved to the repository where
+that code lives.
 
 ## License
 
