@@ -104,17 +104,20 @@ describe('form renderer — server-rejected fields', () => {
     await waitFor(() => expect(stageWrap.contains(document.activeElement)).toBe(true));
   });
 
-  it('names the rejected fields in the toast', async () => {
+  it('raises no toast when every rejected field carries its own message (objectstack#25874)', async () => {
     const onSubmit = vi.fn().mockRejectedValue(
       validationFailure([{ field: 'title', message: 'Title is required' }]),
     );
-    renderForm(FIELDS, onSubmit);
+    const { container } = renderForm(FIELDS, onSubmit);
+    const titleWrap = container.querySelector('[data-field="title"]') as HTMLElement;
 
     submit();
 
-    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-    // The field LABEL, not its machine name.
-    expect(String(toastErrorSpy.mock.calls[0][0])).toMatch(/Title/);
+    // The reason is written under the input it belongs to…
+    await waitFor(() => expect(titleWrap.textContent).toMatch(/Title is required/));
+    // …so a toast naming the same field, drawn over the dialog's title, would
+    // only repeat it.
+    expect(toastErrorSpy).not.toHaveBeenCalled();
   });
 
   it('marks every rejected field, not just the first', async () => {
