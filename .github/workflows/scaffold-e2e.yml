@@ -253,8 +253,9 @@ jobs:
         # sync-catalog.mjs), read the same way as the package-catalog step
         # below. ⛔ Never a name glob or an allow-list here: a skill added to
         # skills/ would red this step until a governed edit of this file.
-        # An internal skill placed in skills/ still fails assertion 2, since
-        # --list hides it and the count drops below the directory count.
+        # An internal skill placed in skills/ still fails: the CLI hides
+        # metadata.internal skills, so the installed set (assertion 1) or the
+        # listed count (assertion 2) falls short of the directory set.
         run: |
           cd "$RUNNER_TEMP"
           node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" skills-probe --skip-install --skip-skills
