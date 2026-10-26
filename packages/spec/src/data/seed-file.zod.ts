@@ -43,20 +43,24 @@ const SEED_FILE_PATH_RULE =
   + 'segment (e.g. `fixtures/nda-v1.pdf`)';
 
 /**
- * Is `path` a package-relative seed file path? Relative (no leading `/`, no
- * drive letter), `/`-separated (no `\`), and confined to the package: no
- * empty, `.` or `..` segment, so the path cannot climb out of the root it is
- * resolved against and two spellings of one file cannot key two entries.
+ * A package-relative seed file path: relative (no leading `/`, no drive
+ * letter), `/`-separated (no `\`), and confined to the package — every segment
+ * non-empty and neither `.` nor `..`, so the path cannot climb out of the root
+ * it is resolved against and two spellings of one file cannot key two entries.
+ *
+ * One regular expression rather than a predicate, so the published JSON Schema
+ * states the rule as the `pattern` the runtime applies.
  */
+const SEED_FILE_PATH_PATTERN = /^(?![A-Za-z]:)(?!\.{1,2}(?:\/|$))[^/\\]+(?:\/(?!\.{1,2}(?:\/|$))[^/\\]+)*$/;
+
+/** Is `path` a package-relative seed file path ({@link SeedFilePathSchema})? */
 export function isSeedFilePath(path: unknown): path is string {
-  if (typeof path !== 'string' || path.length === 0) return false;
-  if (path.startsWith('/') || path.includes('\\') || /^[A-Za-z]:/.test(path)) return false;
-  return path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+  return typeof path === 'string' && SEED_FILE_PATH_PATTERN.test(path);
 }
 
-/** A package-relative seed file path ({@link isSeedFilePath}). */
+/** A package-relative seed file path, e.g. `fixtures/nda-v1.pdf`. */
 export const SeedFilePathSchema = lazySchema(() => z.string()
-  .refine(isSeedFilePath, { message: SEED_FILE_PATH_RULE })
+  .regex(SEED_FILE_PATH_PATTERN, SEED_FILE_PATH_RULE)
   .describe('Path of a file the package ships, relative to the package root (e.g. `fixtures/nda-v1.pdf`)'));
 
 /** A MIME type: `type/subtype`, the shape a `sys_file.mime_type` carries. */

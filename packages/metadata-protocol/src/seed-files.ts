@@ -68,7 +68,7 @@ function fileFieldsOf(definition: unknown): Map<string, FileField> {
     ?.fields;
   if (!fields || typeof fields !== 'object') return found;
   for (const [name, field] of Object.entries(fields)) {
-    if (typeof field?.type === 'string' && (FILE_REFERENCE_TYPES as readonly string[]).includes(field.type)) {
+    if (typeof field?.type === 'string' && FILE_REFERENCE_TYPES.has(field.type)) {
       found.set(name, { multiple: field.multiple === true });
     }
   }

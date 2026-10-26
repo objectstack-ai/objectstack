@@ -57,6 +57,43 @@
       "verifiedAt": "2026-08-28",
       "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`for (let i = 0; i < dataset.records.length; i++)` — the payload rows, written one at a time so a failure can name the row that caused it)",
       "note": "the payload rows. WALK BOUNDARY: each record is a z.record — the keys an author actually writes are the TARGET OBJECT's field names, governed by that object's own field definitions (and the defineSeed factory's compile-time key check), not by this ledger. Recorded here rather than left implicit, per the datasource `config` precedent. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:434` had rotted onto the `referenceVia` pointer-pair scan inside `load`, ~384 lines above the row loop. Re-closed by hand against 8cb96ec41."
+    },
+    "files": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `Object.prototype.hasOwnProperty.call(this.files, path)` — the bundled bytes a `seedFile(path)` reference is stored from, decoded once per dataset and checked against their recorded size and SHA-256); packages/cli/src/utils/bundle-seed-files.ts#bundleSeedFiles (the producer: `os build` writes each referenced file's bytes here, read relative to the package root)",
+      "note": "Seeded 2026-10-26 (#25779, ruled on hotclm#19 letter D). The bytes of the package files the records name with `seedFile(path)`, keyed by that path; written by `os build`, never by an author. The keys are package-relative paths (the `records` walk boundary's rule applies to the records, not to this map), so the ledger drills only the bundled file's own keys.",
+      "children": {
+        "contentType": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`prepareRow`: `reference.contentType ?? content.contentType` — the stored file's media type)",
+          "note": "The MIME type the stored `sys_file` carries unless the reference names one."
+        },
+        "size": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `bytes.byteLength !== content.size` — bytes of another length are refused, by row)",
+          "note": "The byte length the decoded bytes must have."
+        },
+        "sha256": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `sha256 !== content.sha256` — bytes that hash otherwise are refused, by row); packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`prepareRow`: recorded on the stored file, so a replay keeps an unchanged file)",
+          "note": "The digest the bytes are checked against, and the provenance a replay keeps a file by."
+        },
+        "data": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/metadata-protocol/src/seed-files.ts#SeedDatasetFiles (`check`: `Buffer.from(content.data, 'base64')` — the bytes the `field-files` service stores)",
+          "note": "The bytes, base64."
+        }
+      }
     }
   }
 }
