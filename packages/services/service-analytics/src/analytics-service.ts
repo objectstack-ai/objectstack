@@ -97,6 +97,7 @@ import {
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
+import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
 import {
   DatasetExecutor,
   declaredDefaultGranularity,
@@ -112,7 +113,8 @@ import {
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 // [#25778] The one lookup of a dataset duration measure by name.
-import { durationMeasureIn, durationMeasureKey } from './duration-measure-sql.js';
+import { durationMeasureIn } from './duration-measure-sql.js';
+import { scopedMeasureFilter } from './scoped-measure-key.js';
 // [#5918] The measure mint refuses a dotted member through the SAME constructor
 // the strategies' member-level refusals use — `INVALID_FIELD` / 400, naming the
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
@@ -575,8 +577,7 @@ function namedQueryFields(
   for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
   for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
-    const filterKey = durationMeasureKey(datasetScope?.measureDurations, measure, cube.name) ?? measure;
-    for (const member of filterMembers(datasetScope?.measureFilters?.[filterKey])) name(member, 'any', 'predicate');
+    for (const member of filterMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
   }
   for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
@@ -2810,8 +2811,14 @@ export class AnalyticsService implements IAnalyticsService {
       // [#20356] Through the call's own scope, never `this`: every query the
       // executor issues resolves `compiled`'s name to `compiled`, with no
       // registry write before, during or after admission.
-      const scoped = this.scopedService(this.requestScope(compiled));
-      result = await new DatasetExecutor(scoped, orderLabels).execute(compiled, selection, context);
+      //
+      // [#25814] …and the dataset's filters reach that cube keyed by the OBJECT
+      // fields they name, never by a dimension that happens to share the name:
+      // see `dataset-filter-field-binding.ts`. Only this face: the draft-preview
+      // branch above matches `row[key]`, which already reads the field.
+      const bound = bindDatasetFiltersToObjectFields(compiled, selection, this.getObjectFieldNames?.(dataset.object));
+      const scoped = this.scopedService(this.requestScope(bound.compiled));
+      result = await new DatasetExecutor(scoped, orderLabels).execute(bound.compiled, bound.selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
       // envelope reader serves it (4xx as itself; a declared 5xx relayed with

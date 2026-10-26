@@ -9,6 +9,71 @@
       "entry": "email_template/fromOverride",
       "path": "packages/plugins/plugin-email/src/email-service.ts",
       "why": "A compound CHILD-key remap, which no fold of the parent key can reach: the bridge persists `fromOverride.address` → `from_address` and `fromOverride.name` → `from_name` (bootstrap-declared-email-templates.ts:85-88), so the send path reads `row.from_address` / `row.from_name` at :1282-1283 and the parent key `fromOverride` appears nowhere in the file. The entry's OTHER citation is anchored — bootstrap-declared-email-templates.ts names `tpl.fromOverride` — so the read is not in doubt; only this second, downstream pointer is unfalsifiable by name. Its two siblings `bodyHtml`/`bodyText` need no row because the fold reaches `body_html`/`body_text` directly."
+    },
+    {
+      "entry": "page/print.paperSize",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `paperSize` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.orientation",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `orientation` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.margins.right",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `margins.right` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.margins.bottom",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `margins.bottom` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.pageNumbers",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `pageNumbers` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.repeatTableHeaders",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `repeatTableHeaders` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "page/print.avoidBreakInside",
+      "path": "ui/packages/components/src/renderers/layout/page.tsx",
+      "why": "The renderer names only the PARENT key `print`: `isPagePrintDeclaration(schema.print)` gates whether the page is a print page, and the declaration is handed whole to `buildPagePrintStylesheet`. The member `avoidBreakInside` is read in page-print.ts, the entry's other, anchored citation; this pointer is the mount site, unfalsifiable by the member's name. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "dashboard/widgets.chartConfig.showDataLabels",
+      "path": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx",
+      "why": "The widget names the HELPER, not the key: it imports `chartConfigPresentation` from @object-ui/core and spreads its result onto the chart schema. The helper reads `showDataLabels` in core's chart-presentation.ts, the entry's other, anchored citation. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "dashboard/widgets.chartConfig.annotations",
+      "path": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx",
+      "why": "The widget names the HELPER, not the key: it imports `chartConfigPresentation` from @object-ui/core and spreads its result onto the chart schema. The helper reads `annotations` in core's chart-presentation.ts, the entry's other, anchored citation. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "dashboard/widgets.chartConfig.interaction",
+      "path": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx",
+      "why": "The widget names the HELPER, not the key: it imports `chartConfigPresentation` from @object-ui/core and spreads its result onto the chart schema. The helper reads `interaction` in core's chart-presentation.ts, the entry's other, anchored citation. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "view/list.inlineEdit",
+      "path": "ui/packages/plugin-grid/src/ObjectGrid.tsx",
+      "why": "A RENAMED key: ListView forwards `inlineEdit` to the grid node as `editable`, and ObjectGrid reads `schema.editable` (the cell editor, renderCellEditor, and the save/cancel column). The entry's ListView citation names `inlineEdit`. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "view/form.subforms",
+      "path": "ui/packages/plugin-form/src/MasterDetailForm.tsx",
+      "why": "A RENAMED key: ObjectForm hands `subforms` to MasterDetailForm as `details`, and this file reads `details` (`MasterDetailDetailConfig[]`, one panel per entry). The entry's ObjectForm citation names `subforms`. Surfaced when the citation moved from objectui into ui/ (#25712)."
+    },
+    {
+      "entry": "translation/flows.screens",
+      "path": "ui/packages/app-shell/src/views/ScreenView.tsx",
+      "why": "Draws the screen FlowRunner already localized, so it names the overlaid field keys `label` / `placeholder` / `inlineHelpText`, never the bundle group `screens`; FlowRunner.tsx#localizeScreen, the entry's anchored citation, reads `screens`. Surfaced when the citation moved from objectui into ui/ (#25712)."
     }
   ]
 }

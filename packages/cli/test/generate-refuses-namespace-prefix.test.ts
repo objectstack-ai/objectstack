@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 90 — spawns the real producer once per single-cause fixture: five spawns of the source CLI (`os g object order__line`, its view dry run, `os g object customer` over a config that will not load, and one control in each project), each refusal read against its project before that control; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 69.59 s (run 40204927516) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 3 of 3 runs that executed it, x 1.25, rounded up
 
 /**
  * PIN (#20197) — the two refusals the namespace prefix added to

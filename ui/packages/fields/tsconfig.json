@@ -13,7 +13,6 @@
     // `noEmit: true`, so `tsc` here only CHECKS; `dist` is written by
     // vite-plugin-dts, which overrides `rootDir` to `src` and clears `paths`.
     "rootDir": "..",
-    "jsx": "react-jsx",
 
     // See `packages/react/tsconfig.json` for the full argument: under
     // `nodenext` a missing relative extension is TS2835 and a bare directory

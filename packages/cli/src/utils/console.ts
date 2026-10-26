@@ -21,8 +21,8 @@
  * Resolution strategy, in priority order:
  *
  *   1. `@objectstack/console` — the framework-vendored, version-locked
- *      build. Shipped as a dist-only npm package frozen at the objectui
- *      SHA recorded in `<framework>/.objectui-sha`. This is what a
+ *      build. Shipped as a dist-only npm package built from this
+ *      workspace's `ui/apps/console` (`pnpm console:build`). This is what a
  *      fresh `@objectstack/cli` install gets: the CLI declares this
  *      package as a dependency and both ship at one version from the
  *      Changesets `fixed` group, so no app installs it by hand. Cloud /
@@ -408,20 +408,26 @@ export function formatConsoleDistMissingWarning(consolePath: string | null): str
 
 /**
  * The vendored console `dist/` is a locally-built, gitignored artifact
- * rebuilt only by `scripts/build-console.sh` (pnpm objectui:build /
- * objectui:refresh / release) — never by `turbo run build`. When a
- * developer pulls a branch that bumps the framework's `.objectui-sha` pin
- * without re-running `pnpm objectui:build`, the dist stays frozen at the
- * previous objectui commit and would be served silently. The npm-major
- * version guard above can't catch this: the objectui SHA moves underneath a
- * single `@objectstack/console` version.
+ * rebuilt only by `pnpm console:build` (and release) — never by
+ * `turbo run build`. The guard below was built for the two-repo era: the
+ * framework pinned objectui by SHA in a committed `.objectui-sha`, the old
+ * build script stamped the built SHA into `dist/.objectui-sha`, and a pull
+ * that moved the pin without a rebuild left the dist frozen at the previous
+ * objectui commit, served silently. The npm-major version guard above can't
+ * catch that: the objectui SHA moves underneath a single
+ * `@objectstack/console` version.
  *
- * build-console.sh stamps the built SHA into `dist/.objectui-sha`. Here we
- * compare it against the framework's committed `.objectui-sha` pin, located
- * by walking up from the resolved console package. This is inherently a
- * monorepo/dev concern: a published install ships no `.objectui-sha` pin
- * (so the stamped dist is authoritative), and the sibling-repo dev fallback
- * writes no stamp — both cases are skipped silently.
+ * Since #25745 the framework repo carries no pin (the Console builds from
+ * `ui/apps/console` in this workspace) and `packages/console/build-dist.sh`
+ * writes no stamp and replaces the whole dist, so this guard can no longer
+ * fire there. It is kept because a tree that still carries its own
+ * `.objectui-sha` above the console package (the objectos overlay named in
+ * this file's header) with a stamped dist reaches it, and that tree is not
+ * readable from this repository. Here we compare the stamp against the
+ * nearest `.objectui-sha`, found by walking up from the resolved console
+ * package. A published install ships no pin (so the stamped dist is
+ * authoritative), and the sibling-repo dev fallback writes no stamp — both
+ * cases are skipped silently.
  */
 function findObjectuiPin(startDir: string): { pin: string; file: string } | null {
   let dir = startDir;
@@ -469,7 +475,7 @@ export function detectConsoleShaDrift(consoleDir: string): ConsoleShaDrift | nul
   } catch {
     return null; // unreadable stamp — fail open
   }
-  // Unstamped dist: can't prove drift; `pnpm check:console-sha` surfaces it.
+  // Unstamped dist (every `pnpm console:build` since #25745): can't prove drift.
   if (!stamp || stamp === found.pin) return null;
 
   return { stamp, pin: found.pin, pinFile: found.file };
@@ -481,7 +487,7 @@ export function formatConsoleShaDriftWarning(drift: ConsoleShaDrift): string {
     `  ⚠ Console version drift: serving @objectstack/console built from objectui@${drift.stamp.slice(0, 12)}, ` +
     `but ${drift.pinFile} pins objectui@${drift.pin.slice(0, 12)}. ` +
     `packages/console/dist is a gitignored local build that 'turbo run build' does not refresh — ` +
-    `rebuild it with 'pnpm objectui:build'.`
+    `rebuild it with 'pnpm console:build'.`
   );
 }
 
@@ -506,18 +512,16 @@ function describeConsoleShaDrift(drift: ConsoleShaDrift, hostPaths: boolean): st
     `    packages/console/dist is a gitignored local build that 'turbo run build' does NOT refresh,\n` +
     `    so this server would serve a Console SPA the repo no longer pins — and anything you\n` +
     `    observed in it would describe a different objectui commit.\n\n` +
-    `    Rebuild the console at the pinned SHA:\n\n` +
-    `        pnpm objectui:build\n\n` +
-    `    (Use 'pnpm objectui:refresh' only when you intend to move the pin to your local ../objectui HEAD.)\n` +
+    `    Rebuild the console:\n\n` +
+    `        pnpm console:build\n\n` +
     `    To boot anyway with the stale bundle: ${DRIFT_OVERRIDE_ENV}=1 — the API still serves either way.\n`
   );
 }
 
 /**
- * The refusal block — `os dev` declines to mount a drifted console. Mirrors
- * the remediation of `scripts/check-console-sha.mjs` verbatim (rebuild at the
- * *pinned* SHA with `pnpm objectui:build`; `objectui:refresh` would re-bump
- * the pin to the local ../objectui HEAD, which is the opposite of the fix).
+ * The refusal block — `os dev` declines to mount a drifted console. The remedy
+ * is the rebuild, `pnpm console:build`, the same script the not-built remedy
+ * names ({@link describeConsoleDistMissing}).
  */
 export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
   return `\n  ✗ Console version drift — refusing to serve /_console in dev.\n\n${describeConsoleShaDrift(drift, true)}`;
@@ -534,10 +538,10 @@ function driftOverridden(env: NodeJS.ProcessEnv): boolean {
 /**
  * Decide whether the Console SPA may mount, given what resolution found.
  *
- * The drift guard has two seats and this is the second one. The first —
- * `pnpm check:console-sha` — is wired into the root `pnpm dev` /
- * `dev:showcase` / `dev:crm` / `dev:todo` scripts, and every boot that does
- * not go through those scripts misses it: `objectstack dev` run directly in
+ * The drift guard had two seats and this is the one that remains. The other —
+ * `pnpm check:console-sha`, wired into the root `pnpm dev` scripts — retired
+ * with the framework's pin (#25745). Even while it ran, every boot that did
+ * not go through those scripts missed it: `objectstack dev` run directly in
  * an example dir, an example's own `dev` script, a `.claude/launch.json`
  * config, `pnpm exec objectstack dev`. That is how a QA sweep came to measure
  * a console two days behind the pin (#7752) — the pin had moved, the local
@@ -717,9 +721,71 @@ function readExtraConnectSources(env: NodeJS.ProcessEnv): string[] {
 }
 
 /**
+ * The env var an operator names the deployment's default map style document
+ * in: an absolute `https:` URL, such as
+ * `https://tiles.example.com/styles/basic/style.json`. `RuntimeConfigPlugin`
+ * serves the same value as `mapStyleUrl` on `GET /api/v1/runtime/config`, and
+ * the Console document's `connect-src` names its origin, so the map view can
+ * fetch the style the door hands it.
+ */
+const CONSOLE_MAP_STYLE_URL_ENV = 'OS_CONSOLE_MAP_STYLE_URL';
+
+/**
+ * A DNS host name as the WHATWG parser leaves it. An IP literal in brackets is
+ * left out: a content-security-policy host source cannot name one.
+ */
+const MAP_STYLE_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/;
+
+/**
+ * The origin of the map style named in {@link CONSOLE_MAP_STYLE_URL_ENV}, or
+ * `undefined` when it is unset or empty; anything that is not an absolute
+ * `https:` URL on a host name, without credentials or whitespace, refuses the
+ * boot.
+ *
+ * The same contract, and the same refusal, as the reader `RuntimeConfigPlugin`
+ * serves the value through (`@objectstack/cloud-connection`,
+ * `readConsoleMapStyleUrl`). It is restated here rather than imported because
+ * this module, published as `@objectstack/cli/console`, imports Node built-ins
+ * only (`test/published-subpath-console.pin.test.ts`).
+ * `console.content-security-policy.test.ts` holds the two to the same verdict
+ * on every value it names, so the policy allows exactly the URL the door
+ * serves, and a value one side refuses cannot boot past the other.
+ */
+function readMapStyleOrigin(env: NodeJS.ProcessEnv): string | undefined {
+  const value = String(env[CONSOLE_MAP_STYLE_URL_ENV] ?? '').trim();
+  if (value === '') return undefined;
+  const refuse = (why: string, shown: string = value): never => {
+    throw new Error(
+      `${CONSOLE_MAP_STYLE_URL_ENV} is ${JSON.stringify(shown)}, which ${why}. Name the map style document `
+      + 'as an absolute https: URL on a host name, for example '
+      + 'https://tiles.example.com/styles/basic/style.json, or unset it to keep the built-in default style.',
+    );
+  };
+  if (/\s/.test(value)) return refuse('contains whitespace');
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return refuse('is not an absolute URL');
+  }
+  if (parsed.protocol !== 'https:') return refuse(`uses ${parsed.protocol} rather than https:`);
+  if (parsed.username !== '' || parsed.password !== '') {
+    // Named without the credentials: this message lands in the boot log.
+    return refuse(
+      'carries a user name or password, which the anonymous runtime-config door would publish',
+      `${parsed.protocol}//${parsed.host}${parsed.pathname}`,
+    );
+  }
+  if (!MAP_STYLE_HOST.test(parsed.hostname)) return refuse('names a host that a content-security-policy cannot allow');
+  return parsed.origin;
+}
+
+/**
  * The default map style the Console's map view loads when the view names none
  * (objectui `plugin-map`, `DEFAULT_MAP_STYLE`). Its style, tiles and glyphs are
- * all on this host.
+ * all on this host. It stays allowed when the operator names the deployment's
+ * own default in `OS_CONSOLE_MAP_STYLE_URL`: a view may still name it, and a
+ * Console build that does not read the served default yet still loads it.
  */
 const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
 
@@ -756,9 +822,12 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   values, and images inside an email template preview.
  * - `connect-src`: the server itself (`'self'`, which also covers the
  *   same-origin realtime WebSocket and the metadata event stream), the default
- *   map style's host, the error-reporting endpoint when the runtime serves a
- *   DSN (`telemetry.errorReporting.dsn` from `GET /api/v1/runtime/config`), and
- *   the hosts an operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
+ *   map style's host, the origin of the deployment's own default map style
+ *   when the operator names one in `OS_CONSOLE_MAP_STYLE_URL` (the URL
+ *   `GET /api/v1/runtime/config` serves as `mapStyleUrl`), the
+ *   error-reporting endpoint when the runtime serves a DSN
+ *   (`telemetry.errorReporting.dsn` from the same door), and the hosts an
+ *   operator names in `OS_CONSOLE_CSP_CONNECT_SRC`.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
  *   maplibre starts from its own file, the PWA manifest, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
@@ -772,12 +841,14 @@ function consoleContentSecurityPolicy(input: {
   nonce: string;
   reactPages: boolean;
   errorReportingOrigin: string | undefined;
+  mapStyleOrigin: string | undefined;
   extraConnectSources: readonly string[];
   embeddable: boolean;
 }): string {
   const scriptSrc = ["'self'", `'nonce-${input.nonce}'`, "'wasm-unsafe-eval'"];
   if (input.reactPages) scriptSrc.push("'unsafe-eval'");
   const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
+  if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
   connectSrc.push(...input.extraConnectSources);
   const directives: string[][] = [
@@ -908,6 +979,9 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       // Read once, at boot: a malformed value refuses here, loudly, rather
       // than reaching the header of every document.
       const extraConnectSources = readExtraConnectSources(process.env);
+      // The deployment's default map style (#26001), on the contract the
+      // runtime-config door serves it under, so the policy allows that URL.
+      const mapStyleOrigin = readMapStyleOrigin(process.env);
 
       const indexPath = path.join(absoluteDist, 'index.html');
       if (!fs.existsSync(indexPath)) {
@@ -993,6 +1067,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
           nonce,
           reactPages,
           errorReportingOrigin: shell?.errorReportingOrigin,
+          mapStyleOrigin,
           extraConnectSources,
           embeddable: reqPath.startsWith(`${PUBLIC_FORM_PAGE}/`),
         });

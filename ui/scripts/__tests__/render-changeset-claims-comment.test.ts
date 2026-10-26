@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   MARKER,
@@ -31,7 +30,11 @@ import {
  *     the whole body is pinned free of tag-shaped fragments.
  *  2. **One copy of the marker.** The workflow reads it off the body it is
  *     about to post. A second spelling in the YAML is drift waiting to happen,
- *     so its absence is pinned.
+ *     so its absence was pinned. Retired with objectstack#25712: the pin read
+ *     objectui's `changeset-presence.yml`, which runs nowhere under the
+ *     monorepo (GitHub runs the root `.github/workflows/` alone). It is row 4
+ *     of the objectstack#25697 workflow roster (→ sub-issue 4), and a port
+ *     brings the pin back against its root workflow, by path.
  *  3. **An empty finding set never reads as a request.** That inversion is
  *     objectui#3152's bug in this gate's costume, and it would mute the channel
  *     the ruling exists to un-mute.
@@ -40,9 +43,6 @@ import {
  *     「REQUEST TO READ」self-description becomes true by delivery, and it stays
  *     true only while the comment keeps saying what the gate does not do.
  */
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const WORKFLOW = '.github/workflows/changeset-presence.yml';
-
 /** The shape GitHub deletes on save — the reason the marker is plain text. */
 const TAG_SHAPED = /<[^<>\s][^<>]*>/;
 
@@ -119,10 +119,10 @@ describe('the marker the in-place update depends on', () => {
     expect(body).not.toContain('<!--');
   });
 
-  it('is spelled ONCE — the workflow reads it off the body rather than repeating it', () => {
-    const yaml = fs.readFileSync(path.join(repoRoot, WORKFLOW), 'utf8');
-    expect(yaml).not.toContain(MARKER);
-  });
+  // `is spelled ONCE — the workflow reads it off the body rather than repeating
+  // it` retired with objectstack#25712: it read objectui's
+  // `changeset-presence.yml`, which runs nowhere under the monorepo (roster
+  // row 4, → sub-issue 4).
 });
 
 // ── 2. quoted prose is repaired rather than silently eaten ───────────────────

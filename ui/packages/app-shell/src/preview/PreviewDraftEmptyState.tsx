@@ -23,10 +23,18 @@
  *
  * Deliberately CTA-free beyond Retry: the preview is a window owned by the
  * build conversation; every corrective action lives there.
+ *
+ * The two halves are drawn by the shared vocabulary, not by a block of their
+ * own: the load failure by `DataErrorState` and the other two by
+ * `DataEmptyState`. That is what makes them distinguishable to assistive
+ * technology — the failure is announced as `role="alert"`, the empty pane as
+ * `role="status"` — where the bare `Empty` primitive this used to compose gave
+ * both the same unlabelled node, so a failed overlay read was announced as
+ * nothing at all.
  */
 
 import { Eye, RefreshCw, TriangleAlert } from 'lucide-react';
-import { Empty, EmptyTitle, EmptyDescription, Button } from '@object-ui/components';
+import { Button, DataEmptyState, DataErrorState } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 
 export interface PreviewDraftEmptyStateProps {
@@ -40,40 +48,45 @@ export interface PreviewDraftEmptyStateProps {
 
 export function PreviewDraftEmptyState({ appName, error, onRetry }: PreviewDraftEmptyStateProps) {
   const { t } = useObjectTranslation();
-  const failed = Boolean(error);
+  // Both states offer the same Retry, so it is one node: the shared
+  // components' own `onRetry` button carries neither the glyph nor the test id
+  // this control has always had.
+  const retry = (
+    <Button variant="outline" onClick={onRetry} data-testid="preview-draft-retry">
+      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+      {t('preview.empty.retry', { defaultValue: 'Retry' })}
+    </Button>
+  );
   return (
     <div className="flex h-screen items-center justify-center" data-testid="preview-draft-empty-state">
-      <Empty>
-        <div className="mb-2 flex justify-center text-muted-foreground" aria-hidden="true">
-          {failed ? <TriangleAlert className="h-8 w-8" /> : <Eye className="h-8 w-8" />}
-        </div>
-        <EmptyTitle>
-          {failed
-            ? t('preview.empty.loadFailedTitle', { defaultValue: 'Draft preview failed to load' })
-            : appName
+      {error ? (
+        <DataErrorState
+          icon={<TriangleAlert className="size-5 text-destructive" aria-hidden="true" />}
+          title={t('preview.empty.loadFailedTitle', { defaultValue: 'Draft preview failed to load' })}
+          message={t('preview.empty.loadFailedDescription', {
+            defaultValue: 'The draft overlay could not be read. Retry, or check your connection.',
+          })}
+        >
+          {retry}
+        </DataErrorState>
+      ) : (
+        <DataEmptyState
+          icon={<Eye className="size-5 text-muted-foreground" aria-hidden="true" />}
+          title={
+            appName
               ? t('preview.empty.notReadyTitle', {
                   app: appName,
                   defaultValue: '“{{app}}” isn’t in the draft yet',
                 })
-              : t('preview.empty.nothingTitle', { defaultValue: 'Nothing to preview yet' })}
-        </EmptyTitle>
-        <EmptyDescription>
-          {failed
-            ? t('preview.empty.loadFailedDescription', {
-                defaultValue: 'The draft overlay could not be read. Retry, or check your connection.',
-              })
-            : t('preview.empty.notReadyDescription', {
-                defaultValue:
-                  'The build may still be running, or it may have failed before this app was staged. Check the conversation for the build status — this pane refreshes as drafts land.',
-              })}
-        </EmptyDescription>
-        <div className="mt-4 flex justify-center">
-          <Button variant="outline" onClick={onRetry} data-testid="preview-draft-retry">
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            {t('preview.empty.retry', { defaultValue: 'Retry' })}
-          </Button>
-        </div>
-      </Empty>
+              : t('preview.empty.nothingTitle', { defaultValue: 'Nothing to preview yet' })
+          }
+          description={t('preview.empty.notReadyDescription', {
+            defaultValue:
+              'The build may still be running, or it may have failed before this app was staged. Check the conversation for the build status — this pane refreshes as drafts land.',
+          })}
+          action={retry}
+        />
+      )}
     </div>
   );
 }

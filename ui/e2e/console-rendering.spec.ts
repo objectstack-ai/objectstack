@@ -67,22 +67,4 @@ test.describe('Console Rendering', () => {
     const childCount = await root.evaluate((el) => el.children.length);
     expect(childCount, 'React did not mount on deep route').toBeGreaterThan(0);
   });
-
-  test('should include the MSW service worker in the build output', async ({ page }) => {
-    // The mock server requires mockServiceWorker.js to be served from /public.
-    // If it's missing, the app may hang during bootstrap.
-    const response = await page.request.get(`${CONSOLE_BASE}/mockServiceWorker.js`);
-
-    // In production builds without MSW, the asset may be absent. The static
-    // server returns the SPA fallback (index.html) for unknown paths, which
-    // is a 200 with `text/html`. Treat that as "MSW not bundled" and skip.
-    if (response.ok()) {
-      const contentType = response.headers()['content-type'] || '';
-      if (contentType.includes('text/html')) {
-        // SPA fallback — mockServiceWorker.js is not bundled in this build.
-        return;
-      }
-      expect(contentType).toContain('javascript');
-    }
-  });
 });

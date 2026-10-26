@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -25,9 +25,9 @@
         ],
         "knownGaps": [
           "FIXED, regression row, expected PASS (objectui#11817): Setup → Users → Invite User toasts 'Invitation sent to EMAIL' — the declared successMessage 'Invitation sent to ${result.email}' (packages/platform-objects/src/identity/sys-user.object.ts#invite_user) interpolating the invitee from the action result — while the sys_invitation and sys_email rows are written (QA run #23163 at objectui 1fb1ced36243; pin ObjectView.inviteFeedback-11817.test.tsx)",
-          "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's 'Save All' toasts '1 row saved' (objectui#12303 fixed for this row); the approvals drawer's Approve toasts the framework-declared successMessage 'Approved \"${result.request.record_title}\"' (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' toast and its confirm now name the item by its LABEL — QA run #24570 at objectui 4016370a read 'Draft discarded: QA Widget' — a regression row, expected PASS (objectstack-ai/objectui#12690, closed by objectui PR #12830, 0f42aaf8, in the console pin 4016370a and on objectui main; ResourceEditPage.tsx falls back to type/name only for an item with no label)",
+          "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's 'Save All' toasts '1 row saved' (objectui#12303 fixed for this row); the approval decision's Approve toasted the framework-declared successMessage, read in the approvals drawer that route no longer has (variants[6]) 'Approved \"${result.request.record_title}\"' (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' toast and its confirm now name the item by its LABEL — QA run #24570 at objectui 4016370a read 'Draft discarded: QA Widget' — a regression row, expected PASS (objectstack-ai/objectui#12690, closed by objectui PR #12830, 0f42aaf8, in the console pin 4016370a and on objectui main; ResourceEditPage.tsx falls back to type/name only for an item with no label)",
           "FIXED, regression row, expected PASS (objectui#11816): leaving an inline editor with no value change no longer reads '1 row modified · Save All (1)' (QA run #23163 at objectui 1fb1ced36243; pin data-table-noop-edit-11816.test.tsx) — negative[1]",
-          "Undo is scored only where a surface offers it, and on stock NONE does: at objectui 1fb1ced36243 only an action declaring `undoable` pushes an Undo op (inline and form edits push none), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] scores blocked(fixture) on stock (QA run #23163 A5). Its absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
+          "Undo is scored only where a surface offers it, and on stock ONE surface does: the import. An import run as a job (the wizard's 'runs as an undoable job' option) is listed in the import history with 'Undo import', which deletes the records it created and restores the records it updated to their previous values; QA run #25817 at 6679644a read it working in both create and update modes. Elsewhere no stock surface offers Undo: only an action declaring `undoable` pushes an Undo op (inline and form edits push none), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] is scored on the import variant. Undo's absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
         ]
       },
       "variants": [
@@ -37,20 +37,20 @@
         "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a refused move must revert with an error)",
         "declared record action — Mark Done on a task record (declared successMessage 'Task marked done.', examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction)",
         "param action dialog — Setup → Users → Invite User → Confirm (declared successMessage 'Invitation sent to ${result.email}')",
-        "approval decision — the decision drawer on the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken) → Approve with a comment",
+        "approval decision — open the request from the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken). The route has no drawer: opening a request navigates to its record page (sys_approval_request_detail), where the decision is taken → Approve with a comment",
         "import — Tasks → Import a two-row CSV → the result screen",
         "Studio autosave — rename a field label in the scratch package",
         "Studio publish — Publish the scratch package",
-        "Studio discard — on the metadata designer (/_console/apps/setup/metadata/object/OBJ for a scratch-package object with a pending draft), click 'Discard draft' and accept the native confirm; the Studio pillars offer no discard. A scratch object's name carries its package's namespace prefix, so read it off the package before building the URL",
+        "Studio discard — on the metadata designer (/_console/apps/setup/metadata/object/OBJ for a scratch-package object with a pending draft), click 'Discard draft' and accept the in-app confirm dialog (it is no longer the browser's native confirm); the Studio pillars offer no discard. A scratch object's name carries its package's namespace prefix, so read it off the package before building the URL",
         "settings save — Settings → Localization → save a value"
       ],
       "steps": [
         "sign in as admin; keep a second context (or the REST API) open to read server truth independently of the UI",
         "for each variant perform the write once, then within ~2 s capture a screenshot and the DOM of every feedback region — toasts ([data-sonner-toast]), role=status / role=alert regions, and the surface's own save indicator — recording the verbatim text, or its absence",
         "for each variant read server-side whether the write landed (GET the record, the metadata item or the sys_ row) and record the request's status from the network log",
-        "repeat the record rows signed in as the member persona, on member-owned records — the stock member's set (showcase_member_default) grants showcase_task read + create only, so the member's create row runs while its inline-edit, bulk-delete and kanban rows answer 403 PERMISSION_DENIED: record those as refused writes (their error feedback is still clause 3's to score), or bind the member to the contributor position for the edit rows (showcase_contributor grants task edit, not delete)",
+        "repeat the record rows signed in as the member persona, on member-owned records — the stock member's set (showcase_member_default) grants showcase_task read + create only, and the console applies it up front: it offers the member no inline edit, no row selection and no kanban drag, so those three rows cannot be driven as the member (record them as not offered, never as refused). The member's create row runs; for the refusal row use the member's Mark Done on a task record, which answers 403 PERMISSION_DENIED (its error feedback is clause 3's to score). To drive the edit rows as a member, bind the member to the contributor position (showcase_contributor grants task edit, not delete)",
         "negative pass: (a) submit the create form with a required field empty; then break a validation rule — showcase_task's only rule is the UPDATE-time state machine task_status_flow (no create-time rule exists), so drive it as a refused transition, e.g. a kanban move Backlog → Done; (b) open an inline editor and leave it without changing the value",
-        "where a variant offers Undo, click it and read the record back — on stock none does (knownGaps[3]), so record acceptance[5] blocked(fixture)"
+        "where a variant offers Undo, click it and read the record back — on stock the import does (knownGaps[3]): run the two-row CSV import as a job, once creating and once updating, then 'Undo import' from the import history and read the rows back"
       ],
       "acceptance": [
         {
@@ -60,9 +60,9 @@
           "evidence": "per-variant table: variant · landed (y/n, request status) · feedback text verbatim or 'none' · screenshot"
         },
         {
-          "clause": "success feedback names what changed — the record, item or count — rather than a bare 'Success' or a machine name",
+          "clause": "success feedback names its subject: a record-level write names the record or item (its title, label or display name) or the count; a singleton page (settings) and a named automation (e.g. Flow \"X\" completed) are their own subject and pass as they are; a bare 'Success' / 'Done' or a machine name never passes",
           "oracle": "screenshot",
-          "verify": "read the captured text: it names the subject (record title, invitee email, package label, 'N created · M skipped'); a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
+          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until ui card #26172 lands, so those rows are expected FAILs that cite it. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
           "evidence": "the verbatim feedback strings"
         },
         {
@@ -86,7 +86,7 @@
         {
           "clause": "where Undo is offered it restores the prior value server-side",
           "oracle": "api",
-          "verify": "after Undo, GET the record and compare the field with its pre-edit value; on stock no surface offers Undo (knownGaps[3]), so the clause scores blocked(fixture) until a packaged undoable action ships",
+          "verify": "after Undo, GET the record and compare the field with its pre-edit value. On stock the import is the surface that offers it (knownGaps[3]): after 'Undo import' the rows a create-mode import wrote are gone and the rows an update-mode import changed carry their pre-import values",
           "evidence": "before / after / after-undo values"
         }
       ],
@@ -129,6 +129,18 @@
           "date": "2026-10-19",
           "change": "knownGaps[1], steps[3] and steps[4] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24570, ux-conventions.write-feedback; wave anchor #24579 §3). The Studio Discard row no longer reproduces as an expected FAIL: objectstack-ai/objectui#12690 is closed (objectui PR #12830, merge 0f42aaf8, an ancestor of the console pin 4016370a and of objectui main, measured by merge-base --is-ancestor exit 0), and the run read the label. showcase_task carries no create-time validation rule (examples/app-showcase/src/data/objects/task.object.ts: one state_machine on update), and the stock member cannot update or delete tasks (security/permission-sets.ts at base 9a7838edf5). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "knownGaps[1] and [3], variants[6] and [10], steps[3] and [5] and acceptance[5].verify corrected (checklist-accuracy findings of QA run #25817, release-18.2.0-manual-set at 6679644a, objectui pin b41ed7f68956; wave anchor #25807). Import Undo works in both create and update modes, so 'no stock surface offers Undo' is stale and acceptance[5] is scored on the import instead of blocked(fixture). Discard draft is now an in-app dialog. The approvals route has no drawer: a request opens on its record page. The console offers a member no inline edit, selection or drag, so the member's refusal row is Mark Done. Not applied: the run asked for a ruling on object-only success strings ('Task created successfully', 'Settings saved', Flow \"Reassign Task\" completed) under acceptance[1]; that is a maintainer decision, so acceptance[1] is unchanged and the question goes to the seat",
+          "ref": "#25849"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "acceptance[1] clause and verify reworded to the maintainer's ruling on the object-only success strings QA run #25817 (release-18.2.0-manual-set at 6679644a, objectui pin b41ed7f68956) asked about: ruling comment 6417978207 on #25849, letter C — a record-level write names the record (its title) or the count; a singleton page (settings) and a named automation (Flow \"X\" completed) are their own subject and pass as they are, and the clause states that boundary. verify now classifies each row (record-level, or singleton / named automation) before scoring it by that class's test. Not loosened: a generic 'Success' / 'Done' or a machine name still FAILS, and a record-level toast that names only the object ('Task created successfully') is an expected FAIL until the ui card #26172 lands. The 2026-10-07 instruction the clause rests on (every write has feedback; no machine names) is unchanged in meaning",
+          "ref": "#25849"
         }
       ]
     },

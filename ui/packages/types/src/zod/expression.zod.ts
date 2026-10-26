@@ -42,5 +42,5 @@ import { z } from 'zod';
  */
 export const ExpressionWireSchema = z.union([
   z.string(),
-  z.object({ dialect: z.string().optional(), source: z.string() }),
+  z.looseObject({ dialect: z.string().optional(), source: z.string() }),
 ]);

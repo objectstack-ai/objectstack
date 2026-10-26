@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 
 import {
   CONFIRMATION_DELAY_MS,
@@ -24,7 +23,6 @@ import {
   selectHeadEntry,
   selfTest,
 } from '../check-merge-queue-head.mjs';
-import { producedCheckNames, readWorkflows, triggerBlock } from './workflow-checks';
 
 /**
  * objectui#7010 — a merge-queue head entry for which GitHub never dispatches
@@ -58,8 +56,6 @@ import { producedCheckNames, readWorkflows, triggerBlock } from './workflow-chec
  */
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 const GATE = 'scripts/check-merge-queue-head.mjs';
-const WORKFLOW_FILE = 'merge-queue-head-patrol.yml';
-const WORKFLOW = `.github/workflows/${WORKFLOW_FILE}`;
 
 const gateSource = fs.readFileSync(path.join(ROOT, GATE), 'utf8');
 const NOW = Date.parse('2026-09-05T23:40:00Z');
@@ -322,14 +318,25 @@ describe('the report describes calls that were actually made', () => {
   });
 });
 
+/**
+ * The workflow half of this describe retired with objectstack#25712: `the
+ * script and its workflow both exist` (its workflow leg), `the workflow
+ * actually runs the script`, `runs on a clock`, `subscribes no pull_request
+ * leg, so it owes no entry in the merge gate`, `grants exactly the three scopes
+ * it uses`, `serialises itself and never cancels a run mid-reading`, `captures
+ * the exit code with no pipe in between`, `lands the reading BEFORE it raises
+ * the alarm`, `never opens an issue`, the no-install leg of `needs no install`
+ * and the `QUEUE_BASE_BRANCH` leg of `reads the branch it is installed to
+ * watch`. Each read objectui's `merge-queue-head-patrol.yml`, which runs
+ * nowhere under the monorepo: GitHub runs the root `.github/workflows/` alone,
+ * and no root workflow runs this patrol. It is row 20 of the objectstack#25697
+ * workflow roster (→ sub-issue 4), where the root `merge-queue-triage.yml` is
+ * the counterpart; a port brings these pins back against its root workflow, by
+ * path. What stays reads the script and `package.json`.
+ */
 describe('the patrol is wired, not merely present', () => {
-  const workflowText = fs.readFileSync(path.join(ROOT, WORKFLOW), 'utf8');
-  const workflow = parseYaml(workflowText);
-  const job = workflow.jobs.patrol;
-
-  it('the script and its workflow both exist', () => {
+  it('the script exists', () => {
     expect(fs.existsSync(path.join(ROOT, GATE))).toBe(true);
-    expect(fs.existsSync(path.join(ROOT, WORKFLOW))).toBe(true);
   });
 
   it('package.json aliases the offline check and the live read', () => {
@@ -338,92 +345,14 @@ describe('the patrol is wired, not merely present', () => {
     expect(pkg.scripts['merge-queue-head']).toBe(`node ${GATE}`);
   });
 
-  it('the workflow actually runs the script', () => {
-    const runs = job.steps.map((s: { run?: string }) => s.run ?? '').join('\n');
-    expect(runs).toContain(`node ${GATE}`);
-  });
-
-  it('runs on a clock, because the failure is an absence nothing can trigger on', () => {
-    // A wedged entry emits no `merge_group`; `main` never moves, so no `push`
-    // fires; the pull-request events all happened before it was enqueued. There
-    // is no event to hang this on — that is the whole reason for the cron.
-    const crons = (workflow.on.schedule ?? []).map((s: { cron: string }) => s.cron);
-    expect(crons).toHaveLength(1);
-    expect(crons[0]).toMatch(/^[\d,]+ \* \* \* \*$/);
-    const minutes = crons[0].split(' ')[0].split(',').map(Number);
-    expect(minutes.length, 'four firings an hour — see the cadence arithmetic in the workflow header').toBe(4);
-    expect(minutes, 'offset off :00, where every other repository schedules').not.toContain(0);
-    expect(workflow.on).toHaveProperty('workflow_dispatch');
-  });
-
-  it('subscribes no pull_request leg, so it owes no entry in the merge gate', () => {
-    // Every job of a `pull_request` workflow produces a check run, and
-    // `dependabot-merge-gate.mjs` requires every produced name to be classified
-    // in REQUIRED_CONTEXTS / OPTIONAL_CONTEXTS / NOT_A_GATE — a partition
-    // `dependabot-merge-gate.test.ts` asserts exactly. This patrol has no leg,
-    // so it produces nothing and owes nothing. If a leg is ever added, this goes
-    // red and names the other half of the work.
-    expect(workflow.on).not.toHaveProperty('pull_request');
-    expect(workflow.on).not.toHaveProperty('merge_group');
-    const self = readWorkflows().find((w) => w.file === WORKFLOW_FILE);
-    expect(self, 'the patrol workflow must be readable by the shared parser').toBeTruthy();
-    expect(triggerBlock(self!).some((line) => /^ {2}pull_request:/.test(line))).toBe(false);
-    for (const [name, file] of producedCheckNames()) {
-      expect(file, `${name} must not come from the patrol — it can never gate a pull request`).not.toBe(WORKFLOW_FILE);
-    }
-  });
-
-  it('grants exactly the three scopes it uses, and no other write', () => {
-    expect(workflow.permissions).toEqual({ contents: 'read', actions: 'read', issues: 'write' });
-  });
-
-  it('serialises itself and never cancels a run mid-reading', () => {
-    expect(workflow.concurrency.group).toBe('merge-queue-head-patrol');
-    expect(workflow.concurrency['cancel-in-progress']).toBe(false);
-  });
-
-  it('captures the exit code with no pipe in between', () => {
-    // `node … | tail` reports the PIPE's status, and `tail` essentially never
-    // fails — so a wedge (3), a clean reading (0) and an unreadable one (2)
-    // would all read as 0. That silent collapse is the class this patrol exists
-    // to catch, and it would be sitting inside the patrol.
-    const step = job.steps.find((s: { id?: string }) => s.id === 'patrol');
-    expect(step, 'the reading step must keep its `id: patrol`').toBeTruthy();
-    expect(step.run).toMatch(/code=\$\?/);
-    expect(step.run).not.toMatch(/node scripts\/check-merge-queue-head\.mjs[^\n]*\|/);
-  });
-
-  it('lands the reading BEFORE it raises the alarm', () => {
-    const ids = job.steps.map((s: { name?: string }) => s.name ?? '');
-    const summaryAt = ids.findIndex((n: string) => /run summary/i.test(n));
-    const failAt = ids.findIndex((n: string) => /^Fail the run/i.test(n));
-    expect(summaryAt).toBeGreaterThan(-1);
-    expect(failAt).toBeGreaterThan(summaryAt);
-    expect(job.steps[summaryAt].if).toBe('always()');
-  });
-
-  it('never opens an issue — one anchor, refreshed, or nothing at all', () => {
-    // A patrol that filed a card per firing would file four an hour for an hour,
-    // on one incident. objectui#7010's own history is the precedent: a live
-    // recurrence was posted there as a comment "per the one-anchor rule rather
-    // than as a new card".
-    expect(workflowText).not.toMatch(/issues\.create/);
-    expect(workflowText).not.toMatch(/issues\.createComment/);
-    expect(workflowText).toMatch(/issues\.update/);
-  });
-
-  it('needs no install, so it stays inside the pre-install import population', () => {
-    const runs = job.steps.map((s: { run?: string; uses?: string }) => `${s.uses ?? ''} ${s.run ?? ''}`).join('\n');
-    expect(runs).not.toMatch(/pnpm install/);
-    // The gate imports one repo-relative module and nothing else; anything from
-    // `node_modules` would make the install-free step throw at import time.
+  it('imports one repo-relative module and nothing else, so it can run before an install', () => {
+    // Anything from `node_modules` would make an install-free step throw at
+    // import time.
     const imports = [...gateSource.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
     expect(imports).toEqual(['./invoked-as.mjs']);
   });
 
-  it('reads the branch it is installed to watch, with a default that is real', () => {
-    const step = job.steps.find((s: { id?: string }) => s.id === 'patrol');
-    expect(step.env.QUEUE_BASE_BRANCH).toContain('default_branch');
+  it('defaults to a branch that is real', () => {
     expect(DEFAULT_BASE_BRANCH).toBe('main');
   });
 });

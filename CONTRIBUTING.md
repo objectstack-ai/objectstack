@@ -15,8 +15,10 @@ matters, it points you to AGENTS.md, and if the two ever disagree, AGENTS.md win
 
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
+- [Build and Test Cost](#build-and-test-cost)
 - [Making a Change](#making-a-change)
 - [Where Things Live](#where-things-live)
+- [Package Directory](#package-directory)
 - [Pull Request Process](#pull-request-process)
 - [Community](#community)
 
@@ -58,16 +60,48 @@ pnpm build
 ```
 
 The README's [Hack on the framework](./README.md#hack-on-the-framework) section
-covers the rest: building the Console, running an example app with `pnpm dev`, and
-how long a first build and a full test run take.
+has the commands for building the Console and running an example app with `pnpm dev`;
+the next section says what each one costs.
+
+## Build and Test Cost
+
+`pnpm console:build` builds the Console from its source in this workspace
+(`ui/apps/console`, against this tree's own spec and client) and copies the
+result into `packages/console/dist` (gitignored), which is where `pnpm dev`
+serves it from. Nothing is cloned or pinned. `pnpm build` builds the Console
+too but does not copy it, so after `pnpm build` this step is a copy. Skip it
+and `pnpm dev` still serves the REST API, without the Console. Rerun it after
+pulling changes under `ui/`: `packages/console/dist` is never refreshed on its
+own.
+
+A first run is slow, not stuck. Measured once on a fresh clone of `main`
+(4-vCPU container, Node 22.22, pnpm 10.31):
+
+| Command | Time | |
+|:---|---:|:---|
+| `pnpm install` | 16 s | |
+| `pnpm build` | 6 m 54 s | 72 turbo tasks |
+| `pnpm console:build` | 12 m 16 s | 72 turbo tasks: the Console and what it depends on, run before any `pnpm build` (`--concurrency=2`); a cache hit plus a copy, about 1 s, once `pnpm build` has run |
+| `pnpm test` | 54 m 03 s | the full suite: 135 turbo tasks |
+
+For your own change, test what it reaches instead of the full suite:
+
+```bash
+pnpm turbo run test --affected          # packages your branch changes, and their dependents
+pnpm --filter @objectstack/<pkg> test   # one package
+```
+
+`--affected` compares your branch with your local `main`, so a stale `main`
+widens the set; keep it current, or set `TURBO_SCM_BASE=origin/main`.
+
+Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 
 ## Making a Change
 
 1. **Start from an issue.** Pick one from the
    [issue tracker](https://github.com/objectstack-ai/objectstack/issues), or open one
    that describes the bug or the proposal before you write code.
-   [ROADMAP.md](./ROADMAP.md) and [docs/NORTH-STAR.md](./docs/NORTH-STAR.md) show
-   where the project is going.
+   [docs/NORTH-STAR.md](./docs/NORTH-STAR.md) shows where the project is going.
 2. **Branch off an up-to-date `main`, one branch and one pull request per issue**,
    with the issue number in the branch name:
 
@@ -105,15 +139,144 @@ how long a first build and a full test run take.
 | Path | What it holds |
 |:---|:---|
 | `packages/spec/src/` | The protocol: Zod schemas, types and constants. AGENTS.md lists the domains. |
-| `packages/`, `packages/plugins/`, `packages/services/`, … | The kernel, runtime, drivers, plugins, services, CLI and SDK. The README's package directory has them all. |
+| `packages/`, `packages/plugins/`, `packages/services/`, … | The kernel, runtime, drivers, plugins, services, CLI and SDK. The [package directory](#package-directory) below has them all. |
 | `content/docs/` | The documentation site's pages, in trees such as `getting-started/`, `concepts/`, `data-modeling/`, `ui/`, `automation/`, `api/` and `deployment/`. Preview with `pnpm docs:dev`. |
 | `content/docs/references/` | Generated from the Zod schemas by `packages/spec/scripts/build-docs.ts`. Never edit it by hand. |
 | `content/docs/releases/` | Written at release time from changesets. Never edit it in a code pull request. |
-| `examples/` | The example apps. The README's *Examples* table describes each one. |
+| `examples/` | The example apps. The *Examples* table in the [package directory](#package-directory) describes each one. |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Design details, the plugin lifecycle and the dependency graph. |
 
 AGENTS.md (*Documentation Guardrails*) has the rules for every docs path, including what a
 new page needs before it shows up in the navigation.
+
+## Package Directory
+
+<details>
+<summary><b>Everything in <code>packages/</code></b>, grouped by layer — click to expand.</summary>
+
+#### Protocol & core
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/spec`](packages/spec) | The protocol — Zod schemas, TypeScript types, JSON Schemas, constants |
+| [`@objectstack/core`](packages/core) | Microkernel — plugin system, DI container, EventBus, Logger |
+| [`@objectstack/types`](packages/types) | Shared interfaces describing the runtime environment |
+| [`@objectstack/formula`](packages/formula) | Expression engine — CEL plus the ObjectStack stdlib, for formulas, predicates, defaults |
+| [`@objectstack/platform-objects`](packages/platform-objects) | Built-in platform objects — identity, security, audit, tenant, metadata |
+| [`@objectstack/lint`](packages/lint) | Static validation of a metadata graph, shared by `os validate` and AI authoring |
+| [`@objectstack/sdui-parser`](packages/sdui-parser) | Constrained JSX source → SDUI schema tree compiler (parse, never execute) |
+
+#### Engine
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/objectql`](packages/objectql) | Isomorphic ObjectQL query engine and schema registry |
+| [`@objectstack/runtime`](packages/runtime) | Runtime bootstrap — DriverPlugin, AppPlugin, environment artifacts |
+| [`@objectstack/rest`](packages/rest) | Auto-generated REST API layer |
+| [`@objectstack/metadata`](packages/metadata) | Metadata loading, saving, and persistence |
+| [`@objectstack/metadata-core`](packages/metadata-core) | Metadata repository contracts — types, canonicalization, errors |
+| [`@objectstack/metadata-fs`](packages/metadata-fs) | File-system metadata repository (JSON files + JSONL change log) |
+| [`@objectstack/metadata-protocol`](packages/metadata-protocol) | Metadata management protocol — CRUD, draft/publish, locks, diagnostics |
+| [`@objectstack/observability`](packages/observability) | Metrics, error reporting, and logging contracts with noop / console / OTLP exporters |
+| [`@objectstack/verify`](packages/verify) | Boot an app in-process and verify it through the real HTTP stack |
+
+#### Drivers
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/driver-memory`](packages/drivers/driver-memory) | In-memory driver (development, testing, reference implementation) |
+| [`@objectstack/driver-sql`](packages/drivers/driver-sql) | SQL driver — PostgreSQL, MySQL, SQLite via Knex |
+| [`@objectstack/driver-mongodb`](packages/drivers/driver-mongodb) | MongoDB driver over the official client |
+| [`@objectstack/driver-turso`](packages/drivers/driver-turso) | Turso / libSQL driver — edge-first SQLite with embedded replicas |
+| [`@objectstack/driver-sqlite-wasm`](packages/drivers/driver-sqlite-wasm) | WASM SQLite driver for browsers and WebContainers (StackBlitz) |
+
+#### Client
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/client`](packages/client) | Client SDK — CRUD, batch API, error handling |
+| [`@objectstack/client-react`](packages/client-react) | React hooks — `useQuery`, `useMutation`, `usePagination` |
+
+#### Plugins
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/plugin-hono-server`](packages/plugins/plugin-hono-server) | Hono-based HTTP server plugin |
+| [`@objectstack/hono`](packages/adapters/hono) | Hono adapter — Node.js, Bun, Deno, Cloudflare Workers |
+| [`@objectstack/mcp`](packages/mcp) | MCP server — exposes objects and AI tools over stdio and Streamable HTTP |
+| [`@objectstack/plugin-auth`](packages/plugins/plugin-auth) | Authentication and identity (better-auth) |
+| [`@objectstack/plugin-security`](packages/plugins/plugin-security) | RBAC, row-level and field-level security |
+| [`@objectstack/plugin-sharing`](packages/plugins/plugin-sharing) | Record-level sharing and `sharingModel` enforcement |
+| [`@objectstack/organizations`](packages/plugins/organizations) | Multi-organization row-level isolation |
+| [`@objectstack/plugin-approvals`](packages/plugins/plugin-approvals) | Multi-step approval engine |
+| [`@objectstack/plugin-audit`](packages/plugins/plugin-audit) | Audit log object and audit trail |
+| [`@objectstack/plugin-email`](packages/plugins/plugin-email) | Pluggable outbound email transport |
+| [`@objectstack/plugin-webhooks`](packages/plugins/plugin-webhooks) | Durable, cluster-aware outbound webhook delivery |
+| [`@objectstack/plugin-pinyin-search`](packages/plugins/plugin-pinyin-search) | Pinyin recall for CJK search |
+| [`@objectstack/plugin-dev`](packages/plugins/plugin-dev) | Zero-config local development assembly |
+| [`@objectstack/knowledge-memory`](packages/plugins/knowledge-memory) | In-memory knowledge adapter (dev / test) |
+| [`@objectstack/knowledge-ragflow`](packages/plugins/knowledge-ragflow) | RAGFlow knowledge adapter |
+| [`@objectstack/embedder-openai`](packages/plugins/embedder-openai) | OpenAI-compatible embedder (OpenAI, DashScope, Ollama, and any drop-in endpoint) |
+
+#### Connectors & triggers
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/connector-rest`](packages/connectors/connector-rest) | Generic REST connector for the automation engine |
+| [`@objectstack/connector-openapi`](packages/connectors/connector-openapi) | Connector actions generated from an OpenAPI document |
+| [`@objectstack/connector-mcp`](packages/connectors/connector-mcp) | Any MCP server's tools as connector actions |
+| [`@objectstack/connector-slack`](packages/connectors/connector-slack) | Slack Web API connector |
+| [`@objectstack/connector-imap`](packages/connectors/connector-imap) | Read-only IMAP session and mail account abstraction for the mailbox sync |
+| [`@objectstack/trigger-record-change`](packages/triggers/trigger-record-change) | Launch flows on insert / update / delete |
+| [`@objectstack/trigger-schedule`](packages/triggers/trigger-schedule) | Launch flows on a cron, interval, or one-off schedule |
+| [`@objectstack/trigger-api`](packages/triggers/trigger-api) | Inbound HTTP / webhook flow trigger with HMAC verification |
+
+#### Services
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/service-automation`](packages/services/service-automation) | Automation engine — DAG flows, triggers, workflow state machines |
+| [`@objectstack/service-analytics`](packages/services/service-analytics) | Aggregations, time series, funnels, dashboards |
+| [`@objectstack/service-realtime`](packages/services/service-realtime) | Real-time events and subscriptions |
+| [`@objectstack/service-job`](packages/services/service-job) | Cron and interval job scheduler |
+| [`@objectstack/service-queue`](packages/services/service-queue) | Background job queue — in-memory or durable DB-backed |
+| [`@objectstack/service-cache`](packages/services/service-cache) | Cache — in-memory and Redis |
+| [`@objectstack/service-cluster`](packages/services/service-cluster) | Cluster primitives — PubSub, Lock, KV, Counter |
+| [`@objectstack/service-cluster-redis`](packages/services/service-cluster-redis) | Redis driver for the cluster service |
+| [`@objectstack/service-storage`](packages/services/service-storage) | File storage — local filesystem and S3 |
+| [`@objectstack/service-datasource`](packages/services/service-datasource) | External-table federation and datasource lifecycle |
+| [`@objectstack/service-settings`](packages/services/service-settings) | Settings — manifest registry and K/V resolver (env > tenant > user) |
+| [`@objectstack/service-i18n`](packages/services/service-i18n) | Internationalization |
+| [`@objectstack/service-messaging`](packages/services/service-messaging) | Outbound notification dispatch across channels |
+| [`@objectstack/service-sms`](packages/services/service-sms) | SMS delivery (Aliyun, Twilio, log) |
+| [`@objectstack/service-knowledge`](packages/services/service-knowledge) | Knowledge / RAG orchestration over pluggable adapters |
+| [`@objectstack/service-package`](packages/services/service-package) | Package registry — publish, install, manage metadata packages |
+| [`@objectstack/cloud-connection`](packages/cloud-connection) | Runtime-side client for an ObjectStack cloud control plane |
+
+#### Tools & apps
+
+| Package | Description |
+| :--- | :--- |
+| [`@objectstack/cli`](packages/cli) | The `os` / `objectstack` CLI |
+| [`create-objectstack`](packages/create-objectstack) | Project scaffolder (`npm create objectstack`) |
+| [`@objectstack/console`](packages/console) | Prebuilt Console SPA, version-locked to this release; built from [`ui/apps/console`](ui/apps/console) in this repository |
+| [`@objectstack/studio`](packages/apps/studio) | Studio — the visual metadata builder app |
+| [`@objectstack/setup`](packages/apps/setup) | Setup — the platform administration app |
+| [`@objectstack/account`](packages/apps/account) | Account — sign in, organizations, connected apps |
+| [`@objectstack/docs`](apps/docs) | Documentation site (Fumadocs + Next.js) |
+
+#### Examples
+
+| Example | What it shows |
+| :--- | :--- |
+| [`examples/app-todo`](examples/app-todo) | The smallest app — objects, views, dashboards, flows |
+| [`examples/app-crm`](examples/app-crm) | A minimal CRM exercising the full metadata pipeline: objects → views → app → dashboard → hooks → flows → seed |
+| [`examples/app-showcase`](examples/app-showcase) | Kitchen sink — every metadata type, view type, chart type, and capability chain; what `pnpm dev` runs |
+| [`examples/app-multi-package`](examples/app-multi-package) | One release artifact carrying two packages that share a namespace |
+| [`examples/embed-objectql`](examples/embed-objectql) | ObjectQL as a plain library — no kernel, no plugins |
+| [HotCRM](https://github.com/objectstack-ai/hotcrm) | Full-featured enterprise CRM reference app (separate repo) |
+
+</details>
 
 ## Pull Request Process
 
@@ -149,6 +312,12 @@ verified it.
 - **[GitHub Issues](https://github.com/objectstack-ai/objectstack/issues)** — bug reports
   and feature requests
 - **[Documentation](https://objectstack.ai/docs)** — the published docs site
+
+This repository is the one public issue tracker for every ObjectOS edition: Community
+(the code in this repository), Cloud and Enterprise. Say which edition you run when you
+open an issue; the Bug report and Feature request forms ask for it. Cloud and Enterprise
+reports are triaged by the ObjectOS Cloud team and may be moved to the repository where
+that code lives.
 
 ## License
 

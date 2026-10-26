@@ -346,10 +346,13 @@ export const AUTH_INVITATION_TEMPLATE: EmailTemplate = {
 <p><strong>{{inviter.name}}</strong> ({{inviter.email}}) has invited you to join <strong>{{organization.name}}</strong> on {{appName}} as <em>{{role}}</em>.</p>
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">Accept invitation</a></p>
 <p style="font-size:13px;color:#6b7280">Or paste:<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+<p style="font-size:13px;color:#6b7280">This invitation expires on {{ expiresAt | datetime:long }}.</p>
 `),
   bodyText: `{{inviter.name}} ({{inviter.email}}) invited you to join {{organization.name}} on {{appName}} as {{role}}.
 
-Accept: {{acceptUrl}}`,
+Accept: {{acceptUrl}}
+
+This invitation expires on {{ expiresAt | datetime:long }}.`,
   variables: [
     { name: 'inviter.name', type: 'string', required: false },
     { name: 'inviter.email', type: 'string', required: false },
@@ -365,6 +368,21 @@ Accept: {{acceptUrl}}`,
     },
     { name: 'acceptUrl', type: 'url', required: true },
     { name: 'appName', type: 'string', required: false },
+    // The instant the invitation stops being acceptable (better-auth's
+    // `invitation.expiresAt`, an ISO-8601 string). Every body renders it
+    // through the `datetime:long` formatter, so the date reads in the row's
+    // own locale and the reference timezone the send names — and the long
+    // style prints that zone, so the reader is never left guessing it.
+    // Required: the engine has no conditionals, so every body states the
+    // expiry unconditionally, and a send without it would ship a dangling
+    // "expires on ." sentence. Declared required, it is refused loudly
+    // (`MISSING_VARIABLES`) instead.
+    {
+      name: 'expiresAt',
+      type: 'date',
+      required: true,
+      description: 'When the invitation expires (ISO-8601 instant), rendered in the mail locale',
+    },
   ],
   active: true,
   description: 'Sent by better-auth organization plugin when a user is invited to an org.',
@@ -379,10 +397,13 @@ export const AUTH_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
 <p><strong>{{inviter.name}}</strong>（{{inviter.email}}）邀请您以 <em>{{role}}</em> 的身份加入 {{appName}} 上的 <strong>{{organization.name}}</strong>。</p>
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">接受邀请</a></p>
 <p style="font-size:13px;color:#6b7280">或复制以下链接：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+<p style="font-size:13px;color:#6b7280">此邀请将于 {{ expiresAt | datetime:long }} 过期。</p>
 `, FOOTER_ZH_CN),
   bodyText: `{{inviter.name}}（{{inviter.email}}）邀请您以 {{role}} 的身份加入 {{appName}} 上的 {{organization.name}}。
 
-接受邀请：{{acceptUrl}}`,
+接受邀请：{{acceptUrl}}
+
+此邀请将于 {{ expiresAt | datetime:long }} 过期。`,
   description: '当用户被邀请加入组织时，由 better-auth organization 插件发送。',
 };
 
@@ -395,10 +416,13 @@ export const AUTH_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
 <p><strong>{{inviter.name}}</strong>（{{inviter.email}}）さんが、{{appName}} の <strong>{{organization.name}}</strong> に <em>{{role}}</em> として参加するようあなたを招待しました。</p>
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">招待を承認する</a></p>
 <p style="font-size:13px;color:#6b7280">または、次のリンクを貼り付けてください：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+<p style="font-size:13px;color:#6b7280">この招待の有効期限は {{ expiresAt | datetime:long }} です。</p>
 `, FOOTER_JA_JP),
   bodyText: `{{inviter.name}}（{{inviter.email}}）さんが、{{appName}} の {{organization.name}} に {{role}} として参加するようあなたを招待しました。
 
-承認する: {{acceptUrl}}`,
+承認する: {{acceptUrl}}
+
+この招待の有効期限は {{ expiresAt | datetime:long }} です。`,
   description: 'ユーザーが組織に招待されたときに better-auth organization プラグインが送信します。',
 };
 
@@ -411,10 +435,13 @@ export const AUTH_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
 <p><strong>{{inviter.name}}</strong> ({{inviter.email}}) te ha invitado a unirte a <strong>{{organization.name}}</strong> en {{appName}} como <em>{{role}}</em>.</p>
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">Aceptar invitación</a></p>
 <p style="font-size:13px;color:#6b7280">O pega este enlace:<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
+<p style="font-size:13px;color:#6b7280">Esta invitación caduca el {{ expiresAt | datetime:long }}.</p>
 `, FOOTER_ES_ES),
   bodyText: `{{inviter.name}} ({{inviter.email}}) te ha invitado a unirte a {{organization.name}} en {{appName}} como {{role}}.
 
-Aceptar: {{acceptUrl}}`,
+Aceptar: {{acceptUrl}}
+
+Esta invitación caduca el {{ expiresAt | datetime:long }}.`,
   description: 'Lo envía el plugin de organización de better-auth cuando se invita a alguien a una organización.',
 };
 

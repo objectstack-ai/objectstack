@@ -17,7 +17,8 @@
  *   - the real `BulkActionDialog`: an envelope's `source` is the confirm
  *     sentence (never `[object Object]`), a plain string renders unchanged, and
  *     a blank or absent value keeps the default sentence.
- * Holes are not filled at this step: `{{ count }}` stays as written.
+ * The reader leaves holes as written; the dialog fills `{{ count }}` since
+ * objectstack#25942 (its own pins: `bulkConfirmCount-25942.test.tsx`).
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import React from 'react';
@@ -99,7 +100,7 @@ function openConfirm(confirmText: BulkActionDef['confirmText']) {
 describe('BulkActionDialog renders confirmText through the reader (objectui#13183)', () => {
   it("renders an envelope's source, never [object Object]", async () => {
     openConfirm({ dialect: 'template', source: 'Archive {{ count }} account(s)?' });
-    expect(await screen.findByText('Archive {{ count }} account(s)?')).toBeInTheDocument();
+    expect(await screen.findByText('Archive 2 account(s)?')).toBeInTheDocument();
     expect(screen.queryByText(/\[object Object\]/)).toBeNull();
   });
 

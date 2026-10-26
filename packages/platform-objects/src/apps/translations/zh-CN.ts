@@ -176,6 +176,17 @@ export const zhCN: TranslationData = {
     },
   },
 
+  datasets: {
+    sys_user_metrics: { measures: { user_count: { label: '用户' } } },
+    sys_organization_metrics: { measures: { org_count: { label: '组织' } } },
+    sys_session_metrics: { measures: { session_count: { label: '会话' } } },
+    sys_package_installation_metrics: { measures: { package_count: { label: '安装' } } },
+    sys_audit_log_metrics: {
+      dimensions: { action: { label: '操作' }, user_id: { label: '用户' } },
+      measures: { event_count: { label: '事件' } },
+    },
+  },
+
   pages: {
     cloud_connection_settings: {
       label: '云连接',

@@ -17,25 +17,25 @@
     "description": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:341 (buildBookCards)",
+      "evidence": "ui/apps/console/src/pages/book-nav.ts (:341 at objectui @940ba24) (buildBookCards)",
       "note": "portal landing-card subtitle. The framework tree omits it; the portal reads it off the raw /meta/book item."
     },
     "slug": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:132 (bookSlug), :339",
+      "evidence": "ui/apps/console/src/pages/book-nav.ts (:132 at objectui @940ba24) (bookSlug), :339",
       "note": "portal URL segment (`/docs/<slug>`), defaulting to `name`. Portal-side consumer only — the framework tree endpoint routes by `name`."
     },
     "icon": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:345 (buildBookCards)",
+      "evidence": "ui/apps/console/src/pages/book-nav.ts (:345 at objectui @940ba24) (buildBookCards)",
       "note": "portal landing-card icon."
     },
     "order": {
       "status": "live",
       "verifiedAt": "2026-08-01",
-      "evidence": "objectui @940ba24: apps/console/src/pages/book-nav.ts:302-312 (sortBooks)",
+      "evidence": "ui/apps/console/src/pages/book-nav.ts (:302-312 at objectui @940ba24) (sortBooks)",
       "note": "orders books on the portal landing (then label, stable). Authored books always sort ahead of synthetic per-package ones regardless of `order`."
     },
     "audience": {

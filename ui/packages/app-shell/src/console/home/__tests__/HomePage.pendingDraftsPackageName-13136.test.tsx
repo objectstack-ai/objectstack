@@ -86,7 +86,10 @@ vi.mock('../../../providers/MetadataProvider', () => ({
 vi.mock('../../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: 'crm' }),
 }));
-vi.mock('../../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: () => true }));
+vi.mock('../../../hooks/useCanAuthorMetadata', () => ({
+  useCanAuthorMetadata: () => true,
+  useCanReadPendingDrafts: () => true,
+}));
 vi.mock('../../../hooks/useHomeInbox', () => ({
   useHomeInbox: () => ({
     pendingApprovals: [],
