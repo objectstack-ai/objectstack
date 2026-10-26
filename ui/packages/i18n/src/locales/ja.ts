@@ -4615,6 +4615,14 @@ const ja = {
     },
     map: {
       sourceUnresolved: "この地図のデータソースを解決できませんでした",
+      invalidCoordinatesExcluded: "座標が未設定または無効なため地図から除外されたレコード：{{excluded}}",
+      styleFailedConfigured: "地図を読み込めませんでした（{{reason}}）。レコードは下に一覧表示しています。このビューに設定された地図スタイルの URL を確認してください。",
+      styleFailedDefault: "地図を読み込めませんでした（{{reason}}）。レコードは下に一覧表示しています。公開のデフォルト地図タイルをここでは読み込めないため、このビューの地図スタイルを設定するよう管理者に依頼してください。",
+      styleFailedUnknownReason: "地図スタイルまたはタイルを読み込めませんでした",
+      webgl2Unavailable: "地図を読み込めませんでした（このブラウザーは地図に必要な WebGL2 に対応していません）。レコードは下に一覧表示しています。ハードウェアアクセラレーションを有効にするか、WebGL2 対応のブラウザーで地図を表示してください。",
+      retry: "地図を再読み込み",
+      listLabel: "場所",
+      listEmpty: "表示する場所はありません。",
     },
     timeline: {
       sourceUnresolved: "このタイムラインのデータソースを解決できませんでした",

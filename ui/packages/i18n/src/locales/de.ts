@@ -4614,6 +4614,14 @@ const de = {
     },
     map: {
       sourceUnresolved: "Die Datenquelle dieser Karte konnte nicht aufgelöst werden",
+      invalidCoordinatesExcluded: "Wegen fehlender oder ungültiger Koordinaten nicht auf der Karte angezeigte Datensätze: {{excluded}}",
+      styleFailedConfigured: "Die Karte konnte nicht geladen werden ({{reason}}). Die Datensätze sind unten aufgelistet; prüfen Sie die für diese Ansicht festgelegte Kartenstil-URL.",
+      styleFailedDefault: "Die Karte konnte nicht geladen werden ({{reason}}). Die Datensätze sind unten aufgelistet; die öffentlichen Standard-Kartenkacheln konnten hier nicht geladen werden. Bitten Sie Ihren Administrator, für diese Ansicht einen Kartenstil festzulegen.",
+      styleFailedUnknownReason: "Kartenstil oder Kacheln konnten nicht geladen werden",
+      webgl2Unavailable: "Die Karte konnte nicht geladen werden (dieser Browser unterstützt kein WebGL2, das die Karte benötigt). Die Datensätze sind unten aufgelistet; aktivieren Sie die Hardwarebeschleunigung oder verwenden Sie einen Browser mit WebGL2, um die Karte zu sehen.",
+      retry: "Karte erneut laden",
+      listLabel: "Orte",
+      listEmpty: "Keine Orte vorhanden.",
     },
     timeline: {
       sourceUnresolved: "Die Datenquelle dieser Zeitleiste konnte nicht aufgelöst werden",
