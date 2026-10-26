@@ -2,8 +2,8 @@
   "number": 25866,
   "kind": "issue",
   "title": "feat(spec/plugin-security): a field permission entry can carry a row condition, so a set's field lock applies only on the rows it names",
-  "state": "open",
-  "state_reason": "reopened",
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "zhuangjianguo",
@@ -14,7 +14,6 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T01:48:02Z",
-  "updated_at": "2026-10-26T09:41:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T15:17:12Z",
+  "closed_at": "2026-10-26T15:17:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25866",
   "body": "> **Premise checked before dispatch** (domain:spec seat 2, 2026-10-26): readings and corrections in comment 6409890004 (https://github.com/objectstack-ai/objectstack/issues/25866#issuecomment-6409890004). The goal below is unchanged.\n\nRuled: 6408558941 · letter A · 2026-10-26T05:02Z\n\nFiling class: ③ capability gap, from a consuming app — reach: public door (REST `create_record` / `update_record`, flow nodes), measured on 18.1.0. Filed by the hotclm decision-box director on the maintainer's ruling (objectstack-ai/hotclm#127, letter A, 2026-10-26T01:47Z).\n\n## What a metadata app cannot say today\n\n`FieldPermissionSchema` (`packages/spec/src/security/permission.zod.ts`) has two booleans, `readable` and `editable`, keyed `object.field` on a permission set. A field lock therefore applies to **every row of the object** a holder can reach. Row-level security (`rowLevelSecurity[].using`) decides which rows may be written, but cannot name a field. There is no way to express:\n\n> \"This set may edit `clm_contract`, but on rows where `status` is `approved` or later it may not write `governing_law`, `summary`, `confidentiality_term_months`, `status`.\"\n\n## Why it matters (measured)\n\nhotclm, 18.1.0, PR objectstack-ai/hotclm#126 head `19e8dac`:\n\n- Every member holds `clm_requester` (may launch a contract, may edit it while `draft` / `submitted`).\n- A finance controller also holds `clm_finance`: `allowEdit` on `clm_contract`, rows delivered from `approved` onward by a sharing rule plus a row policy, and a field lock on the legal fields and `status` so finance cannot rewrite terms after approval.\n- Because the lock is per set and per object, it also lands on the draft the finance controller creates:\n\n```\n400 Node 'create_contract' failed: create_record(clm_contract) failed:\n[Security] Field write denied: not permitted to edit\n[confidentiality_term_months, governing_law, status, summary] on 'clm_contract'\n```\n\n- `PermissionEvaluator.getFieldPermissions` merges most-permissively, but only sets that declare the field vote, so a co-held set that says nothing (`clm_requester`) does not lift the lock. Declaring the fields open on `clm_requester` would lift finance's post-approval lock everywhere, which is the lock's whole purpose. The app has no fix that keeps its own security design.\n- The same shape hits any \"RU from stage X onward, legal fields frozen\" position (hotclm's records set uses `editableOnly` the same way and is expected to fail identically).\n\n## Ask\n\nA field permission entry accepts an optional row condition, in the same expression language RLS `using` already parses, meaning: **this entry votes only on rows matching the condition; on other rows the entry is absent** (so the existing most-permissive merge and \"declaring sets vote\" rule are unchanged). Sketch, not a design decision:\n\n```ts\nfields: {\n  'clm_contract.governing_law': { readable: true, editable: false, when: 'status in (\"approved\",\"signing\",\"active\",\"expired\",\"terminated\")' },\n}\n```\n\nPoints the maintainer may want to rule on, named so the dev does not guess:\n\n1. **Which row the condition reads.** On update: the stored row before the write (a lock on `status in (approved…)` must bite on an approved row even when the write tries to change `status`). On create: the incoming row.\n2. **Read side.** `readable` with a condition would need the field masker to evaluate per row on list reads; if that is out of scope, the first cut may accept the condition on `editable` only and refuse it on `readable` at parse time, as long as the spec says so.\n3. **`os validate` / `os explain`**: the condition is validated like an RLS predicate (field names exist on the object, no cross-object), and `explain` shows the row-conditioned lock as such.\n4. Studio permission-set form offers the key.\n\nUntil this ships, hotclm's finance and records positions cannot launch a contract (objectstack-ai/hotclm#127 holds `Blocked-by:` on this card).\n\n## Dedupe\n\nSearched objectstack issues for field permission row condition, conditional FLS, per-record field lock, FLS predicate: #23549 (empty object part in a field key, closed), #4376 (row-level read scope, closed), #7900 (automation read domain FLS, closed). None asks for a row condition on a field permission."

@@ -1,0 +1,36 @@
+{
+  "number": 26213,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Browse Marketplace reads an unreachable catalog as unreachable, its raw cause behind More",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:48:36Z",
+  "updated_at": "2026-10-26T18:06:32Z",
+  "closed_at": "2026-10-26T18:06:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:06:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26213",
+  "body": "Fixes #25891\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThe runtime's marketplace proxy answers `502 MARKETPLACE_PROXY_FAILED` only when its own fetch to the catalog throws (`packages/cloud-connection/src/marketplace-proxy-plugin.ts`). Upstream answers pass through with their own status and code. `marketplaceApi.ts` `call()` already stamps `code` on the error. The load-error panel in `MarketplacePage.tsx` never read it: it picked its class line by status alone. So a runtime that could not reach the catalog read \"The marketplace catalog answered with an error (HTTP 502)\", with the raw Node text `fetch failed` in full view.\n\n- `LoadFailure` now carries `code` and an `unreachable` class: no status (no server answered), or `code === 'MARKETPLACE_PROXY_FAILED'`.\n- The unreachable class reads `marketplace.load.unreachable`. Its raw transport text (`fetch failed`, `Failed to fetch`) sits behind a More / Less disclosure with a copy button, reusing the existing `refusalDetails.more/less/copy/copied` keys, the same shape `RefusalMessage` gives a refusal's detail. `RefusalMessage` itself is not reused because it splits a server text into lead + rest, and here the lead is our own sentence, not part of the text.\n- Answered failures (a 403, or a 502/503/504 relayed from upstream) keep `answeredError` with their status and the server's text in full view, as objectui#11688 made them.\n- The online / same-origin hint logic is unchanged.\n- No locale pack is edited: only existing keys are used.\n\n## Tests\n\n`ui/packages/app-shell/src/console/marketplace/__tests__/MarketplacePage.loadFailureCause-11688.test.tsx`, real `call()` over a stubbed `fetch`:\n- flipped: the proxy's `502 MARKETPLACE_PROXY_FAILED` now reads `marketplace.load.unreachable`, never `answeredError`; `fetch failed` is not on screen until More is pressed, then it is, More reads Less, and the copy button is labelled `refusalDetails.copy`. The configured-plane hint is still drawn.\n- new controls: a relayed `503 SERVICE_UNAVAILABLE` and a `403` plain-text refusal both keep `answeredError`, their text in full view, and no disclosure. The 503 keeps the hint and the 403 does not.\n- the no-answer case (`TypeError: Failed to fetch`) also asserts the unreachable line and that the raw text is not in full view.\n\nRun at head `a7b293f0`, under the verify lock: `vitest run packages/app-shell/src/console/marketplace/__tests__/MarketplacePage*`: Test Files 9/9, Tests 67/67. The suites include `MarketplacePage.sameOriginHint-11726.test.tsx` and `MarketplacePage.loadingStates-12710.test.tsx` unchanged and green. `pnpm --filter @object-ui/app-shell run type-check` passed with exit 0 (both `tsc --noEmit` and `tsconfig.test.json`). `eslint` on the two changed files reported 0 errors and 3 warnings, all on pre-existing lines.\n\nAblation, run at head `24315db2` via `scripts/ablation-replace.mjs`: `unreachable: status === undefined || code === PROXY_UNREACHABLE_CODE,` became `unreachable: status === undefined,`. The anchor count went from 1 to 0 and the blob from `f19da1750ab1` to `46ac6aa14f87`. The 11688 suite then had 1 failed and 9 passed; the failure was exactly the flipped 502 case. The tool then restored the file (blob equals HEAD, and `git diff HEAD` is empty).\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `a7b293f0`: 35 commands, every one run, every one exit 0. `--ran` reconciliation: 35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero, exit codes recorded). `node scripts/check-sdui-manifest.mjs` passed with exit 0, and `scripts/sdui-manifest.*` is untouched. The roster gate flagged for `.changeset/`, `node scripts/check-changeset-fixed.mjs`, passed with exit 0. CI-owned families (the type-check lanes, Test UI, Lint UI) are left to this PR's check-runs.\n\n## Acceptance notes\n\n- The card's literal copy names the catalog host. That needs a new structured wire field on the proxy's failure, plus new pack keys. It is out of this claim, as the claim's Premise records, and is a follow-up if wanted. Today no failure the proxy returns carries the upstream host in a field or a header, and the page never parses server prose for one (objectui#11726).\n- `MARKETPLACE_PROXY_FAILED` is compared as a string literal in app-shell. The spec's error-code ledger lists it, but there is no per-code exported constant to import.\n- Open PR #26123 edits other regions of `MarketplacePage.tsx` (an import near `middleTruncate.js`, a hook, `installLocal`). This diff stays out of those regions.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

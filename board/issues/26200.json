@@ -1,0 +1,37 @@
+{
+  "number": 26200,
+  "kind": "issue",
+  "title": "console CSP: connect-src must include the storage endpoint the server presigns uploads to — since #25569 every browser upload to S3/R2 fails with 'Failed to fetch' (hosted production)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:18:20Z",
+  "updated_at": "2026-10-26T19:58:49Z",
+  "closed_at": "2026-10-26T19:57:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26200",
+  "body": "Filing gate: ① a measured product defect with reach: every browser file upload on hosted production. Filed on the maintainer's direct word in the cloud ops seat's chat, 2026-10-26: 「另在 objectstack 立卡让 CSP 自动带上存储端点」.\nReader: the `domain:server` / CLI seat that owns `packages/cli/src/utils/console.ts` (the Console CSP), dispatch step: one PR.\nDedupe:\n- REST `search/issues`, `repo:objectstack-ai/objectstack OS_CONSOLE_CSP_CONNECT_SRC`: 4 hits including closed. The nearest are #25569 (closed: introduced the CSP), #26001 / #26162 (closed: the map-style origin) and #26164 (open: cloud's map-style env check). None covers the storage endpoint.\n- `repo:objectstack-ai/objectstack csp presigned upload`: 0 hits.\n\n## 维护者速读\n\n#25569 给 Console 文档加了 nonce CSP，`connect-src` 只有 `'self'`、默认地图源，以及运维在 `OS_CONSOLE_CSP_CONNECT_SRC` 里写的来源。但 S3/R2 存储的上传是**浏览器直接 PUT 到预签名 URL**，指向存储端点的主机。这个主机不在 `connect-src` 里，浏览器就拒绝请求（`TypeError: Failed to fetch`），于是附件上传整条坏掉。\n\n框架自己知道存储端点（`OS_STORAGE_S3_ENDPOINT`，以及适配器给出的预签名主机），CSP 应该自动把它加进 `connect-src`，不该要求每个部署再手配一个变量。\n\n## Measured (2026-10-26)\n\n**Production `jack.objectos.ai`** (cloud v2.5.0 `ef4c5d2d`, framework pin `c475b45b56`):\n- `POST /api/v1/storage/upload/presigned` → 200, `uploadUrl` on `https://<account>.r2.cloudflarestorage.com/objectos-attachments-prod/projects/<env>/user/<id>.txt`, method PUT;\n- the browser's `PUT` to that URL → **`TypeError: Failed to fetch`**;\n- the document's CSP reads `connect-src 'self' https://demotiles.maplibre.org`;\n- a curl preflight to the same bucket with `Origin: https://jack.objectos.ai` answers 204 with `Access-Control-Allow-Origin: https://jack.objectos.ai`. So the bucket's CORS allows it, and the page's CSP is what refuses.\n\n**Staging `os-4e4qa4.objectos.app`** (cloud `3689c6f6`, same pin): the same failure.\n\n**The same round trip passed on 2026-10-25** at cloud `b64d2cbf`, whose framework pin predates #25569 (presigned 200 → PUT 200 → complete 200 → download 200, bytes back; objectstack-ai/cloud#2767 step (d)).\n\n**Hosted path:** cloud's `objectos-runtime` mounts the Console through `@objectstack/cli/console` (`mountConsoleStatic`), which reads `OS_CONSOLE_CSP_CONNECT_SRC` once at boot (`readExtraConnectSources`).\n\n## Change\n\n1. When the deployment's storage serves uploads through presigned URLs, add its endpoint origin to the Console CSP `connect-src` at boot. Read it from the same resolved storage settings the storage service builds its adapter from (the `OS_STORAGE_S3_ENDPOINT` origin, or the adapter's own presign host). Don't keep a second copy of the endpoint rule.\n2. If the endpoint is virtual-hosted (bucket in the host name) or region-templated, add the exact origin the presigner emits.\n3. `OS_CONSOLE_CSP_CONNECT_SRC` stays for operators' extra sources.\n4. Tests:\n   - with S3 storage configured, the served CSP's `connect-src` contains the endpoint origin;\n   - with local storage, it adds nothing;\n   - a parity test that the CSP origin equals the origin of a real presigned URL from the adapter.\n   - Ablate the addition.\n\n## Acceptance\n\n- The tests above.\n- On a hosted environment with S3/R2 storage and no `OS_CONSOLE_CSP_CONNECT_SRC`: the browser upload round trip (presigned → PUT → complete → download) succeeds and the console logs no CSP violation.\n\n## Interim (hosted)\n\nThe cloud ops seat is setting `OS_CONSOLE_CSP_CONNECT_SRC` to the R2 origin on both cloud planes as a stopgap. Once this ships, it can be removed.\n\nClause-②: no (widens what the document lets the page reach, to a host the server itself hands the page). The seat confirms.\nMetadata-protocol: none\n"
+}

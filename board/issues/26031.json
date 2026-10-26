@@ -2,8 +2,8 @@
   "number": 26031,
   "kind": "issue",
   "title": "A NOT NULL refusal on an undeclared (drifted) column still answers differently per door: REST 400 VALIDATION_FAILED with a drift hint, dispatcher /data 500 INTERNAL_ERROR, actions 400 VALIDATION_ERROR with the driver's text",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T09:46:17Z",
-  "updated_at": "2026-10-26T13:22:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T15:58:24Z",
+  "closed_at": "2026-10-26T15:57:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26031",
   "body": "Filing class: ② follow-up from a landed card's contract review. Carrier: PR #26026 (Fixes #24768), contract review comment 6412927808, boundary flag 3.\n\n## What\n\n#24768's ruling A translates a database NOT NULL refusal into one `400 VALIDATION_FAILED` answer for **a field the object declares**. A refusal on a column the object's field map does **not** hold (a drifted column: present in the table, absent from the metadata) is outside that ruling, and still answers three ways:\n\n| door | answer on `main` after #26026 |\n|:--|:--|\n| `RestServer` `/data` POST/PATCH | `400 VALIDATION_FAILED`, a column sentence plus the drift `hint` (`mapDataError`'s NOT NULL arm) |\n| dispatcher `/data` POST/PATCH (`HttpDispatcher.dispatch()`) | `500 INTERNAL_ERROR` |\n| actions door (`packages/runtime/src/domains/actions.ts`) | `400 VALIDATION_ERROR`, the driver's text in `message`, its code demoted to `declaredCode` |\n\n#24768's title (\"one answer per refusal across doors\") is therefore not met for the drift case.\n\n## Direction (from the review)\n\nThe dispatcher and actions exits recognise `mapDataError`'s NOT NULL arm for an undeclared column, so all three doors answer the REST shape (`400 VALIDATION_FAILED` + drift hint). Keep the driver text out of `message` on every door (the driver-fault redaction boundary already holds this for REST).\n\n## Acceptance\n\n- A pin per door (dispatcher `/data` POST and PATCH, actions, REST) on a real store with a drifted NOT NULL column, `toEqual` on the whole body, red first on `main`.\n- The declared-field answers #26026 pinned stay byte-identical.\n\n## Dedupe\n\n`search_issues` 2026-10-26, \"NOT NULL refusal undeclared drifted column dispatcher 500 INTERNAL_ERROR different answer per door\" → #24768 (the carrier, ruling A, declared fields only) and closed neighbours #24662 / #20701 (other classes). No open card for the drift class."

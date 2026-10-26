@@ -1,0 +1,34 @@
+{
+  "number": 26259,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Enter after a field type search picks the type the search names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:24:55Z",
+  "updated_at": "2026-10-26T18:47:37Z",
+  "closed_at": "2026-10-26T18:47:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:47:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26259",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9B2qu4S8m6QxptyXivYdzJu)_\n\nFixes #26194\nPart of #26059\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nIn Studio's Add field popover and the field inspector, `FieldTypePicker` now highlights, for a non-empty query, the first listed type the query **names** (by its shown name, its id, its id with underscores as spaces, or the catalog's English name), and the first listed type when the query names none. Enter picks the highlighted type, so on a Phone field typing \"Number\" and pressing Enter commits Number.\n\nWith an empty query the current type is highlighted and scrolled into view as before, and re-choosing it still commits nothing. Clearing a query highlights the current type again. The arrow keys move on from the highlighted type.\n\n## The mechanism, measured (the card's hypothesis did not hold)\n\nThe card's hypothesis was that the `defaultValue` given to `Command` kept the current type highlighted while the list filtered. That is not what happens. cmdk 1.1.1 re-highlights the **first rendered row** on every search change, also under `shouldFilter={false}`. The current type stayed highlighted only because it was the first row: Phone's description, \"A phone number.\", holds \"number\" as a whole word, so objectui#12516's search keeps Phone, and its Text group comes before the Number group. Highlighting \"the first match\" (the first row) therefore cannot satisfy the card's own acceptance test. The fix follows the ruling's intent (Enter picks the type you typed) without reordering the list, which objectui#12516 pins in catalog order.\n\nHow: `Command` is now controlled (`value` / `onValueChange`). A search change clears the highlight and records the target the new query asks for. cmdk's own first-row pick then arrives through `onValueChange` and is replaced by that target once. Arrow keys and pointer moves arrive the same way and are taken as they come. The `matches` predicate is split into `names` (name, id, English name) plus the category and description arms; what a query lists is unchanged.\n\n## Tests\n\nNew `FieldTypePicker.enterPicksFirstMatch-26194.test.tsx`, five cases: Phone + \"Number\" + Enter commits Number (and Phone is still the first listed row); empty query highlights Phone and Enter commits nothing; clearing the query highlights Phone again; ArrowDown from the highlighted match moves to the next row and Enter commits it; \"masked\" (description-only match) highlights the first row, Password.\n\n- Red leg, the base `FieldTypePicker.tsx` (6862ef62) with the new test: `Tests 3 failed | 2 passed (5)`, each failure `expected [ 'phone' ] to deeply equal [ 'number' ]` (and the arrow case one row behind). The restore was checked by `git diff HEAD` empty and the blob hash equal to HEAD's.\n- Green leg at ae665e44: the 28 test files that render the picker, the inspector or the Add field popover (`FieldTypePicker*`, `ObjectFieldInspector*`, `DataPillar.addFieldPopover-12516`, `ObjectFormDesigner.typeName-13148`, and every test file naming the picker): `Test Files 28 passed (28)`, `Tests 304 passed (304)`.\n- `pnpm --filter @object-ui/app-shell type-check` (both `tsc --noEmit` and `tsconfig.test.json`), after building the closure: exit 0.\n- The full app-shell suite is left to CI `Test UI` (declared narrowing; the package is too large to run locally).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 35 derived families, each run, every one `exit 0`; `--ran` reconciliation: \"35 run, 0 NOT-MEASURED (a DERIVED zero …)\". Re-run on the merged head 8d468f43 (merge of `origin/main`, derivation unchanged). Every family CI runs is read from this PR's check runs.\n\n## Acceptance notes\n\n- Surface is exactly the claim's: `FieldTypePicker.tsx`, one new sibling test, one root changeset (`patch` for `@object-ui/app-shell`). No registry package, no sdui record.\n- The same first-row pick also meant that on a field of another type, \"Number\" + Enter would commit Phone rather than Number. That follows from the measured first-row pick and was not run separately; this PR covers it, as the same defect.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NWnUGWJGbeTmGLWfrfWFXB\n"
+}

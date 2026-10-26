@@ -1,0 +1,36 @@
+{
+  "number": 26254,
+  "kind": "pull_request",
+  "title": "pm-dispatch: drop the per-round tooling dispatch cap; keep the pm-rule filing gate and the two round-report readings (ruling A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:16:51Z",
+  "updated_at": "2026-10-26T18:21:55Z",
+  "closed_at": "2026-10-26T18:21:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:21:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26254",
+  "body": "Fixes #26122\nClause-②: no\nMetadata-protocol: none\n\nMaintainer Leehom's option on the decision card, as ruling record 6412560587 carries it, verbatim: 「A 删上限,留读数和立卡门」; consequence 「删掉一成上限;保留立卡门和轮次报告的两项读数,产品提交占比连续偏低时由席位报给你」. Triage audit 6416685670: scope exactly as ruled — delete the ≤10% cap, keep the pm-rule filing gate and the two round-report readings. Nothing else is changed here.\n\n## What changed (head `94fbb742`)\n\n- `.claude/skills/pm-dispatch/references/execution-duties.md` 候选与批次: deleted the line 「`tooling` 卡至多占一轮派发的 10%,溢出留积压、⛔ 不入 `pm:queue`;⛔ 无门禁无脚本强制。」 — 188 → 187 lines; the CEILINGS row stays 188 (`check-skill-line-ratchet.mjs` only nudges at headroom over 120 lines and never requires lowering; headroom is now 1).\n- `.claude/skills/pm-dispatch/SKILL.md` `tooling` glossary row: the reader 「每轮派发 ≤10%」 is dropped and the row names 三具名读者 again (候选查询排除、首触即关、普查半态行) — the exact row text the cap PR replaced. 319 → 319 lines; the row shrinks 228 → 207 bytes; widest table row stays 341 (pin 341).\n- `.claude/skills/pm-dispatch/references/seat-lifecycle.md` 轮次报告与节奏: the product-commit-share reading did not yet carry the ruled consequence, so one line under it now reads 「产品提交占比连续多轮偏低 ⇒ 席位报维护者。」 (64 bytes). Paid in-file (ceiling 96, headroom 0): deleted the 开轮互斥 line that described what the `session-start-fleet.sh` hook prints at session start; the hook's own header is the authority on its output and the operative rule two lines above it (fetch, compute the SKILL.md touch sha, compare with the opening mark) is untouched. 96 → 96 lines.\n\nKept untouched, as ruled: `references/filing-gate.md` 「增改 pm 规则的卡只在维护者点名时立…」, and both round-report readings — the 48h follow-up-PR count and the product-commit share. (Measured: the cap PR #25795 landed exactly those two readings; there was never an in-flight tooling-share reading in `seat-lifecycle.md`, so the dispatch's naming of the first reading was off, the location was right.)\n\nGrep for a third spelling of the cap over `.claude/skills/**` before and after (`10%`, `一成`, `≤10`, `tooling` + 上限): before, exactly the two lines above; after, zero. The one other hit, `references/platform-readings.md` 「并发 ≤100」, is a GraphQL rate-limit fact, not the cap, and is left alone. No issue number was spelled into skill text (`check:pm-skill-id-lint` green).\n\n## Line budget\n\n| file | before | after | ceiling |\n|---|---|---|---|\n| `references/execution-duties.md` | 188 | 187 | 188 (unchanged) |\n| `SKILL.md` | 319 | 319 | 319 |\n| `references/seat-lifecycle.md` | 96 | 96 | 96 |\n\nNo re-wrap; every edited line is under 120 bytes; table rows only shrank.\n\n## Gates (local, on `94fbb742`; exit codes captured before any pipe)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 20 families from the merge base; all 20 ran with exit 0 and `--ran` reconciles: 20 derived, 20 run, 0 NOT-MEASURED, 0 UNRUN. Among them: `check:pm-skill-ratchet` (self-test 164 cases; SKILL.md 319/319, widest row 341/341; seat-lifecycle.md 96/96; execution-duties.md 187/188), `check:pm-skill-id-lint` (104 files clean), `check:skill-frame-sync` (the one declared copy coherent, 4 axes), `check:pm-governed-prose`, `check:pm-governed-merges` self-test, `check:pm-expected-skips`, `check:doc-authoring`, `check:nul-bytes`. The lint-package gate `check:doc-formula-expressions` first refused with exit 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` unbuilt); after its prescribed build under the verify lock (VERDICT command-exit 0, 4 tasks, 1m59s) it ran green. The local-only family `check:skill-frame-freshness` also ran: current with `origin/main`. `--ran` noted the tree is 4 commits behind `origin/main` at reconciliation time; the range has no file under `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `skills/**` or `scripts/pm/**`, so the derivation is unaffected and the queue's rebuild validates the merge.\n\nDogfood battery: n/a — no `!` in the title and no `(narrowing)` arm. `skip-changeset`: `.claude/**` publishes nothing.\n\n## Acceptance notes (observations, not cards)\n\n- `seat-lifecycle.md` 座位贴协议 and `triage-duties.md` 在飞活性复查 both state the knock-then-reclaim rule; the first names the director seat as the releasing actor, the second sits under the triage seat's duties. A protocol observation only; untouched here.\n- `seat-post-protocol.md` says the protocol must not copy the patrol's current cadence value, while `seat-lifecycle.md` 断粮 section carries 「默认每小时」. Observation only; untouched.\n\n## 维护者速读(草稿)\n\n**改了什么**:删掉「tooling 卡至多占一轮派发 10%」这条上限 —— `execution-duties.md` 一行、`SKILL.md` 术语表 `tooling` 行的一个读者;立卡门与轮报两项读数原样保留;轮报读数下补一句「产品提交占比连续多轮偏低 ⇒ 席位报维护者」,以删掉一行钩子输出说明付账,文件行数不变。\n\n**为什么改**:你在决策卡上选了 A「删上限,留读数和立卡门」。上限饿死了以工具为主的车道(28 张 open tooling 卡里 devx 21、skills 5),也压住了缺陷修复;它要保的「注意力留在产品」已由读数达成(48h 内约 143/159 的 main 提交触产品代码)。\n\n**风险与代价(含回滚)**:风险是 tooling 派发占比回升、挤占产品;兜底是轮报两项读数加「连续偏低报维护者」。回滚 = revert 本 PR 的一个 commit(三个文件、五行),不涉脚本、不涉门禁。\n\n**席位意见**:\n\n**你要做的**:无需动作。Tier S(`.claude/**`):席位做独立达档复核,PASS 后经队列落地。若日后想恢复上限,在卡上一句话即可,席位照裁决立卡。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LqKsGyMNFwwnbF5FTAqyPn)_\n"
+}

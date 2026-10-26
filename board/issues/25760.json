@@ -2,8 +2,8 @@
   "number": 25760,
   "kind": "issue",
   "title": "`controlled_by_parent`: the owner of a detail row cannot update their own row when they only read the master — no equivalent of the \"activity owner always has full access\" rule (hotclm obligations today, HotCRM tasks next)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "zhuangjianguo",
@@ -14,7 +14,6 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T09:17:47Z",
-  "updated_at": "2026-10-26T14:01:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T15:39:05Z",
+  "closed_at": "2026-10-26T15:38:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25760",
   "body": "> **Premise checked before dispatch** (domain:spec seat 2, 2026-10-26): readings and corrections in comment 6409904490 (https://github.com/objectstack-ai/objectstack/issues/25760#issuecomment-6409904490). The goal below is unchanged.\n\nRuled: 6398566164 · letter 1 · 2026-10-25T13:58:53Z (opt-in `sharing.controlledByParent.ownerMayEdit: true`; the detail row's owner writes with read on the master; default unchanged; ADR-0055 §3 amendment + spec key + server gate + lint arm)\n\nFiling class: ③ platform gap, filed at destination from an app ruling. Reader: `domain:server` / `area:access` triage. Unlabelled, no assignee. Origin: objectstack-ai/hotclm#64, ruled **D** by the maintainer on 2026-10-25 (ruling comment https://github.com/objectstack-ai/hotclm/issues/64#issuecomment-6395825992) — \"this is platform-shaped; file it here and let the app wait\", under the maintainer's rule that metadata apps never build platform-shaped capabilities themselves.\n\n## Context\n\nhotclm's `clm_obligation` is a `controlled_by_parent` detail of `clm_contract`. An obligation has an `owner` (the employee accountable for performing it), lives only under a **signed** contract, and its owner is usually the contract's requester, whose contract edit window closed at `submitted`. `DESIGN.md` §04 grants the requester `RU（本人负责）` on obligations, and the requester permission set carries an RLS update policy `owner == current_user.id` on `clm_obligation`.\n\n## Measured (17.7.0, REST and browser — hotclm#64 and hotclm#87 finding 5)\n\n```\nPATCH /api/v1/data/clm_obligation/<id> {\"status\":\"done\"}   (caller owns the obligation AND the parent contract; parent is `active`)\n→ 403 [Security] Access denied: update on 'clm_obligation' requires edit access to its master record\n       (master 'clm_contract' not editable by this user (row-level security))\nPOST /api/v1/security/explain {object: clm_obligation, operation: update} → allowed: true\n```\n\nThe refusal is correct under ADR-0055 §3 (`packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts`): editing a detail requires **edit** on its master, and the detail's own owner RLS is composed **AND** (ADR-0055 line \"composes with the detail's own tenant/owner RLS (all AND-ed)\"), so it can only narrow, never grant. An owner policy declared on a `controlled_by_parent` detail is therefore unreachable for any caller who merely reads the master — for 100% of hotclm's obligation rows, by construction.\n\n## The gap\n\nThere is no way to declare \"the person this detail row is assigned to may update it, with read (not edit) on the master\". That is a standard pattern, not an app quirk:\n\n- Salesforce, which ADR-0055 frames as the model it closes gaps against, keeps **\"the owner of an activity always has full access to it\"** even under Activities OWD = Controlled by Parent.\n- HotCRM's tasks / activities hang under accounts and are assigned to reps who can read, not edit, the account — the same wall.\n- Nothing in the write gate today consults the detail row's `owner` (grep of the gate for `owner` / opt-in: none).\n\n## What is asked\n\nA per-object, opt-in declaration on a `controlled_by_parent` detail (shape is the platform's to choose), e.g. one of:\n\n1. `sharing: { controlledByParent: { ownerMayEdit: true } }` — the detail row's owner passes the write gate with **read** on the master; everyone else still needs master edit. Closest to the Salesforce rule. **← RULED (6398566164).**\n2. ~~`controlledByParent: { writeRequires: 'read' | 'edit' }` (default `edit`, preserving ADR-0055) — with `'read'`, the detail's own object permission + RLS policies decide the write, as they do for a `private` object.~~ (not chosen)\n\nEither keeps ADR-0055 §1/§2 (one required `master_detail`, read derived from the master) untouched and changes only the §3 write question for objects that opt in. `os lint` should keep flagging an owner-based update policy on a detail that has **not** opted in, since today that policy is dead code.\n\nApp side after it ships: hotclm adds one line on `clm_obligation` and one sentence in `DESIGN.md` §04; no other change.\n\n## Dedupe\n\n`search_issues` on this repo for controlled_by_parent + owner/assigned semantics: 42 results, all about enforcing or regressing the master-edit gate (#25012, #25044, #25049, #25068, #25095, #24962, #24986, #23093, #22721, #19853 …); **0** about letting a detail row's owner write their own row. ADR `docs/adr/0055-master-detail-controlled-by-parent.md` has no owner exemption.\n\n## Not asked\n\n- No change to the default: existing details keep requiring master edit.\n- No app-side workaround in hotclm (per its AGENTS.md → Platform gaps); hotclm#64 is `Blocked-by` this card and 我负责的履约 stays read-only for requesters until it lands."

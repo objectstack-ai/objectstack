@@ -1,0 +1,37 @@
+{
+  "number": 26194,
+  "kind": "issue",
+  "title": "Studio field type picker: typing a type name and pressing Enter picks the current type, not the first match",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:13:45Z",
+  "updated_at": "2026-10-26T18:48:49Z",
+  "closed_at": "2026-10-26T18:47:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26194",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 8 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nIn Studio's Add field popover and the field inspector, typing \"Number\" into the type search and pressing Enter keeps the field's current type (\"Phone\") instead of choosing Number. The current type stays at the top of the filtered list and keeps the highlight, and Enter picks the highlighted item. The user has to click the match with the mouse.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 8 (ui, p3): item 7. Brief 6415795834, item-by-item reading 6415971852 (item 7).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** Builders who model objects in Studio type to find a field type. Enter silently keeps the old type, so a keyboard user commits the wrong type, or nothing, without noticing. The component's own documentation promises the opposite.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step: one os-dev, one PR on `ui/packages/app-shell/src/views/metadata-admin/inspectors/FieldTypePicker.tsx` plus one test.\n\n**Spec contract.** None changes.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `FieldTypePicker.{0,200}(Enter|highlight)|field.?type.{0,60}(search|picker).{0,120}Enter` found 0 hits. objectui#12516 introduced the search.\n\n## Ruled scope (ruling Q3 item 8)\n\n- `FieldTypePicker` **highlights the first match when a query is present**, so Enter picks it.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/FieldTypePicker.tsx`:\n  - `:41–47` holds (the reading cited `:40–47`). It is the doc block \"The search (objectui#12516)\", which ends \"Enter picks the highlighted type\".\n  - The likely mechanism is `<Command shouldFilter={false} defaultValue={current?.id}>` at `:245–247`: cmdk keeps the current type as the highlighted value while the list filters.\n  - The current type is scrolled into view on open (`:192–196`).\n  - Choosing an item is `onSelect={() => choose(row.id)}` at `:269`.\n- The picker is used by `ObjectFieldInspector` and `studio-design/AddFieldPopover` (doc comment `:49–50`).\n\n## Expected / acceptance\n\n- With a non-empty query, the first matching type is highlighted, and Enter commits that type.\n- With an empty query, the current type is highlighted and scrolled into view as today. Re-choosing the current type still commits nothing.\n- The arrow keys still move through the filtered list.\n- One test: open the picker on a \"Phone\" field, type \"Number\", press Enter, and expect the Number type committed."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26250,
+  "kind": "pull_request",
+  "title": "fix(core)!: an update/upsert import refuses its own rows that share a match key (DUPLICATE_MATCH_KEY)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:56:04Z",
+  "updated_at": "2026-10-26T18:50:30Z",
+  "closed_at": "2026-10-26T18:50:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:50:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26250",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XQD76KGN6sbDYQZCuWf6UxQ)_\n\nFixes #26133\n\nClause-②: no (narrowing: rows of one `update` / `upsert` import that carry the same coerced `matchFields` key, which used to be written one by one, now all fail with `DUPLICATE_MATCH_KEY` and none of them is written)\nMetadata-protocol: none\n\n## What changes\n\nOne `update` / `upsert` import never writes two of its own rows for one `matchFields` key. Before any row is written, `runImport` (`packages/core/src/utils/import-runner.ts`) groups the rows by their key, and every row of a key carried more than once fails with `ok: false`, `action: 'failed'`, `code: 'DUPLICATE_MATCH_KEY'`, its `error` naming every row that carries the key and the key set. None of those rows is written; the rest of the file imports as before. The dry run answers the same rows, from the same code path.\n\n- **The key is the coerced key the matcher queries with.** The pre-pass runs `coerceRow` (the one coercion, ⛔ no second normalisation copy) over each row's key columns with the same coercion context the row's own pass uses, then reads the key set by `keySetOf`, the helper `findExisting` now shares. So `ISO 14001` (option label) and `ISO14001` (option value) are one key. A row blank on every key set, or whose key cells fail coercion, has no key and answers as before.\n- **Which rows fail: every row of the key (option (a)).** Recommended over (b) \"first row proceeds, later ones refused\" because it leaves nothing to guess: the runner never picks which spreadsheet row was right, the dry run and the write agree by construction, and re-running the fixed file is safe either way (it creates or updates the one row).\n- **Update mode too; insert mode unchanged.** Measured at the base: an `update` file with two rows of one stored key answered `updated`, `updated` for the same id, and the last row silently won, the merge the triage ruled out. `insert` matches nothing and still writes every row.\n- **Every object, a unique index over the key included** (seat ruling, server seat 2 thread, 2026-10-26T14:56Z): at the base such an object answered `created` + `UNIQUE_VIOLATION` on the write and `created`, `created` on the dry run. Keeping that path would need a runner-side copy of the engine's uniqueness rules; with the check it answers `DUPLICATE_MATCH_KEY` for both rows on both halves.\n- **Contract (D5).** `DUPLICATE_MATCH_KEY` lands in `ERROR_CODE_LEDGER` (`@objectstack/core`'s list) with the runner as its reader, and the `matchFields` description in `api/export.zod.ts` says what it means. Generated references regenerated (`gen:docs`). The hand-written per-row outcome table in `content/docs/data-modeling/import-mappings.mdx` gains the row.\n\n## Evidence\n\nRed first, through the real `POST /data/:object/import` route over a real `SqlDriver` (better-sqlite3 `:memory:`): `packages/rest/src/import-upsert-in-file-duplicate-key.test.ts`, whole per-row results pinned with `toEqual`.\n\n| case | base `c7aa9cde24` | head |\n|---|---|---|\n| two identical rows `Acme, ISO 9001, A-1` | `created`, `created` (2 records) | both `DUPLICATE_MATCH_KEY`, 0 records |\n| `ISO 14001, B-1` then `ISO14001, B-1` | `created`, `created` | both `DUPLICATE_MATCH_KEY` |\n| re-run one row of that key | `failed: AMBIGUOUS_MATCH` | `updated` (after the fixed file created it) |\n| two rows of a stored key (upsert / update) | `updated`, `updated`, last row wins | both `DUPLICATE_MATCH_KEY`, record unchanged |\n| unique-index object, two rows of one key | write `created` + `UNIQUE_VIOLATION`; dry run `created`, `created` | both halves `DUPLICATE_MATCH_KEY` |\n| file without in-file duplicates | `updated`, `created`, blank-key `created` ×2 | identical |\n\n- Base run of the new file: 8 failed, 1 passed (the no-duplicates case) of 9. Head: 9 of 9.\n- Ablation (rebuild + on-disk proof): `if (writeMode === 'insert') return shared;` replaced by an always-return through `scripts/ablation-replace.mjs`, `ablation-dist-preflight` found the marker in `packages/core/dist/index.{js,cjs}`, the file went 8 failed / 1 passed; restored (blob == HEAD, `git diff HEAD` empty), rebuilt, preflight `--absent` clean, 9 of 9.\n\nLocal runs at `9cb2180be` (the head this PR opens with):\n\n- `@objectstack/core` test + typecheck: 121 files, 2778 tests passed. `@objectstack/rest` test + typecheck: 323 files, 6478 passed, 326 skipped.\n- Dependents that run the same runner: `@objectstack/service-automation` connector-pull suites 22 of 22; `@objectstack/plugin-auth` user-import suites 80 of 80.\n- Full dogfood (`(narrowing)` arm): 296 files passed, 3 skipped; 2523 tests passed, 18 skipped; lock VERDICT command-exit 0.\n- `dispatch-gates --commands`: 116 commands, all exit 0; `--ran` reconciles 116 derived, 116 run, 0 NOT-MEASURED. `pnpm --filter @objectstack/spec check:generated`: all 14 artifacts up to date. eslint (`pnpm lint`'s command) over `packages/core packages/rest packages/spec`: exit 0.\n- `check-governed-merges --branch`: 0 of 10 paths governed, 393 changed lines; not Tier H.\n\n## Acceptance notes\n\n- **Case-insensitive collations (not measured).** The in-file key compares coerced values exactly, as sqlite and Postgres compare them in the matcher's `where`. Under a case-insensitive MySQL collation `A-1` and `a-1` are one stored key but two in-file keys, so such a pair would still both be created there. No MySQL cell was run.\n- **Console wording.** `ui/packages/plugin-grid` `ImportWizard` maps a few row codes to translated sentences (`AMBIGUOUS_MATCH` among them); `DUPLICATE_MATCH_KEY` falls through to the server's English `error`, which names the rows. Noted, not filed.\n- **Who else reads the runner.** The connector pull (`upsertKey`) and the user import (`email` / `phone_number`) run the same `runImport`, so a pull page or a user sheet that repeats a key now gets those rows back as `DUPLICATE_MATCH_KEY` too; their existing suites pass unchanged.\n- **Outside the claim's listed surface:** `content/docs/data-modeling/import-mappings.mdx` (one table row) and the four `content/docs/references/api/*.mdx` files `gen:docs` regenerated.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LDVZZPEWCh6ycbrhnDCamc)_\n"
+}

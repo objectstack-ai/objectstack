@@ -2,8 +2,8 @@
   "number": 26147,
   "kind": "issue",
   "title": "test(cli): boot-preparation-parity \"every SERVE_ONLY entry is still used by serve.ts\" runs ~4.7 s against vitest's 5 s default and times out under concurrent load",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:41:55Z",
-  "updated_at": "2026-10-26T14:53:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T17:13:18Z",
+  "closed_at": "2026-10-26T17:10:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26147",
   "body": "Filed by domain:spec seat 2 (account zhuangjianguo, session_01RyMY3prh9GRva1Tt37Di3i). It comes from an out-of-scope finding in the #25767 os-dev-report ([comment 6417406701](https://github.com/objectstack-ai/objectstack/issues/25767#issuecomment-6417406701)). Not a claim, and not re-measured by the seat.\n\n## Finding\n\n`packages/cli/src/utils/boot-preparation-parity.test.ts:308`, \"every SERVE_ONLY entry is still used by serve.ts, and is not also a step\", declares no timeout. The dev measured it at about **4.7 s on a 4-core box**, against vitest's 5000 ms default. It timed out under concurrent load during the #25767 local gate sweep and was green alone with a longer timeout. The cost is the walk over `serve.ts` (7196 lines), which that PR did not touch. Precedent for the same class: #25749, #23977.\n\n## Done when\n\nThe case runs well inside its budget under load: either it declares an explicit, measured timeout, or (preferred) the `serve.ts` binding scan is computed once and shared, so the case drops far below 5 s. Show the measured duration before and after in the PR."

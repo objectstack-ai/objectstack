@@ -1,0 +1,36 @@
+{
+  "number": 26224,
+  "kind": "pull_request",
+  "title": "test(cli): boot-preparation parity reads each module's masked source once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:08:59Z",
+  "updated_at": "2026-10-26T17:10:13Z",
+  "closed_at": "2026-10-26T17:10:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T17:10:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26224",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X4H4YUDsH1nSMT4SyCqVDtv)_\n\nFixes #26147\n\nClause-②: no (test-only)\nMetadata-protocol: none\n\n## What changed\n\nOne file, test-only: `packages/cli/src/utils/boot-preparation-parity.test.ts`.\n\nThe parity pin's readers (`bindings`, `uses`, `declares`) re-read and re-masked the module they were asked about on every call. `serve.ts` is 7,197 lines, and on this box `maskComments` takes about 55 ms on it and `maskCommentsAndLiterals` about 29 ms. The SERVE_ONLY case calls `uses(serve.ts, …)` once per binding `serve.ts` imports, so it spent its whole budget re-masking the same file.\n\nA small `perModule` memo now computes each module's source, its comment mask, its code-only text (comments and literals masked, import statements dropped) and its binding list on the first ask, and every later ask shares it. This is the triage's route (6417925610): the scan is computed once per file and shared across entries. No timeout was raised, nothing moved project, nothing was deleted.\n\nThe predicates are the same expressions over the same text. `uses()` still removes the asked name's own `function NAME` declaration from the code-only text, then tests the same word-boundary pattern. `declares()` still tests the same export pattern on the comment-masked text. `bindings()` runs the same two `matchAll` passes. Its result is now typed `readonly Binding[]`, because the array is shared. Every caller only filters or iterates it.\n\n## Measured\n\nSame box (4 cores, shared, under `os-verify-lock`). BASE is `c7aa9cde`'s file, copied next to HEAD's as `zzbase.boot-preparation-parity.test.ts` so both run under the same conditions. The copy was deleted before commit. Durations come from the json reporter's per-case `duration`. Both legs ran with `--testTimeout=120000` so the BASE case's real cost is read rather than cut off at 5 s; the committed file declares no timeout.\n\n**Alone** (`vitest run --project unit --maxWorkers=2 FILE`, interleaved BASE/HEAD, 3 runs):\n\n| run | BASE: SERVE_ONLY case | HEAD: SERVE_ONLY case | BASE: closure case | HEAD: closure case | BASE: sum of 37 cases | HEAD: sum of 37 cases |\n|---|---|---|---|---|---|---|\n| 1 | 3140 ms | 19 ms | 850 ms | 193 ms | 5790 ms | 634 ms |\n| 2 | 3481 ms | 21 ms | 1043 ms | 205 ms | 6270 ms | 650 ms |\n| 3 | 3172 ms | 30 ms | 1021 ms | 238 ms | 6001 ms | 717 ms |\n\n**Under load**: the whole `@objectstack/cli` unit tier at `--maxWorkers=4` (the core count), with both copies in the same run, 3 runs, about 410 s each:\n\n| run | BASE: SERVE_ONLY case | HEAD: SERVE_ONLY case | BASE: closure case | HEAD: closure case | BASE: sum of 37 cases | HEAD: sum of 37 cases |\n|---|---|---|---|---|---|---|\n| 1 | 4332 ms | 20 ms | 1264 ms | 202 ms | 7899 ms | 746 ms |\n| 2 | 5217 ms | 20 ms | 1106 ms | 257 ms | 8628 ms | 946 ms |\n| 3 | 5435 ms | 40 ms | 960 ms | 205 ms | 8361 ms | 855 ms |\n\nUnder load, BASE runs 2 and 3 are over vitest's 5000 ms default, so at the default timeout they would have failed. HEAD's case takes 20 to 40 ms. In each run, 37/37 cases passed in both copies. The sorted full names and statuses of the 37 cases are identical between BASE and HEAD.\n\n(The load runs exited 1 only because `test/published-subpath-console.pin.test.ts` and `published-subpath-hook-body.pin.test.ts` refused to start: `packages/cli/dist` was not built yet at that point. No test failed. The cli unit tier below ran after `pnpm --filter @objectstack/cli build`.)\n\n## The assertions still prove what they proved\n\nAblation at HEAD `95e00887`, through `scripts/ablation-replace.mjs` (wrap mode, under the lock). In `packages/cli/src/commands/serve.ts`, the one use of the SERVE_ONLY entry `isHostConfig`, `&& isHostConfig(config)`, was replaced by `&& Boolean(config)`. That leaves the import in place but nothing using it. The anchor hit 1 time and then 0, and the blob went `80458419a165` to `031d0e05cbe4`. With both copies run:\n\n- HEAD: `× every SERVE_ONLY entry is still used by serve.ts, and is not also a step 40ms`, `AssertionError: isHostConfig: serve.ts no longer uses it — drop the entry`\n- BASE: the same case and the same message, in 3446 ms\n- `Test Files 2 failed (2)`, `Tests 2 failed | 72 passed (74)`; restore: blob after restore `80458419a1651ceb0f0835034f17a5c9a14a3b50` equals the blob at HEAD, and `git diff HEAD` is empty\n\nThe test reads `serve.ts` from `src/` with `readFileSync`, so no build sits between the mutation and the reading.\n\n## Verification (head `95e00887`)\n\n- `pnpm --filter @objectstack/cli build` exit 0, `pnpm --filter @objectstack/cli typecheck` exit 0\n- `pnpm --filter @objectstack/cli exec vitest run --project unit`: `Test Files 333 passed (333)`, `Tests 4854 passed (4854)`, exit 0. The integration tier is left to CI, because the diff touches no integration-tier file and no spawn entry.\n- `eslint --no-inline-config packages/cli` exit 0\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 58 commands, and every one exits 0. Three first exited 3 (PREREQUISITE NOT MET) and were re-run green after their prerequisite was met: `check-plugin-teardown-shape --self-test` after fetching its positive-control commit `621a4876`, and `check:dual-build-cjs-loads` and `check:i18n-coverage` after building 11 packages that had no `dist`. `--ran`: `58 derived, 58 run, 0 NOT-MEASURED, 0 UNRUN`, exit 0.\n- `skip-changeset`: the cli package ships only `files: [dist, README.md, CHANGELOG.md]`. After the build, `perModule` matches 0 files in `packages/cli/dist` and no file named for the test is there; the control `shouldBootWithLibrary` matches 4.\n\n## Acceptance notes\n\n- The `uses()` scan is still one regex replace and one regex test per asked name over the cached text, so it costs about 1 ms per call. The whole file now takes about 0.6 to 0.9 s of case time, alone or under load.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NqJv2ismsLLfpGXWijRUPq)_\n"
+}

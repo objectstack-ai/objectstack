@@ -1,0 +1,33 @@
+{
+  "number": 26290,
+  "kind": "pull_request",
+  "title": "chore(ui): declare vitest in every ui package whose test script calls it",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T19:21:10Z",
+  "updated_at": "2026-10-26T19:45:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26290",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi93uHdrJhCaZjEQjoR2jXwwH)_\n\nFixes #26276\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\nEvery ui package `test` script reads `vitest run --root ../.. packages/PKG/`. A pnpm script finds binaries in the package's own `node_modules/.bin` and in the workspace root's (`node_modules/.bin` at the repo root). vitest is installed under `ui/node_modules/.bin` only, which is on neither path. So a package that does not declare vitest itself cannot run its own `test` script, from the repo root or from `ui/`.\n\nMeasured on `e05e0de8` (origin/main) before the change, all 41 ui packages that declare a `test` script, each run as `pnpm --filter NAME run test` from the repo root and again from `ui/`:\n\n- 24 packages: `sh: 1: vitest: not found`, from both roots. They are exactly the 24 that do not declare `vitest`: app-shell, components, fields, plugin-calendar, plugin-charts, plugin-chatbot, plugin-dashboard, plugin-editor, plugin-form, plugin-gantt, plugin-grid, plugin-kanban, plugin-map, plugin-markdown, plugin-timeline, plugin-tree, plugin-view, providers, react, react-runtime, runner, sdui-parser, test-support, types.\n- 17 packages: vitest starts. Each declares `vitest: ^4.1.10` (auth, cli, collaboration, core, create-plugin, data-objectstack, i18n, layout, mobile, permissions, plugin-ai, plugin-designer, plugin-detail, plugin-list, plugin-report, the vscode extension, and the console).\n\n## The fix\n\nThe 24 packages now declare `vitest: ^4.1.10` in `devDependencies`, the same range `ui/package.json` and the 17 working packages already declare. No script changes, so the form CI and ui/AGENTS.md prescribe (`pnpm --dir ui exec vitest run packages/PKG/`) is untouched.\n\n`pnpm-lock.yaml`: +73 lines, 0 removed. That is one `vitest` importer entry (3 lines) for each of the 24 packages, plus the `devDependencies:` header for react-runtime, which had none. Every new entry resolves to the existing snapshot the 17 working packages use (byte-identical `version:` string to `ui/packages/auth`). `node ui/scripts/check-lockfile-integrity.mjs --base-ref origin/main`: `VERDICT clean — no package gained a copy` (1941 resolutions on both sides).\n\nChangeset: `.changeset/26276-ui-package-test-vitest.md`, `patch` for the 22 published packages whose `package.json` changes (runner and test-support are private). Only the published `devDependencies` field moves; nothing a consumer installs changes.\n\n## Evidence (head `2ef77bb4`)\n\nAfter the change, `pnpm --filter NAME exec sh -c 'command -v vitest'` resolves for 41 of 41 packages from the repo root and from `ui/`.\n\nThe six packages the card names, each run from the repo root as `pnpm --filter @object-ui/PKG test --maxWorkers=2` (the package's own `test` script, echoed as `> @object-ui/PKG@18.1.0 test`), under the shared verification lock, after building the `@objectstack/*` dependency closure:\n\n| package | Test Files | Tests |\n|---|---|---|\n| `@object-ui/sdui-parser` | 21 passed (21) | 301 passed |\n| `@object-ui/plugin-chatbot` | 84 passed (84) | 805 passed |\n| `@object-ui/react` | 119 passed (119) | 1479 passed |\n| `@object-ui/types` | 390 passed (390) | 10602 passed |\n| `@object-ui/components` | 435 passed, 1 skipped (436) | 4263 passed, 24 skipped |\n| `@object-ui/app-shell` (narrowed: `--shard=1/40`) | 35 passed (35) | 358 passed |\n\nAll six exit 0. app-shell has about 1743 test files, too many for one local run, so it was run through its own `test` script with `--shard=1/40`. That still proves the binary resolves and the package's tests run. The full suite is left to CI `Test UI`.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 47 families. 46 exit 0. `pnpm check:dual-build-cjs-loads` exited 3 (`PREREQUISITE NOT MET`: it reads built `dist/` of every published `@objectstack/*` package, and only the spec/client/formula/lint closure was built here), so it is NOT MEASURED locally and left to CI. `--ran` reconciliation: 47 derived, 46 run, 1 NOT-MEASURED, 0 UNRUN.\n\n## Acceptance notes\n\n- `pnpm install` (non-frozen) prints `unmet peer @vitest/ui@4.1.12: found 4.1.10` for the snapshot all these packages share. It is the same snapshot the 17 working packages and the console already resolve to, so this PR adds no new peer mismatch. Noted, not filed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CQYwcp65XPKU6W8H7gaJ9x)_\n"
+}

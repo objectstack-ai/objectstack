@@ -1,0 +1,30 @@
+{
+  "number": 26208,
+  "kind": "issue",
+  "title": "[Decision] TypeScript's legacy node10 resolution resolves no subpath on 15 published packages: declare node10 unsupported, or mirror exports into typesVersions?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:26:05Z",
+  "updated_at": "2026-10-26T17:27:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26208",
+  "body": "Ruled: 6422810199 · letter A · 2026-10-26T17:25Z\n\nFiling gate: ② a maintainer-only decision. It sets which consumer setups the published packages support. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Reader who acts.** The maintainer chooses. The `domain:devx` seat dispatches the chosen letter.\n\n## Measured\n\n- attw 0.18.5 on `npm pack` staging (PR #26198 at `23f2dea480`, os-dev report 6419735271, out_of_scope_findings[3]) reports `NoResolution@node10` on 15 packages with subpath exports: spec, cli, connector-imap, core, create-objectstack, lint, metadata, metadata-core, objectql, platform-objects, plugin-auth, plugin-webhooks, service-cluster, service-datasource, types.\n- A consumer whose tsconfig uses `moduleResolution: \"node\"` (node10) cannot import any subpath of these packages. The root entry still resolves through `types`.\n\n## 维护者速读\n\nTypeScript 老的 `node` 解析方式不认 `exports` 子路径，所以用这种配置的用户 import 这 15 个包的子路径时类型找不到。两条路：**A** 在文档里写明不支持 node10(要求 `moduleResolution` 用 node16/nodenext/bundler)，不改包;**B** 给 15 个包加 `typesVersions`，把 `exports` 子路径镜像一份。B 能多兼容一类老配置，但同一组子路径要声明两遍，以后容易漂移，还得加一道检查。我推荐 **A**:TypeScript 5 以上的新项目默认都不是 node10,我们的模板也不是。选 A 还是 B?\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A (recommended) | One paragraph in the docs plus a line in each affected README: node10 resolution is unsupported; use node16, nodenext or bundler. | Legacy-config consumers get a clear statement instead of a silent miss. Nothing to drift. | devx · 1 docs PR |\n| B | Add a `typesVersions` mirror of each `exports` subpath on the 15 packages, plus a check that the mirror matches `exports`. | node10 consumers resolve subpaths. Two declarations of one surface, and a new gate to keep them equal. | devx · 1 PR plus a new check |\n\nRelated: #26095, PR #26198.\n"
+}

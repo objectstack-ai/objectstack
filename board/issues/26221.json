@@ -1,0 +1,37 @@
+{
+  "number": 26221,
+  "kind": "pull_request",
+  "title": "chore(sdui-parser): retire the objectui lockstep gate and its vendored record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:03:13Z",
+  "updated_at": "2026-10-26T17:43:27Z",
+  "closed_at": "2026-10-26T17:43:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T17:43:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26221",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao7EJRrpBukNTDcMt2XiXQX1)_\n\nPart of #25712 (item 3 = 2g, PR 3 of 3: retire the sdui-parser lockstep; lands FIRST by PM ruling; Tier H: `.github/workflows/lint.yml`).\nPart of #25677.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么:** 删掉让两份 sdui-parser 保持一致的 lockstep 门禁:`scripts/check-sdui-lockstep.mjs`(1634 行)、它的记录 `packages/sdui-parser/objectui-lockstep.json`、`check:sdui-lockstep` / `gen:sdui-lockstep` 两个脚本、`lint.yml` 里的那一步,以及 merge driver 台账和测量分诊表里指向它的两行。其余只改了指向它的注释。\n- **为什么改:** 你在 2g 决策卡上裁定只保留 `@objectstack/sdui-parser` 一份(6418729849)。只剩一份时这个门禁就没有可比的对象了。\n- **为什么先合这个:** 现在没有 `.objectui-sha`,门禁直接拿 `ui/packages/sdui-parser/src` 做对照。2g PR 1 合并两份实现时会单边改到它比对的区域,PR 2 删掉 ui 那份后它会直接拒绝。先退役它,PR 1 和 PR 2 就不会因为它变红。\n- **风险与代价(含回滚):** 本 PR 合并后到 2g PR 1 合并前,两份解析器之间没有门禁守护。PR 1 紧接着合,它把两份合成一份,之后就没有第二份可以漂移了。不影响运行时、不发布任何包。回滚 = revert 本 PR。\n- **你要做的:** 批准(Tier H:`lint.yml`)。\n\n## 席位核对\n\n(left for the dispatch seat)\n\n## Why\n\nRuling 6418729849 on #25712 (2g decision card 6418466647, letter E + B) keeps `@objectstack/sdui-parser` as the one parser, deletes `ui/packages/sdui-parser`, and retires `check-sdui-lockstep.mjs` with its record. The PM ordered this PR first: with `.objectui-sha` gone, the gate's oracle is `ui/packages/sdui-parser/src` read in place (`oracleFor`, \"pin absent, `ui/` copy\"), and it REFUSES a tree with neither the pin nor that copy. So:\n\n- 2g PR 1 (unify the body into `@objectstack/sdui-parser`) reds the gate if it edits the parse region, the diagnostic-code set or `validate.ts`'s containment branch on one side only;\n- 2g PR 2 (rewrite the 122 importers, delete the ui copy) reds it unconditionally.\n\n⚠️ **Between this PR and 2g PR 1 the two copies are unguarded.** A parser change landing in that window on one side only would not be caught. 2g PR 1 follows directly (4b seat, branch `claude/project-thread-6qe56u`) and removes the second copy's role; 2g PR 2 then deletes it.\n\n## What changes\n\n- Deleted: `scripts/check-sdui-lockstep.mjs`, `packages/sdui-parser/objectui-lockstep.json` (not in the package's `files`, so nothing published changes).\n- `package.json`: `check:sdui-lockstep` and `gen:sdui-lockstep` removed.\n- `.github/workflows/lint.yml`: the step `sdui-parser-stays-in-lockstep-with-objectui` and its comment block removed. No other step or aggregator names that id.\n- `scripts/regen-artifacts.mjs`: the `NOT_DRIVER_MANAGED` row for `objectui-lockstep.json` removed (the file no longer exists). `ROOT_OWNER` keeps four other rows.\n- `scripts/pm/measurement-claim-triage.mjs`: the row whose `file` is the deleted gate removed.\n- Prose that pointed at the gate: `scripts/check-sdui-manifest.mjs` (3 places), `scripts/gen-sdui-manifest-node.mjs`, `scripts/pm/os-regen-merge.sh`.\n\n### Left on purpose\n\n- `packages/sdui-parser/src/parse.ts:49`, `src/validate.ts:53` (the `LOCKSTEP:` docblock), `src/__tests__/html-tier-manifest.test.ts:12`, `src/__tests__/inert-quick-add.test.ts:19`, and the invariant text of `scripts/adr-anchors/packages__sdui-parser__src__parse.ts.json`: 2g PR 1 rewrites these files (and `validate.ts`'s `acceptsChildren` docblock ships in the `.d.ts`), so editing them here would put a published-package change and a changeset into a no-publish PR and collide with PR 1.\n- `ui/packages/sdui-parser/src/parse.ts:52`: deleted with the package in 2g PR 2.\n- Dated measurements that name the old command as the condition of a reading: `scripts/regen-artifacts.mjs:85`, `scripts/check-regen-pending.mjs:143`, the self-test literal in `scripts/check-pnpm-flag-spellings.mjs:884`, `.gitattributes:127`, `docs/audits/*`, and CHANGELOGs (release-owned).\n\n## Verification\n\nAll readings at head `ce348aef` (base `365fe5ec`).\n\n- **Derived gates:** `node scripts/pm/dispatch-gates.mjs --commands` → 97 families; all 97 run, all exit 0 (four dist-reading gates and the teardown self-test after a full `pnpm build` and the pinned-sha fetch). `--ran` reconciliation: 97 derived, 97 run, 0 NOT-MEASURED, 0 UNRUN. List: `/mnt/project-files/d1-merge/out/2g-b/pr3-gates-ran-ce348aef.list`.\n- **Push battery:** `GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push node scripts/pm/check-dispatch-gates.mjs` → `✓ dispatch-gates self-test: 2182 cases pass` (fast 1917 in 478 s, slow 265 in 1312 s), exit 0.\n- **Governed predicate:** `node scripts/pm/check-governed-merges.mjs --branch claude/project-thread-hrsgde` → GOVERNED (1 of 9 paths: `.github/workflows/lint.yml`), 1768 changed lines (+10 / −1758), under the 3000 human-merge line. Tier H.\n- Not run locally (CI owns them): the repo-wide `pnpm lint` and the full `Test Core` matrix.\n\n## Changeset\n\nNone: the diff publishes nothing from any released package (`objectui-lockstep.json` is outside `@objectstack/sdui-parser`'s `files`). `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Xe3LjBvLrRVA6dmFUEGskm\n"
+}

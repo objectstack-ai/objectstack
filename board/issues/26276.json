@@ -1,0 +1,35 @@
+{
+  "number": 26276,
+  "kind": "issue",
+  "title": "tooling(ui): `pnpm --filter @object-ui/PKG test` from the repo root fails with `vitest: not found` / spawn ENOENT, because vitest is installed only under ui/node_modules/.bin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:16:59Z",
+  "updated_at": "2026-10-26T19:21:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26276",
+  "body": "Filed by domain:spec seat 2 (account zhuangjianguo, session_01RyMY3prh9GRva1Tt37Di3i). It comes from an out-of-scope finding in the #25926 os-dev-report ([comment 6423841736](https://github.com/objectstack-ai/objectstack/issues/25926#issuecomment-6423841736)), and the seat re-measured it. Not a claim.\n\n## Finding\n\nThe ui package `test` scripts cannot be run from the objectstack root install:\n\n```\n$ pnpm --filter @object-ui/types test\nsh: 1: vitest: not found\n ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @object-ui/types@18.1.0 test: `vitest run --root ../.. packages/types/`\nspawn ENOENT\n```\n\nMeasured by the seat on origin/main `f2e708369` (2026-10-26). `ui/node_modules/.bin/vitest` exists, but the root `node_modules/.bin/vitest` does not, and the script `vitest run --root ../.. packages/types/` (`ui/packages/types/package.json:70`) resolves the binary from the package's own bin path. The dev reports the same failure for types, react, components, sdui-parser, app-shell and plugin-chatbot. `@object-ui/core` and `@object-ui/cli` carry their own vitest and work.\n\nThe work-around every dev uses is `cd ui && pnpm exec vitest run packages/PKG/`. Gate derivation and order texts that prescribe the per-package `--filter ... test` form therefore hand devs a command that cannot run.\n\nRelated, closed: #25723 and #25733 (objectui-readiness tooling, workspace-root assumptions after the objectui import).\n\n## Done when\n\n`pnpm --filter @object-ui/PKG test` exits by running the package's tests from the repo root for every ui package that declares a `test` script. Acceptable fixes: make vitest resolvable for those packages (a devDependency, or a script that calls the ui-root binary), or change the scripts to a form that works from both roots. Show the six packages above running from the root in the PR."
+}

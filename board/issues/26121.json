@@ -2,8 +2,8 @@
   "number": 26121,
   "kind": "issue",
   "title": "pm-dispatch: cloud work found during development (dev open_questions, out-of-scope findings, seat findings) is filed as a cloud-lane card",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T12:53:43Z",
-  "updated_at": "2026-10-26T13:04:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T20:12:37Z",
+  "closed_at": "2026-10-26T20:10:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26121",
   "body": "Filing gate: ③ 维护者直派(改 pm 规则,维护者点名)。维护者 Leehom 在本项目时间线的原话,逐字不译:\n- 2026-10-26T12:40Z 「需要转给 cloud的，应该立 cloud 车道卡」\n- 2026-10-26T12:51Z 「需要转给 cloud的，应该立 cloud 车道卡，应该立卡写入 skills」\n- 2026-10-26T12:52Z 「开发中涉及 cloud 车道的，也应该转给 cloud」\n\nBusiness reason: ③,以原话代。\nReader who acts: the `domain:skills` seat (next shift). It changes `.claude/skills/pm-dispatch/**`. The expected home is `references/cross-repo-coordination.md` L50–51 (the split-by-repo rule for unreachable repos). A pointer goes in the dev-report handling the seat reads at review: `.claude/agents/os-dev.md` `open_questions` / `out_of_scope_findings`, or `references/execution-duties.md`. One home, the others point to it.\nDedupe: `domain:skills` open + closed (308 cards) title grep \"cloud\" → 10 hits. The nearest is #24591 (closed): ruling D「这一类的卡片能否直接把 cloud 部分分拆成一个 cloud 车道的卡片」「如果没有办法分拆，就立一张 cloud 车道的前置卡」, landed as `cross-repo-coordination.md` L50–51. That rule covers splitting a card at filing or first touch. It does NOT cover cloud work that surfaces during development. No card asks for this one.\n\n## What changes\n\n- Today: L50–51 split a cross-repo card at filing or first touch (the cloud part is filed by a seat that can reach cloud, or parked as `domain:cloud` + `status:parked`).\n- New: anything that touches the cloud lane and is found *during development* also becomes a cloud-lane card. That covers the os-dev-report's `open_questions` and `out_of_scope_findings` and seat findings at review or landing. ⛔ It must not be noted-and-dropped, folded into the objectstack PR, or left as a `carrier: none` line.\n- Card shape, from the precedent below: `domain:cloud` + `status:parked` + `repo:cloud`, a provenance line naming the objectstack card / PR it came from, and a one-line executable criterion. The objectstack card keeps only its own work and records `Blocked-by:` when it depends on the cloud card.\n\n## Precedent (server seat 2, 2026-10-26)\n\n- #26108 `cloud: the hosted control plane's i18n service holds no zh-CN label …`, labels `bug, priority:p2, status:parked, repo:cloud, domain:cloud, area:i18n`\n- #26110 `cloud: at the @objectstack/core bump that carries #26078, check the three AI entry points …`, labels `priority:p2, status:parked, repo:cloud, domain:cloud, area:ai, chore`\n\n## Boundary\n\n- Ratchet: each touched file is at its line ceiling, so new lines are paid in-file. ⛔ No ceiling raise.\n- ⛔ No new gate or script. ⛔ No change to cloud's own PM.\n- Tier S (`.claude/**`). If `os-dev.md` is touched, check its own tier with `dispatch-gates --tier`.\n\nSession: `session_014FZ3TJucS1L7BdMe5DAzXC` (`domain:skills#1`, filing only; the lane is off shift)"

@@ -1,0 +1,36 @@
+{
+  "number": 26214,
+  "kind": "pull_request",
+  "title": "test(cli): install-local suites run their independent boot chains at once and declare their spawn budgets",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:50:03Z",
+  "updated_at": "2026-10-26T17:23:40Z",
+  "closed_at": "2026-10-26T17:23:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T17:23:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26214",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X96yKfHBKrkwiQFzqVAac71)_\n\nPart of #23181 (slice 10: the `@objectstack/cli` `package-install-local-*` family). The card stays open for later slices.\n\n## Summary\n\nThe seven `test/package-install-local-*.integration.test.ts` files ran 68 to 275 s each on CI. The order's hypothesis was a per-case boot, but that is not this family's shape. Every file already boots in one `beforeAll`, and the `it`s only read what the phases recorded. The cost is the boots and installs themselves, spawned from the tsx source entry. One `os start` to READY takes about 20 s, and one `os package install` about 15 s. Slice 9's reading on this box: tsx `--version` takes 10.0 to 10.3 s, dist `--version` 2.7 to 3.0 s. The family spawns 23 boots and 26 installs, so no file here can reach the 10 s line on the tsx entry.\n\nSo this PR gives each file its measured budget. One header line declares the ruled class `spawns the real producer once per single-cause fixture` (ruling record 6181973363, letter B), in the grammar `scripts/measure-test-shard-timings.mjs` reads. `readTestBudget` parses all seven.\n\nThe diff is those seven lines and nothing else. Every chain stays sequential, as on `main`. No assertion, case, timeout, project or tier changed.\n\n**Revised after the seat's review.** The first head also ran chains that share no state side by side: uninstall's orders two at a time, and the `--artifact` CONTROL beside boots 1 and 2. That made each file faster locally, but it is packing on CI's shared box. It also added about 3.3 GB of peak RSS per file (uninstall-cleanups went from 4.2 to 7.6 GB, and four orders at once was memcg-OOM-killed, exit 137). It is taken out. The source-entry oclif manifest (slice 14, a test-only `globalSetup`) is the lever the seat ruled for this cost. Once it lands, the next refresh re-reads these rows and the budgets can tighten.\n\n## The budgets, from CI readings of the sequential shape\n\nEach budget is the slowest CI reading of the file as it runs on `main`, x 1.25, rounded up to the next 10 s. Two windows feed the reading. One is the card's table: refresh run `38340176409`, each row the file's slowest run in its window. The other is the hourly full battery run `40290659753` (schedule, 2026-10-26T08:12Z, head `05f7758f05`), read from its Test Core aggregator table and shard job logs.\n\n| file | card window (run) | run 40290659753 | budget |\n|:--|--:|--:|--:|\n| `uninstall-cleanups` | 275.2 s (38332198724) | 270.1 s | 350 |\n| `jobs` | 160.9 s (38332198724) | 161.8 s | 210 |\n| `hooks` | 117.1 s (38332198724) | 114.4 s | 150 |\n| `jobs-shared-name` | 110.4 s (38332198724) | 107.1 s | 140 |\n| `jobs-pull` | 107.9 s (38335967790) | no line in the job logs read | 140 |\n| `handlers` | 99.4 s (38332198724) | 97.8 s | 130 |\n| `boot-steps` | 94.3 s (38222448090) | 68.2 s | 120 |\n\n## Rows this closes\n\nWhen the next refresh reads each file under its declared budget, these seven #23181 rows close, all `(integration)`: `package-install-local-uninstall-cleanups`, `-jobs`, `-hooks`, `-jobs-shared-name`, `-jobs-pull`, `-handlers`, `-boot-steps`.\n\n## Acceptance notes\n\n- Isolation needs no new proof, because the order of execution is `main`'s. For the record, a shuffled run of the family (`--sequence.shuffle --sequence.seed=23181`) on the base files passed 77/77 under the default workers (387.5 s, peak tree RSS 11.2 GB).\n- Not taken: moving `hooks`' and `jobs-pull`'s boot 2 (the rehydrate of an entry an earlier build wrote) onto its own home. The headers frame it as a restart of the same home.\n\nClause-②: no\nMetadata-protocol: none\n\n`skip-changeset`: the diff is seven comment lines under `packages/cli/test/`. `@objectstack/cli`'s `files` is `dist`, `README.md` and `CHANGELOG.md`, so nothing published moves.\n\n## Local gates (head `ff0ca4cc8`)\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 55 commands on this diff, and each was run with its exit code captured by redirect before any pipe. 54 exited 0.\n- `check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: dist of packages outside this diff is not built here). It is NOT MEASURED locally, and CI runs it.\n- `--ran`: \"55 derived, 54 run, 1 NOT-MEASURED, 0 UNRUN\", exit 0.\n- `pnpm --filter @objectstack/cli typecheck`: VERDICT command-exit 0.\n- `eslint --no-inline-config packages/cli`: exit 0.\n- No ablation and no test run: the diff is header comments only. The integration tier is declared to CI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DcLzU9qErDBr5VydWEmHVM\n"
+}

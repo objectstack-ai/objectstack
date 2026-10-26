@@ -1,0 +1,36 @@
+{
+  "number": 26248,
+  "kind": "pull_request",
+  "title": "docs: one scaffold spelling and one dev-port sentence for contributors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:52:00Z",
+  "updated_at": "2026-10-26T18:02:03Z",
+  "closed_at": "2026-10-26T18:02:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:02:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26248",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9PVMSwVKpsD3oGbArkiX5XR)_\nPart of #26088\nClause-②: no\nMetadata-protocol: none\n\n## What this does\n\nThe non-AGENTS.md half of the card: `README.md`, `CONTRIBUTING.md` and `content/docs/getting-started/**` now say one thing per fact. The AGENTS.md half stays on the card (three open PRs touch that file); #26088 remains open for it.\n\nTwo files, +8 / -1:\n\n- `content/docs/getting-started/index.mdx:169` — `npx create-objectstack my-app` becomes `npm create objectstack@latest my-app`, the spelling README.md:43, your-first-project.mdx:43 and build-with-claude-code.mdx:51 already use.\n- `CONTRIBUTING.md` — one paragraph after the README pointer stating what `pnpm dev` does with the port, in the same terms as getting-started/index.mdx:207-212, plus how the Console dev server's proxy finds the backend.\n\n## The three facts, and the code line that decided each (origin/main df8aac41)\n\n1. **Dev port and env var.** `packages/cli/src/commands/dev.ts:718` reads `flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true })`, and `:765` defaults to `'3000'`; `packages/cli/src/commands/serve.ts:2274` sets `portAutoShiftAllowed = flags.dev || ...` and hops to the next free port. So: default 3000, auto-shift in dev, `OS_PORT` canonical, `PORT` the legacy alias. The UI is not hard-wired: `ui/apps/console/vite.config.ts:1486` proxies `/api` to `process.env.DEV_PROXY_TARGET || 'http://localhost:3000'`. getting-started/index.mdx already said this; CONTRIBUTING.md now says it too.\n2. **Scaffold command.** `packages/create-objectstack/package.json` names the package `create-objectstack`, which `npm create objectstack` resolves to; docs/NORTH-STAR.md:11 and :15 name `npm create objectstack`. Both spellings run the same package, so the North Star's wins.\n3. **Setup command.** Root `package.json:17`: `\"setup\": \"pnpm install && pnpm --filter @objectstack/spec build\"` builds the spec only. `pnpm dev` opens with `scripts/check-dev-prereqs.mjs`, whose existence check covers every workspace package with a dist entry point and prescribes `pnpm build` (`:579`). So `pnpm install` then `pnpm build` is the true first-time sequence for running anything, which is what README.md:213-214, CONTRIBUTING.md:56-59 and getting-started/examples.mdx:53-54 already say. No edit needed in this half.\n\n## Card grep, after this PR (README.md, CONTRIBUTING.md, content/docs/getting-started/)\n\n- `OS_PORT`: CONTRIBUTING.md:67 (`OS_PORT=3000 pnpm dev`), getting-started/index.mdx:211-212 (`OS_PORT=3001 pnpm dev`) — one spelling, `OS_PORT`, `PORT` named only as the legacy alias. `PORT=3000`: zero hits.\n- `npm create objectstack`: README.md:43, CONTRIBUTING.md:268, build-with-claude-code.mdx:29/51, your-first-project.mdx:43/77/93, index.mdx:169. `npx create-objectstack`: zero hits.\n- `pnpm run setup`: zero hits in these three places.\n\n## AGENTS.md lines that still disagree (left for a later round on this card)\n\n- `AGENTS.md:40` — `pnpm run setup  # first-time: install + build spec`: true about what it runs, but not enough for `pnpm dev` (see fact 3); the first-time line should be `pnpm install && pnpm build`.\n- `AGENTS.md:138` — `PORT=3000 pnpm dev`, \"Port **must** be 3000 (UI hard-wired)\", and `PORT=3000 pnpm dev:crm`: should be `OS_PORT=3000`, and the console proxy is overridable through `DEV_PROXY_TARGET` (fact 1).\n- `AGENTS.md:173` — `PORT=3000 pnpm dev` in the sibling `../objectui` section; that section is the objectui-pin text another open card is rewriting.\n\n## Gates (local, at dcabcaf2)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 41 commands; all 41 exit 0. `pnpm --filter @objectstack/spec run check:skill-examples` first exited 3 (PREREQUISITE NOT MET: `packages/client-react/dist` unbuilt), then exit 0 after building `@objectstack/client-react` and its closure. `--ran` reconciliation: 41 derived, 41 run, 0 NOT-MEASURED (a derived zero, every line recorded with its exit code). `pnpm check:doc-authoring` exit 0.\n\nThe link check (`check-links.yml`, lychee) is CI's: lychee is not installed here. The diff adds no link lychee reads (CONTRIBUTING.md is outside its globs, and the one URL added, `http://localhost:3000`, is in `lychee.toml`'s exclude list).\n\nDocs only, nothing published from any package, so `skip-changeset`.\n\n## Acceptance notes\n\n- README.md:216 says `pnpm dev` serves on `:3000`; that is the default and stays true, so it is untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VekRRVKWXqJbHnFKvo9Bak)_\n"
+}

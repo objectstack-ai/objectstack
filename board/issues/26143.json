@@ -2,8 +2,8 @@
   "number": 26143,
   "kind": "issue",
   "title": "pm-dispatch: a main-red is filed and dispatched by the seat that sees it; triage first-touch follows, never gates it (maintainer 2026-10-26)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:39:39Z",
-  "updated_at": "2026-10-26T15:04:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T16:48:41Z",
+  "closed_at": "2026-10-26T16:46:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26143",
   "body": "Filing gate: ③ a pm-rule change named by the maintainer, quoted verbatim below.\nReader: `domain:skills` seat 2 (#19287), seat thread 「Dispatch the skills lane」 (`session_01LqKsGyMNFwwnbF5FTAqyPn`); next PR = skill text only, under `.claude/skills/pm-dispatch/**` (Tier S).\nDedupe (repo-scoped listings; `/search` is refused from cloud sessions): open `domain:skills` cards = 10, none about main-red or triage order; open `tooling` cards = 39 and `tooling` cards closed since 2026-10-19 = 24, titles matched against main-red / 主干红 / 全量红 / triage skip or bypass / 止血 = 0 hits. The nearest neighbour is the sub-issue clause already in the skill (a lane sub-issue carries its parent's domain and priority and is dispatched past triage, with the sweep auditing after), which this card extends to main-red.\n\n## The order\n\nWarren, 2026-10-26, this seat thread, verbatim and untranslated:\n\n> 主干 Test Core 超时红这种应该立刻立卡啊，skills 没有约定吗？ (13:05:01Z)\n>\n> 所以 main红这一类卡应该是 devx 立卡并立刻处理吗 (13:33:49Z)\n>\n> 按照目前的规则，等分诊太慢了 (13:35:02Z)\n\nand, on the seat's decision card 「main-red 卡要不要跳过分诊首触,由看见红的席位直接立卡并派发?」, the option chosen at 13:35:39Z:\n\n> 席位直接立卡派发,分诊后补\n\n## What the rules say today, and where the time went\n\n- `AGENTS.md` (Two speeds / Main-red): a full-battery red is its lane's first work; **triage files it** under the main-red convention; the lane's next PR fixes it; no lane PR arms the queue meanwhile.\n- `references/landing-operations.md` §B: p0 fix-forward may jump the queue (mechanical, root cause verified); the maintainer may hand-merge a one-line fix; one failing check anchors one card, first filer wins, later seers comment on the anchor.\n- `references/triage-duties.md`: a maintainer-named or p0-suspect card gets an immediate default-tier triage subagent, not the timed round.\n- `references/execution-duties.md`: a card without a triage audit comment is not a candidate; the one exception is a lane sub-issue of an audited parent, dispatched past triage with the sweep auditing after.\n\nMeasured on 2026-10-26: the first full `Test Core` red in the queue was 08:39Z; the anchor card (#26074) was filed at 11:11Z, two and a half hours later; the fix (#26077, a revert) merged at 11:58Z, 47 minutes after filing; the queue was landing again from 12:16Z. The whole delay was discovery-to-filing. The skills seat itself saw the signature at about 11:00Z and, having no rule to act on, offered the maintainer a routing instead of filing. Three `queue-flake-anchor` cards (#26047, #26049, #26065) named victim files with no cause and no owner.\n\n## Rule to write (the two points, nothing else)\n\n1. **Any seat that sees a main-red acts; triage follows.** On a full-battery red on `main` or a merge-queue build: look for the anchor card (one per signature = failing job + first error line); if none, file it as ① with `priority:p0` and the domain of the failing surface's lane, claim it, and dispatch the stanch (the first stanch is the revert of the commit that introduced the red, found between the last green and the first red on `main`; root cause is a separate card). ⛔ Do not wait for triage first-touch or for the maintainer's word. Triage first-touch is added after the fact and may change the domain, never the action.\n2. **The existing conventions stay** (one signature one card, first filer wins; p0 fix-forward jumps the queue; maintainer may hand-merge a one-line fix; no lane PR arms the queue meanwhile). The `execution-duties.md` candidate rule gains main-red as its second exception beside the sub-issue clause, in the same shape (dispatched past triage, audited after).\n\n## Where it lands\n\n`.claude/skills/pm-dispatch/references/landing-operations.md` §B (the main-red convention already lives there) and `references/execution-duties.md` (the candidate exception); a pointer line in `SKILL.md` only if paid under the line ratchet (SKILL.md sits at its ceiling). `AGENTS.md`'s main-red sentence is Tier H prose and changes only on the maintainer's hand; the card does not touch it. Machine-filed anchor cards (merge-queue-triage bot) were offered as option B and not chosen; not in scope.\n\n## Acceptance\n\n- The rule names the seat that sees the red as the actor and says ⛔ 不等分诊首触、不等维护者 in those words; it names the anchor lookup, the p0, the revert-first stanch, and the after-the-fact triage.\n- Line ratchet paid line for line; every touched line ≤ 120 bytes; no issue numbers in operative text (id-lint).\n- Independent `CONTRACT_REVIEW_TIER` contract review on the PR head before the seat's ACCEPT (Tier S).\n- Round report cites this card's order lines verbatim."

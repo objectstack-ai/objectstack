@@ -1,0 +1,37 @@
+{
+  "number": 26203,
+  "kind": "pull_request",
+  "title": "build(tsconfig): split the shared base out of the root tsconfig (#26092 part 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/l",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:19:17Z",
+  "updated_at": "2026-10-26T17:10:39Z",
+  "closed_at": "2026-10-26T17:10:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T17:10:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26203",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9LfZ5QdBw85EmeKfVNFm1YF)_\nPart of #26092 (PR 1 of 2: the tsconfig half; the vitest preset follows as PR 2).\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **`tsconfig.base.json`** (new) holds the compiler options the root `tsconfig.json` used to carry, unchanged. The 72 package/app/example configs that extended the root now extend it.\n- **Root `tsconfig.json`** is now only the type-check program for `scripts/` and the top-level configs: it extends the base, adds `types: [\"node\"]`, keeps its `exclude`.\n- **`tsconfig.test.base.json`** (new) holds the vitest module semantics (`noEmit`, `module: esnext`, `moduleResolution: bundler`, `lib: [\"ES2022\"]`). 36 of the 42 `tsconfig.test.json` files now spell `\"extends\": [\"./tsconfig.json\", \"REL/tsconfig.test.base.json\"]` and keep only what differs (`DOM` in `lib`, `types`). The other 6 do not re-set module semantics this way and are untouched.\n- **Module re-sets:** the two configs that re-set `NodeNext` identically to the base (`packages/adapters/hono`, `packages/qa/http-conformance`) drop the duplicate; the seven `ES2020`/`bundler` configs keep it with a one-line reason (four drivers: no `\"type\": \"module\"`, so NodeNext compiles their sources as CommonJS and refuses `import.meta`, TS1470 measured; `embedder-openai` / `knowledge-memory` / `knowledge-ragflow`: tsup-bundled, no `\"type\": \"module\"`).\n- **turbo.json** `globalDependencies` gains both bases, so a change to either invalidates every cached build the way a change to the root did; **`.github/workflows/ci.yml`** `core:` filter lists both verbatim, which `check-ci-filter-parity` requires (measured: FAIL naming both files without these two lines).\n- **Ledgers:** the three empty `test-typecheck-debt.json` files (`packages/rest`, `packages/client`, `packages/plugins/knowledge-ragflow`) are deleted (`check-test-typecheck.mts` reads a missing ledger as empty); the graduation history inside the empty `TEST_DEBT` object is deleted, keeping the closed-ledger rule.\n- **Comments:** 63 mentions of \"the root config\" across 53 tsconfig comments now say \"the base config\".\n\n## No semantic change, measured\n\n`tsc --showConfig -p FILE` for every non-ui `tsconfig*.json` (143 files), before (main 95294be3) and after: **142 byte-identical**, file lists included. The root differs by exactly `types: [\"node\"]`. Strictness is not loosened anywhere.\n\n## The card's premise on the root DEBT entry does not hold\n\nRoot program errors, `tsc --noEmit -p tsconfig.json` with the import closure built: **26 before, 26 after** `types: [\"node\"]`. The TS2591/TS2584 pile the entry's note blamed on the missing Node types was already gone. What stands: `scripts/analytics-reconcile` imports `@objectstack/*` and example sources the root program cannot resolve (TS2307 x17, plus TS7006 x7 they cascade into), `Object.hasOwn` under lib ES2020 in `scripts/check-test-typecheck.mts` (TS2550), and an unused local in `examples/app-showcase` pulled in by import (TS6133). So the `@objectstack/spec-monorepo` DEBT entry stays at 26 and its note is rewritten to that composition (the stale `compositionAt: 80` is dropped). Graduating it also needs a `typecheck:root` script and its step in `.github/workflows/lint.yml`: separate work, not in this PR. The card's acceptance line about deleting the entry is not met by design.\n\n## Landing\n\nTier H: `.github/workflows/ci.yml` is a governed surface, so this needs the maintainer's approval. The maintainer chose this shape (one PR carrying the two filter lines) on the thread decision card. Root `ci.yml` is also under a short hold for other in-flight work; land after that clears.\n\n## Verification (head 07de412e3c)\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived **117** commands on this head; all 117 ran, each exit captured before any pipe: **117 exit 0**. `--ran` reconciliation: 117 derived, 117 run, 0 NOT-MEASURED, 0 UNRUN.\n- Earlier on this branch five of them first refused on prerequisites (exit 2/3: shallow clone, unbuilt dists); after `git fetch --unshallow` and a build of every non-ui package they ran and exited 0, and they are in the 117 above.\n- `node scripts/check-ci-filter-parity.mjs`: FAIL without the two ci.yml lines, exit 0 with them.\n- `turbo run typecheck --force` over rest, client, knowledge-ragflow (the three deleted ledgers, whose `typecheck` runs `check:test-typecheck`), core, driver-sql, hono, http-conformance, spec: 49/49 tasks successful (before the main merge; the merge touched no non-ui tsconfig).\n- Effective-config diff: see above. `tsc -b` was not used for the before/after count: the root config has no `noEmit` or `outDir`, so `tsc -b` would emit next to `scripts/`; the count is `tsc --noEmit -p`, which is what `check:type-check-debt` measures.\n- Changed lines: well under the 3000 human-merge threshold. No changeset: no published package ships a tsconfig, and every package's effective compiler configuration is unchanged (`skip-changeset`).\n\n## Acceptance notes\n\n- `os create --in-repo` (`rootTsconfigExtends` in `packages/cli/src/commands/create.ts`) still points new in-repo scaffolds at the root `tsconfig.json`, which is now the scripts program, so a new scaffold would inherit `types: [\"node\"]` and the root `exclude`. Not changed here (outside this card's file surface); the CLI tests pin the root path.\n- `packages/drivers/driver-memory/tsconfig.json` sets `noUnusedLocals: false`, a pre-existing loosening against the base; untouched.\n- `embedder-openai`, `knowledge-memory`, `knowledge-ragflow` type-check with 0 errors under NodeNext, so their `bundler` re-set could be dropped later; kept here to keep the change semantics-free.\n- The deleted `packages/rest` ledger's `_note` carried a re-derivation grep for `any`-typed response fixtures; it is in git history.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EaorEqkvnJBed5uX9BjSUG)_\n"
+}

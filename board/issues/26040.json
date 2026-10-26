@@ -2,7 +2,7 @@
   "number": 26040,
   "kind": "pull_request",
   "title": "fix(components): a refused submit focuses the first invalid field instead of toasting the field list over the dialog title",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": true,
   "author": {
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T10:03:05Z",
-  "updated_at": "2026-10-26T10:52:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T16:47:29Z",
+  "closed_at": "2026-10-26T16:47:29Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26040",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92fyErozvkr8oDnDfbDrmrb)_\n\nFixes #25874\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThe \"banner\" over the record dialog's title is the sonner error toast that `announceFieldErrors` in `ui/packages/components/src/renderers/form/form.tsx` raised on every refused submit, naming the fields (truncated after three). Route (c) from the claim:\n\n- **No field-list toast.** `announceFieldErrors` no longer toasts. It scrolls to the first invalid field in form order and focuses it, activating that field's tab first when the tab is a background one (unchanged mechanism). The message under each input is the whole report.\n- **A field with no drawn input.** `announceFieldErrors` now returns the rejected names that have no drawn wrapper in the DOM (a field on a predicate-hidden tab or section). The toast used to be the only thing that said those out loud. On the server path, any such name sends the failure down the existing form-level path (banner + its toast twin with the server's sentence), the same path a rejection naming an unknown field already takes. The hidden tab is never activated. The client path cannot produce such a name (react-hook-form validates only mounted controls).\n- **Earlier outcomes retire on a client refusal.** The refusal toast used to supersede the previous outcome under the form's outcome id (a server refusal's toast, or the objectui#8070 clear-on-hide notice). With no toast, the client-invalid handler now clears `submitError` and dismisses the outcome id itself, as an attempt that passes validation already does.\n- `scripts/sdui-manifest.record.json` re-recorded (`node scripts/gen-sdui-manifest-node.mjs`); `sdui.manifest.json` itself is unchanged.\n- Changeset: `.changeset/25874-form-refusal-no-field-toast.md` (`@object-ui/components`, `@object-ui/i18n` patch).\n\n`ConsoleToaster` placement is untouched: no toast is raised in the case the card describes.\n\n## Tests\n\nChanged / added pins (all in `ui/packages/components/src/renderers/form/__tests__/`):\n\n- `form-invalid-scroll`: an empty required field is scrolled to and focused, its message is under the input, and no error toast is raised.\n- `form-server-field-errors`: a fully attributed server rejection raises no toast; a later client refusal retires the previous refusal's banner and toast.\n- `fieldtab-visiblewhen-6237`: a server rejection of a field on a hidden tab shows the server's sentence at form level (one toast, the banner), and the hidden tab is not activated.\n- `visiblewhen-clear-notice-8070`: a later attempt retires the clear-on-hide notice whether it is refused (dismiss, no error toast) or accepted.\n- `form-invalid-toast-joiner`: the per-locale joiner pin moved to the faulted-`visibleWhen` refusal, the form's remaining field-name list that reads `validation.formInvalidJoiner`.\n\nRuns (head `cb3fe1a0`, after merging `origin/main` at `39a78b15`; the form suite was re-run on the merged tree with the same result):\n\n- `vitest run packages/components/src/renderers/form/__tests__/` (from `ui/`): Test Files 78 passed (78), Tests 545 passed, 17 skipped.\n- Reverse verification: `form.tsx` restored to the base `3518664c` with the new tests in place: 5 failed / 33 passed over the 5 changed files (the 5 new or changed assertions above; the joiner file stays green, as predicted, since the base already joins the `visibleWhen` refusal per locale). Restored to `HEAD`, `git diff HEAD` empty, blob hash equal.\n- `pnpm --filter @object-ui/components type-check`: exit 0.\n- `node scripts/check-sdui-manifest.mjs`: exit 0.\n\nGates: the derived local set (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`) derived 46 families at this head; all 46 ran locally, each exit 0; `--ran` reconciliation: \"46 run, 0 NOT-MEASURED (a DERIVED zero)\". Every other family is left to this PR's CI check-runs.\n\n## Acceptance notes\n\n- `validation.formInvalid` is removed from the form's default map and all ten locale packs; nothing else read it. `validation.formInvalidJoiner` stays.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CzUs1oNtFWhWUXT7rmoGy2)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CzUs1oNtFWhWUXT7rmoGy2"

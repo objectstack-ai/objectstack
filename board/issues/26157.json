@@ -2,8 +2,8 @@
   "number": 26157,
   "kind": "issue",
   "title": "Issue forms with an Edition field (Community / Cloud / Enterprise): this repository is the one public issue tracker for ObjectOS, and triage needs to tell the editions apart",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T14:06:45Z",
-  "updated_at": "2026-10-26T14:46:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T15:58:24Z",
+  "closed_at": "2026-10-26T15:57:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26157",
   "body": "Filing gate ③ for the premise, filer's proposal for the mechanism. Maintainer (Sam, `os-zhuang`), 2026-10-26 13:47Z, verbatim: 「如果品牌不分开，issue tracker 应该就是 objectstack 仓库了」 — under the edition model ruled at 13:18Z (ObjectOS Community / Cloud / Enterprise, one brand; ObjectStack the protocol and SDK name), this repository is the single public issue tracker for the product, including issues from Cloud and Enterprise users whose code lives in a private repository. The mechanism — an issue form with an Edition dropdown — is the filer's proposal to make that triageable; the maintainer has not ruled on the form itself. Business reason: a Cloud user's report (\"Build & Ask drafted an object that 404s\") and a Community self-hoster's report (\"`os start` fails on Postgres 17\") land in the same inbox; without a declared edition the triage seat reads each body to decide whether the card belongs here or moves to the cloud repository, and a Cloud report filed as a framework bug sits in the wrong lane. Reader: the `domain:devx` seat dispatches one dev; file surface `.github/ISSUE_TEMPLATE/` (new), `CONTRIBUTING.md` (one paragraph). Dedupe: `is:issue \"issue template\" OR \"issue form\" OR ISSUE_TEMPLATE` → 0 open hits; the repository has no `.github/ISSUE_TEMPLATE/` directory at `d1ea2363` (blank issues only). Session `session_01FMuBZmssbfQkVrKRtxNvng`; siblings: objectstack-ai/docs.objectos.ai#338 (its README routes product issues here — scope amendment of today), objectstack-ai/objectstack#26129 (root README; may add the one \"report an issue\" line if its reviewer agrees — not this card's).\n\n## Scope\n\n1. `.github/ISSUE_TEMPLATE/bug-report.yml` and `feature-request.yml` (GitHub issue forms, YAML): fields — **Edition** (dropdown: ObjectOS Community (self-hosted, this repository's code) / ObjectOS Cloud (cloud.objectos.ai) / ObjectOS Enterprise (licensed, self-managed) / Not sure), **Version** (the `os --version` / Console About string; free text), **What happened / What you expected**, **Steps** — and nothing else. The Edition field is `required: true`.\n2. `.github/ISSUE_TEMPLATE/config.yml`: `blank_issues_enabled: true` (pm-dispatch seats file through the relay with their own body shape — the forms are for users, not for seats), one contact link to the documentation site.\n3. `CONTRIBUTING.md`: one paragraph — this repository is the public tracker for every edition; say the edition; Cloud and Enterprise reports are triaged by the cloud seat and may be moved.\n4. Labels: none added by the form (the triage seat labels). If the seat wants an `edition:*` label family, that is a one-line follow-up, not this card.\n\n## Premises (re-check before dispatch)\n\n- P1 — `ls .github/ISSUE_TEMPLATE` → no such directory at `d1ea2363`.\n- P2 — `.github/ISSUE_TEMPLATE/**` is not a governed path (`check-governed-merges.mjs` governs `.github/workflows/**` only).\n\n## Acceptance\n\n- Opening \"New issue\" on the repository offers Bug report / Feature request / blank; the Bug report form refuses submission without an Edition.\n- `CONTRIBUTING.md` names the one-tracker rule in one paragraph.\n\n## 维护者速读\n\n按你 13:47 的「issue tracker 应该就是 objectstack 仓库」：一个品牌一个入口后，Cloud 用户和 Community 自托管用户的问题会进同一个箱子。本卡给 objectstack 仓加两个 issue 表单，必填「版本：Community / Cloud / Enterprise」，分诊席按它分流；空白 issue 保留给席位走中继立卡。表单本身是我的提案，不是你的原话，不同意就裁掉。"

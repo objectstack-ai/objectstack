@@ -1,0 +1,37 @@
+{
+  "number": 26225,
+  "kind": "pull_request",
+  "title": "fix(console): count only objectui's own packages in the chunk-membership report, so the eager-closure gate stops reading @objectstack/core as objectui core",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:09:49Z",
+  "updated_at": "2026-10-26T18:21:55Z",
+  "closed_at": "2026-10-26T18:21:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:21:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26225",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9CsYCNfbV9QvfmNCbWe36wP)_\n\nPart of #26131\n\nClause-②: no\nMetadata-protocol: none\n\n## The module, named\n\nThe stray module is not an objectui module. It is `packages/core/dist/logger.js` at the objectstack monorepo ROOT, a file of the framework package `@objectstack/core` (reached through `@objectstack/client`, which depends on it). It lands in `vendor-objectstack`, which is the right chunk for it: the vendor group's workspace alternative claims every module under the root `packages/` directory.\n\nThe gate counted it as objectui's `ui/packages/core` because of how `emitChunkMembershipReport` in `ui/apps/console/vite.config.ts` attributes a module id. It matched any `/packages/NAME/` segment anywhere in the id. Inside the monorepo the framework's workspace packages resolve to a second `packages/` directory, and four of its package names are objectui package names too: `cli`, `core`, `sdui-parser` and `types`. So `@objectstack/core`'s logger became \"1 of objectui core's 90 modules\", in `vendor-objectstack`.\n\nHow it was named: a throwaway Vite plugin, added through a wrapper config and deleted afterwards, listed every emitted module id under a root `packages/` directory whose name collides with an objectui package. On `main` that is exactly two ids: `packages/core/dist/logger.js` in `vendor-objectstack`, and `packages/sdui-parser/dist/index.mjs` in a lazy chunk named `dist`. In `chunk-membership.json` on `main`, the only `core` directory counted in `vendor-objectstack` is `dist`. objectui's `packages/core` is aliased to `src` and has no `dist` module in the bundle.\n\n## Why neither suggested route\n\n- (a) A grouping change would move a framework module out of the vendor chunk it belongs in, and the only thing it would serve is a miscount.\n- (b) Changing the declaration does not help. `framework` really does hold all 89 of objectui core's modules. Dropping `core` from the list would leave the package unwatched.\n\nThe defect is in what the report counts, so this PR fixes the producer, the membership emitter in the same `vite.config.ts` file the claim names. Grouping rules, ceilings, baselines and the declaration are untouched.\n\n## Change\n\n- `ui/scripts/vite-objectstack-workspace.ts`: `objectuiPackagesDir(consoleDir)` and `workspaceModuleMatcher(packagesDir)`. The matcher is anchored on objectui's own `packages/` directory and escapes the path. It lives next to `workspaceChunkTests` because it fixes the same monorepo-layout effect, and because a config file's constants cannot be imported by a test.\n- `ui/apps/console/vite.config.ts`: `emitChunkMembershipReport` takes its `WORKSPACE_MODULE` from that matcher, and the docblock says what the population is.\n- `ui/scripts/__tests__/vite-objectstack-workspace.test.ts`: five cases. They cover attribution of an objectui module (package and rest of the id), refusal of each of the four colliding framework names, anchoring, escaping, and that the config uses the matcher.\n- `.changeset/26131-console-chunk-membership-attribution.md`: `patch` on `@object-ui/console`, because `dist/chunk-membership.json` ships in the package's `files`.\n\n## Readings, before and after\n\nAll on this container: the `@object-ui/console^...` closure built with turbo (70/70), then `CI=true pnpm exec vite build` in `ui/apps/console`, then `node scripts/check-eager-closure-budget.mjs` in `ui/`. \"Before\" is base `7111e14a`'s `vite.config.ts`, built from the same tree through a temporary `--config`. \"After\" is this branch at `8831aac4`.\n\n| reading | before (`main` config) | after (this branch) |\n|---|---|---|\n| gate exit | 1 | 0 |\n| membership half | red: `packages/core` 89 in `framework`, 1 in `vendor-objectstack` | green: `packages/core` 89 in `framework`; react 51; types 16 + `src/zod` 10 in `types-zod`; components 217; fields 90 + date-picker 2 |\n| eager closure | 1937.7 KB gz, 88 of 2390 chunks | 1937.7 KB gz, 88 of 2390 chunks |\n| emitted `*.js` files (sha256 of all 2395) | — | identical to before |\n| `eager-closure.json` | — | byte-identical to before |\n\n`chunk-membership.json`, compared by package: 32 of the 38 package keys are unchanged. The ones that changed are exactly the framework modules that drop out: `spec` (73 modules across 6 chunks), `client`, `formula`, `lint`, the logger counted under `core`, and the root `sdui-parser` counted under objectui's `sdui-parser`. Every objectui package count is unchanged.\n\nAfter merging `main` at `e6dfeb08`, the head is `f1393a3c`. On that head the closure and Console were rebuilt and the gate re-run: exit 0, membership green with the same counts, eager closure 1938.7 KB gz across 88 of 2390 chunks. The 185 cases in `vite-objectstack-workspace.test.ts` and `check-eager-closure-budget.test.ts` pass.\n\nThe ablation was run once, with `node scripts/ablation-replace.mjs`. It put the unanchored segment regex back inside `workspaceModuleMatcher`. Two of the new cases went red: \"does not attribute a framework package that shares an objectui package name\" and the escaping case. The file was then restored: the blob hash matches HEAD and `git diff HEAD` is empty.\n\n## Acceptance notes\n\n- The membership gate still runs in no workflow. That belongs to the ui CI port (epic #25677), as the card says. This PR adds no gate and does not touch `ui/.github/**` or the root `ci.yml`.\n- The `advancedChunks` group tests in `vite.config.ts` use the same unanchored segment form, `framework`'s among them (it matches `packages/core`, `packages/react` and `packages/types`). On this build that changes nothing: the probe found the only two colliding root modules in `vendor-objectstack` and in the lazy `dist` chunk, and none in `framework`. A group could still claim a framework module if the module ever stopped being `$initial`, because the vendor group would then no longer outrank it. Noted only: it is not reached today, and no card is filed for it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UXdEMaH3vKYJxDUxiKdp4t)_\n"
+}

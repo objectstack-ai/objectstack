@@ -2,8 +2,8 @@
   "number": 25799,
   "kind": "issue",
   "title": "security/explain: sets a position grants through its definition's permissionSets are attributed \"via direct grant\", not to the position",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:29:14Z",
-  "updated_at": "2026-10-26T10:56:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T18:20:41Z",
+  "closed_at": "2026-10-26T18:18:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25799",
   "body": "Filing class: defect (operator-visible diagnostics; effective access is correct) — reach: `POST /api/v1/security/explain`, measured on `@objectstack/*` 18.1.0 in objectstack-ai/hotclm (`main` `f5ad133`, report on objectstack-ai/hotclm#11).\n\n## Symptom\nA user who holds a position whose definition names its sets in `permissionSets: [...]` (ADR-0131 D3 shape) and has **no** `sys_user_permission_set` row gets an `explain` principal whose contributors read **`via: direct grant`** for those sets. Only a set whose name equals the position's own name reads `position:<name>`.\n\nMeasured: hotclm position `clm_legal_counsel` declares `permissionSets: ['clm_legal', 'clm_requester']`; a user with only that `sys_user_position` row → explain principal contributors `clm_legal` via *direct grant*, `clm_requester` via *direct grant*. Same for the finance, records and executive positions. A `clm_admin` position (same-named set) → `position:clm_admin`.\n\n## Expected\nContributors name the position that granted them (`position:clm_legal_counsel`), so an operator reading explain can tell an assignment row from a position definition — the distinction #24757 also needs in Setup.\n\n## Repro\n1. A position with `permissionSets: ['set_a']` where `set_a` ≠ the position name.\n2. Assign a user only that position (no `sys_user_permission_set` row).\n3. `POST /api/v1/security/explain` as or for that user → contributor `set_a` reads `via: direct grant`.\n\nEffective access is correct (the sets are in force); only the attribution is wrong. Seam: `plugin-security` explain principal contributor attribution for position-defined sets. Related: #24757 (same-named set invisible in Setup), #24736 (position walk counting).\n\n---\n_Filed by the objectstack-ai/hotclm PM seat from the hotclm#11 dev report._\n"

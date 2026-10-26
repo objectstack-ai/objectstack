@@ -1,0 +1,37 @@
+{
+  "number": 26202,
+  "kind": "pull_request",
+  "title": "fix(app-shell): record create/update toasts name the saved record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:19:15Z",
+  "updated_at": "2026-10-26T19:54:08Z",
+  "closed_at": "2026-10-26T19:54:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T19:54:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26202",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99R9hXJTYYUhUGGdHBZb4ty)_\n\nFixes #26172\n\nClause-②: no (adds or rewords message keys; no key is removed, so `TranslationKeys` only widens; no exported runtime contract changes)\nMetadata-protocol: none\n\n## What\n\nThe Console's record create and update success toasts now name the saved record by its display name (ADR-0079), as the ruled `ux-conventions.write-feedback` clause asks: `Task \"Quarterly review\" created`, `Task \"Quarterly review\" updated`. A record with nothing nameable keeps today's object-label toast (`Task created successfully`).\n\n- `ui/packages/app-shell/src/console/AppContent.tsx`: one message builder, `recordSaveMessage(saved)`, now serves both toast sites, the main path (`handleCrudSuccess`, which hands the message to the runner's `crud_success`) and the child-form task path (a subtable child opened over its parent's record page, which toasts directly). `handleRecordFormSuccess` passes the saved record it already receives to both. The name comes from `getRecordDisplayName` in `@object-ui/core`, read through the object being saved (`formObjectDef`), so it follows the object's declared `nameField`. The resolver's floor (`Record #ID`, or the empty fallback for a row with no id) is not a name, and falls back to the object-label string. This is the same floor test `recordToOption` in `LookupField` and `renderLookupColumnValue` already use.\n- `ui/packages/i18n/src/locales/*.ts` (all ten packs): two new keys, `form.createdNamed` and `form.updatedNamed`, each with `{{object}}` (object label) and `{{title}}` (record name), quoted the way each pack already quotes a name (`deleteConfirmTitle` is the model: curly quotes in zh, corner brackets in ja, low-high quotes in de, straight quotes elsewhere). `form.createSuccess` / `form.updateSuccess` are unchanged and stay the no-name toast.\n- `scripts/sdui-manifest.sources/i18n.json`: re-recorded by `node scripts/gen-sdui-manifest-node.mjs` (1 of 27 package records moved: i18n). `sdui.manifest.json` itself is unchanged.\n- Two count pins in `ui/packages/i18n` move with the diff: `de-quote-pairing-3876` (94 to 96 matched pairs, the two new de values) and `residue-namespaces-3546` (the `common.record` fallback in AppContent is written once now, 2 to 1).\n- Root changeset `.changeset/26172-record-save-toast-names-record.md` (patch, `@object-ui/app-shell`, `@object-ui/i18n`).\n\nOut of scope, per the ruling: settings saves and flow-completion toasts.\n\n## Tests\n\nNew: `ui/packages/app-shell/src/console/__tests__/AppContent.recordSaveToastNamesRecord-26172.test.tsx`, a real `AppContent` mount in a real i18next instance (the harness of `AppContent.createLandingOriginPlural-11733`). Nine cells: main path and child-form path, each for create and update, each with a name and with none, plus one zh-CN cell (`任务“季度复盘”已创建`).\n\n- New file: 9/9 passed.\n- Ablation (committed fix, `node scripts/ablation-replace.mjs`, anchor `const title = resolved && !(id` replaced by `const title = false && resolved && !(id`; anchor 1 to 0, blob `66183e3229a8` to `a12d7507a89f`): 5 failed / 4 passed. All five \"names the record\" cells went red (`expected 'Task created successfully' to be 'Task \"Quarterly review\" created'`), and the four no-name cells stayed green, the direction written in the test's header before the run. Restore: blob back to `66183e3229a8` equals HEAD, `git diff HEAD` empty.\n- `vitest run packages/i18n/ packages/app-shell/src/console/__tests__/`: first run 3 failed (the two count pins above), 1694 passed. After re-pinning, the two files: 52/52 passed.\n- Every other test file under `ui/` that names `AppContent.tsx` or `form.createSuccess` / `form.updateSuccess` (14 files): 89/89 passed.\n- Test runs were at `3c5713b5`. The one later commit (`e9bd0d06`) only re-records `scripts/sdui-manifest.sources/i18n.json`.\n\nNarrowed on purpose: the whole `app-shell` suite (about 1700 files) is left to CI `Test Core` / `Build & E2E UI`.\n\n## Acceptance notes\n\n- On an edit, the name is read off what the save returned (`dataSource.update`'s `record`). The toast can only name the record if that response carries the name field. The ObjectStack adapter returns the server's `record`. A live server was not booted for this PR.\n- Serial: `ui/packages/i18n` is held by the batch PR #26158. This PR stays draft. Merging main, re-recording `i18n.json` and enqueuing wait until that batch has merged and the ui seat says go. The two count pins above may need a re-pin at that merge if the batch moves the same counts.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DiQzqGc2iCV6ZSmHBw4mwe)_\n"
+}

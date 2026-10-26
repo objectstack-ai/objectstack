@@ -1,0 +1,30 @@
+{
+  "number": 26239,
+  "kind": "issue",
+  "title": "ui tests: stop pinning the exact ObjectSchema key count in app-shell corpus guards, since every additive spec key turns Test UI red for all ui PRs",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:32:49Z",
+  "updated_at": "2026-10-26T16:34:34Z",
+  "closed_at": "2026-10-26T16:34:34Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26239",
+  "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, at the maintainer's request in the project for a structural fix after #26218. ⛔ Not a claim.\n\n## What was measured\n\n- `ui/packages/app-shell/src/services/MetadataService.retiredObjectEnabled.test.ts:161` and `MetadataService.specKeyObjectPayload.test.ts:175` each assert `expect(Object.keys(ObjectSchema.shape).length).toBe(N)` (\"corpus guard\"). The comments above the first one record six re-points: 42→43 (`editMode`), 44 (`imageField`), 45 (`attachedOnRead`), 46 (`defaultRowScope`), 47 (`membershipKeys`), and now 48 (`sharing`, #26005 → #26218 / #26231).\n- Each time, an **additive** spec key that these files do not read turned `Test UI` red on every ui PR's merge ref. #26005 merged on 2026-10-26 with Test UI skipped by its path filter (closing that gap is #26092), and the ui merge queue then stalled until #26231.\n- The comment itself says that the spec-adoption fact belongs to `packages/types/src/__tests__/object-schema-metadata-spec-derivation.test.ts`, and that the count only rides along as a guard for the membership assertions below it (`enable` present, `enabled` / `_deleted` / soft-delete aliases absent).\n\n## Ask\n\nMake these guards independent of how many keys `ObjectSchema` has. Measure first which of these holds, then do one:\n\n- Assert only the membership claims the files are about, and drop the exact count. The types-package derivation test already pins adoption.\n- Or derive the expected set from the spec's own `authorable-surface/data.json` instead of a literal.\n\n⛔ Do not weaken any membership assertion. Also sweep `ui/` for other exact-count pins on spec-owned shapes (e.g. `Object.keys(<Spec>Schema.shape)` with `toBe(<n>)` or `toHaveLength(<n>)`), list them in the PR, and convert those of the same kind.\n\n## Business reason\n\nWho benefits: every ui PR. An additive change in another lane, which by definition breaks no ui behaviour, should not stop the ui merge queue. Today it costs a p1 card and a full queue round for both ui seats each time.\n\n## Who acts on it\n\nThe `domain:ui` seat that owns app-shell services (seat 1). Test-only and app-shell, so no sdui record moves. It lands after #26231, which edits the same two files.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, open, \"ObjectSchema shape count pin accept.size ui test\": only #26218, the one-time re-point. #26092 covers the CI filter half, not this test design."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 26217,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): fill a bulk confirmText's param holes with the params' display values",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:57:08Z",
+  "updated_at": "2026-10-26T19:54:07Z",
+  "closed_at": "2026-10-26T19:54:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T19:54:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26217",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi91vuMhRJwN3WrWzqrtvosbw)_\nFixes #25942\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nStep 2 of ruling B on #24798, the renderer half. Step 1 was #26030, merged as `66769910`. A bulk action's `confirmText` hole that names one of the def's params is now filled with that param's **display value**, following the rule the spec states on the slot (`packages/spec/src/ui/bulk-action.zod.ts`, the `confirmText` describe).\n\n- `ui/packages/plugin-grid/src/components/bulkConfirmText.ts`:\n  - `bulkConfirmParamDisplayValue(param, value, lookupLabels)`:\n    - an option-bearing param shows the chosen option's `label`, and a multi-value param shows its labels joined with ', ';\n    - a `lookup` / user param shows the picked record's display name from the confirm step's resolved names, and the id until that name resolves;\n    - any other param is returned as the entered value itself, not a string, so the engine's whitelisted formatters apply (`{{ amount | currency:EUR }}`, `{{ due | date:iso }}`);\n    - an empty value is `undefined`, so it prints empty and `{{ x | default:'none' }}` can name it.\n  - `bulkConfirmTemplateScope(scope)` builds the roots over the spec's closed scope, `bulkConfirmTemplateRoots`. It writes `count` last, so `count` wins over a param of that name, as the spec declares.\n  - `bulkConfirmText(confirmText, { count, params, values, lookupLabels })` fills the slot through `fillTemplateHoles`, exactly as in step 1.\n- `BulkActionDialog.tsx` passes `params`, `values` and `lookupLabels` into the confirm sentence. The lookup names that resolve after the confirm step opens re-render the sentence, because it is computed in render.\n- `scripts/sdui-manifest.sources/plugin-grid.json` is re-recorded (`node scripts/gen-sdui-manifest-node.mjs`). Nothing else in the manifest set moved.\n- Changeset: `.changeset/25942-bulk-confirm-param-holes.md`, `@object-ui/plugin-grid` patch.\n\nThe ruling, verbatim: \"Nothing else moves: no CEL inside holes, no change to the default text, no change to where the confirm step sits.\" The default sentence, the confirm step and the value summary under it (`describeValue`) are untouched, and the display value is computed apart from `describeValue`, whose output is a string and would not take a formatter.\n\n## Verification (head `4a874ae1`)\n\n- New file `bulkConfirmParams-25942.test.tsx`, with 10 tests:\n  - helper: option label; multi-value labels joined; a value no option declares; a lookup's resolved name, and its id before that; currency, number and date formatters on the raw value; an empty param printing empty and the `default` formatter naming it; `count` winning over a param named `count`; a hole outside the closed scope printing empty.\n  - dialog: the option label the params step chose (`Move 2 account(s) to Silver?`), and a lookup name arriving after the step opened (`… to u1?`, then `… to Ada Lovelace?`, with `findOne('sys_user', 'u1')`).\n- Confirm-sentence files together (`bulkConfirmParams-25942`, `bulkConfirmCount-25942`, `bulkConfirmTextEnvelope-13183`): Test Files 3 passed, Tests 30 passed.\n- Ablations after commit `aaf4a4ac`, run with `scripts/ablation-replace.mjs`; each leg was restored to its HEAD blob and `git status --porcelain` came back empty:\n  - dialog scope cut back to `{ count: rows.length }` (anchor 1 → 0, blob `76a683a69c71` → `c1b43e1f66ea`): `Tests 2 failed | 8 passed` (both dialog tests).\n  - display value returned raw, without labels (anchor 1 → 0, blob `393b2f5ce8bb` → `557d7171d747`): `Tests 5 failed | 5 passed`.\n  - No build leg was needed, because the tests import the dialog and helper by relative path.\n- Whole package under the lock: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-grid/` gave Test Files 251 passed (251), Tests 2246 passed (2246), VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-grid run type-check` exited 0, after `pnpm --filter '@object-ui/plugin-grid^...' run build`, under the same lock run as the re-record. `node scripts/check-sdui-manifest.mjs` exited 0.\n- Derived gates at `4a874ae1`: 47 commands, all exit 0. `--ran` with exit codes reports 47 derived, 47 run, 0 NOT-MEASURED, 0 UNRUN. CI owns the type-check lanes, `Test Core` and the repo-wide scans.\n\n## Acceptance notes\n\n- **Formatter locale.** The engine reads its formatter locale from the same scope the roots are passed in, so the formatters render `en-US`, and a param named `locale` would set the locale for the whole sentence. The seat ruled that this is fixed in the engine on its own card, so it is not folded in here.\n- **Params with no options.** A boolean param shows `true` / `false`, and an array value on a param with no options is joined with ', '. Both follow the spec's \"the entered value otherwise\".\n- **Not touched:** `ObjectGrid.tsx`, `ui/.github/**` and the root `ci.yml`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016zsTRTJ3SP3dpjEkyLrzWS)_\n"
+}

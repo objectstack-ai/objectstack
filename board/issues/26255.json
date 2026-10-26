@@ -1,0 +1,36 @@
+{
+  "number": 26255,
+  "kind": "pull_request",
+  "title": "test(app-shell): fold ten Interfaces rail label pins onto one shared StudioDesignSurface harness",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:18:25Z",
+  "updated_at": "2026-10-26T19:27:51Z",
+  "closed_at": "2026-10-26T19:27:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T19:27:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26255",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi93kH3NmKTNuUFhcMmaWEDak)_\nPart of #25911\n\nSlice 1a of #25911: the shared-setup pilot on the `StudioDesignSurface.*` app-shell tests. Five Interfaces-rail label pins rendered the real `InterfacesPillar` over the same three mocks and differed only in their metadata-client double. They are now folded into one file, `StudioDesignSurface.railLabels.test.tsx`. The file declares the three mocks once, and each former file is a top-level `describe` named after it. Each of those blocks installs its own client double in a `beforeEach`. No test is deleted, and every assertion moves verbatim. The seat split the original ten-file fold to keep this PR under the 3,000-line bar. The other five pins (`interfacesRailLabelMap-11158`, `interfacesAppLabelMap-11181`, `railServedLabels-12688`, `zhPillarNames-11801`, `navEntryIdentity-11774`) join this file in the next PR from this branch.\n\nClause-②: no\nMetadata-protocol: none\n\n## Measured first (base f143cd88, this container, under `os-verify-lock`, `--maxWorkers=2`)\n\nPer-file vitest module diagnostics over the 95 `StudioDesignSurface.*` files (656 tests). Fixed cost = environment + prepare + setup + import:\n\n- Fixed cost: 678 s, which is 66.4 % of 1022 s CPU. Test bodies: 344 s.\n- Median file: 6.8 s fixed against 1.2 s of tests. The per-file import of the module graph is the lever, and a shared setup removes it.\n- Outlier, not touched here: `autosaveSwitch-11232` takes 94 s, 72 s of it inside its tests (19 real 2.5 s debounce sleeps). That is not setup cost.\n\n## Before / after (same command, same box, `--maxWorkers=2`, shared-box seconds)\n\n| | files | tests | fixed CPU | test CPU | total CPU | wall |\n|---|---|---|---|---|---|---|\n| before (f143cd88) | 95 | 656 | 678.3 s | 343.8 s | 1022.1 s | 528.4 s |\n| after (76d53f205) | 91 | 656 | 644.9 s | 335.3 s | 980.2 s | 507.0 s |\n| the five pins alone | 5 → 1 | 25 → 25 | 34.4 s → 7.3 s | 3.7 s → 3.0 s | 38.1 s → 10.3 s | |\n\nThe family-level test CPU moves by about ±10 s from run to run on this shared box. The per-file rows are the clean reading: each folded file saves about 5 to 6 s of fixed cost.\n\n## Issue number → describe (reviewer check: no assertion dropped)\n\n| former file | describe in `StudioDesignSurface.railLabels.test.tsx` | tests |\n|---|---|---|\n| `StudioDesignSurface.railLabelInherits-11196.test.tsx` | `StudioDesignSurface.railLabelInherits-11196` (objectui#11196) | 3 |\n| `StudioDesignSurface.surfaceLabelInherits-11196.test.tsx` | `StudioDesignSurface.surfaceLabelInherits-11196` (objectui#11196) | 5 |\n| `StudioDesignSurface.surfaceIdentity.test.tsx` | `StudioDesignSurface.surfaceIdentity` | 4 |\n| `StudioDesignSurface.navRailLabels-11862.test.tsx` | `StudioDesignSurface.navRailLabels-11862` (objectui#11862) | 6 |\n| `StudioDesignSurface.railSeparatorBadge-11791.test.tsx` | `StudioDesignSurface.railSeparatorBadge-11791` (objectui#11791) | 7 |\n\nEach block keeps its former file's header comment, fixtures, hooks and inner `describe` names verbatim, indented one level. The mechanical check against the five files at f143cd88 gives the same `it` titles, 25 of 25 as an identical sorted list, and the same `expect(` count, 70 against 70. The run reports 25 tests passed in the folded file, the same 25 the five files reported.\n\nWhat changed besides the indentation:\n- The three `vi.mock` factories read `studio.client`, a `vi.hoisted` slot, instead of each file's `mockClient`. Each block's first `beforeEach` sets the slot to its own `mockClient`. The `fetchPackages` and `useAdapter` doubles were identical in all five files.\n- Three comments named a test file this PR deletes, and now name the block that replaced it: two inside the folded blocks, and one in `StudioDesignSurface.interfacesRailLabelMap-11158.test.tsx`.\n- `NavTree`'s JSDoc in `StudioDesignSurface.tsx` names the folded file. tsc keeps comments, so the published `dist` changes by that one comment, and the PR carries a `patch` changeset for `@object-ui/app-shell`.\n\nIsolation: RTL `cleanup()` and react-i18next's global reset run after every test, as before. No block in the file registers into a metadata or component registry.\n\n## Not in this PR\n\n- **The other five rail pins**: they go in the next PR from this branch, once this one merges.\n- **date-only-zone-pins-10183: premise stale, not split.** `ui/scripts/__tests__/date-only-zone-pins-10183.test.ts` already drives all 26 pins through ONE memoized forked child vitest (73 s measured), so the card's \"collapse into one spawn\" is already true. Splitting it would only rebalance shard legs, not cut CPU, and the seat ruled it out.\n- **cli-bin split** (`ui/packages/cli/src/__tests__/cli-bin.test.ts`, 81 s here: a 33 s self-build in `beforeAll` plus 48 serial CLI spawns): this is slice 2, which comes after both rail PRs.\n\n## Acceptance notes\n\n- `autosaveSwitch-11232` (94 s, real-time debounce sleeps) is the next-largest single lever in this family. It is noted here and not touched.\n\n## Verification (head 76d53f205)\n\n- `pnpm exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface --maxWorkers=2` (from `ui/`): 91 files, 656 tests passed.\n- `tsc -p tsconfig.test.json --noEmit` in `ui/packages/app-shell`: 0 `error TS`. `eslint` on the changed test files: 0 problems.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, re-derived with the changeset): 35 derived, 35 run, every one exit 0, and `--ran` reconciles as a derived zero. CI on 76d53f205 is green: all eight required contexts passed, as did Check Changeset and the 16 Test UI legs.\n\nNo sdui record change: this is test-only in app-shell apart from the comment.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012Vh1mJSJN3FeocpnWPNdH1)_\n\nhttps://claude.ai/code/session_012Vh1mJSJN3FeocpnWPNdH1\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

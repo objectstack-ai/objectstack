@@ -1,0 +1,34 @@
+{
+  "number": 26209,
+  "kind": "issue",
+  "title": "cli(create --in-repo): in-repo scaffolds extend the root tsconfig.json, which becomes the scripts/ program, and inherit its exclude of packages/apps/examples",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:32:57Z",
+  "updated_at": "2026-10-26T20:23:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26209",
+  "body": "Filing gate: ① a defect with a named location, read on the PR that moves the base. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Business reason.** `os create --in-repo` writes a project whose `tsconfig.json` extends the repository root `tsconfig.json`. Once PR #26203 (#26092 PR 1) lands, packages extend `tsconfig.base.json`, and the root file becomes the program for `scripts/` and the top-level configs, with `types: [\"node\"]`. An in-repo scaffold would then be the one package in the tree on the wrong base. It also inherits the root `exclude` (`packages`, `apps`, `examples`, `ui`), because the scaffold declares `include` but no `exclude`, and `exclude` resolves against the file that declares it. That second half predates #26203 and is worth measuring while the base moves.\n\n**Reader who acts.** The `domain:devx` seat: `packages/cli/src/commands/create.ts` `rootTsconfigExtends` (L177) and the in-repo template (L435).\n\n## Measured (reading, `main` and PR #26203 head `07de412e3c`)\n\n- `rootTsconfigExtends(inRepoDir, projectDirName)` returns `../` repeated to the depth, then `tsconfig.json`.\n- On #26203 the root `tsconfig.json` is `extends: ./tsconfig.base.json` + `types: [\"node\"]` + `exclude: [node_modules, packages, apps, examples, ui]`. On `main` the same `exclude` is already there.\n- Raised by the #26092 dev in os-dev report 6419765137, out_of_scope_findings[0].\n\n## Wanted\n\n- Point in-repo scaffolds at `tsconfig.base.json` once #26203 is on `main`.\n- Measure whether the inherited `exclude` drops the scaffold's own `src/` today (`tsc --listFilesOnly` in a scaffolded in-repo plugin). If it does, give the template its own `exclude`.\n- Pin both in the create command's tests.\n\n## Acceptance\n\n- An `os create --in-repo` plugin type-checks and builds its own `src/` with the same options as a sibling package. The `tsc --showConfig` diff against a sibling is limited to `include`, `outDir` and `rootDir`.\n\nBlocked-by: #26203 (the base file must exist on `main`). Related: #26092."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 26191,
+  "kind": "issue",
+  "title": "Setup permission set, Delegated Admin Scope: no hint or one-click grant for the companion grants a delegate needs to enter Setup and pick people",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:12:00Z",
+  "updated_at": "2026-10-26T19:22:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26191",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 5 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nAn admin can configure a Delegated Admin Scope on a permission set and grant the set to a user. That user then opens Setup and gets \"You don't have access to this app\". To act, they also need:\n- the capability `setup.access`\n- read access to `sys_user`, `sys_business_unit` and `sys_business_unit_member`, so the lookups can pick people and units\n- CRUD on `sys_user_position`\n\nNothing in the scope block says so, and the docs page leaves out `setup.access`. The server is right to refuse. The gap is that the editor gives no hint and offers no fix.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 5 (ui + docs, p2): item 2. Brief 6415795834, item-by-item reading 6415971852 (item 2).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** Delegated administration lets a tenant hand one subtree's assignments to a regional manager. As shipped, the admin who sets it up gets a delegate who cannot open Setup and has to work out four further grants alone, by trial and error.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step: one os-dev, one PR on `ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx` (with its i18n strings) and the docs page `content/docs/permissions/delegated-administration.mdx` in the same PR.\n\n**Spec contract.** None changes and no key is new. The grants go into the set's existing `systemPermissions` (`packages/spec/src/security/permission.zod.ts:1115`) and `objects` (`:1109`).\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `setup\\.access.{0,200}(delegat|adminScope)` and the reverse order found 1 hit, not this (#24135, ADR-0090 D12 wording). #23323 (closed) fixed another sentence on the same docs page.\n\n## Ruled scope (ruling Q3 item 5)\n\n- The Delegated Admin Scope block **lists the companion grants**:\n  - `setup.access`\n  - `sys_user` / `sys_business_unit` / `sys_business_unit_member` read\n  - `sys_user_position` CRUD\n- It offers a one-click **\"grant these\"** that adds them to the same set: one save, no new key.\n- `delegated-administration.mdx` gains `setup.access`.\n- Not a server change.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `packages/spec/src/security/capabilities.ts:49`: `{ name: 'setup.access', label: 'Setup Access', description: 'Enter the Setup app shell.' }`. Holds.\n- Docs file **path verified**: `content/docs/permissions/delegated-administration.mdx`.\n  - The authoring example now spans `:20–40`, and its object grants are `:33–38` (`sys_user_position` CRUD, `sys_business_unit` / `sys_business_unit_member` / `sys_user` read).\n  - The ruling cited `:26–36`, which has drifted. Corrected.\n  - `setup.access` appears nowhere on the page.\n- `ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx`:\n  - The scope state and the objectui#9464 business-unit gate are at `:404–433` (the ruling's `:405–420` falls inside), with `scopeBlocksSave` at `:444–445`.\n  - The block renders at `:677` (\"Delegated Admin Scope\" `FacetSection`). Holds.\n\n## Expected / acceptance\n\n- The Delegated Admin Scope block shows the five companion grants. Each is marked present or missing on the set being edited.\n- \"Grant these\" adds only the missing ones to the same draft (`systemPermissions` gains `setup.access`; `objects` gains the reads and the `sys_user_position` CRUD), never removes or narrows an existing grant, and is saved with the set's normal Save.\n- The hint and the action are hidden or inert while no scope is configured, matching the block's existing gate.\n- `delegated-administration.mdx`'s example carries `systemPermissions: ['setup.access']`, with one sentence explaining why a delegate needs it.\n- New strings exist in every locale the block's existing strings are in. Tests cover the present/missing state and the merge."
+}

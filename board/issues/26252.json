@@ -1,0 +1,36 @@
+{
+  "number": 26252,
+  "kind": "pull_request",
+  "title": "chore: delete the 211 inert no-explicit-any eslint-disable comments outside ui/",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:11:34Z",
+  "updated_at": "2026-10-26T18:47:36Z",
+  "closed_at": "2026-10-26T18:47:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:47:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26252",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9CmR52V4tPmUNSq3TokKYLs)_\nFixes #26082\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nRuling 6417062243, letter **C**: delete the 211 `@typescript-eslint/no-explicit-any` disable comments outside `ui/`. They are inert twice over: the root `eslint.config.mjs` never loads `@typescript-eslint/eslint-plugin`, and `pnpm lint` runs `eslint . --no-inline-config`. Nothing is installed, no rule is added, `eslint.config.mjs` and every baseline are untouched, and nothing under `ui/` is touched (#25918 owns that tree).\n\nEvery comment named only this one rule, so no comment needed a partial edit. Two shapes, both handled mechanically:\n\n| Shape | Count | Edit |\n|---|---|---|\n| a whole-line `// eslint-disable-next-line @typescript-eslint/no-explicit-any` | 166 | the line is deleted, no blank line left in its place |\n| a trailing `// eslint-disable-line @typescript-eslint/no-explicit-any` | 45 | the comment and the whitespace before it are cut, the code is kept byte for byte |\n\nThere were no block `/* eslint-disable … */` comments on this rule outside `ui/`.\n\n| Package | Files | Comments |\n|---|---|---|\n| `packages/qa/dogfood` | 41 | 120 |\n| `packages/verify` | 15 | 32 |\n| `packages/plugins/plugin-security` | 6 | 41 |\n| `packages/plugins/plugin-auth` | 1 | 10 |\n| `packages/core` | 1 | 6 |\n| `packages/runtime` | 1 | 1 |\n| `packages/types` | 1 | 1 |\n\n65 of the 66 files are tests; the one source file is `packages/verify/src/handle.ts` (3 comment lines).\n\n## How it was verified (head `cd984c91`)\n\n- **Grep.** `git grep -c 'eslint-disable.*@typescript-eslint/no-explicit-any' -- ':!ui'` was 66 files / 211 comments on `origin/main` (`601c7738` at start, still 211 at `e6dfeb08`); on this head it matches nothing (exit 1).\n- **Diff shape.** Every removed line contains the comment (0 removed lines without it); the 45 added lines are exactly the 45 trailing-comment lines with the comment cut (compared line for line); no `eslint` text is added; no file loses its final newline.\n- **`pnpm lint` before and after, output diff empty.** Before: a clean worktree at `origin/main` `e6dfeb08`; after: this head. Both exit 0, and the outputs are identical once the checkout path is normalised. The same pair was also run on the first head (`c91379fb` against `601c7738`), also identical.\n- **Typecheck.** `pnpm --filter … run typecheck` on the seven touched packages (`core`, `plugin-auth`, `plugin-security`, `dogfood`, `runtime`, `types`, `verify`), on this head after a full `pnpm build` (119/119 tasks): all seven `Done`, lock VERDICT command-exit 0.\n- **Tests on this head.** Each package's `vitest run --maxWorkers=2` under the verify lock, every VERDICT command-exit 0: `types` 29 files / 781 tests; `verify` 46 / 393; `plugin-auth` 198 / 3,779 (10 skipped); `plugin-security` 225 / 4,920 (45 skipped); `core` 121 / 2,778; `runtime` 455 / 7,408 (19 skipped) (`core`, `runtime` and `types` with `--project local`, their `test` script's project). `dogfood`: the 41 touched files only, 41 / 345 passed; the whole dogfood battery is CI's (no `!` in the title and no `(narrowing)` arm). The same set was green on the first head too.\n- **Gates.** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 67 commands; all 67 exit 0, each exit taken before any pipe; `--ran` reconciliation: `67 run, 0 NOT-MEASURED, 0 UNRUN`, a derived zero. (`check-plugin-teardown-shape.mjs --self-test` needs its pinned fixture commit, fetched into this shallow clone first; `check:dts-closure` and `check:dual-build-cjs-loads` read every package's `dist/`, so they were read after the full build.)\n- **Governed surface.** `node scripts/pm/check-governed-merges.mjs --test` on the 66 paths: `0 of 66 path(s) hit the register`.\n- **Changeset:** none, this carries `skip-changeset`. Only comments are deleted: 65 files are tests outside every package's `files[]`, and in `handle.ts` the three deleted lines are line comments, so no symbol, type or runtime behaviour in `@objectstack/verify`'s `dist` changes.\n\n## Acceptance notes\n\n- One merge of `origin/main`: #26175 had changed `packages/verify/src/harness.org-context.test.ts`. On that file this branch takes main's version and deletes its 4 comments the same way; the branch's delta against main is still 66 files, +45 / −211.\n- `pnpm typecheck` was run on the seven touched packages, not the whole workspace; the whole-workspace run is the required `TypeScript Type Check` job on this PR.\n- The measurement option A would have bought (a per-file shrink-only `no-explicit-any` baseline over non-test `src/**`) is not part of this PR, as the ruling says; a later card can cite #26082 if the maintainer names that gate.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01D8CEyQZUZgQM1xXhoZeKgb)_\n"
+}

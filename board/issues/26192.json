@@ -1,0 +1,37 @@
+{
+  "number": 26192,
+  "kind": "issue",
+  "title": "Setup Positions: a new position saved as a draft does not appear in the list, with no unpublished badge and no Publish action",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:12:30Z",
+  "updated_at": "2026-10-26T19:29:39Z",
+  "closed_at": "2026-10-26T19:27:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26192",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 6 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\n**Premise to settle first: which `packageId` did Setup → Positions → New carry when it saved?** The permission editor writes `mode: 'draft'` only when the item sits under a `packageId` (`PermissionMatrixEditor.tsx:1104`, ADR-0086 P0/P2: authoring inside an installed package is a draft until publish). So the measured path was probably a position created inside a package's scope, and the gap is the list. **If the save carried no `packageId`, the draft write is itself the defect**, and the fix is the save, not the list. Reproduce, answer this on the card, then build.\n\nSetup → Positions → New → Save sends `PUT /api/v1/meta/position/:name?mode=draft` and gets 200. The new position does not appear in the Positions list, and `GET` of it answers not found until the admin opens its detail page and clicks Publish. A permission-set save takes effect immediately, so admins reasonably conclude the position was not saved.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 6 (ui, p2): item 4. Brief 6415795834, item-by-item reading 6415971852 (item 4).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** An admin creating positions for an org chart saves one, sees nothing in the list, and creates it again or gives up. The two access objects they author side by side (permission sets and positions) behave differently on Save, with no visible cue.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step: one os-dev, one PR in `ui/packages/app-shell/src/views/metadata-admin/` (the metadata list, or the save path if the premise says so).\n\n**Spec contract.** None changes. The read uses the existing drafts ledger.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `(position).{0,120}draft.{0,120}(list|not shown|unpublished)|unpublished.{0,40}badge` found 0 hits. #26056, the drafts-ledger read for a member, is the neighbour, not a duplicate (see below).\n\n## Ruled scope (ruling Q3 item 6)\n\n- The metadata list shows **the caller's drafts** with an **\"unpublished\" badge** and a **Publish action**, beside #26056's drafts-ledger read.\n- Premise first: which `packageId` the Setup \"New\" carried (`PermissionMatrixEditor.tsx:1104`, ADR-0086 P0/P2). A draft written with none is itself the defect.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`:\n  - `:1104` holds: `...(packageId ? { mode: 'draft' as const, packageId } : {})`.\n  - The comment at `:1092–1101` says the environment door (no `packageId`) \"stays live\", and that metadata-admin mounts this page \"with neither `packageId` nor `embedded`\".\n- `ui/packages/app-shell/src/views/metadata-admin/EmbeddedItemEditor.tsx:167` holds. It writes `mode: 'draft'` only when the parent already has a pending draft (`:117`, objectui#12027).\n- #26056 was **merged 2026-10-26T12:51Z**, after the ruling. It was the PR \"fix(app-shell): no drafts-ledger read for a member, no published read for a new draft\", so the drafts-ledger read the ruling leans on is on `main` now. Build on what it landed.\n- `docs/adr/0086-authz-metadata-config-boundary-and-cross-package-composition.md`: P0/P2, the package door's draft semantics.\n\n## Expected / acceptance\n\n- The premise is answered on this card before code: the `packageId` the Setup \"New\" carried, with a reproduction.\n- If it carried a `packageId`, the Positions list shows the caller's draft positions, each with an \"unpublished\" badge and a Publish action. Publishing moves the position to the published list and clears the badge.\n- If it carried none, a Setup-created position saves live, as a permission set does, and no draft is written. The PR fixes the save path instead.\n- Either way, a position saved from Setup → Positions → New is visible in the list right after Save. Tests pin the chosen path."
+}

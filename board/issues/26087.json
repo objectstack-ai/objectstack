@@ -13,19 +13,21 @@
   "labels": [
     "area:devpath",
     "documentation",
-    "domain:docs",
-    "pm:queue",
+    "domain:devx",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:28:55Z",
-  "updated_at": "2026-10-26T12:16:18Z",
+  "updated_at": "2026-10-26T20:22:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26087",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat — one os-dev, one PR (lychee.toml + the link fixes; the workflow file only if a path filter is added, then Tier H). Dedupe: REST list (439 issues), grep `lychee|broken link|link check` → 0 hits; #26021 (open, dispatched) fixes `docs/releases-maintenance.md`'s retired pin-flow text and may already remove the `../.objectui-sha` link — the dev re-reads that file at dispatch. **New.**\n\n**谁付代价（业务筛）:** a reader following a link from the repository's own release notes or roadmap lands on a 404; the gate that should have caught it never looked there.\n\n## Measured (HEAD 0d83ee8f77)\n\n- `lychee.toml` input globs: `content/**`, `README.md`, `ARCHITECTURE.md`; `check-links.yml` runs lychee offline, internal links only, fragments off (anchors are `check:doc-anchors`'s job).\n- Broken relative links outside that scope (sampled by the evaluation; the dev re-runs lychee over the widened set for the authoritative list): `CHANGELOG.md:160,1027,1352`; `RELEASE_NOTES.md:289,324,326`; `docs/NEXT_STEP.md:8` (`./ENTERPRISE_ASSESSMENT.md`) and `:206` (`./apps/studio/ROADMAP.md`); `docs/releases-maintenance.md:39` (`../.objectui-sha`, a file #25745 deleted).\n- Also absent targets cited as paths, not links: `.changeset/v5-project-to-environment-rename.md` from `ARCHITECTURE.md:3` and `RELEASE_NOTES.md:11` (lychee does not see backticked paths; listed for the decision card on obsolete docs).\n\n## Wanted\n\n1. Widen `lychee.toml` inputs to `docs/**/*.md` and the root `*.md` files (`CONTRIBUTING.md`, `ROADMAP.md`, `CHANGELOG.md`, `RELEASE_NOTES.md`, `AGENTS.md`, `CODE_OF_CONDUCT.md`, `LICENSING.md`); exclude `docs/adr/**` only if `check-adr-links.mjs` already covers it byte-for-byte (read both before excluding).\n2. Fix every link the widened run reports; where the target was deleted on purpose, remove or reword the sentence rather than point it elsewhere. If the obsolete-docs decision card is ruled before dispatch and deletes `docs/NEXT_STEP.md`, its two links go with it.\n3. ⛔ No new workflow and no new gate: the same `check-links.yml` job, wider input. If the job's wall time grows past its current reading, say so in the PR.\n\n## Acceptance\n\n- `lychee --offline` over the widened set → 0 errors on the PR; the PR body pastes the before count.\n- `check-links.yml` green on the PR and on the next scheduled run.\n\n**Size:** S. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#26021 (open, dispatched), #25745 (closed)."

@@ -1,0 +1,35 @@
+{
+  "number": 26204,
+  "kind": "issue",
+  "title": "ci(scaffold-e2e): the skills-boundary step expects only objectstack-* skills, so every create-objectstack PR goes red since the objectui skill joined skills/ (#26097)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:24:03Z",
+  "updated_at": "2026-10-26T18:52:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26204",
+  "body": "Filing gate: ① a defect with a named location, measured once. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Business reason.** Every PR that touches `packages/create-objectstack/**` (the workflow's `paths` filter) now shows a red `Scaffold E2E · Scaffold with repo dist`. The diff is never the cause. The check is not required, so the merge isn't blocked, but a red row a reviewer has to explain away on every scaffold PR trains people to ignore the one check that guards the \"only curated skills ship to users\" boundary.\n\n**Reader who acts.** The seat that owns `.github/workflows/scaffold-e2e.yml`. This is Tier H (`.github/workflows/**`), so it needs a GOVERNED_APPROVERS approval.\n\n## Measured\n\n- PR #26198 at `23f2dea480`, job 121659327584. The step \"Skills boundary: only the curated skills/ catalog installs\" logs `installed` = the ten `objectstack-*` skills plus `objectui`, `expected` = the ten `objectstack-*` skills, then `::error::scaffolded skill set != curated skills/ catalog`.\n- `.github/workflows/scaffold-e2e.yml:255` on `main`: `expected=$(cd \"$GITHUB_WORKSPACE/skills\" && ls -d objectstack-*/ | tr -d '/' | sort)`.\n- #26097 (merged 2026-10-26, decision C) moved the `objectui` skill bundle into root `skills/` as a curated skill. `ls skills` on `main` lists `objectui` beside the `objectstack-*` ten.\n- The job is `if: github.event_name != 'schedule'`, so the nightly run never shows it. It surfaces only on scaffold PRs.\n\n## Wanted\n\nBuild `expected` from the curated catalog as it now stands (every skill directory under `skills/`, or an explicit allow-list that names `objectui`), keeping the step's purpose: fail when an internal skill leaks or a curated one is missing. Pin the new rule with whatever self-test the workflow's scripts carry. ⛔ Don't drop or weaken the boundary step.\n\n## Acceptance\n\n- `Scaffold with repo dist` is green on a PR that touches `packages/create-objectstack/**` and changes no skill.\n- A negative control (an extra non-curated skill directory) still fails the step.\n\nRelated: #26097, PR #26198, #26095."
+}

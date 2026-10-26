@@ -1,0 +1,34 @@
+{
+  "number": 26195,
+  "kind": "issue",
+  "title": "sys_business_unit_member: the record title shows raw ids (user id in business unit id) instead of the person's and the unit's names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:14:26Z",
+  "updated_at": "2026-10-26T20:18:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26195",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 9 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nThe Title column in Setup → Business Unit Members, and the record page heading, read \"<userId> in <businessUnitId>\": two opaque ids, with no person or department name. This is not a rendering bug. The object's title is declared as a formula over the two stored lookup ids, so the title is the ids by definition. It needs to be built from the two lookups' display names instead.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 9 (server, p3): item 8. Brief 6415795834, item-by-item reading 6415971852 (item 8).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** An admin checking who belongs to which department reads a column of ids and has to open each row to find out. Any other surface that names a membership record by its title shows the same ids.\n\n**Reader who acts.** The `domain:server` execution seat, dispatch step: one os-dev, one PR in `packages/platform-objects/src/identity/`. The PR touches the formula runtime or a hook only if the mechanism chosen below needs it.\n\n**Spec contract.** None is expected to change. If the chosen mechanism needs a formula capability that does not exist, say so on this card before building. Do not widen `@objectstack/formula` silently.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `sys_business_unit_member.{0,200}(title|display)|display_title.{0,100}business_unit` found 0 hits.\n\n## Ruled scope (ruling Q3 item 9)\n\n- `sys_business_unit_member`'s title is built **over the two lookups' display names** instead of `record.user_id + ' in ' + record.business_unit_id` (`sys-business-unit-member.object.ts:38, :52–55`).\n- **The dev names the mechanism first.** Either a formula over related display names, or a stamped title kept up to date by a hook on both ids. The reading did not find a lookup-display helper in `packages/formula/src/stdlib.ts`.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `packages/platform-objects/src/identity/sys-business-unit-member.object.ts`:\n  - `:38` `titleFormat: '{user_id} in {business_unit_id}'` holds.\n  - `:52–58` is the `display_title` formula field; the expression ``F`record.user_id + ' in ' + record.business_unit_id` `` is at `:55`. The ruling's `:52–55` holds.\n  - The file's own comment at `:33–35` already states the limit: \"a formula is evaluated on the stored row, before `$expand`, and cannot reach a related record's own title\". That confirms the mechanism has to be named before any code.\n- `packages/platform-objects/src/identity/identity-display-title.test.ts` holds `titleFormat` and `display_title` to the same text, so both move together.\n- `packages/formula/src/stdlib.ts`: no lookup-display helper found (re-checked).\n\n## Expected / acceptance\n\n- The mechanism is named on this card before code, with its cost on writes and reads.\n- The list Title column and the record heading show \"<user's name> in <business unit's name>\".\n- The title follows a change of either `user_id` or `business_unit_id`. A renamed user or unit shows the new name; if the mechanism is a stamp, the PR says how far that goes.\n- `titleFormat` and `display_title` still agree (`identity-display-title.test.ts`). A test covers the named title."
+}

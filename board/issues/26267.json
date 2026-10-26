@@ -1,0 +1,33 @@
+{
+  "number": 26267,
+  "kind": "pull_request",
+  "title": "test(vitest): one shared root preset for the 18 identical package configs (#26092 part 2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:03:45Z",
+  "updated_at": "2026-10-26T18:06:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26267",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WVdorenAFTaK2nQxJ7nMMQ)_\nFixes #26092\n\nThis is PR 2 of 2, the vitest half. PR 1, the tsconfig half, was #26203 and is merged.\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **`vitest.preset.mts`** (new, repo root) holds the one setting the 18 byte-identical package configs carried, `test.disableConsoleIntercept: true`, with its rationale once. It is a plain object, not `defineConfig(...)`: the root package declares no vitest dependency, so importing `vitest/config` there resolves only through pnpm hoisting and adds a TS2307 to the root program (root DEBT measured 26 to 27 with the import, 26 without).\n- **The 18 configs** (former md5 `0d3c266a...`) become a copyright line, one comment line and `export { default } from 'REL/vitest.preset.mts';`.\n- **`scripts/check-console-intercept-disarm.mjs`.** The card's premise that the gate \"reads the effective config; it goes green by construction\" does not hold: the gate greps each config's comment- and literal-masked source for the setting, and with the preset alone it went red on all 18 (measured by the handoff thread). The gate is kept and learns one narrow shape: a package-root config whose only statement is a bare re-export of the root `vitest.preset.mts` is judged by the preset's source, with the same disarm, re-arm and projects checks, and the finding names the re-export. A config that imports the preset and wraps or merges it is not recognised and must still carry the setting itself. Five self-test cases added (battery floor 11 to 16).\n- **`turbo.json`**: the `test` task's `inputs` gain `$TURBO_ROOT$/vitest.preset.mts`, so an edit to the preset re-runs the re-exporting suites instead of replaying cache.\n- **`scripts/check-cross-package-test-inputs.mjs`**: `TURBO_ROOT_FILE_INPUTS` gains `vitest.preset.mts` (its self-test pins the set of repo-root files turbo.json declares as inputs and went red on the new input without it).\n- **`.github/workflows/ci.yml`**: the `core` filter lists `vitest.preset.mts` beside the two tsconfig bases, so a diff confined to the preset still starts Test Core. `node scripts/check-ci-filter-parity.mjs` and its `--self-test` both exit 0 with the line (it is not judged a leftover).\n\n## Verification (head c3829861f6, on main 81bba6c3f5)\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived **107** commands on this head; all 107 ran, each exit captured before any pipe: **107 exit 0**. `--ran` reconciliation (record carries every exit code): 107 derived, 107 run, 0 NOT-MEASURED, 0 UNRUN. Prerequisites first: clone unshallowed, every non-ui package built (76/76 tasks).\n- `node scripts/check-console-intercept-disarm.mjs --self-test`: `self-test OK: 15 cases + real-tree population floor` (the five new cases among them); the scan: `OK: 77 vitest-running package(s), every one disarms console interception at the package root`.\n- `node scripts/check-ci-filter-parity.mjs` and `--self-test`: exit 0.\n- Package tests, `turbo run test --force` over all 18 re-exporting packages: 81/81 turbo tasks successful (dependency builds included); all 301 test files passed (driver-turso: 95 files, 34 tests skipped by its own environment guards). The same 18 also passed with this patch on main `df8aac41f2` before the rebase. The suites were not re-run without the patch: every one passes with it, so none moved from pass to fail.\n- Acceptance md5: the card's command as written (`md5sum ... | sort | uniq -c`) counts whole lines, hash plus path, so it prints 1 for any tree. Counting hashes only (`awk '{print $1}'` before `sort | uniq -c`), the top count is **13**: identical copies of the one-line preset re-export, which the card allows. The other 5 re-exporters differ only in the relative depth. The remaining duplicate pairs predate this card (the `create-objectstack` blank template's `src`/`dist` copy; `knowledge-memory`/`knowledge-ragflow`).\n- Gate ablation (handoff thread, same patch): removing the preset's `disableConsoleIntercept: true` reds the gate on all 18 re-exporters (exit 1); restored (hash-checked), exit 0.\n\n## Landing\n\nTier H: `.github/workflows/ci.yml` is a governed surface. This PR stays a draft until a GOVERNED_APPROVERS approval; the owning seat lands it after that.\n\nNo changeset (`skip-changeset`): the diff touches package vitest configs, a root config file, `turbo.json`, `ci.yml` and repo-internal gate scripts; no package's `files[]` ships a vitest config.\n\n## Acceptance notes\n\n- #7849 (a package with tests and no vitest config tests a stale dist): the preset makes the fix a one-line config. #7849 remains open; this PR does not address it.\n- The header line for check 2 of `check-console-intercept-disarm.mjs` still reads \"its comment-masked source must set...\"; the preset route is documented at the new constant only. A one-sentence header update could follow.\n\n## 维护者速读(草稿)\n\n- **改了什么**:18 个内容完全相同的包级 vitest 配置改成一行转出仓根的 `vitest.preset.mts`(只含 `disableConsoleIntercept: true`);对应门禁学会认这种转出;turbo 测试输入和 ci.yml 的 core 过滤各加一行预设文件。\n- **为什么改**:同一设置抄 18 份，改一处要改 18 处;新包照抄也容易漏。卡 #26092 的第二个 PR。\n- **风险与代价(含回滚)**:ci.yml 只加一行过滤条目，只会让更多 PR 触发 Test Core,不会少跑。回滚就是 revert 本 PR。\n- **席位意见**:\n- **你要做的**:因为碰了 `.github/workflows/ci.yml`,需要你批准(APPROVED review)后席位才能入队。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015eUU8Wj7piuvRkgjo2myLu)_\n"
+}

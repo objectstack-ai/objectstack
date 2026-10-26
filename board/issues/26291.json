@@ -1,0 +1,32 @@
+{
+  "number": 26291,
+  "kind": "pull_request",
+  "title": "fix(auth,console): register mismatch is a confirm-field error; /register links privacy and terms",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T19:28:10Z",
+  "updated_at": "2026-10-26T19:31:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26291",
+  "body": "Fixes #25885\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **Password mismatch is a confirm-field error** (`ui/packages/auth/src/RegisterForm.tsx`). The form used to show \"Passwords do not match\" as the `AuthErrorBanner` at the top of the form, above the name field. It now shows it under the confirm-password input. The input carries `aria-invalid=\"true\"` and `aria-describedby=\"register-confirm-password-error\"`, and the message line has `role=\"alert\"`. Editing either password clears the error. The top banner still shows the server's refusals (existing account, closed registration). The wording is the existing `labels.passwordMismatchError`, so no locale key changes. Every page that renders `RegisterForm` gets this, including app-shell's `DefaultRegisterPage`.\n- **`/register` links privacy and terms** (`ui/apps/console/src/pages/auth/RegisterPage.tsx`). The register page now draws the same footer as `/login`: the locale switch, plus the Privacy and Terms links that `GET /api/v1/auth/config` serves as `features.privacyUrl` / `features.termsUrl`. A link appears only when its URL is served and is an http(s) URL or a same-origin path.\n- **One reader, not a copy** (`ui/apps/console/src/pages/auth/AuthFooter.tsx`, new). `legalHref`, `readLegalLinks` and the footer component (`LoginFooter`, renamed `AuthFooter`) moved out of `LoginPage.tsx` unchanged. `LoginPage` imports them, and its rendered output is the same: `data-testid=\"auth-footer\"`, classes and link attributes are byte-identical. The login pins in `LoginPage.layout-12600.test.tsx` pass unchanged.\n\n## Tests (head `2d8ec77c`)\n\nNew pins, written red-first:\n- `ui/packages/auth/src/__tests__/registerMismatchFieldError-25885.test.tsx` (3 tests): a mismatch sets `aria-invalid` and `aria-describedby` on the confirm input, and the referenced element reads the message. The message comes after the input, no other alert is shown, and sign-up is not sent. Editing the confirmation clears the error. A matching pair stays unmarked, and a server refusal still goes to the banner.\n- `ui/apps/console/src/pages/auth/__tests__/RegisterPage.legalLinks-25885.test.tsx` (3 tests): Privacy and Terms appear inside `auth-footer` with the served hrefs and `rel=noopener`. No link appears when no URL is served. No link appears for `javascript:` or protocol-relative URLs.\n\nRed-first, on the pre-fix tree under the lock: the RegisterForm pin failed 2 of 3 (the preservation test passed, as intended). The RegisterPage pin could not resolve `@objectstack/spec` before the build, so it was NOT MEASURED there. The ablations below are its red.\n\nAblation, one landed mutation per tested behaviour, via `scripts/ablation-replace.mjs` under the lock (anchor 1 → 0, blob moved, restored to the HEAD blob, `git diff HEAD` empty):\n- RegisterPage without the footer line: `RegisterPage.legalLinks-25885`, **1 failed | 2 passed** (both absence tests stay green by design).\n- RegisterForm with `setConfirmError` reverted to `setError` (back to the banner): `registerMismatchFieldError-25885`, **2 failed | 1 passed**.\n\nGreen, under `scripts/pm/os-verify-lock.sh` (VERDICT command-exit 0), cwd `ui/`:\n- `pnpm exec vitest run packages/auth/ apps/console/src/pages/auth/ --maxWorkers=2`: **Test Files 55 passed (55) · Tests 441 passed (441)**. This includes every login-page pin.\n- `pnpm --filter @object-ui/auth type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n- `@object-ui/console` `tsc --noEmit`: **NOT MEASURED**. Locally the `@object-ui/*` closure was not built, so all 862 diagnostics were module-resolution errors (TS2307/TS2882/TS7006 fallout). CI's `Type Check UI` measures it.\n\n## Gates (head `2d8ec77c`)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 commands. 34 exited 0, and `--ran` reconciles: \"35 derived famil(ies) accounted for — 34 run, 1 NOT-MEASURED\". The NOT-MEASURED one is `pnpm check:type-check-debt`, which exited 3 (PREREQUISITE NOT MET). Its `--re-measure` builds every package under the shared lock and never got a turn. This diff touches no tsconfig, typecheck script or ledger. CI's `Lint & Repo Gates` runs it.\n\n`node scripts/check-sdui-manifest.mjs`: exit 0. `@object-ui/auth` and `@object-ui/console` have no `scripts/sdui-manifest.sources/*.json` record, so nothing was re-recorded.\n\n## Acceptance notes\n\n- **The console's `/register` gets the whole login footer, so it also gains the locale switch.** That is the \"same footer\" reading of the card. Narrowing it to the two links would need a prop on the shared footer.\n- **No consent sentence yet.** The card's \"ideally\" form (\"By creating an account you agree to the Terms and Privacy Policy\" under the button) is not done. That sentence would be new visible wording, and this claim keeps the locale packs out of scope. The footer reuses the existing `auth.login.footer.privacy` / `.terms` keys, so it is translated today.\n- **app-shell's default pages draw no legal links.** `DefaultRegisterPage` and `DefaultLoginPage` in `ui/packages/app-shell/src/console/auth/` show none on either page, so they agree with each other. They are not part of this claim.\n- **Only the mismatch moved.** \"Password must be at least 8 characters\" stays in the banner. Both inputs carry `minLength={8}`, so the browser's own validation usually stops it first.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

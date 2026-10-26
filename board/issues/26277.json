@@ -1,0 +1,30 @@
+{
+  "number": 26277,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): related list with `actions: []` no longer draws the built-in New",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:27:37Z",
+  "updated_at": "2026-10-26T18:32:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26277",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi97pCdCGqJdn5YdkDr3iy7cB)_\nFixes #26182\n\nClause-②: no\nMetadata-protocol: semantic\n\n## What\n\n`record:related_list` with an authored `actions: []` no longer draws the built-in **New**. The empty list is the author's choice of no actions on that list, and the generic create form is now part of \"no actions\". It holds per list, whatever the child object's `userActions.create` says.\n\n- `ui/packages/plugin-detail/src/renderers/record-related-list.tsx`: a new `createWithheldByAuthor` (an authored array of length 0) withholds `onNew` from `RelatedList`. Absent `actions`, or a non-empty list, passes the host's `onCreate` exactly as before.\n- The composition-rule comment in the same file now states the `[]` arm. The old text said the built-ins \"stay the host's either way\".\n- No host change: the app-shell bridge still decides create object-wide; the renderer drops it for one list.\n- README (`RelatedList` section) documents the authoring move.\n\n## Why the meaning changes (Metadata-protocol: semantic)\n\nBefore, `actions: []` hid the list's authored and default actions while New stayed. A pinned case in `RecordRelatedListRenderer.authoredActions-11163.test.tsx` said so (\"while New stays, because it is not an action id\"). That pin was the implementer's reading, not the ruling: the ENFORCE ruling on #20665 (comment 5902374623) says \"the authored list is what renders when it is present\" and names the Salesforce shape, where New is one of the list's own buttons. The card's triage grade reads `[]` the same way: \"An explicit empty list means no actions; absent keeps the defaults.\"\n\nThe value `[]` was already accepted, so no key is added or removed and the spec is untouched. What changes is what the value means, so this declares `semantic`, and the changeset grades `@object-ui/plugin-detail` `minor`. The claim on the card carried `Metadata-protocol: none`; the seat agreed to the `semantic` declaration and will amend the claim.\n\nProducers measured at `3d50a43b`: no in-repo page, example, platform page or synthesiser (`buildDefaultPageSchema`) authors `actions: []` on a `record:related_list`, so no shipped page loses New.\n\n## Tests\n\nAt head `58a07ee6` (the code commit is `16f675b7`; `e7398539` re-records the sdui source digest; `58a07ee6` merges `origin/main`):\n\n- `RecordRelatedListRenderer.authoredActions-11163.test.tsx`: 15/15 passed. The old `[]` case is inverted (New absent though the host offers create). A new block pins the rule: CONTROL with no `actions` draws New and runs the host's create; a non-empty list keeps New; `[]` on one list leaves a sibling list of the same object with New.\n- Ablation (`scripts/ablation-replace.mjs`, `onNew={createWithheldByAuthor ? undefined : handlers?.onCreate}` back to `onNew={handlers?.onCreate}`): the two `[]` cases went red, 2 failed / 13 passed. Restore verified: blob equals HEAD, `git diff HEAD` empty. The test imports the package source, so no build leg was needed.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/`: 304 files passed, 1 skipped; 2828 tests passed, 18 skipped. Exit 0.\n- `pnpm --filter @object-ui/plugin-detail type-check`: exit 0.\n- `node scripts/gen-sdui-manifest-node.mjs`: 1 of 27 package records re-recorded (plugin-detail); `sdui.manifest.json` unchanged. `node scripts/check-sdui-manifest.mjs` exit 0 after the main merge.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 47 derived families, all run, each exit 0; `--ran` reconciled 47/47 with exit codes recorded, 0 NOT-MEASURED.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n- Console build after the main merge, `pnpm exec turbo run build --filter=@object-ui/console --concurrency=2`: 71/71 tasks, exit 0.\n\n## Acceptance notes\n\n- Only `[]` withholds New. A list that authors `['renew']` still draws New beside its authored action. That keeps every existing page that names actions unchanged, but a page cannot yet say \"these actions and no New\". This is noted, not filed.\n- Row affordances (View, Edit, Delete) and the `add` (link existing) button are not governed by `actions`. The card asks only about New.\n- The spec `describe()` on `RecordRelatedListProps.actions` (\"Action IDs available for related records\") is not changed here. The dispatch keeps this card ui-only, and the text is not wrong, only silent on New.\n- sdui: plugin-detail is a registry package. This PR lands after #26060 and #26055 on that package and merges `origin/main` and re-records before landing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V5ckU1cUgQX9SC8V9TG3dh)_\n"
+}

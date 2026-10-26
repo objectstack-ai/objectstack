@@ -1,0 +1,33 @@
+{
+  "number": 26300,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): title a business unit membership by the person's and the unit's names",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T19:53:53Z",
+  "updated_at": "2026-10-26T20:19:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26300",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X82u6K5ttmZbHo3BGfKiUPk)_\nFixes #26195\n\nClause-②: no (no exported type, schema field or spec key changes; `sys_business_unit_member.display_title` stays a text formula and `titleFormat` is unchanged)\nMetadata-protocol: none\n\nPart of #26059 (ruling `6416233738`, Q3 child 9). #26059 remains open; only its child card is resolved here.\n\n## What changes\n\n`sys_business_unit_member.display_title`, the record title Setup → Business Unit Members shows in its Title column and on the record heading, composed the two stored ids (`record.user_id + ' in ' + record.business_unit_id`). It now reads the user's name (their email where the name is blank) and the unit's name, ONE hop through each lookup:\n\n`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' in ' + record.business_unit_id.name`\n\n## Mechanism (named on the card first: comment 6424698289)\n\nA formula over related display names, using the one-hop formula read that is already on `main` (#24197, ADR-0079 addendum 2026-10-18). Nothing in `@objectstack/formula` or `packages/spec/**` is touched. It reuses the shape `sys_user_permission_set.display_title` already ships (`plugin-security/src/objects/sys-user-permission-set.object.ts:77`). The object comment that said a formula \"cannot reach a related record's own title\" predated #24197 and is rewritten.\n\n- **Write cost:** none. No stored column, no hook.\n- **Read cost:** one batched `sys_user` read and one batched `sys_business_unit` read per page, never one per row, under the reader's own permissions; a `findOne` makes two point reads. Reads that do not project `display_title` pay nothing.\n- **Rename reach:** total and immediate. Nothing is stamped, so a renamed user or unit, or a membership moved to another user or unit, shows the new names on the next read.\n- **Unchanged limits:** the title is still not sortable or searchable (ADR-0079 addendum item 9; it already was not). A user or unit the reader may not read, or one that no longer exists, leaves the title null and the console falls to `titleFormat`.\n- **`titleFormat` agreement:** `titleFormat` stays `{user_id} in {business_unit_id}`. The console draws a lookup placeholder by the related record's `name`, else its `email` (`ui/packages/core/src/utils/record-title.ts` `displayNameOfEmbeddedObject`), so over an expanded row it renders the formula's text. `identity-display-title.test.ts` now asserts this over the row the hop serves.\n\n## Evidence\n\n**Red first, through the public door** (live `pnpm dev -- --fresh` showcase, signed in as the seeded admin, `POST` a membership then the list and record reads the console makes):\n\n- `main` (`platform-objects` rebuilt from base `c4968860`): `GET /api/v1/data/sys_business_unit_member` and `GET .../94XQV8HLtyUCrIKZ` both serve `display_title: \"7eLi5ISndhNgrM0zdFvHtlv24DnJBmQK in bu_acme\"`.\n- this branch (`81074800`): both serve `display_title: \"Dev Admin in Acme Corporation\"`. The base tree was then restored by `git checkout HEAD --` (HEAD blob hash matched, `git diff HEAD` empty) and rebuilt.\n\n**Tests** (at `81074800`):\n\n- New `plugin-security/src/business-unit-member-title.test.ts`, real `ObjectQL` + `SqlDriver` + the real `sys_user`, `sys_business_unit` and membership definitions: on base 7 of 8 red (`Expected \"Alice Liddell in EMEA Sales\"`, `Received \"simLa1JzYHiOZOF5 in VJG4H1tG-WmtXsHS\"`); on the branch 8/8 green. It pins the write response, `findOne`, the projected list `find`, rename and move, the email fallback, both hops read as the reader (no leak of an unreadable user or unit), a missing user or unit leaving the title null, and no stored column.\n- `pnpm --filter @objectstack/platform-objects test`: 96 files, 1361 tests passed.\n- The suites that register `sys_business_unit_member` (each exit 0 on its own): `plugin-security` 228 files, 4934 passed, 45 skipped; `plugin-sharing` 55 files, 1233 passed; `plugin-approvals` 98 files, 1276 passed.\n- `pnpm --filter @objectstack/platform-objects typecheck` and `pnpm --filter @objectstack/plugin-security typecheck`: exit 0.\n- `eslint --no-inline-config` on the three touched source files: exit 0.\n\n**Gates:** `node scripts/pm/dispatch-gates.mjs --commands` derived 67 families on this diff; all 67 ran with exit 0 (`check:i18n` and `check:dual-build-cjs-loads` after a full build, `check-plugin-teardown-shape --self-test` after fetching its positive-control commit). `--ran` reconciliation: 67 derived, 67 run, 0 NOT-MEASURED.\n\n## Acceptance notes\n\n- File surface: the claim named the object, `identity-display-title.test.ts` \"and the identity tests\". The engine-level test lives in `plugin-security` because `platform-objects` has no `objectql` or `driver-sql` dependency; it sits beside the sibling's `sys-user-permission-set-person-title.test.ts`.\n- Two lookups hopped at once in one formula had no prior pin (the sibling hops one); the new test covers it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KCZSeNY7z5jAXn3EyHdZww)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01KCZSeNY7z5jAXn3EyHdZww\n"
+}

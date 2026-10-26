@@ -1,0 +1,33 @@
+{
+  "number": 26278,
+  "kind": "pull_request",
+  "title": "ci(ui-merge): the ui filter covers the roots the ui gates read outside ui/, and Lint UI runs the spec liveness gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:33:45Z",
+  "updated_at": "2026-10-26T18:44:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26278",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoKs8hmc2q8bGsPhpaAWD8EY)_\n\nPart of #25712\nPart of objectstack#25677\n\n## What\n\nThe root `filter` job's `ui` globs named `ui/**`, the lockfile, the workspace, `turbo.json` and `ci.yml`. Three roots outside `ui/` are read by the ui jobs' gates and tests, and a change confined to one of them started no ui job. This PR (the parked 4b patch, applied onto current `main`) closes that gap and adds one step to Lint UI:\n\n- **F21:** `.github/workflows/**` replaces the `ci.yml` entry. Lint UI's pre-install import graph check scans every root workflow, not `ci.yml` alone.\n- **F16:** `.github/prompts/**` is added. objectui's prompts moved there in #25957, and Lint UI's prompt-keys check reads them.\n- **`skills/objectui/**`** is added (cutover bill item 35). The skill bundle moved to the root catalog in #26097; Lint UI's skill gates and Test UI's skill readers find it through `ui/scripts/skill-bundle-root.mjs`.\n- **F26 = B:** Lint UI runs `pnpm --filter @objectstack/spec check:liveness` after its install. Since #26150 the liveness ledger cites the renderer under `ui/`, and Spec Liveness Check neither runs on a ui-only pull request nor is required. The step takes about 3 s.\n\nThree ui tests pin the new coverage by path: `check-pre-install-import-graph.test.ts` now requires every root workflow to be matched, and `check-prompt-component-keys.test.ts` and `check-skills-paths.test.ts` pin their Lint UI home and the root they read.\n\n### Measured cost of F21\n\nOver the 211 merges of the 7 days before this change, 3 changed another root workflow and no ui path. Those 3 would newly start the 4 ui lanes (Lint UI, Type Check UI, Build & E2E UI, Test UI). Every other merge is unaffected.\n\nClause-②: no\nMetadata-protocol: none\n\n## Verification\n\n- Head `81471c06`, one commit on `main` `3d50a43b`; 4 files, +82 / −12.\n- `pnpm --dir ui exec vitest run` on the three pinning tests: 3 files, 120/120.\n- `pnpm --filter @objectstack/spec check:liveness`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 63 derived gates, 63 exit 0; `--ran`: 63 run, 0 NOT-MEASURED, 0 UNRUN.\n- Push battery (`GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push node scripts/pm/check-dispatch-gates.mjs`, both tiers): 2182 cases pass, 0 fail (fast 1917, slow 265).\n- Model tier: dispatch-gates finds no path-derived mandate for this surface.\n\n## 维护者速读(草稿)\n\n1. **改了什么**:根 `ci.yml` 的 `ui` 过滤器补上 ui 门禁实际读取的三处 `ui/` 之外的根路径(全部根 workflow、`.github/prompts/**`、`skills/objectui/**`);Lint UI 增加 spec 活性账本检查一步。\n2. **为什么**:只改这三处根路径的 PR 此前不会启动任何 ui 任务,ui 门禁读到的文件无人检查;活性账本自 #26150 起引用 `ui/` 下的渲染器,而 ui-only PR 不跑 Spec Liveness Check。\n3. **风险**:近 7 天 211 次合并中有 3 次会因此新启动 4 条 ui 车道;活性检查一步约 3 秒。\n4. **验证**:三个钉住测试 120/120,63 个派生门禁全绿,push battery 2182/0。\n5. **席位意见**:\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01P33kUswHotSHBLPc6UVn6n\n"
+}

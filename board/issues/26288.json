@@ -1,0 +1,34 @@
+{
+  "number": 26288,
+  "kind": "issue",
+  "title": "finding(tooling): CI \"Type Check · workspace\" OOMs in plugin-hono-server (tsc exit 134, no type error) because its tsconfig type-checks spec's dist .d.ts without skipLibCheck, and the heap margin on main is nearly gone",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T19:05:21Z",
+  "updated_at": "2026-10-26T19:57:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26288",
+  "body": "Filing class: ① a product defect with a named location and a reproduction. Here the product is the repo's required CI lane.\n\nreach: measured on the public CI entry. The `Type Check · workspace` job of PR #26244 died with a tsc heap OOM (exit 134, no type error) at heads `2d0dd7dd` and `c33b95d8`. The same lane passed at `6c5c49cc` with identical types (run 40370187707 is the red at `c33b95d8`).\n\n**Business reason.** Any PR that touches `packages/spec` pulls `plugin-hono-server` into the affected set. When the lane OOMs it goes red on a PR with no type error, and the seat must re-run the job or stall the merge queue. Each re-run costs a CI cycle, and the chance of a red grows with every spec declaration added. If nothing is done, the lane will fail on `main` itself once the margin is gone.\n\n**Who acts.** The seat that owns tooling and CI, after triage routes it. The fix is one line plus a measurement (below).\n\n## Measurement (by the #25779 dev, recorded in os-dev-report 6424852503)\n\n- `packages/plugins/plugin-hono-server`'s tsconfig extends nothing and sets no `skipLibCheck`, so tsc type-checks `@objectstack/spec`'s dist `.d.ts`.\n- Measured under `NODE_OPTIONS=--max-old-space-size=4136`, the CI limit:\n\n  | Tree | Peak RSS | Passes at 4136 MB | Passes at 3900 MB | Check time |\n  |:--|:--|:--|:--|:--|\n  | `main` | 4,745,939 KB | yes | not measured | not measured |\n  | the #25779 branch | 4,770,597 KB | yes | no | 67.6 s |\n  | with `skipLibCheck: true` | 872,405 KB | yes | not measured | 3.85 s, 0 errors |\n\n- #25657 measured `main` at 4,167,189 KB on 2026-10-24, so the margin is shared with `main` and is shrinking.\n\n## Expected\n\nThe lane passes with a real margin. The likely fix is `skipLibCheck: true` in that tsconfig, or extending the repo's base tsconfig that already sets it, so long as no lib-check-only error class is lost. Confirm that by reading what the other plugins' tsconfigs do.\n\n## Dedupe\n\nThe query \"typecheck heap out of memory plugin-hono-server tsc OOM skipLibCheck\" in objectstack issues returned 6 hits, all closed: #17708, #14569 (same class, other lanes: the type-check-debt and debt-ledger tsc OOMs), #18435, #12711, #10451, #10444. None covers `plugin-hono-server` or the workspace lane."
+}

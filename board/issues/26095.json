@@ -2,8 +2,8 @@
   "number": 26095,
   "kind": "issue",
   "title": "packages: 73 published root packages carry inconsistent publishing metadata — 18 without README, about 13 without LICENSE, about 33 with main on the ESM file and one types entry for both formats, 19 without publishConfig, sideEffects only in spec",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:36:36Z",
-  "updated_at": "2026-10-26T13:41:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T18:56:27Z",
+  "closed_at": "2026-10-26T18:55:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26095",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:server` or `domain:devx` execution seat (the files are per-package manifests; triage decides) — one os-dev, one or two PRs. Dedupe: REST list (439 issues), grep `sideEffects|publint|attw|LICENSE|README` → #25913 (open, pm:queue, `domain:ui`: \"30 of 39 published packages declare no sideEffects\" — the ui tree). This card is the root tree's 73 non-private manifests; same `sideEffects` mechanism, different tree, plus the README / LICENSE / exports items #25913 does not cover. **New for the root tree.**\n\n**谁付代价（业务筛）:** a consumer who installs `@objectstack/<pkg>` and opens it on npm sees no README for 18 of them; a CJS consumer resolves `main` to an ESM file; TypeScript under `moduleResolution: node16` sees one `.d.ts` for both module formats (arethetypeswrong's \"masquerading as ESM/CJS\"); bundlers cannot tree-shake 60 packages that never said `sideEffects`.\n\n## Measured (HEAD 0d83ee8f77; manifest census over `packages/**/package.json`, `private !== true` → 73)\n\n- `sideEffects`: set only in `@objectstack/spec`; about 60 other published packages lack it (`grep -l sideEffects packages/*/package.json packages/*/*/package.json` → 1).\n- No README: `apps/account`, `apps/setup`, `apps/studio`, `connector-mcp`, `connector-openapi`, `connector-rest`, `connector-slack`, `platform-objects`, `plugin-approvals`, `plugin-email`, `plugin-pinyin-search`, `plugin-sharing`, `plugin-webhooks`, `sdui-parser`, `service-cluster`, `service-messaging`, `service-sms`, `trigger-api` (18).\n- No LICENSE file: about 13 published packages, e.g. `lint`, `metadata-protocol`, `verify`, `service-datasource`, the `trigger-*` packages (the dev lists them; `files` may or may not include a root LICENSE copy at publish time — read `scripts/` release tooling first).\n- About 33 packages: `\"main\": \"dist/index.js\"` (ESM) while `exports.require` is `./dist/index.cjs`; one `types` entry for both conditions. `spec`: `types: dist/index.d.ts` while its `exports` use `.d.mts`.\n- 19 published packages have no `publishConfig`.\n- Packages with no tests at all: `apps/account`, `apps/setup`, `apps/studio`, `qa/refd-timer-testkit` (console and skills have no source) — listed, not actioned here.\n\n## Wanted\n\n1. Run `publint` and `@arethetypeswrong/cli` once over the 73 built packages (a one-time reading, ⛔ no new gate on this card — if the maintainer wants one it is a decision); paste the summary in the PR.\n2. Fix what they report: `main`/`exports`/`types` per format (`.d.ts` + `.d.cts` or the `types` condition inside `exports`), consistent `publishConfig`, a README for each of the 18 (one paragraph: what it is, the one import, a link to the docs page), LICENSE where the release tooling does not already inject it.\n3. `sideEffects`: declare per package after reading each entry — `false` for pure libraries, an array for packages that register on import (the same reading #25913 prescribes for ui). ⛔ Not a blanket `false`.\n4. ⛔ Nothing here changes a metadata contract or a public API; a package whose exports map has to change shape to satisfy attw gets its own card.\n\n## Acceptance\n\n- publint and attw clean (or every remaining warning explained in the PR body) on the 73; `check:readme-exports` and the publish-smoke lane green; the next `pack-smoke-optin` run passes.\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#25913 (open, ui tree), #25764 (open: dist-tag sweep), `publish-smoke.yml`, `pack-smoke-optin.yml`."

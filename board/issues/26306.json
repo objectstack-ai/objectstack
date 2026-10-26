@@ -1,0 +1,26 @@
+{
+  "number": 26306,
+  "kind": "issue",
+  "title": "components: the filter-builder renderer hands an authored `FilterGroup` to a builder typed on `FilterBuilderRowGroup`, and the two row shapes are assignable in neither direction (hidden by `any` until #26293)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T20:06:25Z",
+  "updated_at": "2026-10-26T20:06:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26306",
+  "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, from an out-of-scope finding in the #25918 os-dev-report (comment 6426067960). ⛔ Not a claim; triage grades it.\n\n## What was found\n\n`ui/packages/components/src/renderers/complex/filter-builder.tsx` passes `schema.value` to `FilterBuilder`. `schema.value` is the authored `FilterGroup` from `@object-ui/types`, but `FilterBuilder` is typed on `FilterBuilderRowGroup`. The two row types are **assignable in neither direction**:\n- the operator vocabulary differs one way;\n- whether `value` is required differs the other way.\n\nUntil now the renderer props' `[key: string]: any` index signature hid the mismatch. #26293 (#25918 partial) changes that signature to `unknown` and has to cross the gap with one visible cast, which this card should make unnecessary.\n\n## Why it matters\n\nAn authored filter whose operator the builder doesn't know, or whose row has no value, reaches the builder unvalidated. What it renders or writes back for such a row is unmeasured. The type gap is evidence that one of the two shapes is not the spec's.\n\n## Ask\n\nMeasure the spec's filter row (`@objectstack/spec` filter condition / `ViewFilterRule`) against both `FilterGroup` (types) and `FilterBuilderRowGroup` (components). Make the builder accept the spec-derived shape (AGENTS #0.1: spec first, no consumer-side alias). Then remove the cast in `filter-builder.tsx`. Add one test per divergent operator or value case.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"filter-builder FilterGroup FilterBuilderRowGroup schema.value type mismatch cast\": 0 matching cards (only closed spec-side filter neighbours: #24640, #20662, #19889)."
+}

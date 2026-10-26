@@ -1,0 +1,36 @@
+{
+  "number": 26260,
+  "kind": "pull_request",
+  "title": "chore(packages): LICENSE for the 14 published packages without one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:34:41Z",
+  "updated_at": "2026-10-26T18:55:38Z",
+  "closed_at": "2026-10-26T18:55:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:55:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26260",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WCCBXqjegEWeDz1zCg9E3U)_\n\nFixes #26095\n\nClause-②: no\nMetadata-protocol: none\n\nThe second half of #26095's publishing-metadata sweep. #26198 landed the publint/attw reading, the manifest repairs and the 18 missing READMEs; this PR adds the one thing it held back: a `LICENSE` in the 14 published packages that had none. It was split off because the 14 copies are 2,828 lines on their own and the two halves together crossed the 3,000-line threshold.\n\n## Why these 14 shipped no licence\n\nnpm packs a package's own `LICENSE` whatever its `files` whitelist says (`scripts/check-published-files.mjs` records that measurement in `ALWAYS_PACKED`), and nothing in `scripts/` or `.github/workflows/` copies the repository's root `LICENSE` into a package at publish time. So these 14 tarballs declared `\"license\": \"Apache-2.0\"` and carried no licence text:\n\n`@objectstack/account`, `@objectstack/console`, `@objectstack/lint`, `@objectstack/metadata-protocol`, `@objectstack/sdui-parser`, `@objectstack/service-datasource`, `@objectstack/service-messaging`, `@objectstack/setup`, `@objectstack/skills`, `@objectstack/studio`, `@objectstack/trigger-api`, `@objectstack/trigger-record-change`, `@objectstack/trigger-schedule`, `@objectstack/verify`.\n\nEach new file is a byte-for-byte copy of the root `LICENSE` — the same file, by hash, that the other 59 published packages already carry. No `files` entry changes: a `LICENSE` listed there would be an unregistered extra entry to `check:published-files`, and it is packed anyway.\n\nAfter this PR, re-counted on `origin/main` at `f2e70836`: all 73 published packages outside `ui/` ship both a `LICENSE` and a `README.md`.\n\n## Verification\n\nMeasured at head `03dee064` on `origin/main` `f2e70836`.\n\n- **LICENSE census:** 59 of 73 published packages carried a `LICENSE` before. After this PR, 73 of 73 carry one, and 73 of 73 carry a `README.md`. `npm pack --dry-run` on `packages/console`, one of the 14, now lists `LICENSE` (11.4 kB) next to `README.md`.\n- All 14 files have the same md5 as the root `LICENSE`.\n- `turbo run build` over all 73 published packages: **72 of 72 tasks successful**. The 73rd package has no build task.\n- `dispatch-gates --commands` derived 61 families for this diff. The run record reconciles with `--ran` at **61 accounted: 60 run, 0 unrun**, and all 60 exit 0.\n- One family is NOT MEASURED: `check-plugin-teardown-shape.mjs --self-test`. On a shallow clone it refuses its own prerequisite with exit 3, its reserved code. Its real scan, `node scripts/check-plugin-teardown-shape.mjs`, exits 0. CI has the full history.\n- Gates worth naming for this diff, all exit 0: `check:published-files` (confirms the 14 `files` lists didn't need to change), `check-empty-changeset.mjs --base origin/main`, `check-changeset-no-major.mjs --base origin/main` and `check:changeset-gate-self-tests`.\n\n## Changeset\n\nOne `patch` in `.changeset/26095-license-files.md`, naming the 14 packages whose tarball gains the file.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01UH1DPuU5rAKoNbDzEyoEw6\n"
+}

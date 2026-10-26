@@ -1,0 +1,35 @@
+{
+  "number": 26212,
+  "kind": "pull_request",
+  "title": "test(console): wait for the settings page's registration release before the shell leaves after a save",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:47:24Z",
+  "updated_at": "2026-10-26T16:58:22Z",
+  "closed_at": "2026-10-26T16:58:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T16:58:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26212",
+  "body": "Fixes #26096\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\nBoth queue ejections on this anchor (builds 40316529606 and 40337868008, at 1066 ms and 1064 ms) are the same case: `CONTROLS … › after a successful save: the shell leaves at once`, at `findByText('Profile page')`. It looked like a slow navigation that ran out of the 1000 ms default. It is not one. The click is swallowed, and the navigation never happens at all:\n\n1. The save's PUT resolves outside `act`, so React commits it as an ordinary Scheduler task. The unsaved bar goes in that commit.\n2. The page's unsaved-edits registration (`useRegisterUnsavedEdits`, through `useUnsavedLeaveGuard`) is released in that commit's **passive effect**. React runs that effect as a task of its own, after the commit.\n3. The test only waited for the bar. On a loaded worker the wait can return between (1) and (2): RTL's settle drain is a 0 ms timer, and when the event loop reaches its timers phase late it runs before the passive-effect task.\n4. The Profile click then calls `confirmUnsavedLeave` while the page is still registered. It asks `window.confirm`, the stub answers Cancel (`false`), and the route stays on `/settings/localization`. `'Profile page'` never renders, so a longer timeout cannot help.\n\nThis is the same race the sibling harness `SettingsView.leaveGuard-13163` fixed in its own save case (objectui#13317). That fix waits on the guard itself, through a cancelable `beforeunload` that is no longer prevented, and this PR applies it here.\n\n## The change\n\nOne file, test-only, +16 / -0: `ui/apps/console/src/pages/settings/__tests__/SettingsView.shellLeave-13231.test.tsx`. In the after-save case, after the existing bar `waitFor`, the test now waits until a cancelable `beforeunload` dispatched on `window` is no longer `defaultPrevented`. The seam installs that listener only while some page is registered, so the wait ends exactly when nothing is registered any more. The assertions are unchanged: Profile page appears, and `confirm` is never called. There is no timeout change, no sleep, no retry, no skip and no product change.\n\n## Evidence\n\nAll runs were under `scripts/pm/os-verify-lock.sh` on a shared box, `pnpm exec vitest run --project @object-ui/console --maxWorkers=2`.\n\n- **Mechanism probe (throwaway file, deleted, not committed).** A React `Profiler` `onRender` hook logged each commit. The save's commit runs with `IS_REACT_ACT_ENVIRONMENT=false`, and at that commit the bar is already gone while the registration is still held (`held=true bar=false`). The registration is released only later.\n- **Deterministic reproduction on the unfixed case.** The probe emulated a starved worker: once the bar goes, it burns 3 ms of CPU after the already-queued microtasks, so the event loop reaches its timers phase late. The unfixed case then failed 2 of 2 runs with `registrationHeld=true` at the click, `confirmCalls=1`, path still `/settings/localization`, and `NOT FOUND after 1006 ms`. That is the CI signature. Without the emulation the same probe passed.\n- **The fix under the same emulation:** 3 of 3 runs, 6/6 tests each.\n- **Natural load on `main`:** not reproduced. Plain runs of the file on `main` are green. I did not run a CPU hog on the shared container. The red above comes from the emulation only, and nothing else is claimed.\n- **Fixed file, 5 runs in a row at f7b810df:** 5 × `Tests 6 passed (6)`, `VERDICT command-exit 0`.\n- **Whole `@object-ui/console` project at f7b810df:** `Test Files 247 passed (247)`, `Tests 2488 passed (2488)`, `VERDICT command-exit 0`.\n- **After merging `origin/main` (head 9c7d1a00), deps rebuilt:** this file plus `SettingsView.leaveGuard-13163`, `Test Files 2 passed (2)`, `Tests 18 passed (18)`, `VERDICT command-exit 0`.\n- **Gates at 9c7d1a00:** `dispatch-gates --commands` derived 23 commands, and all 23 exit 0. `--ran` reconciliation: 23 derived, 23 run, 0 NOT-MEASURED, 0 UNRUN. `pnpm --filter @object-ui/console run type-check` exits 0, but that program does not list this test file (`--listFiles` count 0), so it does not cover the change.\n\n## Acceptance notes\n\n- **The other two `findByText('Profile page')` sites (:162 and :184) are left as they are, on purpose.** A probe showed `'Profile page'` is already in the DOM synchronously after the click there (`sync=true`, found in 2–7 ms). Neither case has a commit outside `act` before the click. The OK case navigates whatever the registration state is, and the clean-page case never registers. Neither has ever ejected a PR.\n- **No timeout was raised anywhere.** The seat's suggested route was to size the `findBy` waits to a route-load budget. That would not have fixed this, because the navigation never happens. It would also break `ui/AGENTS.md` \"测试纪律\", which forbids fixing a flake by raising a timeout. The triage wording \"await the save's settled state before querying\" is what was done: the settled state that matters is the released registration.\n- **Changeset:** none. The diff is a test file, and `@object-ui/console`'s `files[]` (`dist`, `plugin.*`, `README.md`) ships none of it, so the PR carries `skip-changeset`.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

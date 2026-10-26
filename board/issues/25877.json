@@ -2,8 +2,8 @@
   "number": 25877,
   "kind": "issue",
   "title": "record page under approval: the admin override bar (\"管理员代为通过 / 代为拒绝 / 代为转签 / 撤回 / 回复\") sits above the record title as five primary-looking buttons, and 撤回 is drawn twice on the page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-steve",
@@ -14,7 +14,6 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:06:58Z",
-  "updated_at": "2026-10-26T10:15:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T16:06:56Z",
+  "closed_at": "2026-10-26T16:06:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -2,8 +2,8 @@
   "number": 25754,
   "kind": "issue",
   "title": "[Decision] The pending release note .changeset/25610-notify-email-field-recipient.md says email-field delivery fails at the node, which #25721 made false: correct it in a PR you confirm (A), at release time (B), or leave it (C)?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T05:40:57Z",
-  "updated_at": "2026-10-26T07:21:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T18:49:44Z",
+  "closed_at": "2026-10-26T18:02:03Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25754",
   "body": "Ruled: 6398564883 · letter A · 2026-10-25T13:58:53Z (a one-paragraph PR by the `domain:spec` lane; the maintainer confirms it past the red `Check Changeset`; lands before #25640)\n\nFiling gate ②: the repo's own gate routes this to a person. Correcting someone else's pending release note is refused by `Check Changeset` (#17712, ruling D), which says: \"Correcting a pending release note is a decision about a release rather than a refactor -- say so on the PR, naming the note and what changed under it, and get it confirmed … staying red is what puts the decision in front of a person.\" Found by the os-dev round-1 report on #25696 (`out_of_scope_findings[0]`) and confirmed by the `domain:spec` seat 2 (seat post #18549) · `sunhaolin` · session `session_01PC4NPXPgPmpDRG9DdDnyXT`. ~~⛔ Not a claim. Grade and domain are triage's.~~ Ruled; see the first line. The seat suggests `domain:spec` and p2, because it must be settled before the next `@objectstack/spec` release.\n\n**Reader who acts:** ~~the maintainer decides. Under A,~~ ruled A: the `domain:spec` lane writes the one-paragraph PR and the maintainer confirms it.\n\n## 维护者速读\n\n- **事由：** `.changeset/25610-notify-email-field-recipient.md`（#25645 合入的 `{ emailField }` 收件人形态，待发版）最后一段写着「投递……另行落地；落地前，跑到这种节点的流程在节点处失败」。#25721（`d1e329e96d`）已经把投递做完了，同一版里它自己的 changeset `.changeset/25571-notify-email-field-delivery.md` 写的是「现在能发了」。不改的话，下一版 `@objectstack/spec` 的 CHANGELOG 会出现一句已经不成立、且与另一条相互矛盾的话。\n- **要你定：** A 由 spec 车道开一个只改这一段的 PR（拟稿见下），`Check Changeset` 会按设计一直红，由您确认后合入（推荐）；B 不动 changeset，发版时在 Version Packages PR 生成的 CHANGELOG 里手改这一句；C 不改，CHANGELOG 里两条并存。\n- **为什么现在定：** 两个 changeset 都已在 `main` 上待发，下一次发版就会把这句话发出去。#25739（#25696 的描述文字 PR）原本想顺手改，被这道门挡下；为了不让 #25739 卡在这个发版决定上，席位已让开发撤回那处改动，单独提给您。\n\n## The note, and what changed under it\n\n`.changeset/25610-notify-email-field-recipient.md` on `main` (from #25645, `@objectstack/spec` minor + `@objectstack/lint` minor). Its last prose paragraph, verbatim:\n\n> This change is the protocol half. Delivery — resolving the field to an address, the outbound mail configuration, the per-address rate limit and the messaging-log entry — is the messaging service's half and lands separately; until it does, a run that reaches such a node fails at the node.\n\n#25721 (`d1e329e96d`, merged) delivers it: `resolveEmailFieldAddress`, `admitEmailFieldSend` and the `sys_notification_delivery` row in `packages/services/service-automation/src/builtin/notify-node.ts`. Its own pending changeset, `.changeset/25571-notify-email-field-delivery.md` (`@objectstack/service-automation` minor), says: \"`recipients: { emailField: 'applicant_email' }` with `channels: 'email'` (the form `@objectstack/spec` declared earlier in this release, which until now failed the run at the node) mails the address held in that `email`-typed field\". Both changesets ship in the next release, so the \"until it does … fails at the node\" clause is false on the day it ships.\n\n**Why it was not corrected in #25739:** the seat's patch-round order folded the edit in, and `Check Changeset` refused it on `aed84ec582` (step \"Reject an empty-frontmatter changeset added by this PR\"). The gate stays red until a person confirms the correction. That would hold #25739's landing on a release decision that is not #25739's, so the seat has the edit reverted there (patch round 2b) and files it here.\n\n## Options\n\n| Letter | What is done | Cost |\n|:--|:--|:--|\n| **A** (RULED, 6398564883) | A one-paragraph PR changes only that paragraph (proposed text below). `Check Changeset` stays red on it by design, and you confirm and merge it past that check. Frontmatter levels and the `Clause-②` / `Metadata-protocol` lines are untouched. | One small PR plus your confirmation. The fix lives in the repo before the release, whoever cuts it. |\n| **B** | The changeset stays. Whoever cuts the release edits the generated `packages/spec/CHANGELOG.md` entry in the Version Packages PR. | No PR now. Depends on the release cutter remembering, and the release PR is regenerated on every push to `main`. |\n| **C** | Nothing changes. The CHANGELOG carries both entries. | None now. Readers, AI agents among them, are told that the email-field form fails at the node, in the same release that says it works. |\n\nProposed replacement paragraph for A, or the text to use under B:\n\n> This change is the protocol half. Delivery — resolving the field to an address, the outbound mail configuration, the per-address rate limit and the messaging-log entry — ships in the same release in `@objectstack/service-automation`.\n\n## Four axes\n\n- **Real business need:** the form exists to mail an applicant who came in through a public form (hotsrm). A release note saying it fails would steer that user away from the one form built for them.\n- **Long-term soundness:** the CHANGELOG is the published record. A sentence that is false on release day is drift between what is declared and what is true, which the project's contract-first rule exists to prevent.\n- **Preventing AI mistakes:** agents read release notes as fact. With C, an agent writing a flow for an outside recipient would avoid `{ emailField }` or reach for a computed address, which #25721 now refuses on an email node.\n- **Startup focus:** every option costs at most one paragraph. A adds no gate and no capability, and uses the confirmation path the existing gate already names.\n\n**Seat recommendation: A.** It fixes the text where the release reads it and does not depend on anyone remembering at release time. It is the path the #17712 gate prescribes. ~~You decide.~~ Ruled A.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:open \"25610\" changeset email-field delivery` → 0 hits. **New.**"

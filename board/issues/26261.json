@@ -1,0 +1,38 @@
+{
+  "number": 26261,
+  "kind": "pull_request",
+  "title": "feat(spec,core,objectql,driver-sql,formula,driver-mongodb,service-analytics): now-anchored filter comparand `{ $now: true, addDays }` shifted by days held on the record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:35:12Z",
+  "updated_at": "2026-10-26T19:12:00Z",
+  "closed_at": "2026-10-26T19:11:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T19:11:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26261",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbFpVLroZXBfHvGDxkKmgWwk)_\n\nFixes #25808\n\nClause-②: yes (widening)\nMetadata-protocol: added\nRuling-ref: 6415710193\n\n## What\n\nA filter comparand anchored at the current instant and shifted by whole days read off the record — the maintainer's letter A on #25808, comment 6415710193:\n\n```ts\n// opened more than review_sla_days_offset days ago — the column holds NEGATIVE days\n{ opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } } }\n// closed on or after thirty days ago\n{ closed_on: { $gte: { $now: true, addDays: -30 } } }\n```\n\n`{ $now: true, addDays: <integer | { $field }> }` is legal exactly where a `{ $field }` reference is: the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`, on a `date` or `datetime` column. `addDays` is REQUIRED (the unshifted instant stays the `{now}` placeholder); its grammar is `FieldReferenceSchema.addDays`' — an integer of any sign or a `{ $field }` to a numeric column of the same record. There is no `subDays`: **\"now minus the SLA\" needs a column holding negative days**, the sign rule the ruling names (\"sign rules as `addDays`\").\n\n## Work items 1–5 of the ruling\n\n1. **Spec shape + authorable surface** — `NowAnchorSchema` in `data/filter.zod.ts`, in the ordering and equality comparand unions beside `FieldReferenceSchema`; refused by name as an `$in` / `$nin` member and a `$between` endpoint; an equality triple with an anchored comparand lowers to the explicit `$eq` (as #7597 did for a reference). The `FilterCondition` door (comparand-TYPE walk, `filter-comparand-type.ts`) steps around a well-formed anchor and refuses a malformed one in the anchor's words; the lowering face (`filter-lowering.ts`) treats an anchored comparison as NULL-total. `authorable-surface/data.json`, `json-schema.manifest/data.json`, the api surface and `content/docs/references/data/filter.mdx` regenerated.\n2. **Engine resolution + class rule** — `resolveFilterTokens` (`@objectstack/core`, where the resolver lives) pins `$now` to the tree's one instant as an ISO string, so every executor sees `{ $now: '<ISO>', addDays }`; an anchor without `addDays` or with a malformed offset is `INVALID_FILTER` / 400 there. The temporal-comparand door steps around the anchor as it steps around a reference. `having-filter.ts` judges the anchor on `aggregations[i].filter` (operands withheld, diagnostic to the log — `where`'s posture) and on `having` (named — the author's own query): no base column, the target `date` / `datetime`, the offset declared and numeric, never the tenant column (on SQL), and compares it per row through the formula evaluator. No `engine.ts` edit was needed: the judges it calls are the ones that grew.\n3. **driver-sql on all three dialects** — `applyNowAnchorComparison`: the instant bound in the target column's storage form (`datetime` keeps the time of day — canonical ISO, `mysqlDatetimeLiteral` on MySQL, `cast(? as timestamptz)` / `cast(? as datetime(3))`; `date` meets the instant's UTC calendar day, `cast(? as date)`; SQLite reads the canonical text directly), shifted through the existing `crossFieldOffsetExpr` — so **NULL offset = 0 days through the same `coalesce`**, pinned and documented. Predicate total: `(A is not null and A op Bx)` for the orderings and `$eq`, `(A is null or A <> Bx)` for `$ne`, so `$not` takes exactly the complement. Offset column under the 2026-08-06 rules; non-temporal target, malformed anchor and every other position refused with the operands withheld (#7929) and the diagnostic in the server log.\n4. **Formula + one driver-mongodb cell** — `matchesFilterCondition` resolves the anchor in the form of the stored value it meets (a bare calendar day stays a calendar day), `$now: true` reads the evaluator's clock for a caller with no resolver seam; MongoDB refuses the anchor in every position (`INVALID_FILTER` / 400), one pinned cell per position.\n5. **Conformance, lint, docs** — `CROSS_FIELD_NOW_CASES` (12 expectations × both temporal pairs + 4 per-class cells with a NOW off the fixture's time of day — 28 cases) and `CROSS_FIELD_NOW_REFUSALS` (14) on the offset fixture, driven on both paths by driver-sql (sqlite + live PostgreSQL locally; MySQL is the `Temporal Conformance` battery on `main`), driver-sqlite-wasm, service-analytics (where + RLS read scope + dataset measure filter + dataset filter, authored `$now: true`), plus formula, objectql engine (where / aggregation filter / having), spec, core and lint cells. `content/docs/protocol/objectql/query-syntax.mdx` gains \"Comparing Against Now, Shifted by Days Held on the Record\" after \"Comparing Two Fields\".\n\nItem 6 (hotcrm's dataset authoring) is a hotcrm card, not this PR.\n\n## NativeSQLStrategy\n\nDeclines a query carrying an anchor as it declines a `{ $field }` comparand (`findCrossFieldComparand` detects `$now` too), so a dataset filter or measure filter routes to the engine path where the driver compiles it under the 2026-08-12 ruling; the ObjectQL strategy's equality lowering emits the explicit `$eq` for an anchored comparand. A dataset's authored `$now: true` is pinned by the service's own token seam (`resolvedDatasetScopeGetter`).\n\n## Acceptance notes\n\n- **Sign caveat.** The ruling's title says \"now minus an SLA\"; the ruled shape has no subtraction. A column that means \"days before now\" must hold negative values (`review_sla_days_offset: -14`). The docs section and the schema description say so; a positive SLA column needs a negated sibling column or a formula field.\n- **Related record.** The ruling names the SLA \"held on a related record\"; SQL push-down compiles same-table columns only (2026-08-06), so a dotted offset validates, resolves in memory and is refused by SQL push-down by name — the same asymmetry the `addDays` pair has, pinned on both faces. The shape that answers everywhere is the SLA propagated onto the row.\n- **driver-memory** (not on the claim's surface): measured with a probe — it answers `[]` for a `{ $field }` comparand today and answers the same `[]` for an anchor; that silent hole is pre-existing and reported as out of scope.\n\n## Verification\n\nSee the `os-dev-report` comment on #25808 for the test and gate ledger.\n\n_Generated by [Claude Code](https://claude.ai/code/session_019YLF9PyrRqUX4N7C2pzSoH)_\n"
+}

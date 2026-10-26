@@ -1,0 +1,37 @@
+{
+  "number": 26193,
+  "kind": "issue",
+  "title": "Object list: New shows for a user without Create (auditor, read-only finance) and the save is then refused 403",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:12:59Z",
+  "updated_at": "2026-10-26T19:56:29Z",
+  "closed_at": "2026-10-26T19:54:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26193",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 7 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nUsers whose permission sets grant no Create still see the New button on object lists, for example an auditor (read + View All) or a read-only finance user. They can fill the form, and only the server's 403 tells them they could never save. The list is supposed to gate New on the effective permissions from `/me/permissions`. For this user set one input to that verdict answered \"allowed\", and the dev has to find which.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 7 (ui, p3): item 6. Brief 6415795834, item-by-item reading 6415971852 (item 6).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** Read-only roles (auditors, finance reviewers) are offered an action they can never complete, and they find out only after filling in a form. The server holds, so nothing leaks. The cost is wasted work and a console that contradicts the role it was configured for.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step: one os-dev, one PR on `ui/packages/core/src/utils/affordanceGrants.ts` and/or `ui/packages/permissions/src/usePermissions.ts`, whichever the reproduction blames, plus a pin.\n\n**Spec contract.** None changes.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `listNew|New button.{0,120}(create|permission|Create)|(without|no) Create.{0,80}New` found 0 hits.\n\n## Ruled scope (ruling Q3 item 7)\n\n- New is **hidden or greyed** without Create.\n- **Reproduce with the auditor set and pin the `resolveAffordance('listNew')` verdict** (`affordanceGrants.ts:293–310`).\n- Suspected cause: `can()` answering before `/me/permissions` loads. The reading also names View All cascading into the create verdict as the other candidate.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `ui/packages/core/src/utils/affordanceGrants.ts`:\n  - `resolveAffordance` is at `:293–306` (the ruling's `:293–310` holds). Its grant check, `perms.can(objectName, row.grant)`, is at `:305`.\n  - The `listNew` row is at `:147` (`{ crud: 'create', grant: 'create' }`).\n  - The fail-open rule is documented at `:68–74`: with no provider mounted, `can` answers `true` and `isLoaded` `false`.\n  - `resolveFieldAffordance` short-circuits on `!perms?.isLoaded` at `:320`. The ruling had `:321`.\n- `ui/packages/app-shell/src/views/ObjectDataPage.tsx`:\n  - The `listNew` verdict (`newVerdict = resolveAffordance('listNew', …)`) is at `:471–476`. The ruling cited `:503`, which has drifted. Corrected.\n  - The New button renders at `:567–575` (`objectCanCreate && createVisible`).\n- `ui/packages/permissions/src/usePermissions.ts:115`: `usePermissions`. Whether its `can` answers `true` while `/me/permissions` is still loading is the open question. The reading did not read it line by line.\n- Effective API operations: objectstack#3391.\n\n## Expected / acceptance\n\n- The reproduction with the auditor permission set is posted on this card, naming which input answered \"allowed\": the grant while loading, View All cascading, or the operation set.\n- For a user without Create, New is not offered on the object list (hidden, or disabled with a reason), both after permissions load and while they are loading.\n- A user with Create still sees New. Embeds with no permission provider keep today's fail-open behaviour; the server still enforces.\n- A pinned test of the `resolveAffordance('listNew')` verdict for the auditor set."
+}

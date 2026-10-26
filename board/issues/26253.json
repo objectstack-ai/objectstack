@@ -1,0 +1,36 @@
+{
+  "number": 26253,
+  "kind": "pull_request",
+  "title": "feat(ui): the board dims the lanes a card's state machine closes and refuses a drop into one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T17:11:56Z",
+  "updated_at": "2026-10-26T18:18:50Z",
+  "closed_at": "2026-10-26T18:18:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:18:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26253",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi955CwQcSiWwJCH5htb8Ncqt)_\nFixes #25933 — the board half. The edit form half landed in #26033.\n\nClause-②: yes\nMetadata-protocol: none\n\n## What changes\n\nOn a board grouped by a field that an error-severity `state_machine` validation governs (the showcase Task Board's `status`), a `backlog` card could be dragged onto any column. The server refused the move and the board rolled it back with a toast, which works correctly, and nothing during the drag marked the columns the card could not enter. Now:\n\n- **While a card is dragged**, each lane its column's value may not move to is dimmed (`opacity-40`) and draws no drop highlight, with `aria-disabled` and `data-kanban-drop-blocked` on the lane. This covers the flat layout (`KanbanColumnView`) and every swimlane row's cells.\n- **A drop into a closed lane is refused on the client** in `handleDragEnd`, before the optimistic move and before `onCardMove`, so nothing is written and the card stays in its column. A new `onDragCancel` handler clears the dimming when a drag is cancelled. Before this PR the board had no cancel handler, and `activeCard` stayed set after Escape.\n- **The gate is a new optional prop**, `canDropCard(fromColumnId, toColumnId)`, on `KanbanBoardProps` (`KanbanImpl.tsx`), forwarded by `KanbanBoardCore.tsx`. `ObjectKanban.tsx` derives it from `objectDef.validations` through `stateMachineNextValues` (`@object-ui/core`, from #26033). A lane is an option value of `groupBy`, so only a rule on the board's own `groupBy` field can close a lane, and only one the server enforces on update: `severity` `error` (the default), `active`, `events` covering `update`. An undeclared from-state stays open. The Uncategorized lane also stays open, because the mover writes nothing for a drop into it. `KanbanRenderer` (a host-mounted board) passes no gate and is unchanged.\n- The server still refuses an invalid move, and `handleCardMove`'s rollback stays. No new visible text, so no i18n.\n\n## Tests\n\nRun at head `c0333981` from `ui/` under the verify lock:\n\n- `packages/plugin-kanban/src/ObjectKanban.stateMachineDropGate-25933.test.tsx` (new, 6, driven through `DndContext`'s captured handlers like the rollback test). Dragging a `backlog` card dims only Done. A drop on Done writes nothing, shows no toast, leaves the card in Backlog and clears the dimming. A drop on To Do writes `{ status: 'todo' }`. A cancelled drag clears the dimming. CONTROLS: a warning-severity machine closes no lane and the drop is written, and so does a machine on a field the board does not group by.\n- `packages/plugin-kanban/src/ObjectKanban.rejectedMoveRollback.test.tsx`: still green, so the server-refusal rollback is untouched.\n- The whole `@object-ui/plugin-kanban` package: 79 files, 531 tests, all green. `pnpm --filter @object-ui/plugin-kanban run type-check` (source and test configs) exits 0. Both ran in the same locked run that re-recorded `scripts/sdui-manifest.sources/plugin-kanban.json`; `node scripts/check-sdui-manifest.mjs` exits 0 at the head.\n\n**Ablations** (fix committed first; `scripts/ablation-replace.mjs`, mutation proven on disk, restored to the HEAD blob each time):\n\n- `canDropCard={undefined}` in `ObjectKanban.tsx` turned 3 pins red: the dimming, the refusal and the cancel. The 3 that expect an open lane stayed green.\n- The `handleDragEnd` guard replaced by `false` in `KanbanImpl.tsx` turned exactly the refusal pin red. The dimming stays driven by the gate, so the refusal is pinned on its own.\n\n**Gates.** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 47 commands at `c0333981`. All 47 exited 0 there. `--ran` reconciliation: 47 derived, 47 run, 0 NOT-MEASURED (a derived zero: every row carries its exit code). Repo-wide scans (`pnpm lint`, the full `check:*` farm) and the Console build are left to CI.\n\n## Acceptance notes\n\n- A refused drop is silent to a screen reader. dnd-kit's drop announcement does not speak for cross-column drops (#13054 moved that to the write's outcome), and with no write there is no outcome sentence. Adding one would be new copy, which this card ruled out. The dimmed lanes carry `aria-disabled`.\n- The pointer can still hover a closed lane, because collision detection is not filtered. The lane just draws no highlight and the drop is refused. Filtering the droppables in `collisionDetection` would be a deeper change to the dnd wiring.\n- Like the form, only top-level `state_machine` rules are read. A machine nested in a `conditional` rule leaves lanes open, never stricter than the server.\n\nSession: `session_015Kzn5VKHAGKe251waHoUqj` (card thread, `domain:ui#2`)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Kzn5VKHAGKe251waHoUqj)_\n"
+}

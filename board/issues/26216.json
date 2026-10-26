@@ -1,0 +1,37 @@
+{
+  "number": 26216,
+  "kind": "pull_request",
+  "title": "docs(agents): instructions treat ui/ as a workspace, not the objectui sibling repo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:56:42Z",
+  "updated_at": "2026-10-26T17:27:46Z",
+  "closed_at": "2026-10-26T17:27:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T17:27:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26216",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoKs8hmc2q8bGsPhpaAWD8EY)_\n\nPart of #25712\nPart of objectstack#25677\n\n## What\n\nItem 4 of #25712 (slice 2h): the instruction set stops treating objectui as a sibling repository now that it lives in `ui/`.\n\n- **Root `AGENTS.md`** drops the `objectui#` references and every sibling-checkout step (`pnpm objectui:refresh`, pin moves, `.cache/objectui-*`, the PD#15 pin item). The Frontend section, the monorepo layout line, Context Routing (`ui/**` → `ui/AGENTS.md`) and Post-Task step 4 now describe `ui/` as a workspace of this repo. 1117 → 1112 lines.\n- **`ui/AGENTS.md`** is rewritten as a nested file scoped to `ui/` (630 → 261 lines). It keeps the UI-specific rules and no longer restates root rules (governed surfaces, merge queue, changesets, release); a new §9 points at the root file for those.\n- **Lane charter** (folded in per the PM's ruling on the claim): `SKILL.md` gains a `domain:ui` lane-table row (with `packages/console`, removed from the unowned row) and loses the pin-consumer clause of the hold rule; `references/lanes/ui.md` and `references/cross-repo-coordination.md` describe `ui/` as a workspace here, with the sister-repo, pin-lag and pin-bump lines deleted and no new lane rules; `scripts/pm/ensure-pm-labels.sh` keeps `domain:ui` in the main-repo lane loop.\n- **Gates that quoted the old text**: `scripts/check-closing-keyword-parity.mjs` drops the stale `ui/AGENTS.md` non-parser row; `ui/scripts/check-required-check-set.mjs` docblock and its test retire the leg that read a phrase the rewrite removed (the gate's own remedy text prescribes this).\n- **Ratchet** (`scripts/pm/check-skill-line-ratchet.mjs`): ceilings lowered to the landed counts — `AGENTS.md` 1117 → 1112, `cross-repo-coordination.md` 51 → 47, `lanes/ui.md` 38 → 23. `SKILL.md` stays at 319: the new row was paid by deleting the hold rule's pin clause and folding the rest of that line into the `pm:on-hold` rule it qualified. No raise, no cross-file move.\n\nUntouched by design: the sdui-manifest paragraph in root `AGENTS.md` (\"Moving the pin has a second half…\") is byte-identical for 2g/2i, and no sdui files are in this diff.\n\nClause-②: no\nMetadata-protocol: none\n\n## Verification\n\n- Head `22fcfd7f`; 10 files, +123 / −547 (under the 3000-line threshold, so no split).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 54 derived gates, 54 exit 0. `check:doc-formula-expressions` first exited 3 (prerequisite: unbuilt `@objectstack/formula`/`@objectstack/lint`); after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it exits 0.\n- `pnpm check:pm-skill-ratchet`: exit 0.\n- `pnpm --dir ui exec vitest run scripts/__tests__/check-required-check-set.test.ts`: 24/24.\n- Push battery (`GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push node scripts/pm/check-dispatch-gates.mjs`, both tiers): 2182 cases pass, 0 fail (fast 1917, slow 265).\n- Model tier: dispatch-gates names clause ① for the `SKILL.md` edit. The edit is one table row plus one deleted clause, recorded as the one-line-class mechanical exit (PM ruling on the claim thread).\n\n## Follow-up (not in this PR)\n\nRemaining places that still treat objectui as a separate repo, left for a later card so this PR does not widen:\n\n- `.claude/skills/pm-dispatch/references/`: `lanes/triage.md:5`, `lanes/director.md:81` (objectui pin chain), `lanes/hotcrm.md:15`, `dispatch-runbook.md:89`, `filing-gate.md:42-43`, `platform-readings.md:239,389`, `rest-channel.md:78`, `review-checklist.md:23`, `seat-post-protocol.md:80`, `true-green.md:18` (objectui section), `decision-analysis.md:47`.\n- `.claude/agents/os-dev.md:73,125,157,309,310` (objectui force-push, script spelling, labeler and changeset rows).\n- `.claude/skills/checklist-test/SKILL.md:69,135` and `.claude/skills/dogfood-verification/SKILL.md:76-107` (`.objectui-sha`, `pnpm objectui:build`, vendored console).\n- `.claude/settings.json` allow-list rows for `repos/objectstack-ai/objectui/**` (13).\n- Provenance-only mentions (no change needed): `.claude/hooks/guard-*.sh` comments citing objectui incidents; `skills/objectui/**` is the product skill bundle's name.\n\n## 维护者速读(草稿)\n\n1. **改了什么**:根 `AGENTS.md` 与 pm-dispatch 技能不再把 objectui 当兄弟仓;`ui/AGENTS.md` 改为只管 `ui/` 的嵌套文件,不重述根规则;`domain:ui` 进入本仓车道表。\n2. **为什么**:objectui 已并入本仓 `ui/`(#25677),旧的兄弟仓步骤(`pnpm objectui:refresh`、pin 移动等)已无对象,留着会误导执行席。\n3. **风险**:纯文档与门禁文案;两个门禁随引用文本调整,行数上限只降不升。\n4. **验证**:54 个派生门禁全绿,push battery 2182/0,ratchet 绿。\n5. **席位意见**:\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01P33kUswHotSHBLPc6UVn6n\n"
+}

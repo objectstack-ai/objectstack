@@ -2,8 +2,8 @@
   "number": 26093,
   "kind": "issue",
   "title": "tooling: eslint.config.mjs is 1,271 lines of which 906 are four inline custom-rule plugins and 67% is comment — move the rules into a local eslint-plugin-objectstack workspace package with their own tests",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt",
     "tooling"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:34:51Z",
-  "updated_at": "2026-10-26T14:52:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T16:04:04Z",
+  "closed_at": "2026-10-26T16:03:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26093",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:spec` execution seat (`packages/lint` and gate tooling anchor there per the lane table; triage decides) — one os-dev, one PR. Dedupe: REST list (439 issues), grep `eslint.config|eslint plugin` → 0 hits. **New.**\n\n**谁付代价（业务筛）:** a seat that wants to know why lint rejected a line opens a 69 KB config file and reads rule implementations inline; a change to a rule has no test but the config's self-assert; the actual configuration (eight objects, lines 939–1271) is the last quarter of the file.\n\n## Measured (HEAD 0d83ee8f77)\n\n- `eslint.config.mjs`: 1,271 lines, 69,544 bytes; about 46.4 KB (67%) are comment lines.\n- Lines 1–906: four custom rule plugins written inline — `slot-lookup` (with `scripts/slot-lookup-baseline.json`, 25 files / 100 sites), `query-options` (`scripts/query-options-erasure-baseline.json`, 15 files / 50 sites), `verify-stand-in`, `comment-swallow` — plus a self-assert block.\n- Lines 939–1271: the config array, 8 objects; ignore lists are small (`NEVER_LINTED` 5 globs plus the two JSON baselines).\n- `packages/lint` exists and is the metadata linter (a different thing); a workspace-local ESLint plugin package does not exist. The ui tree has `ui/eslint-rules/` as a folder of rule files, a lighter precedent.\n\n## Wanted\n\n1. A private workspace package (e.g. `tools/eslint-plugin-objectstack`, `\"private\": true`, not published) holding the four rules, each with a `RuleTester` test file; `eslint.config.mjs` imports the plugin and keeps only configuration. ⛔ Behaviour-preserving: the baselines and every current verdict are unchanged — the dev proves it by running `pnpm lint` before and after and diffing the output.\n2. Comments that explain a rule's history move with the rule (file header) or to the ADR that decided it; per #25919 ruling A (「存量不横扫」) no other comment is rewritten.\n3. The self-assert block becomes the plugin's tests.\n\n## Acceptance\n\n- `pnpm lint` output identical before/after (0 errors both sides, same warning set); `wc -l eslint.config.mjs` under about 400.\n- The plugin's tests run in the lane where `packages/lint` tests run; `pnpm typecheck` covers the new package (coverage ratchet: new packages arrive covered).\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#25919 (open, ruled A), the as-any decision card in this batch (if ruled A its rule lands in this plugin)."

@@ -1,0 +1,37 @@
+{
+  "number": 26197,
+  "kind": "pull_request",
+  "title": "fix(console): keep the build-identity define out of the other ui test projects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:14:55Z",
+  "updated_at": "2026-10-26T16:07:19Z",
+  "closed_at": "2026-10-26T16:06:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T16:06:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26197",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi989Xx1AWqCMG6VmVHPtUXrt)_\n\nFixes #26126\n\nClause-②: no (build/test configuration only; no exported type or runtime contract change; the console production build keeps its version stamp)\nMetadata-protocol: none\n\n## What changes\n\n`ui/apps/console/vitest.config.ts` now drops every `import.meta.env.*` / `process.env.*` key from the console Vite config's `define` before merging it into the console test project. `ui/apps/console/vite.config.ts` is untouched, so `vite build` still bakes `import.meta.env.VITE_APP_VERSION` (the build's `VITE_APP_VERSION`, else the git short sha) exactly as before. `buildIdentity-12970.test.ts` is unchanged; it stays the pin.\n\n## Mechanism (measured, vitest 4.1.10 in `ui/node_modules`)\n\n1. Vitest's `vitest:project` plugin runs `deleteDefineConfig` in each project's Vite `config` hook. That function writes every `import.meta.env.*` / `process.env.*` define into the **main process's** `process.env` and deletes it from the define.\n2. `resolveProjects` initialises the projects concurrently (`limitConcurrency(availableParallelism)`), so the console project's config hook races the other projects' Vite config resolution.\n3. A project whose Vite config resolves **after** that hook has run picks `VITE_APP_VERSION` up in its own env snapshot (Vite reads `VITE_*` from `process.env`). `buildIdentity.ts` reads `(import.meta as ...).env`, which Vite serves from that snapshot, so `getConsoleBuild()` returns the sha instead of `null`. Which project wins the race is timing, which is why the queue build for #26019 went red and earlier builds did not.\n\nA throwaway probe in a `unit` worker (base config, `VITE_APP_VERSION` unset in the shell) read `process.env.VITE_APP_VERSION === 'c35f1762' (that tree's HEAD)` in 6 of 6 runs while the import-meta read stayed `null`: the leak into `process.env` is deterministic, and the red depends on the resolution order.\n\n## Measurement\n\n| leg | config | result |\n|---|---|---|\n| race forced: a throwaway 4 s `config` hook on the `unit` project, so it resolves after the console project | main's console `vitest.config.ts` | **red**: `AssertionError: expected 'c35f1762' (that tree's HEAD) to be null` (1 failed, 10 passed), the same failure as queue run 40325012039 |\n| same forced race | this PR | **green**: 11 passed |\n| CI-identical leg, `CI=true pnpm --dir ui run test --shard=10/16` (unfiltered, all projects incl. console; the leg that holds `buildIdentity-12970` and 9 console files) | this PR at the merge with main (`b0841718`) | `buildIdentity-12970` passed; 363/364 files, 4955 passed. The one red was `check-i18n-dead-keys.test.ts` timing out at 15 s while the gate sweep loaded the box; it passes when run alone |\n| same leg | main's console `vitest.config.ts` | `buildIdentity-12970` passed (the race was won that time); one unrelated red, see Acceptance notes |\n\nSo the natural race did not lose in 2 targeted runs, 6 probe runs and 1 shard run here. The red was reproduced deterministically only by forcing the resolution order. The probe and the delay hook were throwaway and are not in the diff. Narrowing declared: one shard of 16, not the whole suite, because a full local run takes several hours on this box; CI's Test UI runs all 16 legs.\n\n## Acceptance notes\n\n- `ui/packages/app-shell/src/preview/__tests__/DraftChangesPanel.securityLink.test.tsx` (\"offers the named item as a control that asks for that surface, inside Studio\") fails 3 of 3 times when run alone on main `601c7738` and on this branch, and it failed in the base shard leg. It is not touched by this diff (the dom project never sees the removed define). Handed to the seat; it may show up on this PR's Test UI.\n- A shell that exports `VITE_APP_VERSION` before `vitest run` still turns the \"reads null\" case red. That is the test reading its build environment as written, not the leak, and nothing in CI exports it.\n\n## Local gates (head `b0841718`)\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 27 families, each run, all exit 0; `--ran` reconciliation: 27 derived, 27 run, 0 NOT-MEASURED (a derived zero).\n- `eslint apps/console/vitest.config.ts`: exit 0. `tsc -b tsconfig.node.json --force` in `ui/apps/console` (the program that type-checks this file): exit 0.\n- Console build: `pnpm --filter '@object-ui/console^...' build`, then `CI=true vite build` in `ui/apps/console` with `VITE_APP_VERSION` unset: lock verdict exit 0, 10273 modules. The bundle still bakes the stamp: `dist/assets/index-*.js` carries `VITE_APP_VERSION:` with value `b0841718` (the git short sha of HEAD).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KpXmBvpnCGgpgx8hNbqsso)_\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26218,
+  "kind": "issue",
+  "title": "app-shell: MetadataService.retiredObjectEnabled corpus guard expects 47 ObjectSchema keys, main now has 48 after #26005 added sharing, so Test UI is red for every ui PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:58:26Z",
+  "updated_at": "2026-10-26T17:13:49Z",
+  "closed_at": "2026-10-26T17:10:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26218",
+  "body": "Filing gate ①: a red gate on `main`, measured. ⛔ Not a claim.\n\nSince #26005 (5e113b39) `ObjectSchema` carries one more top-level key, `sharing` (`packages/spec/src/data/object.zod.ts`). `ui/packages/app-shell/src/services/MetadataService.retiredObjectEnabled.test.ts:161` pins the key count as a corpus guard, `expect(accept.size).toBe(47)`, so it now fails with `expected 48 to be 47`. That makes `Test UI` red on every PR's merge ref. The first measured case is #26213, check-run 121679452481 (Test UI 8/16), on a diff that touches only marketplace files. Every ui PR in the merge queue will be ejected on it.\n\n**Business reason.** The ui merge queue stalls. Every ui card's landing waits on a gate that has nothing to do with it.\n\n**Fix.** Re-point the guard to 48, the same way the file has re-pointed it five times before. That means a comment line naming the adopted key (`sharing`, objectstack#26005), measured as exactly one key gained and none lost. The membership assertions below it stay as they are. Test-only, one file. No product change, and no sdui record moves (app-shell is outside the registry closure).\n\n**Why the gate didn't catch it on #26005.** #26005 changed `packages/spec`, and its CI did not run this ui suite. That points at the turbo/CI filter gap #26092 is closing (root `turbo.json` and `ci.yml` core filter lines). That work is not part of this card.\n\n**Who acts.** The `domain:ui` seat 2 dispatches it at once.\n\n**Duplicate check.** I scanned the 40 newest issues and 30 newest PRs for `retiredObjectEnabled`, the guard count, and `48`. There were 0 relevant hits."
+}

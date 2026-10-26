@@ -1,0 +1,31 @@
+{
+  "number": 26309,
+  "kind": "pull_request",
+  "title": "test(app-shell): fold the other five Interfaces rail label pins onto the shared railLabels harness",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T20:08:53Z",
+  "updated_at": "2026-10-26T20:21:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26309",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi93kH3NmKTNuUFhcMmaWEDak)_\nPart of #25911\n\nSlice 1b of #25911, the follow-up to #26255. The other five Interfaces-rail label pins (`interfacesRailLabelMap-11158`, `interfacesAppLabelMap-11181`, `railServedLabels-12688`, `zhPillarNames-11801`, `navEntryIdentity-11774`) render the real `InterfacesPillar` over the same three mocks as the five folded in #26255. They now join `StudioDesignSurface.railLabels.test.tsx`. Each former file is a top-level `describe` named after it, and each block installs its own metadata-client double into the shared `vi.hoisted` slot in a `beforeEach`. No test is deleted, and every assertion moves verbatim. The diff is test-only: no `src` file, no sdui record, no changeset.\n\n## Before / after (same command, same box, `--maxWorkers=2`, shared-box seconds)\n\n`pnpm exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface --maxWorkers=2` from `ui/`, with a throwaway reporter reading each module's diagnostics. Fixed cost = environment + prepare + setup + import.\n\n| | files | tests | fixed CPU | test CPU | total CPU | wall |\n|---|---|---|---|---|---|---|\n| before #26255 (f143cd88) | 95 | 656 | 678.3 s | 343.4 s | 1021.7 s | 528.4 s |\n| after #26255 (76d53f205) | 91 | 656 | 644.9 s | 334.9 s | 979.8 s | 507.0 s |\n| after this PR (f62241cf7) | 86 | 656 | 616.8 s | 338.1 s | 954.9 s | 493.8 s |\n| the ten pins alone, this PR | 6 → 1 | 56 → 56 | 41.4 s → 7.6 s | 7.4 s → 6.2 s | 48.8 s → 13.8 s | |\n\nAcross both slices the ten pins went from 10 files to 1, and the family's CPU went from 1021.7 s to 954.9 s (−6.5 %). Each folded file saved about 6.5 s of fixed cost, and the folded file's own fixed cost barely moved (7.3 s → 7.6 s). Test CPU moves by about ±10 s from run to run on this shared box, so the per-file rows are the clean reading.\n\n## Issue number → describe (reviewer check: no assertion dropped)\n\n| former file | describe in `StudioDesignSurface.railLabels.test.tsx` | `it` | `expect(` |\n|---|---|---|---|\n| `StudioDesignSurface.interfacesRailLabelMap-11158.test.tsx` | `StudioDesignSurface.interfacesRailLabelMap-11158` (objectui#11158) | 4 | 16 |\n| `StudioDesignSurface.interfacesAppLabelMap-11181.test.tsx` | `StudioDesignSurface.interfacesAppLabelMap-11181` (objectui#11181) | 5 | 15 |\n| `StudioDesignSurface.railServedLabels-12688.test.tsx` | `StudioDesignSurface.railServedLabels-12688` (objectui#12688) | 6 | 20 |\n| `StudioDesignSurface.zhPillarNames-11801.test.tsx` | `StudioDesignSurface.zhPillarNames-11801` (objectui#11801) | 4 | 11 |\n| `StudioDesignSurface.navEntryIdentity-11774.test.tsx` | `StudioDesignSurface.navEntryIdentity-11774` (objectui#11774) | 6 | 21 |\n\nThe five blocks from #26255 stay as they were. The mechanical check of the new file against the ten former files on main gives the same `it` titles, 50 of 50 as an identical sorted list, and the same `expect(` count, 153 against 153. The run reports 56 tests passed in the folded file, the same 56 the six files reported before (`it.each` rows expand).\n\nWhat changed besides the indentation:\n- The header now says ten pins. The import block adds what the new blocks use (`beforeAll`, `MockInstance`, `act`, `useLocation`, `AppSchema`, `useObjectTranslation`, `MetadataContextValue`, `ComponentRegistry`, `path`/`fileURLToPath`, `readDesignerPairs`, `t`, `listStudioCanvasPreviewTypes`). The `@ts-expect-error` for the untyped gate script moved with its import to the top of the file.\n- Comments that named a file this PR deletes now name the block in this file.\n\nIsolation: RTL `cleanup()` and react-i18next's global reset still run after every test. `navEntryIdentity-11774` registers an `object-view` recorder into `ComponentRegistry` in its `beforeAll`, so it is the last block in the file and no block after it can read that registration.\n\n## Not in this PR\n\n- **cli-bin split** (`ui/packages/cli/src/__tests__/cli-bin.test.ts`): slice 2, next.\n- **date-only-zone-pins-10183**: not split, premise stale, as recorded on #26255.\n- `autosaveSwitch-11232` (94 s of real debounce sleeps) is the family's next-largest lever. It is not touched.\n\n## Verification (head f62241cf7)\n\n- The family vitest run above: 86 files, 656 tests passed.\n- `eslint` on the changed test file: 0 problems.\n- `tsc -p tsconfig.test.json --noEmit` in `ui/packages/app-shell`, after `pnpm --filter '@object-ui/app-shell^...' build`: 0 `error TS`.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`): 24 derived, 24 run, every one exit 0, and `--ran` reconciles as a derived zero. The diff is 1,896 changed lines, under the 3,000-line bar.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012Vh1mJSJN3FeocpnWPNdH1)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012Vh1mJSJN3FeocpnWPNdH1\n"
+}

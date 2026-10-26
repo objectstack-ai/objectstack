@@ -2,8 +2,8 @@
   "number": 26149,
   "kind": "issue",
   "title": "[Decision] Closing a paused flow screen dialog: should abandoning the run be possible, and who may do it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,22 @@
   },
   "labels": [
     "area:workflow",
-    "domain:spec",
-    "needs-user-decision"
+    "domain:spec"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:50:00Z",
-  "updated_at": "2026-10-26T14:07:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T17:35:11Z",
+  "closed_at": "2026-10-26T17:34:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26149",
-  "body": "Filing class: ② a decision only the maintainer can make. This card carries the **second half** of #25801 (item 2, \"closing a paused run's screen dialog cancels the run, or offers to\"); the first half (a `type: 'file'` screen field) is in flight on PR #26134 under #25801 and is not decided here.\n\nos-decision-facets\n\n动手的读者：维护者裁决方向；domain:spec 席位（#18917）按「裁后执行」收口 #25801 并立实施卡。业务理由：hotclm 的请求人放弃录入向导后，运行一直暂停，平台没有让本人收尾的出口。\n\n## 维护者速读\n\n一句话问题：用户在流程向导里中途关掉对话框，这次运行就一直停在「暂停」，向导之前写下的记录也留着；要不要让用户自己放弃这次运行，如果要，关对话框时是静默放弃还是先问一句。\n\n推荐：**B（关对话框时询问「放弃这次运行？」，由发起人本人放弃）**，但分期：本轮不做，先落 #26134（向导可以把所有写入挪到最后一屏之后，hotclm 的残留草稿因此消失），等出现「必须中途写入」的真实流程再立实施卡。\n\n## 背景\n\n- 来源：hotclm 录入向导（objectstack-ai/hotclm#99 item 4，维护者 2026-10-25 批 5 字母 B 立卡）。症状是请求人在上传版本那一屏关掉对话框，留下删不掉的无版本草稿（NDA-2026-0021）。\n- 该症状的根因是「文件只能在建记录之后收」，#26134 已解决：`type: 'file'` 屏字段在第一屏就能收文件，写入挪到最后一屏之后，关对话框不再留下半截记录。\n- 剩下的只是「中途必须写入的流程」被放弃时的残留，以及一条一直暂停的运行本身。\n\n## Governing text\n\n- `packages/runtime/src/domains/automation.ts`（#13953）：取消运行是平台运维动词，「a run belongs to the environment rather than to a user」；非运维者调用 `POST /automation/:name/runs/:runId/cancel` 得 403 `PERMISSION_DENIED`。\n- 同文件 #19987：恢复（resume）门对发起人开放（`isRunStarterOrRunStateReader`）。\n- 选项 A、B 都要新增一个「发起人放弃自己暂停中的屏幕运行」的动词，即改写 #13953 对屏幕暂停这一类运行的立场；这一点只有维护者能定。\n\n## 协议声明\n\n- A/B：新增 REST 动词与控制台行为，不改 spec 元数据（Metadata-protocol: none），REST 面加宽（Clause-②: yes (widening)）。C：无改动。D：可能新增流程级配置键（added）。\n\n## 前提（带复核命令）\n\n- 取消门仍是运维专属：`git grep -n \"RUN_LIFECYCLE_DENY_VERB\" origin/main -- packages/runtime/src/domains/automation.ts`，命中 1 处即成立。\n- 关对话框不发请求：`git grep -n \"onOpenChange\" origin/main -- ui/packages/app-shell/src/views/FlowRunner.tsx`，读该行只调 `onClose`。\n- 取消不回滚屏前写入：取消只结束运行，不撤销已提交的写（dev 在 #26134 正文 Acceptance notes 实测陈述）。\n\n## 选项\n\n| 选项 | 做什么 | 客户看到的后果 | 工作量 |\n|:--|:--|:--|:--|\n| A 静默放弃 | 关对话框即调用新的发起人放弃动词 | 误关一次就丢掉整个向导进度，无法回来继续 | spec 车道 1 个 PR（运行时动词 + 控制台），无先例 |\n| B 询问后放弃 | 关对话框弹出「放弃这次运行？」，确认才调用新动词；取消则保持暂停 | 用户明确知道自己在放弃；屏前写入仍不撤销 | 同 A，外加一个确认框，1 个 PR，无先例 |\n| C 不改 | 关对话框保持暂停（现状） | 运行一直暂停；有 #26134 后向导不再留下半截记录 | 0 |\n| D 到期清理 | 暂停超过期限的屏幕运行自动结束 | 用户回来时运行可能已过期；对谁都不需要新权限 | 1–2 个 PR，需定期限配置，无先例 |\n\n业务含义直译：A 像网购时关掉结账页就清空购物车；B 像关页面时问「确定放弃订单？」；C 像购物车一直留着；D 像购物车 30 天后自动清空。\n\n## 四轴\n\n- ① 项目长远合理性：两年后的平台样子是「暂停中的运行归发起人管理，发起人可继续也可主动放弃，管理员可清理全部」，这是 Salesforce「Paused Flow Interviews」的模型（用户可删除自己的暂停会话）。B 最接近：放弃是明确动作，不靠关窗副作用；A 把放弃藏进关窗，误触不可恢复；D 是补充清理手段，不替代发起人的选择；C 不前进。\n- ② 实际业务拉动：今天唯一的拉动方 hotclm 的残留问题由 #26134 解决；仓内与 hotclm 未见「必须中途写入」的屏幕流程。零剩余拉动 ⇒ 时序上延后。\n- ③ 防 AI 犯错：B 出错时用户看到一个确认框，结果可见；A 出错时用户静默丢进度且没有提示；D 出错时用户回来才发现运行过期。响亮优于静默 ⇒ B。\n- ④ 创业阶段不扩散：任何放弃动词都是新的永久 REST 面与权限面；没有拉动就不加。⇒ 现在不做。\n\n只看①选 B；②③④ 是否翻转：否（②④只把 B 延后，不改字母）。\n\nPrior rulings read: \"cancel\" \"paused run\" \"starter\" in objectstack issues → 0 hits; \"paused\" run abandon/expiry/TTL screen flow → 79 hits, none asks for abandonment or expiry of a screen-paused run; ADR-0044 (cancel is an operator verb), #13953, #19987; thread: objectstack-ai/hotclm#99 item 4.\n\n## 推荐与置信缺口\n\n- 推荐 B，分期：本轮不实施，#25801 只以前一半关闭；B 的实施卡在出现第一个必须中途写入的真实屏幕流程时再立。\n- 不取 A：误关即丢进度，且无提示。不取 C 作终态：运行永久暂停，平台没有让发起人收尾的出口。不取 D 作主方案：它是清理而不是用户的选择，可另行评估。\n- 盲区：未测线上暂停运行的累积量；若累积成为运维负担，D 的优先级会上升。\n\n## 裁后执行\n\n- 选 B 或 C：spec 席位在 #26134 落地后以 `Part of` 收口 #25801，在卡上记明后半由本卡承载；选 B 时同笔立实施卡（发起人放弃动词 + 确认框），按本卡裁决入队。\n- 选 A：同上立实施卡，去掉确认框。选 D：立到期清理卡，期限值由维护者给出。\n\n## 相关\n\n#25801（母卡）、PR #26134（前一半）、#13953、#19987、#25692、objectstack-ai/hotclm#99。"
+  "body": "Ruled: 6423004356 · letter B (staged) · 2026-10-26T17:34Z\n\nFiling class: ② a decision only the maintainer can make. This card carries the **second half** of #25801 (item 2, \"closing a paused run's screen dialog cancels the run, or offers to\"); the first half (a `type: 'file'` screen field) is in flight on PR #26134 under #25801 and is not decided here.\n\nos-decision-facets\n\n动手的读者：维护者裁决方向；domain:spec 席位（#18917）按「裁后执行」收口 #25801 并立实施卡。业务理由：hotclm 的请求人放弃录入向导后，运行一直暂停，平台没有让本人收尾的出口。\n\n## 维护者速读\n\n一句话问题：用户在流程向导里中途关掉对话框，这次运行就一直停在「暂停」，向导之前写下的记录也留着；要不要让用户自己放弃这次运行，如果要，关对话框时是静默放弃还是先问一句。\n\n推荐：**B（关对话框时询问「放弃这次运行？」，由发起人本人放弃）**，但分期：本轮不做，先落 #26134（向导可以把所有写入挪到最后一屏之后，hotclm 的残留草稿因此消失），等出现「必须中途写入」的真实流程再立实施卡。\n\n## 背景\n\n- 来源：hotclm 录入向导（objectstack-ai/hotclm#99 item 4，维护者 2026-10-25 批 5 字母 B 立卡）。症状是请求人在上传版本那一屏关掉对话框，留下删不掉的无版本草稿（NDA-2026-0021）。\n- 该症状的根因是「文件只能在建记录之后收」，#26134 已解决：`type: 'file'` 屏字段在第一屏就能收文件，写入挪到最后一屏之后，关对话框不再留下半截记录。\n- 剩下的只是「中途必须写入的流程」被放弃时的残留，以及一条一直暂停的运行本身。\n\n## Governing text\n\n- `packages/runtime/src/domains/automation.ts`（#13953）：取消运行是平台运维动词，「a run belongs to the environment rather than to a user」；非运维者调用 `POST /automation/:name/runs/:runId/cancel` 得 403 `PERMISSION_DENIED`。\n- 同文件 #19987：恢复（resume）门对发起人开放（`isRunStarterOrRunStateReader`）。\n- 选项 A、B 都要新增一个「发起人放弃自己暂停中的屏幕运行」的动词，即改写 #13953 对屏幕暂停这一类运行的立场；这一点只有维护者能定。\n\n## 协议声明\n\n- A/B：新增 REST 动词与控制台行为，不改 spec 元数据（Metadata-protocol: none），REST 面加宽（Clause-②: yes (widening)）。C：无改动。D：可能新增流程级配置键（added）。\n\n## 前提（带复核命令）\n\n- 取消门仍是运维专属：`git grep -n \"RUN_LIFECYCLE_DENY_VERB\" origin/main -- packages/runtime/src/domains/automation.ts`，命中 1 处即成立。\n- 关对话框不发请求：`git grep -n \"onOpenChange\" origin/main -- ui/packages/app-shell/src/views/FlowRunner.tsx`，读该行只调 `onClose`。\n- 取消不回滚屏前写入：取消只结束运行，不撤销已提交的写（dev 在 #26134 正文 Acceptance notes 实测陈述）。\n\n## 选项\n\n| 选项 | 做什么 | 客户看到的后果 | 工作量 |\n|:--|:--|:--|:--|\n| A 静默放弃 | 关对话框即调用新的发起人放弃动词 | 误关一次就丢掉整个向导进度，无法回来继续 | spec 车道 1 个 PR（运行时动词 + 控制台），无先例 |\n| B 询问后放弃 | 关对话框弹出「放弃这次运行？」，确认才调用新动词；取消则保持暂停 | 用户明确知道自己在放弃；屏前写入仍不撤销 | 同 A，外加一个确认框，1 个 PR，无先例 |\n| C 不改 | 关对话框保持暂停（现状） | 运行一直暂停；有 #26134 后向导不再留下半截记录 | 0 |\n| D 到期清理 | 暂停超过期限的屏幕运行自动结束 | 用户回来时运行可能已过期；对谁都不需要新权限 | 1–2 个 PR，需定期限配置，无先例 |\n\n业务含义直译：A 像网购时关掉结账页就清空购物车；B 像关页面时问「确定放弃订单？」；C 像购物车一直留着；D 像购物车 30 天后自动清空。\n\n## 四轴\n\n- ① 项目长远合理性：两年后的平台样子是「暂停中的运行归发起人管理，发起人可继续也可主动放弃，管理员可清理全部」，这是 Salesforce「Paused Flow Interviews」的模型（用户可删除自己的暂停会话）。B 最接近：放弃是明确动作，不靠关窗副作用；A 把放弃藏进关窗，误触不可恢复；D 是补充清理手段，不替代发起人的选择；C 不前进。\n- ② 实际业务拉动：今天唯一的拉动方 hotclm 的残留问题由 #26134 解决；仓内与 hotclm 未见「必须中途写入」的屏幕流程。零剩余拉动 ⇒ 时序上延后。\n- ③ 防 AI 犯错：B 出错时用户看到一个确认框，结果可见；A 出错时用户静默丢进度且没有提示；D 出错时用户回来才发现运行过期。响亮优于静默 ⇒ B。\n- ④ 创业阶段不扩散：任何放弃动词都是新的永久 REST 面与权限面；没有拉动就不加。⇒ 现在不做。\n\n只看①选 B；②③④ 是否翻转：否（②④只把 B 延后，不改字母）。\n\nPrior rulings read: \"cancel\" \"paused run\" \"starter\" in objectstack issues → 0 hits; \"paused\" run abandon/expiry/TTL screen flow → 79 hits, none asks for abandonment or expiry of a screen-paused run; ADR-0044 (cancel is an operator verb), #13953, #19987; thread: objectstack-ai/hotclm#99 item 4.\n\n## 推荐与置信缺口\n\n- 推荐 B，分期：本轮不实施，#25801 只以前一半关闭；B 的实施卡在出现第一个必须中途写入的真实屏幕流程时再立。\n- 不取 A：误关即丢进度，且无提示。不取 C 作终态：运行永久暂停，平台没有让发起人收尾的出口。不取 D 作主方案：它是清理而不是用户的选择，可另行评估。\n- 盲区：未测线上暂停运行的累积量；若累积成为运维负担，D 的优先级会上升。\n\n## 裁后执行\n\n- 选 B 或 C：spec 席位在 #26134 落地后以 `Part of` 收口 #25801，在卡上记明后半由本卡承载；选 B 时同笔立实施卡（发起人放弃动词 + 确认框），按本卡裁决入队。\n- 选 A：同上立实施卡，去掉确认框。选 D：立到期清理卡，期限值由维护者给出。\n\n## 相关\n\n#25801（母卡）、PR #26134（前一半）、#13953、#19987、#25692、objectstack-ai/hotclm#99。\n"
 }

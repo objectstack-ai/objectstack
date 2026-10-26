@@ -1,0 +1,37 @@
+{
+  "number": 26279,
+  "kind": "pull_request",
+  "title": "fix(core): one declaration serves both module formats, so exports give types per condition",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:35:34Z",
+  "updated_at": "2026-10-26T20:10:38Z",
+  "closed_at": "2026-10-26T20:10:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T20:10:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26279",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9W2h5P9XVs1x44jgK8SstGW)_\nFixes #26205\n\nClause-②: no\nMetadata-protocol: none\n\n`@objectstack/core` was the one published package still handing a `require` consumer its ESM-kind declaration (attw `FalseESM` on `.` and `./logger`). Serving the `.d.cts` per condition, as #26198 did for 38 other packages, broke consumers, because `dist/index.d.ts` and `dist/index.d.cts` were two separate declarations of the same classes and `ObjectKernel`'s `private plugins` makes the two copies incompatible types.\n\n## What changed\n\n- **`packages/core/tsup.config.ts`**: the declaration pass runs once, for ESM only (a `dts: { only: true }` half). The JS half (ESM + CJS, unchanged options) writes `dist/index.d.cts` and `dist/logger.d.cts` in its `onSuccess` as one line each, `export * from './index.js';` / `'./logger.js'`. The declaration half never emits a `.d.cts`, so the two halves tsup runs concurrently never write the same file, and `clean` stays on the JS half only (tsup's clean keeps declaration files).\n- **`packages/core/package.json`**: both subpaths become `{ import: { types, default }, require: { types, default } }`, the shape #26198 used. No subpath added or removed, no JavaScript target moved; the top-level `main`/`types` are unchanged.\n- **`scripts/check-dual-build-cjs-loads.mjs`**: the two `@objectstack/core` rows leave `TYPED_EXEMPTIONS`. The table is shrink-only and the scan reports a row whose entry now resolves a CommonJS declaration as stale, so they go in the same PR; the header paragraph that described core's block now says where the cure lives. This file was added to the claim's file surface by the seat before the edit.\n- **`.changeset/26205-core-one-declaration-per-condition.md`**: `@objectstack/core` patch.\n\n## Why this direction and not the reverse\n\nTried first the other way round: declarations in the `.d.cts`, `index.d.ts` re-exporting `./index.cjs` (ESM may import CJS in every TypeScript mode). That made core's own imports of `@objectstack/spec` resolve through spec's `require` condition, and spec's own twin declarations then failed `@objectstack/driver-memory`'s build: `TS2345` at `src/memory-driver.ts:1469`, `ComposedReadableIds` not assignable to itself. Keeping the declarations in the ESM `.d.ts` means everything core's types import resolves exactly as it did when both conditions read the `.d.ts`.\n\nThe cost of this direction is TS1479 inside core's `.d.cts` for a CommonJS consumer on `module: node16` (or on TypeScript 5.6 under `nodenext`). A consumer CJS file plus ESM file importing core in both resolution modes and assigning `ObjectKernel` across them, compiled against this branch's build and against `origin/main`'s:\n\n| TypeScript · module | `origin/main`, `skipLibCheck: true` | this PR, `skipLibCheck: true` | this PR, `skipLibCheck: false` |\n|:---|:---|:---|:---|\n| 6.0.3 · nodenext | 0 errors | 0 errors | 0 errors |\n| 6.0.3 · node16 | 2 × TS1479 in the consumer's own file | 0 errors | 2 × TS1479 in core's `.d.cts` |\n| 5.6.1-rc · node16 | 2 × TS1479 in the consumer's own file | 0 errors | 2 × TS1479 in core's `.d.cts` |\n| 5.6.1-rc · nodenext | 2 × TS1479 in the consumer's own file | 0 errors | 2 × TS1479 in core's `.d.cts` |\n\nSo the diagnostic that `origin/main` raises at the consumer's import, where no option silences it, moves into the package, where `skipLibCheck` does. The cross-mode `ObjectKernel` assignments type-check in every cell. (The 5.6 runs also print errors from `ai`/`@ai-sdk` and `@objectstack/spec` declarations with `skipLibCheck: false`; those are unchanged by this PR and not counted above.)\n\n## Acceptance\n\n- **Premise reproduced on `origin/main` (`f2e70836`)**: with only the export map split and the declaration build unchanged, `pnpm --filter @objectstack/plugin-dev build` exits 1 with `src/dev-plugin.ts(523,32): error TS2345: Argument of type 'ObjectQLPlugin' is not assignable to parameter of type 'Plugin'.`; unsplit, exit 0.\n- **attw** (`@arethetypeswrong/cli` 0.18.5) on the `pnpm pack` tarball of core: before 3 problems (`FalseESM` × 2, `NoResolution` on `./logger` under `node10`), after 1 (`NoResolution` on `./logger` under `node10`). **FalseESM: 2 → 0.** The remaining `node10` row is the known no-`exports`-support class, left out of scope as in #26198.\n- **`pnpm --filter @objectstack/plugin-dev build`**: exit 0 at `01ec8f2e` (inside the force build below).\n- **dist file names**: `packages/core/dist` lists the same 12 file names before and after (plus its two `.build-input-hash*` stamps), and the packed tarball the same 18 paths, `diff` clean. What changed is content only: `index.d.cts` 579,364 → 28 bytes and `logger.d.cts` 3,963 → 29 bytes (now re-exports); `index.d.ts` and `logger.d.ts` are the same declarations as before.\n\n## Verification\n\nAll at head `01ec8f2e`, which merges `origin/main` at `0453fabe` (that brought in #26203's tsconfig base change to core and plugin-dev):\n\n- `turbo run build --force --filter='./packages/**'`: **75 of 75 tasks successful**, including `@objectstack/verify`, `@objectstack/plugin-dev` and `@objectstack/driver-memory`, the three builds that met this hazard before.\n- `pnpm --filter @objectstack/core typecheck` exit 0; `pnpm --filter @objectstack/core test`: 121 files, 2,778 tests passed.\n- `dispatch-gates --commands` derived 93 families for this diff; every one exits 0, and `--ran` reconciles at **93 derived, 93 run, 0 NOT-MEASURED** (exit codes recorded). `check-plugin-teardown-shape.mjs --self-test` first refused on the shallow clone (exit 3) and passed after `git fetch --unshallow`. Named for this diff: `check:dual-build-cjs-loads` (self-test 93 cases; scan: 112 require entry points across 69 packages, 112 require conditions resolve a CommonJS-flavoured `types` that exists), `check:dts-closure`, `check:lean-entry-closure`, `check:published-files`, `check-dts-emitted.mjs --self-test`, `check-empty-changeset.mjs`, `check-adr-0087-registration.mjs`.\n- Repo-wide scans (`pnpm lint` first) and the type-check lanes are CI's.\n\n## Acceptance notes\n\n- No path under `packages/plugins/plugin-dev/**`, `ui/**` or any governed surface is touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VPkxx6ackwXchvtVNidtum)_\n"
+}

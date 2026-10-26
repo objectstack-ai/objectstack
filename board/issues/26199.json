@@ -1,0 +1,38 @@
+{
+  "number": 26199,
+  "kind": "issue",
+  "title": "app-shell: DraftChangesPanel.securityLink \"inside Studio\" case fails when run alone on main (draft-security-problems not found), likely since #26056",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:17:40Z",
+  "updated_at": "2026-10-26T18:19:55Z",
+  "closed_at": "2026-10-26T18:18:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26199",
+  "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`. Source: a finding outside the scope of the #26126 card thread, in report 6419675993. ⛔ Not a claim.\n\n## What was measured\n\n`ui/packages/app-shell/src/preview/__tests__/DraftChangesPanel.securityLink.test.tsx`, case \"offers the named item as a control that asks for that surface, inside Studio\":\n\n- It fails 3 out of 3 times when run alone, at `main` `601c7738` and at `b0841718`. The error is `Unable to find data-testid draft-security-problems`.\n- It also fails in the base shard-10 leg.\n- It passed once inside another shard layout, so the outcome depends on run order.\n\nRepro: `cd ui && ./node_modules/.bin/vitest run --maxWorkers=2 packages/app-shell/src/preview/__tests__/DraftChangesPanel.securityLink.test.tsx`\n\n## Likely cause (seat's reading, NOT MEASURED)\n\nThe last change to `DraftChangesPanel.tsx` was #26056 (`6d15acab`, for #25894). After it, a pending-changes row waits for its new-or-update classification before it reads the published body. If this case's fixture does not answer the classification read, or answers it late, the security-problems block may never render. Measure this before changing anything.\n\n## Ask\n\nMake the case pass when run alone and in any shard order:\n\n- If the panel is right and the fixture predates #26056, fix the fixture.\n- If the panel lost the block for a real Studio session, fix the panel and say so.\n\n⛔ Do not skip, quarantine or loosen the assertion.\n\n## Business reason\n\nWho benefits: every ui PR's merge-queue run. A test that goes red depending on shard order can eject unrelated PRs from the queue. While the ui lanes land PRs one package line at a time, each ejection costs a full queue round.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, open, \"DraftChangesPanel securityLink draft-security-problems\": 0 hits."
+}

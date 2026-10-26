@@ -10,16 +10,24 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T14:59:46Z",
-  "updated_at": "2026-10-26T14:59:46Z",
+  "updated_at": "2026-10-26T18:52:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26183",
   "body": "Filing class: ① user-visible defect — reach: public door, measured in a browser on 18.1.0 (the Console `objectstack dev --ui` serves) with objectstack-ai/hotclm `main`. **Reader:** the UI lane, `ui/packages/app-shell` navigation (the route segment `objectui#11887` keyed paths on).\n\n## Business reason\nUsers bookmark and share these addresses. Within one app's sidebar, half the entries open under the app name and half under the package id, so the same app has two address families, and a link copied from one entry does not look like a link from the next.\n\n## Measured (hotclm: app `name: 'clm'`, package id `app.objectstack.hotclm`)\n- 我发起的 → `/_console/apps/clm/clm_contract/view/my_contracts`\n- 合同 record → `/_console/apps/clm/clm_contract/record/<id>`\n- 我负责的履约 (object nav, `objectName: 'clm_obligation'`, `viewName: 'my_obligations'`) → `/_console/apps/app.objectstack.hotclm/clm_obligation/view/my_obligations`\n- 待我处理 (component nav, the approvals inbox) → `/_console/apps/app.objectstack.hotclm/component/approvals/inbox`, and a request opened from it → `/_console/apps/app.objectstack.hotclm/sys_approval_request/record/<id>`\nThe sidebar stays the same app in both, so nothing breaks; the addresses differ.\n\n## Expected\nEvery entry of one app routes under one segment, whichever objectui#11818 / #11887 chose as canonical.\n\nDedupe: the archived objectui issues (2,000 most recently updated, all states) grepped for package id / app name in routes — objectui#11818 (\"console routes address the same app by package id and by app name\", closed by #11887) is this symptom; it is still visible on the 18.1.0 Console, so either the fix is not in the Console 18.1.0 ships or these two nav kinds were not covered.\n\n---\n_Filed from the hotclm browser regression thread (2026-10-26); maintainer: 「平台的问题应该提交issue到平台」._"

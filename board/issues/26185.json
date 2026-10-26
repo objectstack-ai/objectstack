@@ -2,9 +2,9 @@
   "number": 26185,
   "kind": "pull_request",
   "title": "qa(checklist): write-feedback acceptance[1] states the record-level vs singleton / named-automation boundary",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T15:02:21Z",
-  "updated_at": "2026-10-26T15:02:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-10-26T15:57:10Z",
+  "closed_at": "2026-10-26T15:57:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T15:57:07Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26185",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9VKYMfHJzAPdSSUmVdsTS15)_\nFixes #25849\nClause-②: no\nMetadata-protocol: none\n\nThe fifth line of the card: `ux-conventions.write-feedback` acceptance[1] reworded to the maintainer's ruling, comment 6417978207 on the card, letter **C**. Wave anchor: #25807 (linked only; it stays open). The other four lines of the card landed in #26109; the ui half of the ruling is its own card #26172, which this PR does not wait for: the clause defines the test, the ui card makes the console pass it.\n\nDocs only: one ledger file, one item. Nothing under `packages/`, `ui/` or any governed surface moves, so the PR carries `skip-changeset`.\n\n## What changed\n\n`docs/qa/platform-checklist/areas/ux-conventions.json`, item `ux-conventions.write-feedback` only:\n\n- acceptance[1] `clause` states the boundary the ruling draws: a record-level write names the record (title / display name) or the count; a singleton page (settings) and a named automation are their own subject and pass as they are; a bare Success / Done or a machine name still fails.\n- acceptance[1] `verify` is a two-step, decidable test: classify the row first (record-level, or singleton / named automation), then score it by that class's test. A record-level row that names only the object (\"Task created successfully\") scores FAIL and cites #26172.\n- `revision` 5 → 6; one `history` row citing the card, the ruling comment 6417978207 and QA run #25817 (`ref` is the card, as the revision-5 row of the same card is).\n\n### Before (origin/main c7aa9cde)\n\n```text\nclause: success feedback names what changed — the record, item or count — rather than a bare 'Success' or a machine name\n\nverify: read the captured text: it names the subject (record title, invitee email, package label, 'N created · M skipped'); a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row\n```\n\n### After (fa4e25d8)\n\n```text\nclause: success feedback names its subject: a record-level write names the record or item (its title, label or display name) or the count; a singleton page (settings) and a named automation (e.g. Flow \"X\" completed) are their own subject and pass as they are; a bare 'Success' / 'Done' or a machine name never passes\n\nverify: two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until ui card #26172 lands, so those rows are expected FAILs that cite it. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row\n```\n\n## Verification\n\n- Scripted span edit (each anchor hit exactly once); a value comparison proves the new document equals the old one plus the four declared operations, the other two items of the file value-equal, and the bytes outside the edited spans unchanged (`git diff`: +9 / −3).\n- `pnpm check:platform-checklist` at fa4e25d8: exit 0, `OK — 16 areas, 329 items (324 active, 1 planned)`.\n- `dispatch-gates --commands` derives 13 families for this diff; all 13 run at fa4e25d8, every one exit 0; `--ran` reconciliation: 13 derived, 13 run, 0 NOT-MEASURED, 0 UNRUN.\n\n## Acceptance notes\n\n- The record-level class keeps the original clause's \"item\" (Studio rows are named by the item label) so the Studio autosave / publish / discard variants still have a class; the ruling's own words name records, settings and named automations only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LxjRCZExSRaXN87XaS2A33)_\n"

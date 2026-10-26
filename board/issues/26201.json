@@ -1,0 +1,34 @@
+{
+  "number": 26201,
+  "kind": "issue",
+  "title": "ci(governed-surface-guard): the pull_request leg re-runs on ready_for_review and spends ~95 s on checkout + install for a 1 s check, so an admin merge tapped right after an approval is refused with \"required status check is in progress\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:18:34Z",
+  "updated_at": "2026-10-26T20:15:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26201",
+  "body": "Filing gate: maintainer-directed task. Maintainer, 2026-10-26, in the director summon chat after the seat read the cause: 「立卡」. Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. Reader: the lane that owns the governed-surface guard (`.github/workflows/governed-surface-guard.yml`, SUBJECT = the governed register; Tier H, lands by maintainer approval). Dedupe: REST list of the 124 newest open + closed issues, grep `governed.surface.queue.guard|ready_for_review|queue guard.*(slow|in progress|checkout)` → 0 (control `merge queue` → 6). **New.**\n\n## 维护者速读\n\n手机上批准一张受管 PR 后马上按「立即合并」,会弹 \"Required status check 'Governed Surface Queue Guard' is in progress\"。原因是时序而不是故障:批准 → PR 被翻成 ready → guard 的 `pull_request` 一侧按 `ready_for_review` 触发重跑;这一跑真正的判定只要 1 秒,但 checkout(48 秒)+ pnpm 缓存与安装(约 20 秒)+ 缓存回写(19 秒)让检查有约 95 秒处于进行中,管理员直合在这个窗口被拒。车队已在 15:13:36 挂上 auto-merge,检查完自然入队,所以弹窗那一下其实不需要任何操作。本卡把这个窗口去掉:翻 ready 不改 head sha,不必重跑;`pull_request` 这条腿按设计恒 exit 0,也不需要装依赖。\n\n## What was measured (PR #25965, 2026-10-26)\n\n- 15:12:28Z `os-zhuang` APPROVED → 15:12:32Z `ready_for_review` by the same account → 15:12:35Z workflow run (event `pull_request`) started on head `e7b12fdd` → 15:14:09Z completed; 15:13:36Z `auto_merge_enabled` by `objectstack-fleet[bot]`.\n- Step timings of that run: Checkout repository 48 s; Setup pnpm cache 11 s; Install dependencies 9 s; **Governed surfaces may not enter the merge queue unreviewed: 1 s**; Post Setup pnpm cache 19 s. Total ~94 s, of which the check is 1 s.\n- Eleven other runs of the workflow in the same quarter hour: `pull_request` legs 67–111 s each, `merge_group` legs 76–104 s.\n\n## Governing text\n\n- `.github/workflows/governed-surface-guard.yml` `on:` — `pull_request: types: [opened, synchronize, reopened, ready_for_review]` and `merge_group`; the header says the `pull_request` leg \"is an EARLY WARNING that deliberately exits 0\" and the `merge_group` leg \"is the leg that REFUSES\".\n- `scripts/check-required-contexts.mjs` `REQUIRED_CONTEXTS` names `governed-surface-guard.yml` → job `governed-surface-guard` as a required context; the check-run name `Governed Surface Queue Guard` is contract (AGENTS.md Multi-agent discipline §7: a rename detaches its gate silently).\n- AGENTS.md Prime Directive 14: `.github/workflows/**` is Tier H — the change lands by the maintainer's approval; the owning seat then lands it.\n- The workflow's own `paths:` / `branches:` notes: the permanent-pending wedge comes from the workflow NOT starting on a PR head; nothing below changes which heads start it.\n\n## Premises (re-check before acting)\n\n- P1 — `ready_for_review` is in the trigger list: `git grep -n 'ready_for_review' .github/workflows/governed-surface-guard.yml` → 1 line (control: `synchronize` → 1 line).\n- P2 — flipping draft → ready does not change the head sha, so the check run the `opened`/`synchronize` leg already published on that sha stays attached: re-read `GET /repos/objectstack-ai/objectstack/commits/e7b12fdd/check-runs` and confirm one `Governed Surface Queue Guard` run existed before 15:12:35Z.\n- P3 — the `pull_request` leg needs the checkout only to run `scripts/pm/check-governed-queue-guard.mjs` and its predicate self-test; read the \"Governed surfaces may not enter the merge queue unreviewed\" step and list what it reads from the tree versus the API.\n\n## Wanted\n\n1. Drop `ready_for_review` from the `pull_request` trigger types (the ready flip changes no sha; the existing check run stands). Keep `opened`, `synchronize`, `reopened` and the `merge_group` leg exactly as they are. Add one sentence to the header saying why the type is absent.\n2. If P3 shows the `pull_request` leg reads nothing from the tree that the API cannot give, make that leg API-only (no checkout, no pnpm install): a `node` script fetched from the default branch or vendored, or `actions/github-script`, publishing the same check-run name. The `merge_group` leg keeps the full checkout (it is the refusing leg and must read the queue head).\n3. `scripts/check-required-contexts.mjs --self-test` and `pnpm check:required-contexts` exit 0; the check-run name is unchanged; `check:ci-filter-parity`, `check-expected-skips`, `check-step-collectors` follow.\n\n⛔ Not here: the `merge_group` leg's semantics, the required set, any other workflow.\n\n## Acceptance\n\n- Approving and readying a governed PR starts no new guard run; the check on the head stays `completed`.\n- On a PR whose head changes, the `pull_request` leg's wall time is under 20 s (P3 route) or unchanged (route 1 only), measured on the PR's own run and quoted in the PR body.\n- `Governed Surface Queue Guard` remains the published check-run name on both legs.\n\n**Size:** S (route 1) or M (routes 1 + 2). **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\nPR #25965 (the measured case); `scripts/check-required-contexts.mjs`; #26071 (scheduled/bot workflow consolidation, ruled A — a different file set)."
+}

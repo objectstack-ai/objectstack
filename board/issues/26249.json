@@ -1,0 +1,37 @@
+{
+  "number": 26249,
+  "kind": "pull_request",
+  "title": "fix(runtime): log a sandboxed business refusal once, at info, without a stack",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:53:43Z",
+  "updated_at": "2026-10-26T18:02:04Z",
+  "closed_at": "2026-10-26T18:02:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T18:02:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26249",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XNMUyAtJ3QHgAodTpjswVPJ)_\n\nFixes #26153\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA sandboxed hook or action body that refuses on purpose (a throw the HTTP doors answer in the 4xx band, such as hotclm's `422 INVALID_STATE`) used to write two `ERROR [BodyRunner]` lines with full stacks: `sandboxed hook threw` at the hook's catch, then `sandboxed action threw` at the action's catch for the same refusal relayed across the VM hop.\n\nNow:\n\n- **A refusal logs once, at `info`, with no stack.** The line is `[BodyRunner] sandboxed hook refused` (or `action refused`) and carries `appId`, the hook or action name, the declared `code`, the `status` and the error's message (the debug wrapper, which names every frame). No error object is passed, so no stack.\n- **The action does not repeat a refusal its hook already logged.** A nested body's refusal that the outer body re-threw unchanged is recognised by identity and the outer catch writes nothing for it. The same holds for a hook whose `ctx.api` write is refused by another hook.\n- **A fault keeps `error` with its stack.** A crash, a denied capability or a declared 5xx is logged exactly as before. For a nested fault **both** lines are kept (hook and action), as today.\n- Every throw is still rethrown. No HTTP status, body or message changes.\n\n## How refusal vs fault is decided\n\nBy the status band of `mapDataError(err)` (`@objectstack/types`), the ADR-0112 table the `/data` door answers with and that the bulk-import runner already reuses for its row verdicts. There is no second list of codes or names. The new test pins, for each shape that reaches these catches (nested hook refusal 422, action refusal with no declared status, nested hook crash, action crash, denied capability), that this band equals the band the `/actions` door actually answers through `HttpDispatcher.handleActions`. If the two ever drift, that block goes red.\n\n## Why `quickjs-runner.ts` is touched (claim amendment 6420650570)\n\nThe fact \"this outer `SandboxError` is a nested refusal relayed unchanged\" exists only in the runner's pump loop (`readRelayedRefusal`). The outer error is a new object, so `body-runner.ts` could tell it apart only by pattern-stripping `.message`, which this code forbids. The runner now records such errors in a module-level `WeakSet` and exports `isRelayedSandboxRefusal()` to `body-runner.ts`. It is not exported from the package entry (`@objectstack/runtime` exports only `.`, and `sandbox/index.ts` does not re-export it). The catch-site diff stays at the two catches plus one helper, `logBodyThrow`, so #26170 (same file) rebases trivially.\n\n## Evidence\n\n- **Red first, on `main` (fbb75998):** `body-throw-log-level.test.ts`, 3 failed / 7 passed. The nested case recorded `error '[BodyRunner] sandboxed hook threw'` and `error '[BodyRunner] sandboxed action threw'`, both with stacks. The fault and door-parity cases were already green there.\n- **After the fix:** 10/10 pass.\n- **Ablation:** with `if (isRelayedSandboxRefusal(err)) return;` deleted via `scripts/ablation-replace.mjs` (anchor 1 to 0, blob `bfd61dd8ec74` to `43513b2871d9`), only the nested case goes red (1 failed / 9 passed). Restored, `git diff HEAD` empty. The test imports `src/`, so no `dist/` leg applies.\n- **Runtime:** on head `a1db083d` (rebased onto `origin/main` `df8aac41`, which moved `mapDataError` and the `/actions` catch for #26031): `pnpm --filter @objectstack/runtime typecheck` exit 0 and `pnpm --filter @objectstack/runtime test` 457/457 files, 7422 passed, 19 skipped (lock VERDICT command-exit 0).\n- **Lint:** `eslint --no-inline-config` on the three touched files, exit 0.\n- **Derived gates:** `node scripts/pm/dispatch-gates.mjs --commands` derived 65 commands on head `a1db083d`; all 65 run, every one exit 0, and `--ran` reconciles 65 run, 0 NOT-MEASURED, 0 UNRUN. Families CI runs outside that list (Test Core shards, Build Core, the type-check lanes) are left to this PR's check-runs.\n\n## Acceptance notes\n\n- **Level `info`, not `warn`:** a refused click is an ordinary outcome. REST does not log an expected 4xx at all, and `warn` would keep paging anyone alerting on WARN.\n- **Known edge where the doors themselves disagree.** A body that throws a code one of `mapDataError`'s 4xx arms recognises together with a **declared 5xx** status is answered 4xx by `/data` but 5xx by `/actions` (the divergence `error-response-structured-arm-door-parity.test.ts` §4 already names). Such a throw logs `info`. The reverse case, a 5xx arm code with no declared status (`ERR_DATASOURCE_UNAVAILABLE`), logs `error` while `/actions` answers 400, which is the louder direction. Neither shape has a producer in a sandbox body today.\n- A bare `Error` out of `UnimplementedScriptRunner` (no engine installed) reads 5xx under `mapDataError`, so it stays `error`, which is right for a misconfiguration.\n- The job body catch (`sandboxed job threw`) is out of this card's scope and unchanged.\n- `#26170 remains open`: the translation key for hook refusals is not started here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018jZoq6nbK2HEZ8a7BnDwG7)_\n"
+}

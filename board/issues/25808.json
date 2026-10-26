@@ -2,8 +2,8 @@
   "number": 25808,
   "kind": "issue",
   "title": "Analytics datasets: no filter compares a datetime column against now minus an SLA held on a related record",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:26:14Z",
-  "updated_at": "2026-10-26T12:14:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T19:11:59Z",
+  "closed_at": "2026-10-26T19:11:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25808",
   "body": "Ruled: 6415710193 · letter A · 2026-10-26T12:13Z\n\nFiling gate: ③ maintainer-directed task, split from #25778 (item 2) as its triage asked.\nReader: domain:spec seat, the next PR on the filter comparand grammar (`packages/spec/src/data/filter.zod.ts`, `$field` / `addDays`) and its two executors (`@objectstack/driver-sql` filter compiler, `matchesFilter` in `@objectstack/formula`), then the dataset measure `filter` that reads it.\nDedupe (open AND closed): \"filter compare datetime against now minus days from related object field SLA per type\" → 1 hit (#21255, closed, unrelated); \"relative date offset from a field value, $field addDays now, cross-object reference in filter\" → 2 hits (#21255, #20127, both closed, unrelated). Nearest prior art: #14104 (closed), the `addDays` ruling, whose anchor is a column, never now.\n\n## Why (the maintainer's words stand in)\n\nRuling, hotclm#31 comment 6396322580, letter C: keep the goal, file the capability, do not stamp durations app-side.\n\nTriage on #25778 (comment 6397322215): \"A datetime-difference measure in the semantic layer, with no SQL or expressions (ADR-0021). Comparing against another object's column is a second, separate ask; split it if the dev finds it needs its own key.\"\n\nThe case behind it: a contract-review dashboard counts reviews past their SLA, where the SLA in days depends on the contract's type: `clm_contract.review_started_at` older than now minus `clm_contract_type.review_sla_days`. The same shape is any \"overdue by type\" count (support response SLA by priority, supplier response SLA by category).\n\n## The ask\n\nA per-row predicate, usable as a dataset measure `filter` and a dataset `filter`, that compares a `datetime` column against **now minus N days**, where **N is a numeric column of a related record** (a lookup / master-detail parent). Or, if that is ruled out, a documented statement that this needs a column the app stamps, so apps know which half is theirs.\n\n## Why the #25778 PR does not cover it, and why it needs its own key\n\nThe #25778 PR adds a `duration: { from, to, unit }` measure: the time between two `datetime` columns of the same record, aggregated. Item 2 falls outside it on two counts, and neither is reachable with today's keys:\n\n1. **Now as the anchor, with a column offset.** `addDays` (#14104) puts a whole-day offset on a `{ $field }` comparand, so `completed_at <= due_date + grace_days` compiles. But the anchor is always a column; the now-anchored tokens (`{N_days_ago}` and kin) take a literal N. \"now minus `review_sla_days` days\" has no spelling.\n2. **The offset lives on a related record.** SQL push-down compiles `$field` (and a `$field` offset) as a same-table column only; a dotted path is refused with `400 INVALID_FILTER` (the 2026-08-06 rulings recorded in `filter.zod.ts`, \"Execution support (#5041 → #5222 → #14104)\"). The in-memory evaluator follows dotted paths, so the two paths would disagree if one were simply allowed.\n\nSo either a now-anchored comparand that takes a `{ $field }` offset, plus a cross-object reading for it (a JOIN contract the #5222 rulings declined), or the documented \"stamp it\" answer. That choice is the maintainer's; this card states what is missing.\n\n⛔ No expression language or raw SQL (ADR-0021), as for #25778.\n"

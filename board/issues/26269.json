@@ -1,0 +1,36 @@
+{
+  "number": 26269,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a position created from Setup is saved live and shows in the list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T18:06:11Z",
+  "updated_at": "2026-10-26T19:27:52Z",
+  "closed_at": "2026-10-26T19:27:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T19:27:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26269",
+  "body": "Fixes #26192\n\nClause-②: no\nMetadata-protocol: none\n\n## Premise (answered first, as the card asks)\n\nSetup → Positions → New carried **no** `packageId`. Positions register no `EditPage`, so New opens the generic `MetadataResourceEditPage`; its save sends `mode: 'draft'` and adds a package only under `?package=`, and Setup carries none. By the ruling's own condition (\"a draft written with none is itself the defect\"), the fix is the save path, not a drafts list.\n\nMeasured red-first on `origin/main` `df8aac41f2` with the new test below: the create sent one PUT with `mode: \"draft\"` and `package: null`.\n\n## What changes\n\n- `ui/packages/app-shell/src/services/builtinComponents.tsx`: the `position` resource registers `createLive: true`, the key the permission set already carries (objectui#7611). **Where the key lives:** the permission set's `createLive` sits in `anchors.ts` (`registerBuiltinAnchors`, beside its object anchor), but the position has no anchor entry there; its only registration is the `registerMetadataResource({ type: 'position', ... })` call in `builtinComponents.tsx`, so the key goes there. The registry merges per type, so either home would read the same at runtime; the position's single home keeps it in one place.\n- No change to `ResourceEditPage.tsx`: its existing rule already writes a `createLive` type live when no package binding is active, and as a package draft under `?package=`.\n- The server admits the live write: the spec's metadata-type registry row for `position` carries `allowRuntimeCreate: true`.\n\nResult: a position saved from Setup → Positions → New is written live (one PUT, no `mode`, no `package`, `If-None-Match: *`), shows in the Positions list right after Save, and its detail page reads it at once. Under `?package=` the create stays a package draft (ADR-0086 P0/P2).\n\n**Out of scope (stated per the claim):** later edits of an existing position in Setup still save as drafts, the generic editor's rule for every type. Changing that is a product choice and is not made here.\n\n## Tests\n\nNew `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.positionCreateLive-26192.test.tsx`, after the liveCreate-7611 pattern: the REAL page over a REAL `MetadataClient`, the position's registration taken from the real `builtinComponents` module, the transport an in-memory server recording each PUT's `mode`, `package` and first-write pin.\n\n- outside a package: exactly one PUT `{ name: 'regional_lead', mode: null, packageId: null, ifNoneMatch: '*' }`, then the editor opens `/metadata/position/regional_lead`;\n- under `?package=com.acme.crm` (control): one PUT `{ mode: 'draft', packageId: 'com.acme.crm', ifNoneMatch: '*' }`.\n\nReadings (all under `scripts/pm/os-verify-lock.sh`, shared box):\n\n- Red first, test commit `739f7ba6` (no fix): `Tests 1 failed | 3 passed (4)`; the live case received `\"mode\": \"draft\"` against expected `null`. The 7611 permission control passed in the same run.\n- Green at head `41bbd17a`: the new test, `ResourceEditPage.liveCreate-7611`, `ResourceListPage.positionGrants-25333`, `ResourceEditPage.permissionSetsFeed-12126`: `Test Files 4 passed (4)`, `Tests 14 passed (14)`, VERDICT command-exit 0.\n- `@object-ui/app-shell` `type-check` (both `tsconfig.json` and `tsconfig.test.json`) at `41bbd17a`: VERDICT command-exit 0, 0 `error TS`.\n- NOT MEASURED, reason: lock queue-timeout twice behind a whole-package app-shell run held by another worktree. The wider set of 41 app-shell test files that load `builtinComponents` or name `position` is left to CI (the UI test jobs).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `41bbd17a`: 35 derived commands, each run with its exit captured before any pipe: 34 exit 0. `pnpm check:type-check-debt` exit 3 = PREREQUISITE NOT MET (its closure build never got a turn on the verify lock), NOT MEASURED, left to CI `Lint & Repo Gates`. `--ran` reconciliation: 35 derived, 35 run, 0 UNRUN. `scripts/sdui-manifest.*` untouched (`check-sdui-manifest` exit 0).\n\n## Acceptance notes\n\n- Main's Test UI may be red on the MetadataService ObjectSchema 48≠47 guards until #26231 lands; that red is not from this diff.\n\nThis PR was authored by session `session_01SMps7wq7rBTk53e8KTSEup` (`domain:ui` seat 2 dispatch).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 26082,
   "kind": "issue",
   "title": "[Decision] Root ESLint never loads @typescript-eslint/eslint-plugin, so no-explicit-any is a rule nobody runs: 1,922 as-any sites in non-test source and 211 eslint-disable comments for an absent rule — add a per-file ratchet, or not",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt",
     "tooling"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:21:10Z",
-  "updated_at": "2026-10-26T14:28:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T18:51:00Z",
+  "closed_at": "2026-10-26T18:47:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26082",
   "body": "Ruled: 6417062243 · letter C · 2026-10-26T13:22Z\n\nFiling gate ②: a maintainer-only decision. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). Reader: the director seat presents this card in a decision batch; after the ruling the lane named under \"After the ruling\" dispatches. ⛔ Not a claim. Dedupe: REST list (439 issues), grep `as any|no-explicit-any|typescript-eslint` → 2 hits: #25918 (open, pm:queue, domain:ui: 14,366 no-explicit-any WARNINGS in the ui tree; \"不做全仓翻转（objectui#8316 已拒），只在发布的授权面上加严\"), #25302 (closed, unrelated). The root tree is a different case: the rule is not loaded at all. This card asks about `packages/**`; #25918 owns `ui/**`. **New.**\n\n## 维护者速读\n\n根 `eslint.config.mjs` 只引入了 `@typescript-eslint/parser`，没有安装 `@typescript-eslint/eslint-plugin`，所以 `no-explicit-any` 在 `packages/**` 从未生效过（ui 树是另一回事：规则是 warn，#25918 在管）。`pnpm lint` 又带 `--no-inline-config`，于是 66 个文件里 211 条 `eslint-disable @typescript-eslint/no-explicit-any` 注释是对一条不存在的规则的空操作。非测试源码 1,922 处 `as any`（350 个文件），前三名 `objectql/src/engine.ts` 205、`metadata-protocol/src/protocol.ts` 133、`plugin-approvals/src/approval-service.ts` 62——恰是三个最大文件（#25467 / #25522 / #25521 正在切片）。仅有两条窄的自定义规则（slot-lookup、query-options）各带 grandfather 基线。新增门禁/棘轮是人工地板项，且 objectui#8316 曾拒全仓翻转，所以请你裁：**A** 安装插件，加 `no-explicit-any` 为 error 但只对 `src/**` 非测试文件，配按文件计数、只减不增的基线（与 `test-typecheck-debt.json` 同一棘轮形态），删 211 条空注释；**B** 只装插件开 warn 并删空注释，不设基线不红；**C** 不加任何规则，只删 211 条空注释。选 A / B / C？\n\n## Governing text\n\n- `eslint.config.mjs` imports: `@typescript-eslint/parser` only; `package.json` devDependencies: `\"@typescript-eslint/parser\": \"^8.70.1\"`, no `@typescript-eslint/eslint-plugin`.\n- `package.json` `lint`: `eslint . --no-inline-config` — every `eslint-disable` comment is ignored by design.\n- AGENTS.md 「Build & Test」: the type-check ratchet principles (shrink-only ledgers, re-measure, graduate by deleting the entry).\n- objectui#8316 (closed, refused a whole-repo flip to error) — the prior ruling #25918 cites; a per-file shrink-only baseline is not a flip.\n- pm-dispatch 四轴 ④: 新增门禁默认否, 荐新增须引维护者点名 — none exists; the recommendation below therefore states the gate as the ratchet form the repo already uses, and leaves the yes/no to you.\n- `ui/eslint.config.js:101`: `'@typescript-eslint/no-explicit-any': 'warn'` — the ui tree's shape, owned by #25918.\n\n## Premises\n\n- P1 — `grep -n 'typescript-eslint' package.json` → parser only; `grep -n 'no-explicit-any' eslint.config.mjs` → 0.\n- P2 — `grep -rl 'eslint-disable.*no-explicit-any' packages --include='*.ts' --exclude-dir=node_modules | wc -l` → 66 files; count of comments → 211.\n- P3 — `grep -rE 'as any' packages --include='*.ts' --exclude-dir=node_modules --exclude-dir=dist | grep -vE '\\.(test|spec)\\.ts' | wc -l` → about 1,922 lines in 350 files; top files as listed.\n- P4 — the two custom rules and their baselines: `scripts/slot-lookup-baseline.json` (25 files, 100 sites), `scripts/query-options-erasure-baseline.json` (15 files, 50 sites).\n\n## One-sentence problem\n\nThe code that turns metadata into SQL and permissions is written with two thousand holes in its type checking, and the one tool meant to count them is not installed.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | Install the plugin; `no-explicit-any: error` scoped to non-test `src/**`; `scripts/no-explicit-any-baseline.json` per file, shrink-only, generated once, checked by an existing lint step; delete the 211 dead comments. | New `as any` in source reds the PR; existing ones are debt with a number; the three giant files' slices (#25467/#25522/#25521) can graduate their new modules file by file. | spec lane (lint tooling) · 1 PR (+ one install, `pnpm-lock.yaml`) · precedent: `test-typecheck-debt.json` onboarding (AGENTS.md 「Build & Test」) |\n| B | Install; warn; delete comments. | A number appears in logs nobody reads (#25918's exact finding for ui: \"什么都不能让 CI 红\"). | 1 PR |\n| C | Delete the 211 comments only. | Honest file; no measurement. | 1 PR, S |\n\n## Business meaning\n\n- A: the engine's type holes get a ceiling that only goes down.\n- B: a counter on the wall.\n- C: remove the pretend guard rails, add nothing.\n\n## 四维分析\n\n- **实际业务需求**：`as any` 最密的三个文件是查询引擎、元数据协议、审批服务——权限与数据完整性所在，北极星「安全与数据完整性永远最高」。每个 `as any` 是一处编译器看不见的契约绕过。\n- **项目长远合理性**：仓库已经为 typecheck 债建立了「按文件、只减不增、毕业即删」的棘轮；A 是同一形态的第三个实例，不是新发明。B 在 ui 树被实测为无效（#25918）。\n- **防 AI 犯错**：席位写代码时 `as any` 是最便宜的「让它编译」；没有红灯就没有阻力。A 让新增的那一处在 PR 上响亮失败，错误形态是席位看到行号；B/C 下错误形态是静默进入 main。\n- **创业阶段不扩散**：这是新增门禁（④ 默认否）；但它复用已有棘轮机制与 lint 步骤，不加 workflow、不加 job。推荐只按①②③得出，④ 的「默认否」由你翻。\n\n## Recommendation\n\n**A**, if you name the gate; otherwise **C**. 只看①选 A；②③④ 是否翻转：④ 新增门禁默认否——这是唯一允许翻字母的例外，字母由你定。\n\nConfidence gaps: whether `@typescript-eslint/eslint-plugin` v8 with the parser already pinned adds measurable lint wall time on 3,521 source files (the dev reads `pnpm lint` before/after on the PR).\n\n## After the ruling\n\n- A: spec lane dispatches; file surface `eslint.config.mjs`, `package.json`, `pnpm-lock.yaml`, `scripts/no-explicit-any-baseline.json`, the 66 files with dead comments. Clause-②: no. Metadata-protocol: none. Serialize behind the in-flight slices of #25467/#25522/#25521 for the baseline's file list.\n- B / C: same lane, smaller surface.\n\nos-decision-facets\n① 项目长远合理性：复用已有的按文件只减不增棘轮，不发明新机制。\n② 实际业务拉动：1,922 处集中在查询引擎、元数据协议、审批服务，权限与数据完整性所在。\n③ 防 AI 犯错：新增 as any 在 PR 上响亮失败，而不是静默进 main；warn 在 ui 树已被实测无效。\n④ 创业阶段不扩散：是新增门禁，默认否；只复用 lint 步骤，不加 job 不加 workflow。\nPrior rulings read: no-explicit-any,as any,ratchet,baseline → 2 hits (#25918; objectui#8316 refused a whole-repo flip); none; thread: none; repo: objectstack-ai/objectstack\n\n## Related\n\n#25918 (open, ui tree), #25467 / #25522 / #25521 (open: slicing the three largest files), AGENTS.md 「Build & Test」 ratchet principles.\n"

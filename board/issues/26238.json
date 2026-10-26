@@ -1,0 +1,37 @@
+{
+  "number": 26238,
+  "kind": "issue",
+  "title": "app-shell: the ObjectSchema corpus guards pin an exact top-level key count, so every additive spec change turns Test UI red on main; assert only the membership claims they guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T16:32:38Z",
+  "updated_at": "2026-10-26T19:34:05Z",
+  "closed_at": "2026-10-26T19:30:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26238",
+  "body": "Filing gate ③: a coordinator-directed structural fix after the main-red of #26218. The maintainer asked whether one red blocking many PRs is the right shape and whether something faster exists. ⛔ Not a claim.\n\nTwo app-shell tests pin `Object.keys(ObjectSchema.shape).size` to an exact number:\n- `ui/packages/app-shell/src/services/MetadataService.retiredObjectEnabled.test.ts:161`\n- `ui/packages/app-shell/src/services/MetadataService.specKeyObjectPayload.test.ts:175`\n\nEach file's own comment block records six re-points (42 → 48). Every one of them was caused by an unrelated spec adoption: `editMode`, `imageField`, `attachedOnRead`, `defaultRowScope`, `membershipKeys`, `sharing`. The count is not what the tests are about. It is described as \"the corpus guard for the membership claims below\", which are:\n- the tombstone keys `enabled` and `_deleted` are refused by name;\n- `enable` is the capabilities object;\n- no near-spelling of a retired key exists;\n- the object payload maps its keys.\n\nThe last re-point (#26005 adding `sharing`, fixed by #26218 / #26231) turned Test UI red on every ui PR's merge ref and in the merge queue, and ejected PRs that had nothing to do with it.\n\n**Business reason.** An additive spec change, which is the most common kind, should not stop the ui lane. Today it does, until someone notices and re-points a number.\n\n**Expected.**\n- Each guard asserts the claims it exists for, as explicit membership checks.\n- No exact count.\n- Where the comment says the count backs \"no near-spelling of a retired key\", that claim is asserted directly over the key set, for example as a no-key-within-edit-distance check against the retired names, rather than through a count.\n- The re-point comment history can be condensed to one line that points at this card.\n- No product change. Test-only. app-shell is outside the sdui registry closure.\n\n**Related.**\n- #26092 closes the other half: the spec PR's CI does not run the ui consumers today (root `turbo.json` / `ci.yml` core filter lines).\n- #26222 and #26223 are the bot's aggregation issues for the two files.\n\n**Who acts.** The `domain:ui` seat 2, after #26231 lands, because it edits the same two files.\n\n**Duplicate check.** Searched the 40 newest issues for \"corpus guard\", \"ObjectSchema key count\" and \"retiredObjectEnabled\". Only #26218, #26222 and #26223 came up, all of them about the 48 re-point."
+}
