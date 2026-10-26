@@ -206,6 +206,12 @@ describe('report-turbo-cache (objectui#12222)', () => {
 // (objectstack#25697, row 7 and row 16 of its workflow roster) carry
 // objectstack's own Turbo-cache steps instead, on purpose: a
 // `<os>-turbo-<job>-<ref>-<sha>` key that restores from `build-core`'s cache
-// when the job has none, a `Save Turbo cache (main only)` on push, and no
-// prune or report step. Running this reporter there is a follow-up port; it
-// brings these pins back against those jobs (`helpers/root-ci.ts`).
+// when the job has none, and a `Save Turbo cache (main only)` on push.
+// objectstack#25869 (row F2) settled the follow-up port: the root jobs do NOT
+// run this script. The prune before each seed save is objectstack's
+// `scripts/ci/prune-turbo-cache.mjs`, the same summary-driven prune, already
+// the root's for every other seed, and the hit/miss report is
+// `scripts/ci/assert-turbo-remote-cache.mjs`'s table on `Build UI Deps`, the
+// one job that builds what the others replay. `turbo-cache-save-bound.test.ts`
+// pins those saves. This script retires with its last callers, the nested
+// workflows under `ui/.github/workflows/` (objectstack#25712).

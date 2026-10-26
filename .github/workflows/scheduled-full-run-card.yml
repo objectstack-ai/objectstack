@@ -1,6 +1,6 @@
 name: Scheduled Full Run Card
 
-# The reader for the hourly full run (#16467).
+# The reader for the scheduled full run (#16467; every 4 hours since #25771).
 #
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY THIS EXISTS: A RED SCHEDULED RUN HAD NOBODY LOOKING AT IT.
@@ -8,7 +8,7 @@ name: Scheduled Full Run Card
 #
 # Since #16467 a `push` to `main` computes the Test Core package set with
 # `--affected`, and `scripts/ci/select-gate-families.sh` already scopes several
-# `Lint & Repo Gates` families away on merge groups. The hourly `schedule` run
+# `Lint & Repo Gates` families away on merge groups. The scheduled `schedule` run
 # of `CI` and `Lint & Type Check` is therefore the ONLY run that exercises the
 # whole battery on `main`.
 #
@@ -30,11 +30,13 @@ name: Scheduled Full Run Card
 # `scripts/ci/scheduled-full-run.mjs`, driven offline by its `--self-test`. That
 # is deliberate: a de-dup rule exercised only by the live workflow gets its
 # first real test on the night it files its second duplicate, and this one fires
-# hourly.
+# six times a day.
 #
 #   IDENTITY   a fixed title prefix per workflow —
-#              `hourly full run: red on main (CI)` — plus a PLAIN-TEXT body
-#              marker. ⛔ Never an HTML comment: this platform's body sanitizer
+#              `4-hourly full run: red on main (CI)` — plus a PLAIN-TEXT body
+#              marker. The hourly spellings an older card carries
+#              (`hourly full run: red on main (CI)`, #25438) are still matched
+#              (`CADENCE_PREDECESSORS`), so a cadence change never orphans it. ⛔ Never an HTML comment: this platform's body sanitizer
 #              is measured to eat short angle-bracket fragments, and a de-dup
 #              key that can be swallowed files a duplicate an hour.
 #   DE-DUP     scan OPEN issues for that prefix or that marker, bounded pages;
@@ -101,14 +103,14 @@ concurrency:
 
 jobs:
   file:
-    name: File or refresh the hourly full run card
+    name: File or refresh the scheduled full run card
     # ⭐ THREE guards, and each one is load-bearing.
     #
     #   event == 'schedule'  — a push, PR or merge_group run of these workflows
     #     is read by branch protection and by merge-queue-triage.yml. Filing on
     #     those would mint a card for every red PR in the repo.
     #   conclusion in (failure, timed_out) — NOT `!= 'success'`. `cancelled`
-    #     and `skipped` are not reds: a cancelled hourly run measured nothing,
+    #     and `skipped` are not reds: a cancelled scheduled run measured nothing,
     #     and a card saying "main is red" on the strength of a run that did not
     #     finish is a false statement that costs somebody an investigation.
     #   head_branch == 'main' — belt and braces. A scheduled run can only be on
@@ -181,7 +183,7 @@ jobs:
               });
               const hit = previous.data.workflow_runs?.[0];
               if (hit) previousGreen = { run_id: hit.id, head_sha: hit.head_sha };
-              else rangeNote = 'No previous GREEN `schedule` run of this workflow is in the API window — either this is the first one, or every hourly run in the window was red.';
+              else rangeNote = 'No previous GREEN `schedule` run of this workflow is in the API window — either this is the first one, or every scheduled run in the window was red.';
             } catch (error) {
               rangeNote = `The previous-green lookup failed (${error.message}).`;
             }
@@ -272,13 +274,13 @@ jobs:
             core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
             if (outcome.block) core.info(`block: ${outcome.blockSummary}`);
             const moved = outcome.block === 'expired' ? ' (every blocker closed: pm:blocked moved to pm:queue)' : '';
-            core.notice(`${run.name} is red on the hourly full run — card #${outcome.number} ${outcome.action}${moved}.`);
+            core.notice(`${run.name} is red on the scheduled full run — card #${outcome.number} ${outcome.action}${moved}.`);
             core.setOutput('action', outcome.action);
             core.setOutput('number', String(outcome.number));
 
       - name: Publish the verdict to the run summary
         # always(): when the step above threw — a refused scan, a rate limit —
-        # the run must still say what it was reacting to, or the red hourly run
+        # the run must still say what it was reacting to, or the red scheduled run
         # is invisible in both places at once.
         if: always()
         env:
@@ -289,7 +291,7 @@ jobs:
           WATCHED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           {
-            echo "### Hourly full run: \`$WATCHED\` concluded \`$WATCHED_CONCLUSION\` on \`main\`"
+            echo "### Scheduled full run: \`$WATCHED\` concluded \`$WATCHED_CONCLUSION\` on \`main\`"
             echo
             echo "- Run: $WATCHED_URL"
             if [ -n "${CARD_ACTION:-}" ]; then
