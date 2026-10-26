@@ -390,6 +390,9 @@ describe('the retired population is measured off the shipped tree (objectui#7340
       // `deleteBehavior`, not a handler; no shipped interface declares the name
       // otherwise.
       'onDelete',
+      // objectstack#25921 — its one LIVE declaration, `AIRecommendationsSchema.onDismiss`,
+      // left with `@object-ui/plugin-ai`; only `?: never` spellings remain.
+      'onDismiss',
       'onExpandChange',
       // objectui#7068: the legacy `ActionSchema.onFailure` callback object — no
       // shipped interface declares an `onFailure` at all any more. `onSuccess`

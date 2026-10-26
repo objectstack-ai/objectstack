@@ -253,15 +253,13 @@ export const ADJUDICATED = new Map([
   // objectui#10872 batch 4 (its `QUICK_START` path): the first json fence under
   // the quick-start's "### Add Actions" heading -- the taught `action:button`
   // node -- which the page pin runs through `objectui validate` beside a
-  // `page:header`. The scanner also resolves the bare `'README.md'` segment of
-  // the file's prose against this package and the root; neither is read. (Its
-  // other read, `@object-ui/plugin-ai`'s README, left with that package,
-  // objectstack#25921.)
+  // `page:header`. (Its other read, `@object-ui/plugin-ai`'s README, left with
+  // that package, objectstack#25921, and with it the bare `'README.md'` segment
+  // the scanner used to resolve.)
   [
     'packages/cli/src/__tests__/registered-types-validate-ratchet-10859.test.ts',
     {
       reads: ['content/docs/guide/quick-start.md'],
-      notRead: ['README.md', 'packages/cli/README.md'],
     },
   ],
   [

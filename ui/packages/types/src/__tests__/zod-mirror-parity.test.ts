@@ -154,7 +154,12 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **53 entries** in `KnownDrift`, **90 keys** across them — 55 / 93 until
+ *   - **51 entries** in `KnownDrift`, **87 keys** across them — 53 / 90 until
+ *     objectstack#25921 retired `@object-ui/plugin-ai`: its seven pairs left `MIRRORS`
+ *     with it (their TS twins are `never` tombstones, their zod names `z.never()`), and
+ *     with them the two objectui#6124 runtime-slot entries
+ *     `ai.zod.ts#AIRecommendationsSchema` (`onDismiss`, `onSelect`) and
+ *     `ai.zod.ts#NLQuerySchema` (`onSubmit`) — −2 entries, −3 keys. It was 55 / 93 until
  *     objectstack#25923 made every object in `../zod/` `.passthrough()` and taught
  *     `NarrowerThanDeclared` the interface rule (`AcceptedOf`): four
  *     INTERFACE-TO-PASSTHROUGH keys LEFT — two entries whole
@@ -912,7 +917,7 @@
  *
  * ## KNOWN_DRIFT is a ratchet, not a waiver
  *
- * 53 of the registered pairs carry TYPE drift TODAY (measured, not assumed). Each is
+ * 51 of the registered pairs carry TYPE drift TODAY (measured, not assumed). Each is
  * pinned to its EXACT drifted key set, so the entry fails when new drift appears on
  * that mirror AND when the recorded drift is fixed — a stale entry cannot rot
  * quietly. Correcting them is not one change: the pairs below split into DISJOINT
@@ -5367,7 +5372,7 @@ const ZOD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'zod');
  * MINUEND under it had moved. Nothing failed on any of those days, because nothing
  * compared the registry to a number. objectui#7433 is that absence, not the digits.
  */
-const EXPECTED_MIRROR_PAIRS = 204;
+const EXPECTED_MIRROR_PAIRS = 197;
 
 /**
  * A ledger this file can size from its own AST. `WiderThanDeclared` joined at
