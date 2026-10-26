@@ -18,7 +18,7 @@ Pick the layer that matches the requirement:
 |---|---|---|
 | Can read/create/edit/delete an object type | Object CRUD | permission-set `objects.{allowCreate/Read/Edit/Delete}` |
 | Can see / edit a specific field | Field-level security (FLS) | permission-set `fields`, or field `requiredPermissions` |
-| Can no longer edit a field once a record reaches a stage, for some roles only | Row-conditioned FLS | permission-set `fields` entry with `when` ([recipe](#data-lock-fields-for-a-role-once-a-record-reaches-a-stage)) |
+| Can no longer edit a field once a record reaches a stage, for some positions only | Row-conditioned FLS | permission-set `fields` entry with `when` ([recipe](#data-lock-fields-for-a-position-once-a-record-reaches-a-stage)) |
 | Which *rows* a user sees | Row-level security (RLS) | permission-set `rowLevelSecurity` (CEL `using` / depth `readScope`) |
 | A functional capability (export, approve, manage) | Capability | `systemPermissions` ↔ resource `requiredPermissions` |
 | Can open an app / nav entry / page | Surface access | `App.requiredPermissions`, `tabPermissions`, nav gating |
@@ -41,7 +41,7 @@ definePermissionSet({
 - Grants combine **most-permissively** across a user's sets; the tenant-isolation policy `AND`s on top; the superuser bypass (`viewAllRecords` / `modifyAllRecords`) short-circuits RLS where the object's posture allows it (ADR-0066).
 - For genuinely sensitive objects, set `access: { default: 'private' }` so they are **not** covered by blanket wildcard grants — access needs an explicit grant.
 
-### Data: lock fields for a role once a record reaches a stage
+### Data: lock fields for a position once a record reaches a stage
 
 > Finance may edit a contract while it is a draft, but once it is approved the legal terms are frozen for finance. Legal still edits them.
 
@@ -55,7 +55,10 @@ Every business app meets this shape: a contract's legal terms after approval, an
 
 **The same entries as metadata:**
 
+{/* os:check */}
 ```ts
+import { definePermissionSet } from '@objectstack/spec';
+
 definePermissionSet({
   name: 'finance',
   objects: { clm_contract: { allowRead: true, allowEdit: true } },
