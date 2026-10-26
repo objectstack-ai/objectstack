@@ -158,9 +158,9 @@ const expectAgedOutRefusal = (
   expect(issue, `no issue at path '${key}'`).toBeTruthy();
   expect(issue!.code).toBe('invalid_type');
   expect(issue!.message).toContain(`Unrecognized key(s) on this ${container}: \`${key}\``);
-  // The guide sentence is the spec's own, byte for byte: `zod/tombstone.zod.ts`
-  // carries a copy (the mirrors' import boundary admits no spec string), and
-  // this is the pin that keeps the copy equal to `@objectstack/spec/shared`'s export.
+  // The guide sentence is the spec's own: `zod/tombstone.zod.ts` imports it from
+  // `@objectstack/spec/shared` (a declared TEXT exception of the mirrors' import
+  // boundary, imported-defaults-8317), so the twin's refusal carries the spec's words.
   expect(issue!.message).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
   expect(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE).toContain('https://objectstack.ai/docs/protocol-upgrade');
   expect(issue!.message).toContain('objectstack#25767');

@@ -163,6 +163,7 @@ import {
 import {
   EvaluatedExpressionInputSchema as SpecEvaluatedExpressionInputSchema,
   EvaluatedExpressionSchema as SpecEvaluatedExpressionSchema,
+  RETIRED_KEY_UPGRADE_GUIDE_SENTENCE,
 } from '@objectstack/spec/shared';
 import { stripImportedDefaults } from '../zod/imported-defaults.js';
 
@@ -679,6 +680,13 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
    *    There is no Zod graph to walk and no default to remove: the whole effect
    *    of a refinement is `ctx.addIssue`, so it cannot write a value into a
    *    parsed document, which is the only thing this boundary is about.
+   *  - a spec TEXT (objectstack#25767) — a sentence such as
+   *    `RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`, which a mirror's own refusal
+   *    restates so the two doors answer an aged-out key with the same words. A
+   *    string has no Zod graph and no default; it cannot write a value into a
+   *    parsed document. It is imported rather than copied because ui's
+   *    `check:spec-symbols` refuses a hand-written declaration under a spec
+   *    export's name, and the assertion below holds each entry to be a string.
    */
   describe('every `@objectstack/spec` value read in the mirrors goes through the boundary', () => {
     /** `<file>:<enclosing const>` for each read that is allowed to stay raw. */
@@ -753,6 +761,18 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
      */
     const SCHEMA_RECORDS = new Map<string, unknown>([
       ['SpecViewMetadataMembers', SpecViewMetadataMembers],
+    ]);
+
+    /**
+     * Spec TEXT a mirror restates in its own refusal, keyed by binding name
+     * (objectstack#25767): the guide sentence `agedOutSpecKeyRefusal`
+     * (`tombstone.zod.ts`) opens with, so a console-side refusal of a key whose
+     * spec tombstone aged out carries the spec's own words. Held as name →
+     * binding so the assertion below can check each entry really is a string:
+     * a schema must not reach this list merely by being listed.
+     */
+    const TEXT_EXCEPTIONS = new Map<string, unknown>([
+      ['RETIRED_KEY_UPGRADE_GUIDE_SENTENCE', RETIRED_KEY_UPGRADE_GUIDE_SENTENCE],
     ]);
 
     const isSpecModule = (m: string): boolean =>
@@ -835,6 +855,7 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
         .filter((r) => r.kind === 'value' && !r.wrapped)
         .filter((r) => !VOCABULARY_EXCEPTIONS.has(`${r.file}:${r.owner}`))
         .filter((r) => !REFINEMENT_EXCEPTIONS.has(r.name))
+        .filter((r) => !TEXT_EXCEPTIONS.has(r.name))
         .filter((r) => !(SCHEMA_RECORDS.has(r.name) && r.wrappedViaMember));
       expect(
         offenders.map((r) => `${r.file}:${r.line} ${r.name} (in \`${r.owner ?? '<top level>'}\`)`),
@@ -856,6 +877,18 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
         const matching = reads.filter((r) => r.file === file && r.owner === owner && r.kind === 'value');
         expect(matching.length, `declared exception ${key} matches no read — delete it`).toBeGreaterThan(0);
         for (const r of matching) expect(r.wrapped, `${key} is wrapped; the exception is dead`).toBe(false);
+      }
+    });
+
+    it('every declared text exception is a STRING the mirrors read, not a schema in disguise', () => {
+      expect(TEXT_EXCEPTIONS.size, 'the list is empty — delete it rather than leave a hole').toBeGreaterThan(0);
+      for (const [name, binding] of TEXT_EXCEPTIONS) {
+        expect(typeof binding, `${name} is not a string`).toBe('string');
+        expect((binding as string).length, `${name} is empty`).toBeGreaterThan(0);
+        expect('_zod' in Object(binding), `${name} is a schema; a schema keeps the strip`).toBe(false);
+        const matching = reads.filter((r) => r.name === name && r.kind === 'value');
+        expect(matching.length, `declared exception ${name} matches no read — delete it`).toBeGreaterThan(0);
+        for (const r of matching) expect(r.wrapped, `${r.file}:${r.line} wraps ${name}; a string is not stripped`).toBe(false);
       }
     });
 
@@ -890,7 +923,7 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
     it('every symbol the mirrors import is covered by the differential above', () => {
       const differential = new Set(IMPORTED.map(([n]) => n));
       const missing = [...new Set(reads.map((r) => r.name.replace(/^Spec/, '')))]
-        .filter((n) => !differential.has(n) && !REFINEMENT_EXCEPTIONS.has(n));
+        .filter((n) => !differential.has(n) && !REFINEMENT_EXCEPTIONS.has(n) && !TEXT_EXCEPTIONS.has(n));
       expect(
         missing,
         'a schema imported by a mirror is not in this file\'s `IMPORTED` list, so nothing measures ' +

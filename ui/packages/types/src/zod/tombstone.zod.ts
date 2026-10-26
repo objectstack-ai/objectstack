@@ -15,21 +15,7 @@
  */
 
 import { z } from 'zod';
-
-/**
- * The sentence every strict unknown-key refusal of `@objectstack/spec` carries
- * (`RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`, `@objectstack/spec/shared`), restated
- * here rather than imported: the mirrors' import boundary
- * (`../__tests__/imported-defaults-8317.test.ts`) walks every value read of a
- * spec binding inside `zod/*.ts` and admits only schemas wrapped in
- * `stripImportedDefaults`, vocabularies and refinements. A string is none of
- * those, so it crosses as a copy — pinned byte-equal to the spec's export by
- * `../__tests__/page-app-dashboard-spec-parity.test.ts`, so the two doors
- * cannot drift.
- */
-const RETIRED_KEY_UPGRADE_GUIDE_SENTENCE =
-  'Keys retired before the previous protocol major are no longer prescribed here — '
-  + 'see the protocol upgrade guide: https://objectstack.ai/docs/protocol-upgrade.';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 
 /**
  * Declare an ADR-0049 RETIREMENT TOMBSTONE: a key that stays declared but is
@@ -96,9 +82,13 @@ export function retirementTombstone(guidance: string) {
  * `actions` set: {@link retirementTombstone}'s primitive, `invalid_type` at the
  * key's own path, one string feeding both channels. The guidance opens with the
  * sentence the spec answers the key with and the guide sentence the spec's
- * refusal carries (a copy pinned equal to the spec's export, see
- * {@link RETIRED_KEY_UPGRADE_GUIDE_SENTENCE}), then says what happened to the
- * key and where its value went. The TS twin is `?: never`.
+ * refusal carries — `RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`, imported from
+ * `@objectstack/spec/shared` rather than restated (ui's `check:spec-symbols`
+ * refuses a hand-written declaration under a spec export's name); the mirrors'
+ * import boundary (`../__tests__/imported-defaults-8317.test.ts`) admits the
+ * read as a declared TEXT exception, a sentence being unable to write a value
+ * into a parsed document — then says what happened to the key and where its
+ * value went. The TS twin is `?: never`.
  *
  * ⛔ Asserts no spec behaviour that does not exist: the spec's tombstone text is
  * gone and is not restated; the unknown-key refusal is the only spec verdict
@@ -112,13 +102,13 @@ export function retirementTombstone(guidance: string) {
  * @param remedy    where the value went — one or two sentences ending in `Delete the key.`
  */
 export function agedOutSpecKeyRefusal(container: string, def: string, key: string, retiredIn: string, remedy: string) {
-  const guidance =
+  const agedOutGuidance =
     `Unrecognized key(s) on this ${container}: \`${key}\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} `
     + `\`${def}\` was retired in @objectstack/spec ${retiredIn}, and its tombstone aged out of the spec's shape one `
     + 'major on (objectstack#25767, ADR-0087): the spec refuses the key as an unknown one, and this node — derived '
     + 'from that shape by reference over a `.passthrough()` base — refuses it by name here rather than keeping it in '
     + `silence. ${remedy}`;
-  return retirementTombstone(guidance);
+  return retirementTombstone(agedOutGuidance);
 }
 
 /** How a handler key sits on the TypeScript face (objectui#6124, measured per key). */
