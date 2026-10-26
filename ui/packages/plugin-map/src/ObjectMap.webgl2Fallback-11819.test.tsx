@@ -110,6 +110,8 @@ describe('ObjectMap without WebGL2 (objectui#11819)', () => {
     expect(alert).toHaveTextContent('WebGL2');
     expect(screen.getByRole('button', { name: /Install rooftop unit/ })).toHaveTextContent('North wing');
     expect(screen.getByRole('button', { name: /Replace boiler/ })).toHaveTextContent('Basement');
+    // No retry here: the browser will not grow WebGL2 by asking again.
+    expect(screen.queryByTestId('map-style-retry')).toBeNull();
   });
 
   it('keeps the records searchable: the search box narrows the list', async () => {

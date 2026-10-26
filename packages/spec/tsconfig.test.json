@@ -12,7 +12,7 @@
 //     the CHECK rather than the code (TS2835 dynamic-import extensions, TS1470
 //     `import.meta`, TS2307, TS2550). Matching vitest is fidelity.
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noImplicitReturns`
-//     and the rest are inherited from the root config. Nothing about this file
+//     and the rest are inherited from the base config. Nothing about this file
 //     may loosen a type rule; if a test does not compile, that is the finding.
 //   - `rootDir` widens to the PACKAGE, from the build config's `./src` (#4796).
 //     Under `noEmit` that setting carries no output meaning; all it does is
@@ -33,12 +33,9 @@
 // still rejects; and it carries no ledger entries at all, so plain `tsc` is a
 // stricter gate for it than this file's shrink-only debt list.
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.test.base.json"],
   "compilerOptions": {
-    "noEmit": true,
     "rootDir": ".",
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
