@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 160 — spawns the real producer once per single-cause fixture: nine spawns of the source CLI, `os build` over one fixture per callable kind the census derives plus the control and the named-export stack, each artifact then loaded through loadArtifactBundle; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 123.82 s (run 40200279306) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 5 of 5 runs that executed it, x 1.25, rounded up
 
 /**
  * `objectstack build` ships every authored `functions` name under its own name,

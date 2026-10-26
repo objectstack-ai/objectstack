@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 120 — spawns the real producer once per single-cause fixture: six spawns of the source CLI, `os build` over six stacks that differ only in which callables keep a body; each spawn's floor is the source entry loading all 72 commands (about 8.5 s, `os --version` included); slowest CI reading 92.69 s (run 40200279306) in the window of shard-timings refresh run 40275747937 (PR #25960), over 10 s in 3 of 3 runs that executed it, x 1.25, rounded up
 
 /**
  * `objectstack build` writes the runtime module (`objectstack-runtime.*.mjs`)
