@@ -211,11 +211,19 @@ describe("PermissionAdvancedFacets · delegated admin companion grants", () => {
 
   it("under a package binding: the hint stays, the action does not, and the note says where to grant", async () => {
     await mount(
-      { name: "field_ops_delegate", objects: {}, adminScope: ANCHORED },
+      {
+        name: "field_ops_delegate",
+        systemPermissions: ["setup.access"],
+        objects: {},
+        adminScope: ANCHORED,
+      },
       { packageBound: true },
     );
     const hint = screen.getByTestId("admin-companions");
-    for (const id of COMPANIONS) expect(row(id)).toBeTruthy();
+    // Listed, but not marked: the package door's draft holds only the
+    // package's own objects, so a `sys_*` row absent here says nothing about
+    // the stored set.
+    for (const id of COMPANIONS) expect(row(id).hasAttribute("data-granted"), id).toBe(false);
     expect(grantButton()).toBeNull();
     expect(within(hint).getByText("perm.admin.companions.packageNote")).toBeTruthy();
   });

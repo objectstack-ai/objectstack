@@ -2681,6 +2681,19 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'perm.admin.manageAssignments': 'Manage assignments',
   'perm.admin.assignableSets': 'Assignable permission sets',
   'perm.admin.noSets': 'No permission sets loaded.',
+  // The grants a scope's holder needs beside the scope itself before they can
+  // act on it: enter Setup, pick people and units, write the assignment rows.
+  'perm.admin.companions.title': 'What a delegate also needs',
+  'perm.admin.companions.help':
+    'The scope says what its holders may administer; it does not let them in. A delegate also needs to enter Setup, to read people and business units so the lookups can pick them, and to create, read, edit and delete position assignments. These grants may sit on this set or on another set the delegate holds.',
+  'perm.admin.companions.setupAccess': 'Enter Setup',
+  'perm.admin.companions.read': 'Read',
+  'perm.admin.companions.crud': 'Create, read, edit and delete',
+  'perm.admin.companions.granted': 'On this set',
+  'perm.admin.companions.missing': 'Not on this set',
+  'perm.admin.companions.grant': 'Grant the missing ones',
+  'perm.admin.companions.packageNote':
+    'Under a package, grant these on an environment permission set in Setup, one the delegate holds: this editor saves only the package’s own objects.',
   'perm.loading': 'Loading permission set {name}…',
   // objectui#9420 — the package door refuses rather than PUTs when the
   // save-time layered re-read REJECTS: without it the merge base falls back
@@ -6299,6 +6312,17 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'perm.admin.manageAssignments': '管理分配',
   'perm.admin.assignableSets': '可分配权限集',
   'perm.admin.noSets': '未加载权限集。',
+  'perm.admin.companions.title': '委派管理员还需要的授权',
+  'perm.admin.companions.help':
+    '范围只规定持有者可以管理什么，并不能让其进入。委派管理员还需要：进入 Setup，读取人员与业务单元（供查找字段选择），以及对职位分配的创建、读取、编辑和删除。这些授权可以放在本权限集上，也可以放在委派管理员持有的其他权限集上。',
+  'perm.admin.companions.setupAccess': '进入 Setup',
+  'perm.admin.companions.read': '读取',
+  'perm.admin.companions.crud': '创建、读取、编辑和删除',
+  'perm.admin.companions.granted': '本权限集已授予',
+  'perm.admin.companions.missing': '本权限集未授予',
+  'perm.admin.companions.grant': '授予缺少的项',
+  'perm.admin.companions.packageNote':
+    '在包中时，请在 Setup 中把这些授权放到委派管理员持有的环境权限集上：此编辑器只保存本包自己的对象。',
   'perm.loading': '加载权限集 {name}…',
   // objectui#9420 — 见 EN 表同键注释。
   'perm.save.rereadFailed':
