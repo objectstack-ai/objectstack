@@ -45,8 +45,7 @@
  * family the merge-queue build answers it: on `merge_group` the `docs`, `core`
  * and `crosspkg` outputs widen to `'true'` and those jobs run on the merged
  * tree before anything reaches `main` (the `|| 'true'` half of ci.yml's filter
- * contract, pinned by `--self-test`). Two exceptions. The ui jobs (the four
- * `* UI` jobs and `Build UI Deps`): on
+ * contract, pinned by `--self-test`). Two exceptions. The five ui jobs: on
  * `merge_group` their outputs are the same paths filter read against the
  * queue's `base_sha`, so a queue build skips them exactly when the merged diff
  * touches no ui path, and main's hourly run widens them. And the
