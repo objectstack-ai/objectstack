@@ -1070,9 +1070,17 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   {
     // [#22432] The `/i18n` domain joined the anonymous-deny floor; the gate is
     // the handler's first statement, so this row has the actions.ts shape. Its
-    // handler name occurs 3 times: the declaration, the DomainRoute call site
-    // and the file docblock's link to it. Its name carries digits, which is
-    // why the population rule's handler-name class admits them.
+    // handler name occurs 4 times: the declaration, the DomainRoute call site,
+    // the file docblock's link to it and the cache-directive docblock's link
+    // to it. Its name carries digits, which is why the population rule's
+    // handler-name class admits them.
+    //
+    // [#25988] 3 -> 4, re-read rather than bumped: the fourth is the
+    // `{@link handleI18nRequest}` in `TRANSLATIONS_CACHE_CONTROL`'s docblock,
+    // added with the translations validator (#25785). That change added three
+    // module-private helpers (`requestHeader`, `ifNoneMatchHits`,
+    // `translationsAnswer`) and no handler, route or gate call, so population,
+    // reach and `shouldDenyAnonymous(` are unchanged at 1 / 1 / 1.
     file: 'packages/runtime/src/domains/i18n.ts',
     kinds: ['GATE_PIN'],
     probes: 1,
@@ -1081,7 +1089,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 1,
     blindSpot: 0,
     populationRule: '`export async function handle*Request` entry points',
-    controls: { 'shouldDenyAnonymous(': 1, handleI18nRequest: 3 },
+    controls: { 'shouldDenyAnonymous(': 1, handleI18nRequest: 4 },
     note: 'Same shape as domains/actions.ts.',
   },
   {

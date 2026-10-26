@@ -3,7 +3,6 @@
   "entry": "./ui",
   "exports": {
     "ACTION_CONFIRM_PARAMS_ROOT": "src/ui/action-copy-template.ts#ACTION_CONFIRM_PARAMS_ROOT (const)",
-    "ACTION_COPY_DOLLAR_TRANSITION_ROOTS": "src/ui/action-copy-template.ts#ACTION_COPY_DOLLAR_TRANSITION_ROOTS (const)",
     "ACTION_COPY_RECORD_ROOT": "src/ui/action-copy-template.ts#ACTION_COPY_RECORD_ROOT (const)",
     "ACTION_ERROR_TEMPLATE_ROOTS": "src/ui/action-copy-template.ts#ACTION_ERROR_TEMPLATE_ROOTS (const)",
     "ACTION_LOCATIONS": "src/ui/action.zod.ts#ACTION_LOCATIONS (const)",
@@ -492,6 +491,7 @@
     "anonymousFormIntakeCandidates": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeCandidates (function)",
     "anonymousFormIntakeSlug": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlug (function)",
     "anonymousFormIntakeSlugs": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlugs (function)",
+    "anonymousFormObjectName": "src/ui/anonymous-form-intake.ts#anonymousFormObjectName (function)",
     "appForm": "src/ui/app.form.ts#appForm (const)",
     "bulkConfirmTemplateRoots": "src/ui/bulk-action.zod.ts#bulkConfirmTemplateRoots (function)",
     "chartAggregateCategoryKey": "src/ui/chart-aggregate.ts#chartAggregateCategoryKey (function)",
