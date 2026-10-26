@@ -3412,9 +3412,6 @@ importers:
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1(@noble/hashes@2.4.0)
-      msw:
-        specifier: ^2.15.0
-        version: 2.15.0(@types/node@26.6.3)(typescript@6.0.3)
       playwright:
         specifier: ^1.62.1
         version: 1.63.0
@@ -5350,9 +5347,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.5
         version: 6.0.5(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-      msw:
-        specifier: ^2.15.0
-        version: 2.15.0(@types/node@26.6.3)(typescript@6.0.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -5493,9 +5487,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.5
         version: 6.0.5(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-      msw:
-        specifier: ^2.15.0
-        version: 2.15.0(@types/node@26.6.3)(typescript@6.0.3)
       postcss:
         specifier: ^8.5.10
         version: 8.5.31
@@ -16358,7 +16349,8 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
-  '@inquirer/ansi@2.0.7': {}
+  '@inquirer/ansi@2.0.7':
+    optional: true
 
   '@inquirer/confirm@6.1.1(@types/node@26.6.3)':
     dependencies:
@@ -16366,6 +16358,7 @@ snapshots:
       '@inquirer/type': 4.0.7(@types/node@26.6.3)
     optionalDependencies:
       '@types/node': 26.6.3
+    optional: true
 
   '@inquirer/core@11.2.1(@types/node@26.6.3)':
     dependencies:
@@ -16378,12 +16371,15 @@ snapshots:
       signal-exit: 4.1.0
     optionalDependencies:
       '@types/node': 26.6.3
+    optional: true
 
-  '@inquirer/figures@2.0.7': {}
+  '@inquirer/figures@2.0.7':
+    optional: true
 
   '@inquirer/type@4.0.7(@types/node@26.6.3)':
     optionalDependencies:
       '@types/node': 26.6.3
+    optional: true
 
   '@ioredis/as-callback@3.0.0': {}
 
@@ -16683,6 +16679,7 @@ snapshots:
       is-node-process: 1.2.0
       outvariant: 1.4.3
       strict-event-emitter: 0.5.1
+    optional: true
 
   '@neon-rs/load@0.0.4': {}
 
@@ -16751,16 +16748,20 @@ snapshots:
       wrap-ansi: 7.0.0
       wsl-utils: 0.4.0
 
-  '@open-draft/deferred-promise@2.2.0': {}
+  '@open-draft/deferred-promise@2.2.0':
+    optional: true
 
-  '@open-draft/deferred-promise@3.0.0': {}
+  '@open-draft/deferred-promise@3.0.0':
+    optional: true
 
   '@open-draft/logger@0.3.0':
     dependencies:
       is-node-process: 1.2.0
       outvariant: 1.4.3
+    optional: true
 
-  '@open-draft/until@2.1.0': {}
+  '@open-draft/until@2.1.0':
+    optional: true
 
   '@opentelemetry/api@1.9.1':
     optional: true
@@ -18410,13 +18411,15 @@ snapshots:
   '@types/set-cookie-parser@2.4.10':
     dependencies:
       '@types/node': 26.6.3
+    optional: true
 
   '@types/sql.js@1.4.11':
     dependencies:
       '@types/emscripten': 1.41.5
       '@types/node': 26.6.3
 
-  '@types/statuses@2.0.6': {}
+  '@types/statuses@2.0.6':
+    optional: true
 
   '@types/trusted-types@2.0.7':
     optional: true
@@ -19366,7 +19369,8 @@ snapshots:
 
   cli-spinners@2.9.2: {}
 
-  cli-width@4.1.0: {}
+  cli-width@4.1.0:
+    optional: true
 
   client-only@0.0.1: {}
 
@@ -19381,6 +19385,7 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
+    optional: true
 
   cliui@9.0.1:
     dependencies:
@@ -20818,7 +20823,8 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  graphql@16.14.2: {}
+  graphql@16.14.2:
+    optional: true
 
   hachure-fill@0.5.2: {}
 
@@ -20988,6 +20994,7 @@ snapshots:
     dependencies:
       '@types/set-cookie-parser': 2.4.10
       set-cookie-parser: 3.1.2
+    optional: true
 
   hermes-estree@0.25.1: {}
 
@@ -21199,7 +21206,8 @@ snapshots:
 
   is-interactive@2.0.0: {}
 
-  is-node-process@1.2.0: {}
+  is-node-process@1.2.0:
+    optional: true
 
   is-number@7.0.0: {}
 
@@ -22425,12 +22433,14 @@ snapshots:
       typescript: 6.0.3
     transitivePeerDependencies:
       - '@types/node'
+    optional: true
 
   murmurhash-js@1.0.0: {}
 
   mute-stream@0.0.8: {}
 
-  mute-stream@3.0.0: {}
+  mute-stream@3.0.0:
+    optional: true
 
   mysql2@3.24.4(@types/node@26.6.3):
     dependencies:
@@ -22631,7 +22641,8 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
 
-  outvariant@1.4.3: {}
+  outvariant@1.4.3:
+    optional: true
 
   p-limit@2.3.0:
     dependencies:
@@ -22727,7 +22738,8 @@ snapshots:
 
   path-to-regexp@0.1.13: {}
 
-  path-to-regexp@6.3.0: {}
+  path-to-regexp@6.3.0:
+    optional: true
 
   path-to-regexp@8.4.2: {}
 
@@ -23415,7 +23427,8 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
-  rettime@0.11.11: {}
+  rettime@0.11.11:
+    optional: true
 
   reusify@1.1.0: {}
 
@@ -23916,7 +23929,8 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  strict-event-emitter@0.5.1: {}
+  strict-event-emitter@0.5.1:
+    optional: true
 
   strictdom@1.0.1: {}
 
@@ -24071,7 +24085,8 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
 
-  tagged-tag@1.0.0: {}
+  tagged-tag@1.0.0:
+    optional: true
 
   tailwind-merge@3.6.0: {}
 
@@ -24307,6 +24322,7 @@ snapshots:
   type-fest@5.8.0:
     dependencies:
       tagged-tag: 1.0.0
+    optional: true
 
   type-is@1.6.18:
     dependencies:
@@ -24461,7 +24477,8 @@ snapshots:
       picomatch: 4.0.7
       webpack-virtual-modules: 0.6.2
 
-  until-async@3.0.2: {}
+  until-async@3.0.2:
+    optional: true
 
   unzipper@0.10.14:
     dependencies:
@@ -24845,7 +24862,8 @@ snapshots:
       camelcase: 5.3.1
       decamelize: 1.2.0
 
-  yargs-parser@21.1.1: {}
+  yargs-parser@21.1.1:
+    optional: true
 
   yargs-parser@22.0.0: {}
 
@@ -24872,6 +24890,7 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+    optional: true
 
   yargs@18.0.0:
     dependencies:

@@ -155,7 +155,6 @@
     "globals": "^17.11.0",
     "happy-dom": "^20.11.2",
     "jsdom": "^29.1.1",
-    "msw": "^2.15.0",
     "playwright": "^1.62.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -177,10 +176,5 @@
     "vitest-axe": "^0.1.0",
     "wait-on": "^9.5.1",
     "yaml": "^2.9.0"
-  },
-  "msw": {
-    "workerDirectory": [
-      "public"
-    ]
   }
 }
