@@ -1688,7 +1688,9 @@ interface TemporalGroupFace {
  * empty key, the stored text otherwise.
  *
  * The formatting CALLS are the cells' own, with the cells' arguments:
- * `DateCellRenderer` paints `formatDate(value, format || 'relative', …)`;
+ * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)
+ * paints `formatDate(value, format || undefined, …)`, the absolute default
+ * face when no `format` is declared;
  * `DateTimeCellRenderer` paints `formatRelativeDate` for `'relative'`, the
  * compact face for no format and for `'short'`, and `formatDateTime` with the
  * authored word otherwise (the compact face's string is the cell's two halves
@@ -1713,7 +1715,7 @@ function temporalGroupHeading(
   if (!key) return undefined;
   // The cells' validity guard, the shared parse step.
   if (isNaN(toDisplayDate(key).getTime())) return undefined;
-  if (face.rendererType === 'date') return formatDate(key, face.format || 'relative', { locale });
+  if (face.rendererType === 'date') return formatDate(key, face.format || undefined, { locale });
   // A `datetime` cell renders an INSTANT, from the engine's parse.
   const instant = new Date(key);
   const style = !face.format || face.format === 'short' ? 'compact' : face.format;
@@ -3759,6 +3761,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // one helper in `@object-ui/core`, with the scope and relation collapse
     // this grid's conditional formatting uses; a field that is not a declared
     // deadline answers `false` before any predicate runs.
+    //
+    // objectstack#25884 — every column cell built below also carries
+    // `inGridColumn`, so a `date` field with no declared `format` reads in
+    // one absolute face down the column (`CellRendererProps.inGridColumn`).
+    // The record panel and the mobile card's slots draw their cells without
+    // it, outside this function.
     const settledFor = (field: unknown, row: Record<string, unknown> | undefined): boolean =>
       isDeadlineSettled(field as Parameters<typeof isDeadlineSettled>[0], row, { scope: predicateScope, fields: objectFields });
     // Map field type to column header icon (Airtable-style)
@@ -4082,7 +4090,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Both link and action: link takes priority for navigation, action executes on secondary interaction
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -4100,7 +4108,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Link column: clicking navigates to the record detail
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -4140,7 +4148,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // `dependentValues` for a cell whose value only means something
               // beside a sibling column (objectui#12613).
               cellRenderer = (value: any, row: any) => (
-                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
               );
             } else {
               // Default renderer with empty value handling
@@ -4321,7 +4329,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
           if (isPrimaryField && LinkContentRenderer) {
             cellRenderer = (value: any, row: any) => {
-              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
               return (
                 <LinkCell
                   testId="primary-field-link"
@@ -4345,7 +4353,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               </LinkCell>
             );
           } else if (CellRenderer) {
-            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
           }
 
           return {
@@ -4510,7 +4518,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             ...(schema.showColumnTypeIcons && rendererType && { headerIcon: getTypeIcon(rendererType) }),
             ...(inferredAlign && { align: inferredAlign }),
             ...(CellRenderer && {
-              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />,
+              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />,
             }),
             sortable: fieldDef?.sortable !== false,
           };
@@ -4618,7 +4626,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // Aligned on the RENDERER key, like paths A-C: a `text` column with
         // `format: 'currency'` renders as currency, so it aligns as currency.
         ...(!!rendererType && numericTypes.includes(rendererType) && { align: 'right' as const }),
-        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} />,
+        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
         sortable: field.sortable !== false,
       });
     });
