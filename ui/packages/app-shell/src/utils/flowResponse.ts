@@ -316,6 +316,9 @@ interface FlowFailureCarriers {
     innerRefusal?: unknown;
 }
 
+/** The one subtree of a resident catalogue {@link permissionDeniedLine} reads. */
+type PermissionLinePack = { form?: { noPermissionToSave?: unknown } } | undefined;
+
 /**
  * The record form's permission line (`form.noPermissionToSave`) in `locale`,
  * read from the RESIDENT built-in catalogue — exact tag first, then its base
@@ -323,15 +326,23 @@ interface FlowFailureCarriers {
  * The active language's catalogue is resident whenever the console runs in
  * it; anything else answers the resident `en` catalogue, which always is.
  * The literal is the last resort only for a registry that answers neither.
+ *
+ * Each read is one chain off `getLoadedBuiltInLocales()`, never a local
+ * binding of its result, so `scripts/check-i18n-dead-keys.mjs` derives the
+ * `en` read as a read of `form.noPermissionToSave` and the active-language
+ * reads as runtime-indexed; its header bullet for this file says which leg
+ * sees what.
  */
 function permissionDeniedLine(locale: string | undefined): string {
-    const resident = getLoadedBuiltInLocales();
-    const lineOf = (catalogue: unknown): string | undefined => {
-        const line = (catalogue as { form?: { noPermissionToSave?: unknown } } | undefined)?.form?.noPermissionToSave;
-        return typeof line === 'string' && line.trim() ? line : undefined;
-    };
-    const active = locale ? (resident[locale] ?? resident[locale.toLowerCase().split('-')[0]]) : undefined;
-    return lineOf(active) ?? lineOf(resident.en) ?? "You don't have permission to save this record.";
+    const usable = (line: unknown): string | undefined =>
+        typeof line === 'string' && line.trim() ? line : undefined;
+    const base = locale ? locale.toLowerCase().split('-')[0] : undefined;
+    return (
+        (locale ? usable((getLoadedBuiltInLocales()[locale] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
+        ?? (base ? usable((getLoadedBuiltInLocales()[base] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
+        ?? usable((getLoadedBuiltInLocales().en as PermissionLinePack)?.form?.noPermissionToSave)
+        ?? "You don't have permission to save this record."
+    );
 }
 
 /**
