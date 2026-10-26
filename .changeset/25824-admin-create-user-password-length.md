@@ -17,8 +17,8 @@ Metadata-protocol: none (an admin REST door's handling of a request body; nothin
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the admin create-user door handles a request body's explicit password: a value outside the deployment's configured length range is refused, as the set-user-password door already refused it. The remedy is a request edit (send a password inside the range, or `generatePassword: true`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
 
-**BREAKING** for a caller that created users with passwords shorter than the deployment's minimum.
+**BREAKING** for a caller that created users with passwords shorter than the deployment's minimum, or that matched the error code of a too-long one.
 
-- **Before.** `POST /api/v1/auth/admin/create-user` with `password: 'a'` answered `200` and saved the password.
-- **Now.** It answers `400 INVALID_REQUEST`, "Password must be at least 8 characters" (the deployment's minimum), and creates no user.
-- **Fix.** Send a password at least `minPasswordLength` characters long, or send `generatePassword: true` and hand the user the returned temporary password.
+- **Before.** `POST /api/v1/auth/admin/create-user` with `password: 'a'` answered `200` and saved the password. A password longer than `maxPasswordLength` answered `400 PASSWORD_TOO_LONG`.
+- **Now.** The short one answers `400 INVALID_REQUEST`, "Password must be at least 8 characters" (the deployment's minimum), and creates no user. The too-long one answers `400 INVALID_REQUEST`, "Password must be at most 128 characters" (the deployment's maximum), set-user-password's answer.
+- **Fix.** Send a password inside the deployment's `minPasswordLength` / `maxPasswordLength` range, or send `generatePassword: true` and hand the user the returned temporary password. A client that matched `PASSWORD_TOO_LONG` on this door matches `INVALID_REQUEST` instead.
