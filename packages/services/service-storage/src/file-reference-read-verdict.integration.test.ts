@@ -60,6 +60,7 @@ import type { IStorageService, RouteHandler } from '@objectstack/spec/contracts'
 import { RAW_FILE_VALUES_CONTEXT_KEY, type EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -427,6 +428,16 @@ describe('#25692 — a record write claims or copies only a file the download do
   });
 
   describe('[#25694] an anonymous write carries no file, whatever the door would serve it', () => {
+    /**
+     * The refusal as the HTTP boundary answers it (ADR-0112: code and status),
+     * through the one mapping both dispatcher exits and the REST door share.
+     */
+    const expectAnswered400 = (err: unknown) => {
+      const answered = resolveThrownHttpError(err);
+      expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(answered.details?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
+    };
+
     /** The write's refusal, and proof that nothing was written: no record, no new file, no owner moved. */
     const expectRefused = async (data: Record<string, unknown>, context: Record<string, unknown>) => {
       const recordId = `c_new_${++seq}`;
@@ -434,7 +445,7 @@ describe('#25692 — a record write claims or copies only a file the download do
       const err = await engine
         .insert('contract', { id: recordId, title: recordId, ...data } as any, { context })
         .then(() => null, (e: any) => e);
-      expect(err?.code).toBe('VALIDATION_FAILED');
+      expectAnswered400(err);
       expect(err?.fields).toEqual([expect.objectContaining({ field: 'doc', code: 'invalid_value' })]);
       expect(await storedDoc(recordId)).toBeUndefined();
       expect(await fileRows()).toEqual(before);
@@ -464,7 +475,7 @@ describe('#25692 — a record write claims or copies only a file the download do
       const err = await engine
         .update('contract', { id: recordId, doc: F_PUBLIC_FREE } as any, { context: GUEST_CTX })
         .then(() => null, (e: any) => e);
-      expect(err?.code).toBe('VALIDATION_FAILED');
+      expectAnswered400(err);
       expect(await storedDoc(recordId)).toBeNull();
       expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
     });

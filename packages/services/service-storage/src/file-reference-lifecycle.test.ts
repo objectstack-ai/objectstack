@@ -9,6 +9,7 @@ import {
   type FileReferenceEngine,
 } from './file-reference-lifecycle.js';
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { resolveThrownHttpError } from '@objectstack/types';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
@@ -1437,7 +1438,8 @@ describe('an anonymous write carries no file (#25694, ruling C at every anonymou
 
         const err = await refusedBy(write(engine, 'insert', { name: 'n', image: value }, 'p1', asGuest));
 
-        expect(err?.code).toBe('VALIDATION_FAILED');
+        const answered = resolveThrownHttpError(err);
+        expect({ status: answered.status, code: answered.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
         expect(err?.fields).toEqual([expect.objectContaining({ field: 'image', code: 'invalid_value', label: 'Photo' })]);
         expect(err?.fields[0].message).toContain('Photo');
         // Nothing was written: no row, no claim, no copy, and no file was looked up for it.
