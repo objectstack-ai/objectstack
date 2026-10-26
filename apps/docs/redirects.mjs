@@ -151,6 +151,14 @@ export const docsRedirects = [
   ['/docs/guides/:path*', '/docs'],
 ];
 
+/**
+ * The product site's origin. Declared here — the one dependency-free module
+ * both halves can read — and re-exported by `lib/layout.shared.tsx` as
+ * `PRODUCT_SITE_URL` for the nav, the home page and the footer line, so the
+ * cross-site links and the cross-site redirects can never name two hosts.
+ */
+export const PRODUCT_SITE_ORIGIN = 'https://www.objectos.ai';
+
 /** Next.js redirects() entries derived from the table above. */
 export function toNextRedirects() {
   return docsRedirects.map(([source, destination]) => ({
