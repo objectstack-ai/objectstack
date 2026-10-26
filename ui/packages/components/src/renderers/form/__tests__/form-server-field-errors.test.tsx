@@ -153,6 +153,34 @@ describe('form renderer — server-rejected fields', () => {
     expect(String(toastErrorSpy.mock.calls[0][0])).toMatch(/Owner is required/);
   });
 
+  it('a later client-side refusal retires the previous refusal`s banner and toast (objectstack#25874)', async () => {
+    // The client refusal raises no toast of its own any more, so nothing would
+    // supersede the earlier server refusal under the shared outcome id: the
+    // attempt has to take the stale banner and toast down itself.
+    const dismissSpy = vi.spyOn(toast, 'dismiss').mockImplementation(() => 'id' as any);
+    const forbidden = Object.assign(new Error('insufficient privileges'), {
+      code: 'FORBIDDEN',
+      httpStatus: 403,
+      details: { error: 'insufficient privileges', code: 'FORBIDDEN' },
+    });
+    const onSubmit = vi.fn().mockRejectedValue(forbidden);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderForm([{ name: 'title', label: 'Title', type: 'input', required: true }], onSubmit);
+    const input = screen.getByLabelText(/title/i);
+
+    fireEvent.change(input, { target: { value: 'Filled' } });
+    submit();
+    await waitFor(() => expect(screen.getByText(/permission to save/i)).toBeTruthy());
+
+    dismissSpy.mockClear();
+    fireEvent.change(input, { target: { value: '' } });
+    submit();
+
+    await waitFor(() => expect(screen.queryByText(/permission to save/i)).toBeNull());
+    expect(dismissSpy).toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves a non-field failure on the generic path', async () => {
     const forbidden = Object.assign(new Error('insufficient privileges'), {
       code: 'FORBIDDEN',

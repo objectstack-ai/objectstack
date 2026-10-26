@@ -3075,6 +3075,14 @@ ComponentRegistry.register('form',
       // regardless of scroll position. Every name here has a drawn input:
       // react-hook-form validates only mounted controls, and an undrawn field
       // is unmounted, so the returned list is always empty on this path.
+      //
+      // This attempt's outcome is those inline messages, so whatever outcome
+      // the form showed before it — the previous attempt's banner and its toast
+      // twin, or a clear-on-hide notice (objectui#8070) — retires here, as it
+      // does at the start of an attempt that clears validation. The refusal
+      // toast used to do that by superseding the same id.
+      setSubmitError(null);
+      toast.dismiss(outcomeToastId);
       announceFieldErrors(Object.keys(validationErrors || {}));
     });
 
