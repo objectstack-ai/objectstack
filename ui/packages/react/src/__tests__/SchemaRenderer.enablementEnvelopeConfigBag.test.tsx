@@ -12,7 +12,7 @@
  *
  * ## The same two loops, a different chain
  *
- * `disabled` / `disabledOn` / `enabled` sit in the same per-value `properties` /
+ * `disabled` / `enabled` (and the since-retired `disabledOn`) sit in the same per-value `properties` /
  * `props` loops objectui#9100 measured, and were handed to
  * `ExpressionEvaluator.evaluate`, whose FIRST action unwraps any
  * `{ source: string }` object down to its bare `source`. The envelope is the
@@ -40,7 +40,7 @@
  * whichever way it landed. The two halves land in opposite directions because
  * `evaluateCondition`'s fail-soft answer is `true` on every internal path, and
  * the renderers NEGATE the `enabled` leg (`disabled = !isEnabled`) while the
- * node gate does not negate `disabled` / `disabledOn`.
+ * node gate does not negate `disabled`.
  *
  * ⇒ ⚠️ neither polarity alone detects this. A suite asserting only the DISABLED
  * case is green on the two broken `disabled` legs; a suite asserting only the
@@ -86,7 +86,7 @@ const FAULTS = { dialect: 'cel', source: 'nope(((' };
  * A control, in both senses of the word: a real `<button disabled>` whose
  * disabled state is reached by the two channels the three keys actually use.
  *
- *   * `disabled` / `disabledOn` — the node gate's verdict, which this component
+ *   * `disabled` — the node gate's verdict, which this component
  *     forwards as a real `disabled` React prop (`_disabled`).
  *   * `enabled` — read off the schema and NEGATED, which is byte-for-byte what
  *     `action:button` / `action:icon` do one layer down
@@ -180,7 +180,7 @@ describe('#9107 — a CEL envelope on an enablement key reaches the CEL engine',
   // The node-gate legs. `true` means DISABLED and is NOT negated, so the
   // pre-fix fail-soft `true` left BOTH rows disabled: the `fails: false` half
   // of this assertion is the one that was red on the broken tree.
-  it.each(['disabled', 'disabledOn'])(
+  it.each(['disabled'])(
     'properties.%s (node gate): holds disables, fails leaves the control usable',
     (key) => {
       expect(pair(key)).toEqual({ holds: true, fails: false });
@@ -221,7 +221,7 @@ describe('#9107 — a CEL envelope on an enablement key reaches the CEL engine',
    * here) — so the assertion is on the value a renderer receives, not on a
    * verdict.
    */
-  it.each(['disabled', 'disabledOn', 'enabled'])(
+  it.each(['disabled', 'enabled'])(
     'props.%s keeps its envelope for the renderer that reads that bag',
     (key) => {
       mount({ type: 'probe-9107', props: { [key]: HOLDS } });

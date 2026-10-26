@@ -13,17 +13,15 @@ value must clear before it reaches the screen.
 | Field | Evaluation Type | Return Type | Example |
 |---|---|---|---|
 | `content` | Template (`${}`) | string | `"content": "Total: ${data.total}"` |
-| `hidden` | Condition | boolean | `"hidden": "${data.status !== 'active'}"` |
-| `hiddenOn` | Condition | boolean | `"hiddenOn": "data.status === 'draft'"` |
+| `visibleWhen` | Condition | boolean | `"visibleWhen": "data.permissions.canView"` (raw expression, no `${}`) |
+| `hidden` | Condition | boolean | `"hidden": "data.status === 'draft'"` |
 | `visible` | Condition | boolean | `"visible": "${data.isActive}"` |
-| `visibleOn` | Condition | boolean | `"visibleOn": "data.permissions.canView"` |
-| `disabled` | Condition | boolean | `"disabled": "${form.isSubmitting}"` |
-| `disabledOn` | Condition | boolean | `"disabledOn": "!data.hasPermission"` |
+| `disabled` | Condition | boolean | `"disabled": "!data.hasPermission"` |
 | `title` / `label` / `value` / `description` | Template (`${}`) | Preserves original type | **Only on the component types the spec declares** — see "Rule: Bindable Text Keys" below. `"value": "${data.total}"` on a `statistic` renders the number. |
 | `properties.*` | Template (`${}`) | Preserves original type | Evaluated, then **hoisted onto the node** (`type` / `id` excepted), so the result lands where every renderer reads. See "Rule: Keys Live on the Node" below. |
 | `props.*` | Template (`${}`) | Preserves original type | Evaluated, then spread as **React props** — a `ui:*` / `page:*` renderer reads `schema.*` and never sees the result. Consumed only by `element:*` components. |
 
-**Precedence rule:** `visible` takes priority over `hidden`.
+**Precedence rule:** `visible` takes priority over `hidden`. `visibleOn` / `hiddenOn` / `disabledOn` are retired: `objectui validate` refuses them by name, pointing at `visibleWhen` / `hidden` / `disabled`.
 
 ### Fields That are NOT Evaluated
 
@@ -111,8 +109,8 @@ as React props (`packages/react/src/SchemaRenderer.tsx`), which those renderers
 ignore. A key parked under `props` is therefore dropped: the component renders
 an empty frame, and the envelope itself lands in the DOM as the invalid
 attribute `props="[object Object]"`. Silent for every key except the node-gate
-predicates (`visibleWhen` / `visible` / `visibleOn` / `visibility` / `hidden` /
-`hiddenOn` / `disabled` / `disabledOn`), which are refused by name on the
+predicates (`visibleWhen` / `visible` / `hidden` / `disabled`, and their
+retired spellings), which are refused by name on the
 console, with the migration, instead of gating nothing.
 
 **❌ WRONG — renders an empty card:**
