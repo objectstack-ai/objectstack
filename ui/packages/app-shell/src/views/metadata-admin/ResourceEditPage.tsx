@@ -3581,9 +3581,9 @@ function ReferencesPanel({
       <table className="w-full text-sm">
         <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
           <tr>
-            <th className="px-3 py-2 text-left">From type</th>
-            <th className="px-3 py-2 text-left">From name</th>
-            <th className="px-3 py-2 text-left">Path</th>
+            <th className="px-3 py-2 text-left">{t('engine.edit.refsColFromType', locale)}</th>
+            <th className="px-3 py-2 text-left">{t('engine.edit.refsColFromName', locale)}</th>
+            <th className="px-3 py-2 text-left">{t('engine.edit.refsColPath', locale)}</th>
           </tr>
         </thead>
         <tbody className="divide-y">

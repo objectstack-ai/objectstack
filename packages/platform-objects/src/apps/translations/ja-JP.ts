@@ -166,6 +166,17 @@ export const jaJP: TranslationData = {
     },
   },
 
+  datasets: {
+    sys_user_metrics: { measures: { user_count: { label: 'ユーザー' } } },
+    sys_organization_metrics: { measures: { org_count: { label: '組織' } } },
+    sys_session_metrics: { measures: { session_count: { label: 'セッション' } } },
+    sys_package_installation_metrics: { measures: { package_count: { label: 'インストール' } } },
+    sys_audit_log_metrics: {
+      dimensions: { action: { label: 'アクション' }, user_id: { label: 'ユーザー' } },
+      measures: { event_count: { label: 'イベント' } },
+    },
+  },
+
   pages: {
     cloud_connection_settings: {
       label: 'クラウド接続',

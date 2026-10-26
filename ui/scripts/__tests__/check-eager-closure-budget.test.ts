@@ -43,7 +43,6 @@ import {
 import { OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/performance-budget.yml');
 const viteConfigPath = path.join(repoRoot, 'apps/console/vite.config.ts');
 const checkerPath = path.join(repoRoot, 'scripts/check-eager-closure-budget.mjs');
 
@@ -2057,7 +2056,7 @@ describe('main', () => {
  * not readable from inside a checkout. `evaluateCeilingFreshness`'s own docblock
  * carries what the tree can re-derive instead, cited to
  * `scripts/dependabot-merge-gate.mjs` and to the workflow's `on:` block; the pin
- * at the bottom of this file keeps all three files off the claim.
+ * at the bottom of this file keeps the gate's prose files off the claim.
  *
  * Not hypothetical: run 32804357171 started 6m50s after `0409b766d` lowered the
  * aggregate ceiling from 4,086,000 to 3,345,000 and published
@@ -2458,35 +2457,19 @@ describe('ceiling freshness (objectui#6245)', () => {
 /**
  * The checker can only be correct if the workflow keeps feeding it and the
  * build keeps emitting the report. Neither half is reachable from a unit test.
+ *
+ * The workflow half (`runs the closure checker in the budget step`, `keeps the
+ * entry-chunk budget alongside it`, `measures the closure even when the entry
+ * chunk is over budget` and `maps the gauge-failure exit code to \`error\`, not
+ * to a size verdict`) retired with objectstack#25712. It read objectui's
+ * `performance-budget.yml`, which runs nowhere under the monorepo: GitHub runs
+ * the root `.github/workflows/` alone, and no root workflow runs this checker.
+ * That workflow is row 22 of the objectstack#25697 workflow roster, "kept,
+ * follow-up port" into `Build & E2E UI`; the port brings these pins back
+ * against the root job, by path. The build half stands.
  */
-describe('performance-budget.yml + vite.config.ts contract', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
+describe('vite.config.ts contract', () => {
   const viteConfig = fs.readFileSync(viteConfigPath, 'utf8');
-
-  it('runs the closure checker in the budget step', () => {
-    expect(workflow).toContain('node scripts/check-eager-closure-budget.mjs');
-  });
-
-  it('keeps the entry-chunk budget alongside it', () => {
-    // Replacing a blind gauge is not licence to drop the check already there.
-    expect(workflow).toContain('MAX_ENTRY_GZIP_KB=350');
-  });
-
-  it('measures the closure even when the entry chunk is over budget', () => {
-    // The entry check used to `exit 1` on breach. If it still did, a fat entry
-    // chunk would hide the number that actually governs a page load.
-    const step = workflow.slice(workflow.indexOf('MAX_ENTRY_GZIP_KB=350'));
-    const entryVerdict = step.indexOf('ENTRY BUDGET EXCEEDED');
-    const closureRun = step.indexOf('node scripts/check-eager-closure-budget.mjs');
-    expect(entryVerdict).toBeGreaterThan(-1);
-    expect(closureRun).toBeGreaterThan(entryVerdict);
-  });
-
-  it('maps the gauge-failure exit code to `error`, not to a size verdict', () => {
-    expect(workflow).toContain('if [ "$CLOSURE_CODE" -eq 2 ]; then');
-    const branch = workflow.slice(workflow.indexOf('if [ "$CLOSURE_CODE" -eq 2 ]; then'));
-    expect(branch.slice(0, 400)).toContain('budget_status=error');
-  });
 
   it('emits the report from a plugin that is not skipped on CI', () => {
     // `compression` and `visualizer` sit behind `...(!isCI ? [` — the budget
@@ -2764,7 +2747,11 @@ describe('the prose attached to the baselines (objectui#7046)', () => {
  * `.github/workflows/performance-budget.yml` joined this population in
  * objectui#7850 — the same rule, the same reader, no second matcher. Its prose
  * is `#` comments rather than `/**` blocks, so it reaches the reader through
- * `yamlProse` below, which translates the marker and nothing else.
+ * `yamlProse` below, which translates the marker and nothing else. It left the
+ * population with objectstack#25712, with its must-hit control: that workflow
+ * runs nowhere under the monorepo (roster row 22, "kept, follow-up port"). The
+ * translation and its self-test stay for the root job the port lands in, which
+ * rejoins the population then.
  *
  * Its one obstacle was settled by REWORDING, not by an exemption. The workflow
  * counted chunks once as the OUTCOME of a hazard — a `"sideEffects": false`
@@ -2788,9 +2775,9 @@ describe('the prose attached to the baselines (objectui#7046)', () => {
  */
 describe("chunk counts in this gate's prose (objectui#7528)", () => {
   /**
-   * The population. Two script files whose prose is JS comments, and the
-   * workflow whose prose is `#` comments (objectui#7850) — the same rule and the
-   * same reader, with only the comment marker translated for the third.
+   * The population: two script files whose prose is JS comments. The workflow
+   * whose prose is `#` comments (objectui#7850) left it with objectstack#25712,
+   * and its root successor joins with the marker translated by `yamlProse`.
    */
   const PROSE_FILES: Record<string, { path: string; toProse: (source: string) => string }> = {
     'check-eager-closure-budget.mjs': { path: checkerPath, toProse: (source) => source },
@@ -2798,13 +2785,12 @@ describe("chunk counts in this gate's prose (objectui#7528)", () => {
       path: fileURLToPath(import.meta.url),
       toProse: (source) => source,
     },
-    'performance-budget.yml': { path: workflowPath, toProse: yamlProse },
   };
 
   /** A chunk population written as a numeral: "N chunks", or "N of M chunks". */
   const CHUNK_COUNT = /\b\d[\d,_]*\s+(?:of\s+\d[\d,_]*\s+)?chunks?\b/gi;
 
-  /** A commit named the way all three files name one: a backticked short hash. */
+  /** A commit named the way these files name one: a backticked short hash. */
   const NAMES_A_COMMIT = /`[0-9a-f]{7,40}`/;
 
   /**
@@ -2984,18 +2970,9 @@ describe("chunk counts in this gate's prose (objectui#7528)", () => {
     expect(anchored).toContain('58 of 507 chunks');
   });
 
-  /**
-   * The same must-hit control for the workflow entry (objectui#7850). Its prose
-   * reaches the reader through a translation, and a translation that stopped
-   * working would show up as a population that passes because it is empty. This
-   * fails instead.
-   */
-  it('sees the anchored measurement the workflow must not be refused for', () => {
-    const anchored = chunkCounts(yamlProse(fs.readFileSync(workflowPath, 'utf8')))
-      .filter((count) => count.anchored)
-      .map((count) => count.text);
-    expect(anchored).toContain('58 of 507 chunks');
-  });
+  // `sees the anchored measurement the workflow must not be refused for`, the
+  // same must-hit control for the workflow entry (objectui#7850), retired with
+  // that entry (objectstack#25712, roster row 22).
 
   it.each(Object.entries(PROSE_FILES))(
     '%s writes no chunk count that no commit anchors',
@@ -3139,15 +3116,19 @@ describe('no prose here classifies `Bundle Analysis` against branch protection (
    */
   const CLASSIFIES = new RegExp(String.raw`\b${REQ}\s+contexts?\b|\bis\s+not\s+${REQ}\b`, 'gi');
 
-  /** The three files objectui#9155 is about, by the name a failure prints. */
+  /**
+   * The files objectui#9155 is about, by the name a failure prints. The third,
+   * objectui's `performance-budget.yml`, left with objectstack#25712: it runs
+   * nowhere under the monorepo (roster row 22, "kept, follow-up port"), and the
+   * root job the port lands in joins here.
+   */
   const POPULATION: Record<string, string> = {
     'check-eager-closure-budget.mjs': checkerPath,
     'check-eager-closure-budget.test.ts': fileURLToPath(import.meta.url),
-    'performance-budget.yml': workflowPath,
   };
 
   /**
-   * The must-HIT control, with a known direction. Without it the three zeroes
+   * The must-HIT control, with a known direction. Without it the zeroes
    * below are equally consistent with a matcher that stopped matching anything
    * — which is how a pin on absence goes quietly green forever.
    */
@@ -3165,7 +3146,7 @@ describe('no prose here classifies `Bundle Analysis` against branch protection (
     ).toBeNull();
   });
 
-  it('reads three files that are really there, not three empty strings', () => {
+  it('reads files that are really there, not empty strings', () => {
     for (const [name, file] of Object.entries(POPULATION)) {
       const source = fs.readFileSync(file, 'utf8');
       expect(source.length, `${name} read as empty`).toBeGreaterThan(1000);
@@ -3204,22 +3185,9 @@ describe('no prose here classifies `Bundle Analysis` against branch protection (
     expect(OPTIONAL_CONTEXTS['Bundle Analysis']).toContain('performance-budget.yml filters on paths');
   });
 
-  /**
-   * The other cited source, re-derived rather than restated: the prose may say
-   * this job has no `merge_group` leg only for as long as that is true of the
-   * `on:` block. Guarded by locating a block that is found and substantial
-   * first, so a renamed section cannot pass by scanning nothing.
-   */
-  it('leaves the workflow without the `merge_group` leg the prose cites the absence of', () => {
-    const source = fs.readFileSync(workflowPath, 'utf8');
-    const start = source.indexOf('\non:\n');
-    const end = source.indexOf('\npermissions:\n');
-    expect(start, 'the `on:` block is not where this pin looks for it').toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const onBlock = source.slice(start, end);
-    expect(onBlock.length).toBeGreaterThan(200);
-    expect(onBlock).toContain('  push:');
-    expect(onBlock).toContain('  pull_request:');
-    expect(onBlock).not.toMatch(/^\s{2}merge_group:/m);
-  });
+  // `leaves the workflow without the \`merge_group\` leg the prose cites the
+  // absence of` retired with objectstack#25712. It re-derived the other cited
+  // source from objectui's `performance-budget.yml` `on:` block, and that
+  // workflow runs nowhere under the monorepo (roster row 22, "kept, follow-up
+  // port"); the port brings it back against the root job, by path.
 });

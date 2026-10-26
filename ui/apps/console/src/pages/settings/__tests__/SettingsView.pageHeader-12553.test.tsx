@@ -104,7 +104,8 @@ describe('Settings namespace page — the console page header (objectui#12553)',
     expect(header.contains(h1s[0])).toBe(true);
     expect(within(h1s[0]).getByText('Mail')).toBeInTheDocument();
     expect(within(h1s[0]).getByText('console.settingsHub.beta')).toBeInTheDocument();
-    expect(h1s[0].textContent).toBe('Mailconsole.settingsHub.beta');
+    // A space between the name and the badge, so the title reads as two words.
+    expect(h1s[0].textContent).toBe('Mail console.settingsHub.beta');
 
     const line = within(header).getByText('Outbound email transport.');
     expect(line.tagName).toBe('P');

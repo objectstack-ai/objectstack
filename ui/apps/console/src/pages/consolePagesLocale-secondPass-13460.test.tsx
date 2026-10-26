@@ -124,6 +124,22 @@ describe('console pages under zh (objectui#13460, second pass)', () => {
     expect(container.textContent).not.toMatch(LEAK);
   });
 
+  it('Audit Log: every column header of the entries table, the IP one included', async () => {
+    // One entry, so the table (and its header row) is drawn instead of the empty state.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const records = [{ id: 'al_1', action: 'create', object_name: 'crm_account', record_id: 'acc_1', ip_address: '10.0.0.1', created_at: '2026-10-25T00:00:00Z' }];
+        return new Response(JSON.stringify({ object: 'sys_audit_log', records, total: 1 }), { status: 200 });
+      }),
+    );
+    page(<AuditLogPage />, 'zh');
+    expect(await screen.findByText('10.0.0.1')).toBeTruthy();
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toContain(zhAudit.ipAddress);
+    expect(headers).not.toContain('IP');
+  });
+
   it('Flow Runs: the cards, and the sentences that name another control by its zh label', async () => {
     const { container } = page(<FlowRunsPage />, 'zh');
     expect(await screen.findByText(zhFlow.recentRuns)).toBeTruthy();
