@@ -3,13 +3,20 @@
   "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Pinyin search recall for ObjectStack — populates the hidden `__search` companion column (full pinyin + initials of the display/name field) so `$search` hits CJK names typed as pinyin. Locale-gated via OS_SEARCH_PINYIN_ENABLED (#2486).",
+  "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "scripts": {
@@ -42,12 +49,18 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
     "directory": "packages/plugins/plugin-pinyin-search"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md"
-  ]
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
 }

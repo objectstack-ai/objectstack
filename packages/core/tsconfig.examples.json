@@ -50,7 +50,7 @@
 //
 // STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
 // `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest come
-// from the root config through `tsconfig.json`. The directory type-checks clean
+// from the base config through `tsconfig.json`. The directory type-checks clean
 // under them — it enters with ZERO recorded debt and there is no ledger here to
 // record any in. A published example that does not compile is the finding, not
 // a line to write down.

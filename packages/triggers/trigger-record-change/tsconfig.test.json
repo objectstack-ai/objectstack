@@ -67,7 +67,7 @@
 //     alone), `include` still names `src/**/*` so no new file may ENTER the
 //     program on its own, and STRICTNESS below is untouched.
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
-//     `noImplicitReturns` and the rest are inherited from the root config.
+//     `noImplicitReturns` and the rest are inherited from the base config.
 //     Nothing here may loosen a type rule; if a test does not compile, that is
 //     the finding.
 //
