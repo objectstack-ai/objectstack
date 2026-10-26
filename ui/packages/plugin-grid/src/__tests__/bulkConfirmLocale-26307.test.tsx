@@ -23,7 +23,7 @@
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import type { BulkActionDef, BulkActionParam } from '@object-ui/types';
@@ -100,16 +100,31 @@ function openDialog(tenantLocale: string | undefined) {
   );
 }
 
+/**
+ * The confirm step's sentence, read as the dialog's description `textContent`.
+ * Not `findByText`: its default normalizer turns the no-break space `Intl`
+ * writes before a de-DE `€` into a plain space in the node text, while the
+ * matcher string keeps it, so the right sentence would not match.
+ */
+async function confirmSentence(): Promise<string | null> {
+  fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+  const dialog = await screen.findByRole('dialog');
+  const description = await waitFor(() => {
+    const el = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
+    expect(el?.textContent).toMatch(/^Set the amount to /);
+    return el;
+  });
+  return description?.textContent ?? null;
+}
+
 describe('BulkActionDialog formats its confirm sentence in the display locale (objectstack#26307)', () => {
   it('formats a currency hole in the tenant display locale', async () => {
     openDialog('de-DE');
-    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(`Set the amount to ${money('de-DE')} on 2 records?`)).toBeInTheDocument();
+    expect(await confirmSentence()).toBe(`Set the amount to ${money('de-DE')} on 2 records?`);
   });
 
   it('formats in the UI language when no tenant locale is set', async () => {
     openDialog(undefined);
-    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(`Set the amount to ${money('en')} on 2 records?`)).toBeInTheDocument();
+    expect(await confirmSentence()).toBe(`Set the amount to ${money('en')} on 2 records?`);
   });
 });
