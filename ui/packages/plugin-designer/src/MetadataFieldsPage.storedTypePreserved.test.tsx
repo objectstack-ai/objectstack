@@ -284,9 +284,10 @@ describe('objectui#8060 · P1 every census member survives an edit to a differen
       cleanup();
     }
 
-    // The vacuity guard, restated where the iteration happens.
-    expect(checked).toBe(22);
+    // The vacuity guard, restated where the iteration happens: every census
+    // member was checked, and the census holds at least the measured members.
     expect(checked).toBe(CENSUS.length);
+    expect(checked).toBeGreaterThanOrEqual(CENSUS_AT_FILING.length);
   });
 });
 
