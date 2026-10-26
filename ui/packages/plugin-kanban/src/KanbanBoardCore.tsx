@@ -14,6 +14,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 // which is the same shape `ObjectKanban.tsx` <-> `index.tsx` already has.
 import { bucketCardsIntoColumns } from './index';
 import type { KanbanRendererProps } from './index';
+import type { KanbanBoardProps } from './KanbanImpl';
 
 const useUncolumnedT = createSafeTranslation(
   { 'kanban.uncategorized': 'Uncategorized' },
@@ -44,6 +45,12 @@ export interface KanbanBoardCoreProps {
    * no move the caller may not make.
    */
   cardsMovable?: boolean;
+  /**
+   * The per-column drop gate — see `KanbanBoardProps.canDropCard` (#25933). A
+   * PROP, never a schema key, for the reason `cardsMovable` is: `ObjectKanban`
+   * derives it from the object's `state_machine` rule on the grouped field.
+   */
+  canDropCard?: KanbanBoardProps['canDropCard'];
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -92,6 +99,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   objectFields,
   onCardMove,
   cardsMovable,
+  canDropCard,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -115,6 +123,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         columns={processedColumns}
         onCardMove={onCardMove}
         cardsMovable={cardsMovable}
+        canDropCard={canDropCard}
         onCardClick={schema.onCardClick}
         className={schema.className}
         quickAdd={quickAdd}

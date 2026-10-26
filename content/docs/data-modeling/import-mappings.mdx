@@ -278,6 +278,7 @@ fails does **not** stop the import.
 | `skipped` | `true` | `BLANK_MATCH_KEY` | One key set in `matchFields`, and a field of it is blank on the row. Upsert creates such a row by default; `update` skips it, and `skipBlankMatchKey: true` skips it in either mode. |
 | `failed` | `false` | `BLANK_MATCH_KEY` | Ordered key sets in `matchFields`, and every set has a blank field on the row. Nothing is written for that row. |
 | `failed` | `false` | `AMBIGUOUS_MATCH` | The match fields matched **more than one** record. Nothing is written for that row. |
+| `failed` | `false` | `DUPLICATE_MATCH_KEY` | `update` or `upsert`, and another row of the same import has the same match key, compared after cell coercion (`ISO 14001` and `ISO14001` coerce to one option value). Every row of that key fails, `error` names them all, and none of them is written, on a dry run too: keep one row per key and import again. |
 | `failed` | `false` | a field error code | A cell could not be coerced, or the engine rejected the record. `field` names the column and `error` carries the message. |
 
 So "a row that does not match" is not one behaviour but three, chosen by `writeMode`

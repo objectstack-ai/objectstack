@@ -23,7 +23,6 @@ class FakeOrganizationsPlugin {
   readonly name = 'fake-organizations';
   readonly version = '0.0.0';
   readonly supportedPostures = ['group', 'isolated'] as const;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async init(ctx: any): Promise<void> {
     ctx.registerService('org-scoping', this);
   }

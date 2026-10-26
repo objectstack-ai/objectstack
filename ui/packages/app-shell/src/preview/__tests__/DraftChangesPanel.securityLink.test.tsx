@@ -40,6 +40,12 @@ vi.mock('@object-ui/i18n', async (importOriginal) => {
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
 import { SurfaceDeepLinkProvider } from '../../views/studio-design/surfaceDeepLinkChannel';
+// Warm the lint package at module scope, as the sibling security suite does:
+// `securityPostureLint` loads it with a function-body `import('@objectstack/lint')`,
+// and run alone, that first transform lands inside the first case's 1000 ms
+// `findBy` window (the block arrived at ~1 s). Same specifier, so the
+// component's own dynamic import resolves from the cache.
+import '@objectstack/lint';
 
 afterEach(() => {
   cleanup();

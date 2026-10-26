@@ -137,13 +137,12 @@ import {
 } from './security-plugin-rls-filter.js';
 import { resolverCollisionMessage, resolverCollisionsOf } from './object-membership-keys.js';
 // [#25223 cut 8] The permission-set resolution for an execution context: the
-// resolution itself, the deactivated folded-set drop, the position-name fold
-// report and the memo's key; the methods of the same names below hand each
-// body the members it reads (`PermissionSetsHost`).
+// resolution itself, the namesake-set report and the memo's key; the methods
+// of the same names below hand each body the members it reads
+// (`PermissionSetsHost`).
 import {
-  dropDeactivatedFoldedSets,
   permissionSetMemoKey,
-  reportNameFoldCollisions,
+  reportUngrantedNamesakeSets,
   resolvePermissionSetsForContextUnmemoized,
   type PermissionSetsHost,
 } from './security-plugin-permission-sets.js';
@@ -302,7 +301,6 @@ import {
   securityPluginManifestHeader,
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
-import { GUEST_POSITION } from '@objectstack/spec';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 import { humanBaselineFor } from './external-baseline.js';
 
@@ -970,31 +968,27 @@ interface SecurityReportSink {
  * (#10706), so a degraded boot reports through the host too.
  */
 /**
- * [#13419 执行要点 3; #24757 under 「甲」] The stable event name stamped on every
- * position-name-fold report — the structured half of
- * {@link SecurityPlugin.reportNameFoldCollisions}, so an operator can grep one
- * token for every grant that exists only because a position and a permission
- * set share a name.
+ * [#13419 执行要点 3 and 5; #24757] The stable event name stamped on every
+ * report of a permission set that shares a held position's name and is NOT
+ * granted through it — the structured half of
+ * {@link SecurityPlugin.reportUngrantedNamesakeSets}, so an operator can grep
+ * one token for every such pair.
  *
- * ## The 18.x loud half of the fold's retirement
+ * ## The fold is retired; the event is its loud half
  *
- * The standing ruling 「甲」 (ruling record 6292005854 on #6015) splits a
- * narrowing that no ADR-0087 conversion can carry: 18.x ships only its loud
- * half, and the refusal waits for 19.0. Retiring the position-name fold is
- * such a narrowing: the platform cannot write `permissionSets` into a sealed
- * managed position definition (ADR-0131 D6), so nothing rewrites an author's
- * reliance on it (triage's derivation for #24757, record 6292072572). This
- * event is that loud half's REPORTED EVENT. Every report carries the retirement
- * as data, `removedIn: 'next_major'`, beside the fields it has always carried
- * (`event`, `position`, `permissionSet`), which stay unchanged because a log
- * consumer may already key on them. 19.0 removes the fold, and with it this
- * event and its reporter (the card's 19.0 half).
+ * The resolver used to fold each held position's NAME into the permission-set
+ * request, so a set sharing a position's name was granted to its holders
+ * though nothing declared it. #13419's ruling B retired that channel (ADR-0131:
+ * "the binding is written, not inferred"), and 「甲」 as amended (ruling record
+ * 6303865025 on #6015) ships the narrowing in 18.x. Its 要点 5 requires that a
+ * behaviour difference shows only as a refusal or a loud warning, never as a
+ * silent change of resolution: this event is that warning. The token is the
+ * one the deprecation half shipped under (17.3.0, re-pointed in 18.x), so a
+ * consumer already grepping it keeps finding the pair; the payload keeps
+ * `event`, `position` and `permissionSet`, and carries `granted: false`.
  *
- * Deliberately NOT exported from this package. The maintainer ruling this
- * serves permits a warning and nothing more; adding a published symbol would
- * widen the surface a slice that changes no resolution result has no business
- * widening. Its pin asserts the literal rather than importing it, which is what
- * makes a silent rename fail.
+ * Deliberately NOT exported from this package. Its pin asserts the literal
+ * rather than importing it, which is what makes a silent rename fail.
  *
  * snake_case per the precedent beside it (`platform_owner_wall_bypass`): this
  * is a data value, not an error code (ADR-0112 governs those).
@@ -1492,8 +1486,8 @@ export class SecurityPlugin implements Plugin {
   private logger: SecurityReportSink = CONSOLE_SECURITY_SINK;
 
   /**
-   * [#13419 执行要点 3, warning half] Position names already reported by
-   * {@link reportNameFoldCollision}, so the warning is LOUD ONCE rather than
+   * [#13419 执行要点 5; #24757] Position names already reported by
+   * {@link reportUngrantedNamesakeSets}, so the warning is LOUD ONCE rather than
    * once per request.
    *
    * Deduplication is what keeps it loud. This resolution runs on every request
@@ -2064,9 +2058,7 @@ export class SecurityPlugin implements Plugin {
     // report "no such set" for a read that never answered.
     //
     // Whether a set is switched off is not this loader's question: the names
-    // it is asked for arrive already judged by the resolver's ledger read,
-    // except a POSITION name folded into the request, which
-    // `resolvePermissionSetsForContextUnmemoized` judges itself.
+    // it is asked for arrive already judged by the resolver's ledger read.
     this.catalogSetLoader = async (names: string[]) => {
       const catalog = securityCatalogReaderOf(ql);
       if (!catalog) return [];
@@ -3508,49 +3500,16 @@ export class SecurityPlugin implements Plugin {
     const readLogger = () => this.logger;
     const readMetadata = () => this.metadata;
     const readPermissionEvaluator = () => this.permissionEvaluator;
-    const host: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'dropDeactivatedFoldedSets' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportNameFoldCollisions'> = {
+    const host: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportUngrantedNamesakeSets'> = {
       baselinePermissionSets: this.baselinePermissionSets,
       bootstrapPermissionSets: this.bootstrapPermissionSets,
       dbLoaderForContext: (...a) => this.dbLoaderForContext(...a),
-      dropDeactivatedFoldedSets: (...a) => this.dropDeactivatedFoldedSets(...a),
       get logger() { return readLogger(); },
       get metadata() { return readMetadata(); },
       get permissionEvaluator() { return readPermissionEvaluator(); },
-      reportNameFoldCollisions: (...a) => this.reportNameFoldCollisions(...a),
+      reportUngrantedNamesakeSets: (...a) => this.reportUngrantedNamesakeSets(...a),
     };
     return resolvePermissionSetsForContextUnmemoized.call(host, context);
-  }
-
-  /**
-   * [ADR-0049, ADR-0131 D3] Drop a set that reached the resolution ONLY because
-   * a POSITION of the same name was folded into the request, when the
-   * activation ledger switched that set off.
-   *
-   * Every other name arrives already judged: `context.permissions` is the
-   * resolver's output, which drops a deactivated set (§6b), and the baseline
-   * is the deployment's configuration, applied regardless. A folded position
-   * name is the one name nobody judged as a SET — the position is in effect,
-   * but the set that shares its name may not be. The row loader this replaced
-   * judged it with the catalog row's `active` column; the switch now lives in
-   * `sys_metadata_activation`, read through the resolver's own
-   * `readDisabledCatalogNames`, so this path and the resolver cannot disagree.
-   *
-   * The ledger is read only when a folded name actually resolved, so a request
-   * with no such collision issues no read. A read that fails throws
-   * (`AuthzStoreUnavailableError`), and the request fails closed.
-   */
-  private dropDeactivatedFoldedSets(
-    positions: unknown,
-    explicitPermissionSets: unknown,
-    baselineApplied: string[],
-    resolved: PermissionSet[],
-  ): Promise<PermissionSet[]> {
-    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
-    const readQl = () => this.ql;
-    const host: Pick<PermissionSetsHost, 'ql'> = {
-      get ql() { return readQl(); },
-    };
-    return dropDeactivatedFoldedSets.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
   }
 
   /**
@@ -3559,24 +3518,21 @@ export class SecurityPlugin implements Plugin {
    *
    * ## The sets, from the enforcement path
    *
-   * A holder of position P is granted, through P, two things, each read where
-   * the resolver reads it — ⛔ never a second copy of either rule:
-   *
-   *  1. the sets P's DEFINITION names, in force — `@objectstack/core`'s
-   *     `readPositionGrantsInForce`, the reading §6a/§6b of
-   *     `resolveUserAuthzGrants` takes (a switched-off position grants
-   *     nothing; a switched-off set, or a name the catalog holds no set for, is
-   *     not granted). These arrive here as a context's `permissions`;
-   *  2. the set that shares P's NAME — the position-name fold of
-   *     {@link resolvePermissionSetsForContextUnmemoized}, requested by the same
-   *     evaluator call and judged by the same {@link dropDeactivatedFoldedSets}.
-   *     Never for `guest`: the guest envelope requests no position.
+   * A holder of position P is granted, through P, exactly the sets P's
+   * DEFINITION names, in force — `@objectstack/core`'s
+   * `readPositionGrantsInForce`, the reading §6a/§6b of
+   * `resolveUserAuthzGrants` takes (a switched-off position grants nothing; a
+   * switched-off set, or a name the catalog holds no set for, is not granted).
+   * These arrive at the resolver as a context's `permissions`, and are resolved
+   * here by the same evaluator call — ⛔ never a second copy of the rule. A set
+   * that merely shares P's NAME is not granted (#24757 retired the
+   * position-name fold), so it is not listed.
    *
    * So each position's sets are this resolver's request for a holder of that
    * position ALONE: the baseline and every other grant left out, and nothing
-   * reported ({@link reportNameFoldCollisions} is the request path's, and an
-   * admin reading the list is not a holder resolving). A set is `via:
-   * 'definition'` when the definition names it, else `via: 'name'`.
+   * reported ({@link reportUngrantedNamesakeSets} is the request path's, and an
+   * admin reading the list is not a holder resolving). Every set is `via:
+   * 'definition'`; the contract's `'name'` member is no longer served.
    *
    * ## The holders
    *
@@ -3605,19 +3561,17 @@ export class SecurityPlugin implements Plugin {
       const permissionSets: PositionGrantSummary['permissionSets'] = [];
       if (!disabledPositions.has(position)) {
         const declared = inForce.get(position) ?? [];
-        const folded = position === GUEST_POSITION ? [] : [position];
-        let resolved = await this.permissionEvaluator.resolvePermissionSets(
-          [...folded, ...declared.filter((n) => !folded.includes(n))],
+        const resolved = await this.permissionEvaluator.resolvePermissionSets(
+          declared,
           this.metadata,
           this.bootstrapPermissionSets,
           this.dbLoaderForContext(context),
           { logger: this.logger },
         );
-        resolved = await this.dropDeactivatedFoldedSets(folded, declared, [], resolved);
         for (const set of resolved) {
           const name = (set as any)?.name;
           if (typeof name !== 'string' || permissionSets.some((p) => p.name === name)) continue;
-          permissionSets.push({ name, via: declared.includes(name) ? 'definition' : 'name' });
+          permissionSets.push({ name, via: 'definition' });
         }
       }
       summaries.push({ position, holderCount: holders.get(position) ?? null, permissionSets });
@@ -3626,101 +3580,66 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#13419 执行要点 3; #24757 under 「甲」] Report a permission set granted to a
-   * position's holders only because the two share a NAME — a grant the
-   * position's definition does not declare — and say what happens to it when
-   * the fold is retired.
+   * [#13419 ruling B, 执行要点 5; #24757] Report a permission set that shares a
+   * held position's NAME and is NOT granted to that position's holders,
+   * because the position's definition does not name it.
    *
-   * ## What is being reported
+   * ## Why there is anything to report
    *
-   * {@link resolvePermissionSetsForContextUnmemoized} builds its request as
-   * `[...positions, ...explicitPermissionSets]`. That fold means a position
-   * called `sales_rep` resolves a permission set called `sales_rep` although
-   * the definition of `sales_rep` names no such set in `permissionSets`, the
-   * one binding spec and docs declare (ADR-0131 D3/D4; `position.zod.ts`,
-   * `positions.mdx`). Nothing declares that it happens, and Setup cannot show
-   * it: both the position's Permission Sets field and the set's Assigned Users
-   * read the declared binding. The maintainer ruling on #13419 (2026-08-31,
-   * 「同意」 to B) retires the fold; ADR-0131 later made the definition's
-   * `permissionSets` the binding in place of the junction table that ruling
-   * named.
-   *
-   * ## The 18.x loud half (「甲」, #24757)
-   *
-   * The fold's retirement is a narrowing no ADR-0087 conversion can carry, so
-   * under 「甲」 (ruling record 6292005854 on #6015) 18.x ships its loud half
-   * and the removal waits for 19.0. This warning IS that loud half, and its
-   * text says three things the 17.x wording did not: the grant is in force
-   * today only because the names match; that name-based grant is deprecated
-   * and is removed in the next major version, after which holders of `P` do
-   * not receive set `P` unless `P`'s definition names it; and the fix,
-   * `permissionSets: ['P']` on position `P` (or renaming one of the two). The
-   * structured payload carries the same consequence as `removedIn:
-   * 'next_major'` beside its unchanged `event`, `position` and `permissionSet`
-   * ({@link POSITION_NAME_FOLD_EVENT}). The string says "the next major
-   * version" and not a number, and carries no tracker id: an operator reading
-   * the log can resolve neither a ruling record nor `#NNNN`.
+   * The resolver used to fold each held position's name into the permission-set
+   * request, so position `sales_rep` granted a set called `sales_rep` that its
+   * definition never named. That channel is retired (#13419's ruling B;
+   * ADR-0131 D3/D4: a position grants only the sets its definition names in
+   * `permissionSets`; `position.zod.ts`, `positions.mdx`), in 18.x under 「甲」
+   * as amended (ruling record 6303865025 on #6015). An author who relied on it
+   * — or who names a set after a position expecting that to bind them — now
+   * gets nothing from the shared name, and 要点 5 of the ruling forbids that
+   * difference being silent: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」.
+   * This warning is that loud half. It says the set is NOT granted, why, and
+   * the fix (`permissionSets: ['P']` on position `P`, or a rename). Its text
+   * carries no tracker id: an operator reading the log can resolve neither a
+   * ruling record nor `#NNNN`.
    *
    * ## When it fires
    *
-   * Lazily, on the first resolution that meets an undeclared pair — never at
-   * boot, so a deployment where no holder of `P` has made a request has not
-   * been told yet. Once per position NAME per plugin instance
-   * ({@link nameFoldWarned}): not per holder, and not per organization, since
-   * the key is the name alone. A restart reports again.
+   * A position name `P` held by the caller is reported when ALL of:
    *
-   * ## The predicate, and why each clause is there
+   *   1. `P` is not already in the request — not named by a held position's
+   *      definition, not directly assigned, not a baseline name. Those grant
+   *      set `P` through the governed channel, so there is nothing to say;
+   *   2. a permission set named `P` exists, asked of the same three sources the
+   *      resolution reads (the metadata list, the bootstrap sets, the catalog
+   *      loader). A position whose name matches no set has nothing ungranted,
+   *      which keeps built-in identities (`platform_admin`, `org_owner`, …)
+   *      silent. What the probe returns is never granted.
    *
-   * A position name `P` is reported when ALL of:
-   *
-   *   1. a permission set named `P` actually resolved — a position whose name
-   *      matches nothing grants nothing, and the seven inert positions
-   *      (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `guest`,
-   *      and app-showcase's `finance` / `legal`) are all of that kind. ⛔ A
-   *      false positive on a built-in identity is the most expensive failure
-   *      this warning has, and this clause is what prevents it;
-   *   2. `P` was NOT already requested through the governed channel. The sets
-   *      a position's definition names (`permissionSets`, ADR-0131 D3/D4)
-   *      arrive as permission-set NAMES in `context.permissions`
-   *      (`resolve-authz-context.ts` §6b pushes `ps.name`), as do directly
-   *      assigned sets. Either way the grant does not depend on the fold, so
-   *      there is nothing ungoverned to report;
-   *   3. `P` is not one of the baseline names folded in just above — those are
-   *      in force for every authenticated caller regardless of the fold.
-   *
-   * ⚠️ Clause 2 is about the pair `(position P, set P)` SPECIFICALLY. A
-   * position bound to some OTHER set is still folded onto its own name: the
-   * #13419 census measured `sales_manager` bound to `crm_sales_user` and
-   * folding onto the same-named set anyway. Testing "is this position bound to
-   * anything?" would report neither of the two real name-folds in the repo
-   * while looking complete.
-   *
-   * ## Boundary (#13419 slice 2, kept by #24757)
-   *
-   * ⛔ Purely additive. The resolution result is READ, never rewritten — 要点 5
-   * of the ruling: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」, and a
-   * warning is the permitted half. Under 「甲」 the grant does not change in 18.x
-   * either: a holder of `P` still resolves set `P`, and
-   * `position-name-fold-warning.test.ts` pins that beside the text. ⛔ Deleting
-   * the fold is NOT this change. It is #24757's 19.0 half, with
-   * {@link dropDeactivatedFoldedSets} and the delegated walk, explain and
-   * collision-gate follow-ups. The reliance it would revoke, as measured on the
-   * card, is HotCRM's: 5 of its 12 positions at `f22dfa52`, which
-   * objectstack-ai/hotcrm#2200 declares in `permissionSets`.
+   * Lazily, on a resolution whose holder carries `P`; once per position NAME
+   * per plugin instance ({@link nameFoldWarned}), and a restart reports again.
+   * The name alone is the right key: the catalog the probe reads is
+   * environment-level, as is the position's definition, so the pair is a
+   * deployment fact, not an organization's. A name already reported is not
+   * probed again; an unreported one is probed on each unmemoized resolution
+   * that carries it — the reads the fold itself made on every such resolution.
+   * Never for `guest`: the guest envelope judges no position.
    */
-  private reportNameFoldCollisions(
+  private reportUngrantedNamesakeSets(
     positions: unknown,
-    explicitPermissionSets: unknown,
-    baselineApplied: string[],
-    resolved: PermissionSet[],
-  ): void {
+    requested: readonly string[],
+    context: any,
+  ): Promise<void> {
     // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
     const readLogger = () => this.logger;
-    const host: Pick<PermissionSetsHost, 'logger' | 'nameFoldWarned'> = {
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<PermissionSetsHost, 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'logger' | 'metadata' | 'nameFoldWarned' | 'permissionEvaluator'> = {
+      bootstrapPermissionSets: this.bootstrapPermissionSets,
+      dbLoaderForContext: (...a) => this.dbLoaderForContext(...a),
       get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
       nameFoldWarned: this.nameFoldWarned,
+      get permissionEvaluator() { return readPermissionEvaluator(); },
     };
-    reportNameFoldCollisions.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
+    return reportUngrantedNamesakeSets.call(host, positions, requested, context);
   }
 
   /**

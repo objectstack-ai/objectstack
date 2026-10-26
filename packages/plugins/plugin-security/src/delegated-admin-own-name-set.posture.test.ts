@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0090 D12, amended 2026-10-17] A delegate's position assignment is judged
- * on EVERY permission set the assignment grants — the names the position's
- * definition lists and, while the resolver folds held position names into the
- * requested set names, the permission set of the position's own name.
+ * [ADR-0090 D12, amended 2026-10-17; ADR-0131 D3/D4; #24757] A delegate's
+ * position assignment is judged on EVERY permission set the assignment grants —
+ * exactly the names the position's definition lists. The permission set of the
+ * position's own name was judged too while the resolver folded held position
+ * names into the requested set names; #24757 retired that fold, so the
+ * own-name set is granted by nothing and judged by nothing.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` registered on it (the delegated-administration gate, the CRUD
@@ -15,8 +17,8 @@
  * and names the set it judged; every admission reads the stored row back.
  *
  * The unit pins beside the gate (`delegated-admin-gate.test.ts`) hold the same
- * rule on a fake engine; this file holds it where the catalog, the resolver's
- * fold and the gate meet.
+ * rule on a fake engine; this file holds it where the catalog, the resolver and
+ * the gate meet: the gate admits exactly what the resolver grants.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -44,13 +46,17 @@ const CRUD = { sys_user_position: { allowRead: true, allowCreate: true, allowEdi
 
 /**
  * The catalog. `field_rep` and `field_lead` each list only `field_user`, and
- * the catalog also holds a permission set of each one's own name; `field_clerk`
- * lists `field_user` and has no set of its own name.
+ * the catalog also holds a permission set of each one's own name — which their
+ * definitions do not list, so an assignment grants neither; `field_clerk`
+ * lists `field_user` and has no set of its own name; `field_auditor` lists
+ * `field_audit`, which neither delegate allowlists.
  */
 const PERMISSIONS = [
   ...defaultPermissionSets,
   { name: 'field_user', label: 'Field user', objects: { sys_user: { allowRead: true } } },
   { name: 'field_rep', label: 'Field rep (own name)', objects: { sys_user: { allowRead: true, allowEdit: true } } },
+  // Listed by `field_auditor`, allowlisted by neither delegate.
+  { name: 'field_audit', label: 'Field audit', objects: { sys_user: { allowRead: true } } },
   // Carries an adminScope equal to the wide delegate's own: not strictly contained by it.
   { name: 'field_lead', label: 'Field lead (own name)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
   // Narrow: allowlists the sets the positions LIST, not their own-name sets.
@@ -62,6 +68,7 @@ const POSITIONS = [
   { name: 'field_rep', label: 'Field rep', permissionSets: ['field_user'] },
   { name: 'field_lead', label: 'Field lead', permissionSets: ['field_user'] },
   { name: 'field_clerk', label: 'Field clerk', permissionSets: ['field_user'] },
+  { name: 'field_auditor', label: 'Field auditor', permissionSets: ['field_audit'] },
 ];
 
 type Posture = 'single' | 'group' | 'isolated';
@@ -160,28 +167,32 @@ async function storedPositions(h: Awaited<ReturnType<typeof boot>>): Promise<str
   return (Array.isArray(rows) ? rows : []).map((r: any) => r.position).sort();
 }
 
-describe('[ADR-0090 D12, amended 2026-10-17] a delegate is judged on every set a position assignment grants — three postures', () => {
+describe('[ADR-0090 D12, amended 2026-10-17; #24757] a delegate is judged on exactly the sets a position assignment grants — three postures', () => {
   for (const posture of POSTURES) {
     describe(`posture '${posture}'`, () => {
-      it("ground truth: an assignment of the position grants the permission set of the position's own name", async () => {
+      it("ground truth: an assignment of the position does NOT grant the permission set of the position's own name", async () => {
         const h = await boot(posture);
         const sets = await (h.plugin as any).resolvePermissionSetsForContext(
           { userId: 'u_target', positions: ['field_rep'], permissions: ['field_user'], tenantId: ORG_A, accessible_org_ids: [ORG_A] });
-        expect(sets.map((s: any) => s.name)).toEqual(expect.arrayContaining(['field_user', 'field_rep']));
+        const names = sets.map((s: any) => s.name);
+        expect(names).toContain('field_user');
+        expect(names).not.toContain('field_rep');
       });
 
-      it("a delegate whose allowlist lacks the position's own-name set is refused 403, naming that set", async () => {
+      it("a delegate whose allowlist lacks the position's own-name set is admitted: that set is granted by nothing", async () => {
         const h = await boot(posture);
-        const r = await assign(h, NARROW, 'field_rep');
-        expect([r.status, r.code], r.message).toEqual([403, 'PERMISSION_DENIED']);
-        expect(r.message).toMatch(/position 'field_rep' distributes permission set 'field_rep'.*not in the scope's allowlist/);
-        expect(await storedPositions(h)).toEqual([]);
-      });
-
-      it('CONTROL: a delegate whose allowlist also covers the own-name set is admitted', async () => {
-        const h = await boot(posture);
-        expect(await assign(h, WIDE, 'field_rep')).toEqual({ status: 200 });
+        expect(await assign(h, NARROW, 'field_rep')).toEqual({ status: 200 });
         expect(await storedPositions(h)).toEqual(['field_rep']);
+      });
+
+      it('CONTROL: an assignment whose LISTED set is outside the allowlist is still refused 403, naming that set', async () => {
+        // The gate has teeth: the admissions above are not a gate judging
+        // nothing at all.
+        const h = await boot(posture);
+        const r = await assign(h, NARROW, 'field_auditor');
+        expect([r.status, r.code], r.message).toEqual([403, 'PERMISSION_DENIED']);
+        expect(r.message).toMatch(/position 'field_auditor' distributes permission set 'field_audit'.*not in the scope's allowlist/);
+        expect(await storedPositions(h)).toEqual([]);
       });
 
       it('a position with no own-name set in the catalog is judged on its listed sets alone, as before', async () => {
@@ -190,12 +201,10 @@ describe('[ADR-0090 D12, amended 2026-10-17] a delegate is judged on every set a
         expect(await storedPositions(h)).toEqual(['field_clerk']);
       });
 
-      it('an own-name set that carries an adminScope is held to strict containment', async () => {
+      it('an own-name set that carries an adminScope is not judged for containment: an assignment does not hand it out', async () => {
         const h = await boot(posture);
-        const r = await assign(h, WIDE, 'field_lead');
-        expect([r.status, r.code], r.message).toEqual([403, 'PERMISSION_DENIED']);
-        expect(r.message).toMatch(/granting set 'field_lead' would hand out an adminScope not strictly contained by yours/);
-        expect(await storedPositions(h)).toEqual([]);
+        expect(await assign(h, WIDE, 'field_lead')).toEqual({ status: 200 });
+        expect(await storedPositions(h)).toEqual(['field_lead']);
       });
 
       it("the delegable-scope report offers one of this catalog's positions exactly when the write admits it", async () => {
@@ -207,8 +216,8 @@ describe('[ADR-0090 D12, amended 2026-10-17] a delegate is judged on every set a
           const report = await security.delegatedAdminGate.describeDelegableScope(sets, context);
           return (report.assignablePositions as string[]).filter((n) => fixture.includes(n)).sort();
         };
-        expect(await offered(NARROW)).toEqual(['field_clerk']);
-        expect(await offered(WIDE)).toEqual(['field_clerk', 'field_rep']);
+        expect(await offered(NARROW)).toEqual(['field_clerk', 'field_lead', 'field_rep']);
+        expect(await offered(WIDE)).toEqual(['field_clerk', 'field_lead', 'field_rep']);
         for (const [label, context] of [['narrow', NARROW], ['wide', WIDE]] as const) {
           const listed = await offered(context);
           for (const position of fixture) {

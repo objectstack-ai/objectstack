@@ -52,6 +52,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { createMemoryI18n } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
+import { summaryAsRead } from './__tests__/summary-as-read.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -275,6 +276,20 @@ const lastSummary = (storeFor: (o: string) => Map<string, Record<string, unknown
 };
 
 /**
+ * [#26167] …and as a reader in `locale` is served it: the summary is stored in
+ * English, and its field labels are localized per reader.
+ */
+const lastSummaryAsRead = (
+  storeFor: (o: string) => Map<string, Record<string, unknown>>,
+  i18n: unknown,
+  locale: string,
+  engine: unknown,
+) => {
+  const rows = Array.from(storeFor('sys_activity').values());
+  return summaryAsRead(rows[rows.length - 1], i18n, locale, engine as any);
+};
+
+/**
  * Seed the two accounts, the region, the user, and TWO deals:
  *
  *  - `deal_1` holds NO references — the rendering cases move them from `∅`.
@@ -372,24 +387,30 @@ describe('[#7230] value half — a tracked reference renders a title, not a raw 
 // ---------------------------------------------------------------------------
 
 describe('[#7230] label half — the tracked-change branch gets the locale-bound translator', () => {
-  it('localizes the tracked field label to the workspace locale (zh-CN)', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+  // [#26167] The label is localized for the READER: the row stores the English
+  // sentence and the field's key, and a zh-CN reader is served the zh-CN label.
+  it('localizes the tracked field label to the reader locale (zh-CN)', async () => {
+    const i18n = makeI18n();
+    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n });
     await seed(engine);
 
     await engine.update('biz_deal', { owner: 'usr_1' }, { where: { id: 'deal_1' } } as any);
 
     // Both halves at once, which is the reported string's actual shape:
     // localized label + resolved title, where it read `Owner: ∅ → usr_1`.
-    expect(lastSummary(storeFor)).toBe('负责人: ∅ → 张伟');
+    expect(lastSummary(storeFor)).toBe('Owner: ∅ → 张伟');
+    expect(lastSummaryAsRead(storeFor, i18n, 'zh-CN', engine)).toBe('负责人: ∅ → 张伟');
   });
 
   it('localizes a non-reference tracked label too (the label half is not lookup-only)', async () => {
-    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
+    const i18n = makeI18n();
+    const { engine, storeFor } = await boot({ locale: 'zh-CN', i18n });
     await seed(engine);
 
     await engine.update('biz_deal', { stage: 'won' }, { where: { id: 'deal_1' } } as any);
 
-    expect(lastSummary(storeFor)).toBe('阶段: open → won');
+    expect(lastSummary(storeFor)).toBe('Stage: open → won');
+    expect(lastSummaryAsRead(storeFor, i18n, 'zh-CN', engine)).toBe('阶段: open → won');
   });
 
   it('falls back to the authored field label when the bundle has no entry for it', async () => {
@@ -400,6 +421,7 @@ describe('[#7230] label half — the tracked-change branch gets the locale-bound
     await engine.update('biz_deal', { partner_id: 'acc_2' }, { where: { id: 'deal_1' } } as any);
 
     expect(lastSummary(storeFor)).toBe('Partner: ∅ → Globex');
+    expect(lastSummaryAsRead(storeFor, makeI18n(), 'zh-CN', engine)).toBe('Partner: ∅ → Globex');
   });
 
   it('keeps the authored label when no i18n service is resolvable (status quo)', async () => {

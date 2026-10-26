@@ -90,9 +90,7 @@ async function boot(
     },
   };
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.init(ctx as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await plugin.start(ctx as any);
   return { plugin, logger };
 }
@@ -103,7 +101,6 @@ describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the s
       { sys_widget_registry: walledSchema('sys_widget_registry') },
       { entitlement: { platformGlobalObjects: ['sys_widget_registry'] } },
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toEqual({
       organization_id: 'org-1',
     });
@@ -115,7 +112,6 @@ describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the s
       { entitlement: { platformGlobalObjects: ['sys_widget_registry'] }, tenancy: { posture: 'group' } },
     );
     const groupCtx = { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-2'] };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', groupCtx)).toEqual({
       organization_id: { $in: ['org-1', 'org-2'] },
     });
@@ -126,7 +122,6 @@ describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the s
       { sys_widget_registry: walledSchema('sys_widget_registry') },
       { entitlement: { platformGlobalObjects: ['sys_widget_registry'] } },
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const walled = await (plugin as any).computeWriteTenantCheckFilter(
       [PLAIN_MEMBER], 'sys_widget_registry', 'insert', NO_ORG_CTX,
     );
@@ -138,14 +133,11 @@ describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the s
       sys_widget_registry: plannedSchema('sys_widget_registry'),
       crm_task: walledSchema('crm_task'),
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).computeWriteTenantCheckFilter(
       [PLAIN_MEMBER], 'sys_widget_registry', 'insert', NO_ORG_CTX,
     )).toBeNull();
     // CONTROL — a sibling on the same deployment walls as today.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('crm_task', MEMBER_CTX)).toEqual({ organization_id: 'org-1' });
   });
 
@@ -154,9 +146,7 @@ describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the s
       { sys_widget_registry: walledSchema('sys_widget_registry'), crm_task: walledSchema('crm_task') },
       { entitlement: { platformGlobalObjects: ['sys_widget_registry'] }, tenancy: { posture: 'single' } },
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('crm_task', MEMBER_CTX)).toBeUndefined();
   });
 });
@@ -167,7 +157,6 @@ describe('[#12699] refusals: this plugin warns only for the key it reads', () =>
       { sys_widget_registry: walledSchema('sys_widget_registry') },
       { entitlement: { platformGlobalObjects: 'sys_widget_registry' } },
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX);
     const warned = logger.warn.mock.calls.map((c) => String(c[0]));
     expect(warned.filter((m) => m.includes('org-scoping entitlement key'))).toEqual([]);

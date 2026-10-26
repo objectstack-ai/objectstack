@@ -114,6 +114,10 @@ interface Golden { sequentialLegs: number; grants: unknown; queries: RecordedCal
  * — the last mainline commit before the batch (post-#10982). `sequentialLegs`
  * is that run's leg count, which equalled its query count because every read
  * awaited the one before it.
+ *
+ * [#25799] `directPermissions` postdates that capture: each fixture's value was
+ * added from the current resolver, beside the captured envelope it leaves
+ * unchanged (the names the fixture's own grant rows confer in its tenant).
  */
 const GOLDEN: Record<string, Golden> = JSON.parse(
   readFileSync(new URL('./resolve-authz-context.batch-equivalence.golden.json', import.meta.url), 'utf8'),

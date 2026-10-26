@@ -89,6 +89,7 @@ import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { getRuntimeConfig } from '../../runtime-config.js';
 import { readMarketplaceInstalls, type LocalInstallEntry } from '../../console/marketplace/marketplaceApi.js';
 import { MarketplaceNotLoaded, MarketplaceRowActions } from '../../console/marketplace/MarketplaceRowActions.js';
+import { useDependencyMissingText } from '../../console/marketplace/dependencyMissing.js';
 import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type { PackagePublishResult } from '@objectstack/spec/system';
 import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
@@ -204,7 +205,16 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
       payload?.error ||
       payload?.message ||
       `Request failed (${res.status})`;
-    throw new Error(typeof msg === 'string' ? msg : `Request failed (${res.status})`);
+    const err = new Error(typeof msg === 'string' ? msg : `Request failed (${res.status})`) as Error & {
+      code?: string;
+      details?: unknown;
+    };
+    // ADR-0141 D2 — the envelope's `code` and `details` ride on the error, so a
+    // caller that draws a refusal from its facts (`DEPENDENCY_MISSING` at the
+    // import door) can; every other caller reads the message as before.
+    if (typeof payload?.error?.code === 'string') err.code = payload.error.code;
+    if (payload?.error?.details !== undefined) err.details = payload.error.details;
+    throw err;
   }
   // Runtime wraps successful payloads in { data, ... } or returns the object directly.
   return (payload?.data ?? payload) as T;
@@ -1298,6 +1308,9 @@ export function PackageDetailSheet({
 
 export function PackagesPage() {
   const locale = useMetadataLocale();
+  // ADR-0141 D2 — the import door's `DEPENDENCY_MISSING` refusal, one line per
+  // unmet dependency, from the locale packs (the `engine.*` table is en/zh only).
+  const dependencyMissingText = useDependencyMissingText();
   const { pathname } = useLocation();
   // App base = path up to (and excluding) `/component/...`, so links to
   // `/apps/:app/metadata/...` work regardless of nesting.
@@ -1488,7 +1501,10 @@ export function PackagesPage() {
       });
       await load();
     } catch (err: any) {
-      setImportMsg({ kind: 'err', text: err?.message ?? t('engine.packages.import.failed', locale) });
+      setImportMsg({
+        kind: 'err',
+        text: dependencyMissingText(err) ?? err?.message ?? t('engine.packages.import.failed', locale),
+      });
     } finally {
       setImporting(false);
     }
@@ -1571,7 +1587,7 @@ export function PackagesPage() {
 
       {importMsg && (
         <div
-          className={`mt-4 rounded-md border p-2 text-sm ${
+          className={`mt-4 whitespace-pre-wrap rounded-md border p-2 text-sm ${
             importMsg.kind === 'ok'
               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
               : 'border-destructive/40 bg-destructive/10 text-destructive'
