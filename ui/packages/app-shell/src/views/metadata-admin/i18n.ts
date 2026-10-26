@@ -1330,6 +1330,13 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.inspector.recipients.remove': 'Remove recipient',
   'engine.inspector.recipients.empty': 'No recipients yet.',
   'engine.inspector.recipients.notEmail': 'Not an email address — the messaging service would read it as a user id.',
+  'engine.inspector.recipients.kind.emailField': 'Email field',
+  'engine.inspector.recipients.placeholder.emailField': 'Email field of the trigger record',
+  'engine.inspector.recipients.emailFieldHint': 'Mails the address in this field of the trigger record, by email only — for a person who is not a user. It is the node\u2019s only recipient.',
+  'engine.inspector.recipients.emailFieldNotEmail': 'Not an email field — this recipient must name an email-typed field of the trigger record.',
+  'engine.inspector.recipients.emailFieldChannels': 'This recipient is sent by email only: the node\u2019s channels must be email alone, or the node is refused.',
+  'engine.inspector.recipients.emailFieldChannelsFix': 'Send by email only',
+  'engine.inspector.recipients.fieldOnEmailNode': 'This node sends email: the address in this field must belong to a user, or the run fails. To mail the address itself, use the Email field type.',
   // objectui#11788 — the create/update record nodes' field-value keys, picked from the target object.
   'engine.inspector.fieldMap.chooseObject': 'Choose the Object above to list its fields.',
   // objectui#11783 — the shared object picker (inspectors/ObjectPicker.tsx).
@@ -2172,6 +2179,10 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.edit.refsScanning': 'Scanning references…',
   'engine.edit.refsEmptyTitle': 'No references found',
   'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.',
+  // #25916 — the references table's column headers.
+  'engine.edit.refsColFromType': 'From type',
+  'engine.edit.refsColFromName': 'From name',
+  'engine.edit.refsColPath': 'Path',
   // …and its FAILED state (objectui#5110), which must never be confusable with
   // the empty one above: the copy states that the check did not complete and
   // deliberately makes no claim — in either direction — about whether deleting
@@ -5013,6 +5024,13 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.inspector.recipients.remove': '移除收件人',
   'engine.inspector.recipients.empty': '还没有收件人。',
   'engine.inspector.recipients.notEmail': '这不是邮箱地址 —— 消息服务会把它当作用户 id。',
+  'engine.inspector.recipients.kind.emailField': '邮箱字段',
+  'engine.inspector.recipients.placeholder.emailField': '触发记录的邮箱字段',
+  'engine.inspector.recipients.emailFieldHint': '向触发记录该字段中的地址发送邮件，仅走邮件渠道 —— 用于不是用户的人。它是本节点唯一的收件人。',
+  'engine.inspector.recipients.emailFieldNotEmail': '这不是邮箱类型的字段 —— 这种收件人必须指向触发记录的邮箱类型字段。',
+  'engine.inspector.recipients.emailFieldChannels': '这种收件人只走邮件渠道：本节点的渠道必须只有 email，否则节点会被拒收。',
+  'engine.inspector.recipients.emailFieldChannelsFix': '只走邮件',
+  'engine.inspector.recipients.fieldOnEmailNode': '本节点会发邮件：该字段中的地址必须属于某个用户，否则运行失败。要直接给该地址发邮件，请改用「邮箱字段」类型。',
   // objectui#11788 — 新建/更新记录节点的字段值键,从目标对象中选取。
   'engine.inspector.fieldMap.chooseObject': '请先在上方选择对象，才能列出它的字段。',
   // objectui#11783 — the shared object picker (inspectors/ObjectPicker.tsx).
@@ -5798,6 +5816,9 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.edit.refsScanning': '正在扫描引用…',
   'engine.edit.refsEmptyTitle': '未找到引用',
   'engine.edit.refsEmptyDesc': '元数据图中没有任何项指向它,可以安全删除。',
+  'engine.edit.refsColFromType': '来源类型',
+  'engine.edit.refsColFromName': '来源名称',
+  'engine.edit.refsColPath': '路径',
   // …以及它的失败态(objectui#5110):必须与上面的空态不可混淆 —— 文案只说明检查
   // 没有完成,对「删除是否安全」不做任何方向的断言,因为这个问题根本没有被回答。
   // 后续改写务必保留这一性质;「未找到引用」正是此状态要避免的那句话。

@@ -721,6 +721,20 @@ export const ERROR_CODE_LEDGER = {
     'WRITABLE_PACKAGE_REQUIRED',
   ],
   '@objectstack/metadata-core': [
+    // [ADR-0141 D2] The pre-install dependency check refused an install whose
+    // delivered package declares a `manifest.dependencies` entry the
+    // environment does not satisfy: not installed (nor delivered by the same
+    // act), installed outside the declared range, or a range or installed
+    // version outside the stated grammar (`DependencyMissingError`,
+    // `protocol-handshake.ts`). Answered 422, the status the sibling refusals
+    // at the same gate answer for a delivered manifest judged against the
+    // environment ahead of registration (`NAMESPACE_CONFLICT`). The three
+    // install doors — the protocol install primitive, the no-protocol fallback
+    // of `POST /api/v1/packages` and `POST /api/v1/marketplace/install-local`
+    // — answer it through the shared `dependencyMissingAnswer`, carrying one
+    // `dependency_missing` `AppCompatibilityCheck` issue and one fact row per
+    // unmet entry in `error.details`.
+    'DEPENDENCY_MISSING',
     // [ADR-0131 D6/D7, #23429] `readLegacyOrganizationRows`
     // (`legacy-organization-row.ts`, `LegacyOrganizationRowsUnreadable`) could
     // not tell a `sys_metadata`-family table's legacy organization rows from

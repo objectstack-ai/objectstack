@@ -8,7 +8,8 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import type { GroupingConfig } from '@object-ui/types';
-import { deriveColumnSummary, type ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import { compareSortValues, getSortValue, type SortValue } from '@object-ui/core';
+import { deriveColumnSummary, listViewGroupOrderColumn, type ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 
 /** Supported aggregation function types. */
 export type AggregationType = 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
@@ -258,6 +259,55 @@ interface SortableGroup {
   raw: unknown;
   /** The header label, for the label-order arms. */
   label: string;
+  /**
+   * The value the group is placed by when its level names an `orderBy`
+   * (objectstack#25786) — `null` when the group has none. Absent when the
+   * level orders by its own key.
+   */
+  orderValue?: SortValue;
+}
+
+/**
+ * The field a level's groups are ordered by when that is not the grouping
+ * field itself (spec `GroupingFieldSchema.orderBy`, objectstack#25786), or
+ * `undefined` when the level orders by its own key — `orderBy` absent, or
+ * naming the grouping field, the same two cases the spec's
+ * `listViewGroupOrderColumn` answers with the grouping field.
+ */
+export function groupOrderByOf(f: UsableGroupingField): string | undefined {
+  return f.orderBy && f.orderBy !== f.field ? f.orderBy : undefined;
+}
+
+/**
+ * One `orderBy` value reduced to what two groups compare by. `orderBy` names
+ * a numeric, temporal or boolean field (the spec refuses the string classes),
+ * and a numeric column can arrive as a numeric STRING — a driver's decimal —
+ * which a string compare would order digit by digit, so it is read as the
+ * number it spells.
+ */
+function orderValueOf(value: unknown): SortValue {
+  const reduced = getSortValue(value);
+  if (typeof reduced === 'string' && reduced.trim() !== '' && Number.isFinite(Number(reduced))) {
+    return Number(reduced);
+  }
+  return reduced;
+}
+
+/**
+ * The client-side twin of the header query's order node: over a group's rows,
+ * the smallest `orderBy` value for `asc` and the largest for `desc`, so the
+ * group sits where its first row would if the rows were sorted by `orderBy`.
+ * Rows with no value there do not count; a group with none answers `null`.
+ */
+function groupOrderValueOfRows(rows: any[], orderBy: string, order: 'asc' | 'desc'): SortValue {
+  let extreme: SortValue = null;
+  for (const row of rows) {
+    const value = orderValueOf(row?.[orderBy]);
+    if (value === null) continue;
+    const cmp = extreme === null ? 0 : compareSortValues(value, extreme);
+    if (extreme === null || (order === 'desc' ? cmp > 0 : cmp < 0)) extreme = value;
+  }
+  return extreme;
 }
 
 /**
@@ -282,6 +332,11 @@ function optionRankOf(raw: unknown, ranks: ReadonlyMap<string, number>): number[
  * the options in that order (reversed for `desc`), then any value the options
  * do not declare, by label, then the empty group — empty and unknown values
  * sit last in both directions. Without one: label order, exactly as before.
+ *
+ * A level that names an `orderBy` (objectstack#25786) orders by each group's
+ * `orderValue` first, ahead of both: in `order`, a group with no value last
+ * in both directions, and equal values fall back to the key comparison above
+ * in the same direction — what the spec states the consumer owes.
  */
 function compareGroupEntries(
   a: SortableGroup,
@@ -289,6 +344,16 @@ function compareGroupEntries(
   order: 'asc' | 'desc',
   ranks: ReadonlyMap<string, number> | undefined,
 ): number {
+  if (a.orderValue !== undefined && b.orderValue !== undefined) {
+    const aValue = a.orderValue;
+    const bValue = b.orderValue;
+    if (aValue === null || bValue === null) {
+      if (aValue !== bValue) return aValue === null ? 1 : -1;
+    } else {
+      const cmp = compareSortValues(aValue, bValue);
+      if (cmp !== 0) return order === 'desc' ? -cmp : cmp;
+    }
+  }
   if (!ranks) return compareGroups(a.label, b.label, order);
   const aEmpty = a.segment === '';
   const bEmpty = b.segment === '';
@@ -308,7 +373,7 @@ function compareGroupEntries(
 
 /**
  * One entry of the spec's `grouping.fields[]` as AUTHORED — `field` plus the
- * optional `order` / `collapsed`.
+ * optional `order` / `orderBy` / `collapsed`.
  *
  * ⚠️ NOT the same type as `@object-ui/components`' `GroupingFieldEntry`, which
  * is the grouping EDITOR's fully-populated value shape and requires `order`
@@ -526,6 +591,13 @@ export function useGroupedDataInOptionOrder(
         const rowsAtDepth = (server.headers[depth] ?? []).filter((row) =>
           outer.every((pf) => sameGroupKey(row[pf.field], prefix[pf.field])),
         );
+        // [objectstack#25786] A level ordered by another field reads each
+        // group's order value off the column the spec names for it — never a
+        // re-derived alias. Asked only over an answered header set: one was
+        // compiled from this same grouping, so the spec accepted its `orderBy`.
+        const orderColumn = groupOrderByOf(f) !== undefined && rowsAtDepth.length > 0
+          ? listViewGroupOrderColumn({ fields } as Parameters<typeof listViewGroupOrderColumn>[0], depth)
+          : undefined;
         const entries = rowsAtDepth.map((row) => {
           const raw = row[f.field] ?? null;
           const resolved = raw === null ? undefined : server.keyLabels?.[f.field]?.[String(raw)];
@@ -534,6 +606,7 @@ export function useGroupedDataInOptionOrder(
             raw,
             segment: extractValueKey(raw),
             label: resolved ?? buildSegmentLabel(raw, f.field, formatValue),
+            ...(orderColumn !== undefined ? { orderValue: orderValueOf(row[orderColumn]) } : {}),
           };
         });
         const order = f.order ?? 'asc';
@@ -597,11 +670,20 @@ export function useGroupedDataInOptionOrder(
 
       const order = f.order ?? 'asc';
       const ranks = optionRanks?.get(f.field);
-      const sortableOf = (segment: string): SortableGroup => {
-        const entry = map.get(segment);
-        return { segment, raw: entry?.rows[0]?.[f.field], label: entry?.label ?? segment };
-      };
-      keyOrder.sort((a, b) => compareGroupEntries(sortableOf(a), sortableOf(b), order, ranks));
+      // [objectstack#25786] Each group's order value, folded from its rows
+      // once, before the sort.
+      const orderBy = groupOrderByOf(f);
+      const sortables = new Map<string, SortableGroup>();
+      for (const segment of keyOrder) {
+        const entry = map.get(segment)!;
+        sortables.set(segment, {
+          segment,
+          raw: entry.rows[0]?.[f.field],
+          label: entry.label,
+          ...(orderBy !== undefined ? { orderValue: groupOrderValueOfRows(entry.rows, orderBy, order) } : {}),
+        });
+      }
+      keyOrder.sort((a, b) => compareGroupEntries(sortables.get(a)!, sortables.get(b)!, order, ranks));
 
       return keyOrder.map((segment) => {
         const entry = map.get(segment)!;

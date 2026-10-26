@@ -20,6 +20,19 @@
  * determination that the declared range excludes the runtime major. Absent and
  * unrecognized ranges are admitted (the former grandfathered, the latter a
  * parser-coverage gap) so the handshake can never cause a false rejection.
+ *
+ * ## The dependency check beside it (ADR-0141 D2)
+ *
+ * The same module hosts the pre-install dependency check: one predicate
+ * ({@link checkDeclaredDependencies}) that every install door runs right after
+ * {@link assertProtocolCompat}, and the range reader it needs
+ * ({@link rangeAdmitsVersion}). The reader is a SIBLING of the handshake's
+ * {@link rangeAdmitsMajor}, sharing its alternative split, its length bound and
+ * its comparator-operator peel, and differing in the two ways D2 requires: it
+ * answers at exact-version granularity, and its caller fails CLOSED on what it
+ * cannot read. The handshake's own verdicts do not move. ⛔ No fourth range
+ * reader: `parseRangeFloor` and `SemanticVersionManager` are the other two,
+ * and neither has both the grammar and the granularity.
  */
 
 import { PROTOCOL_VERSION } from '@objectstack/spec/kernel';
@@ -229,6 +242,45 @@ function rangeAlternatives(range: string): string[] {
 }
 
 /**
+ * The longest range either reader reads. A real SemVer range is short, and a
+ * manifest's range strings are externally authored, so bounding the length
+ * defuses any pathological input before it reaches a split or a regex: an
+ * overlong string is simply unrecognized, never a slow scan.
+ */
+const MAX_RANGE_LENGTH = 128;
+
+/** The intersection separator both readers accept: whitespace or a comma. */
+const COMPARATOR_SEPARATOR = /[\s,]+/;
+
+/**
+ * A hyphen range's two ends (`'11.0.0 - 12.0.0'`), or `null` when `r` is not
+ * one. Split on the whitespace-delimited hyphen (a fixed anchor between the two
+ * `\s+` runs — linear, no `.`-vs-`\s` backtracking) rather than a lazy
+ * `(.+?)…(.+)` match.
+ */
+function hyphenRangeEnds(r: string): [string, string] | null {
+  const ends = r.split(/\s+-\s+/);
+  return ends.length === 2 ? [ends[0]!, ends[1]!] : null;
+}
+
+type ComparatorOperator = '>=' | '<=' | '>' | '<';
+
+/**
+ * Peel a comparator's operator off by fixed prefix rather than a `\s*(.+)`
+ * match, whose whitespace/any-char overlap is a polynomial-ReDoS shape on
+ * untrusted input. `null` when `comparator` opens with no comparison operator.
+ */
+function peelComparatorOperator(comparator: string): { op: ComparatorOperator; rest: string } | null {
+  if (comparator.startsWith('>=') || comparator.startsWith('<=')) {
+    return { op: comparator.slice(0, 2) as ComparatorOperator, rest: comparator.slice(2) };
+  }
+  if (comparator.startsWith('>') || comparator.startsWith('<')) {
+    return { op: comparator.slice(0, 1) as ComparatorOperator, rest: comparator.slice(1) };
+  }
+  return null;
+}
+
+/**
  * Decide whether a SemVer-ish range admits `runtimeMajor`.
  *
  * Returns `true`/`false` on a positive determination, or `null` when the range
@@ -245,12 +297,9 @@ function rangeAlternatives(range: string): string[] {
  */
 export function rangeAdmitsMajor(range: string, runtimeMajor: number): boolean | null {
   const r = range.trim();
-  // A real SemVer range is short. Bounding the length here defuses any
-  // pathological input before it reaches a split or a regex (a manifest's
-  // `engines` string is externally authored, so treat it as untrusted): an
-  // overlong string is simply unrecognized (admit-with-warning), never a slow
-  // scan.
-  if (r.length > 128) return null;
+  // Bounded before any split or regex ({@link MAX_RANGE_LENGTH}): an overlong
+  // string is simply unrecognized (admit-with-warning), never a slow scan.
+  if (r.length > MAX_RANGE_LENGTH) return null;
   let verdict: boolean | null = false;
   for (const alternative of rangeAlternatives(r)) {
     const admits = alternativeAdmitsMajor(alternative, runtimeMajor);
@@ -266,7 +315,7 @@ function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null
   if (r === '*' || r === 'x' || r === 'latest') return true;
 
   // Compound comparator range, e.g. ">=11.0.0 <13.0.0" (space- or comma-joined).
-  const parts = r.split(/[\s,]+/).filter(Boolean);
+  const parts = r.split(COMPARATOR_SEPARATOR).filter(Boolean);
   if (parts.length > 1 && parts.every((p) => /^[<>]=?/.test(p))) {
     let ok = true;
     for (const p of parts) {
@@ -277,13 +326,11 @@ function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null
     return ok;
   }
 
-  // Hyphen range: "11.0.0 - 12.0.0". Split on the whitespace-delimited hyphen
-  // (a fixed anchor between the two `\s+` runs — linear, no `.`-vs-`\s`
-  // backtracking) rather than a lazy `(.+?)…(.+)` match.
-  const hyphenParts = r.split(/\s+-\s+/);
-  if (hyphenParts.length === 2) {
-    const lo = leadingMajor(hyphenParts[0]!);
-    const hi = leadingMajor(hyphenParts[1]!);
+  // Hyphen range: "11.0.0 - 12.0.0".
+  const hyphenParts = hyphenRangeEnds(r);
+  if (hyphenParts) {
+    const lo = leadingMajor(hyphenParts[0]);
+    const hi = leadingMajor(hyphenParts[1]);
     if (lo === null || hi === null) return null;
     return runtimeMajor >= lo && runtimeMajor <= hi;
   }
@@ -333,19 +380,9 @@ function declaredFloorMajor(range: string): number | null {
 }
 
 function comparatorAdmitsMajor(comparator: string, runtimeMajor: number): boolean | null {
-  // Peel the operator off by fixed prefix rather than a `\s*(.+)` match, whose
-  // whitespace/any-char overlap is a polynomial-ReDoS shape on untrusted input.
-  let op: string;
-  let rest: string;
-  if (comparator.startsWith('>=') || comparator.startsWith('<=')) {
-    op = comparator.slice(0, 2);
-    rest = comparator.slice(2);
-  } else if (comparator.startsWith('>') || comparator.startsWith('<')) {
-    op = comparator.slice(0, 1);
-    rest = comparator.slice(1);
-  } else {
-    return null;
-  }
+  const peeled = peelComparatorOperator(comparator);
+  if (peeled === null) return null;
+  const { op, rest } = peeled;
   const bound = rest.trim().replace(/^v/i, '');
   if (bound === '') return null;
   const parts = bound.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
@@ -467,4 +504,445 @@ export function assertProtocolCompat(
     case 'incompatible':
       throw new ProtocolIncompatibleError(result.diagnostic);
   }
+}
+
+// ==========================================================================
+// ADR-0141 D2 — the range reader at exact-version granularity
+// ==========================================================================
+
+/** A full version, `[major, minor, patch]`. */
+export type ExactVersion = readonly [number, number, number];
+
+/**
+ * The version grammar the dependency check reads for an INSTALLED package:
+ * `MAJOR.MINOR.PATCH`, an optional leading `v`, an optional `+build` suffix
+ * (ignored, as SemVer orders it). `null` for anything else — a partial
+ * version (`6`, `6.1`), a prerelease (`6.1.0-beta.1`: outside the stated
+ * grammar, so the check fails closed on it), a non-string.
+ */
+export function readExactVersion(version: unknown): ExactVersion | null {
+  if (typeof version !== 'string' || version.length > MAX_RANGE_LENGTH) return null;
+  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/);
+  if (!m) return null;
+  return [Number.parseInt(m[1]!, 10), Number.parseInt(m[2]!, 10), Number.parseInt(m[3]!, 10)];
+}
+
+/**
+ * The range grammar {@link rangeAdmitsVersion} reads, as a refusal states it.
+ * The handshake family's grammar minus `latest` (a dist-tag, not a bound), at
+ * npm's exact-version semantics.
+ */
+export const DEPENDENCY_RANGE_GRAMMAR =
+  '`^`, `~`, `>=`, `>`, `<=`, `<` or `=` before a version; an exact version (`6.1.0`); '
+  + 'an `x` / `*` wildcard (`6.x`, `6.1.*`, `*`); a hyphen range (`6.1.0 - 6.3`); '
+  + 'comparators joined by a space or a comma (an intersection: `>=6.1.0 <7`); and `||` between alternatives';
+
+/** A version token as written: up to three numeric parts, stopping at the first `x` / `X` / `*`. */
+function readPartialVersion(token: string): number[] | null {
+  const m = token.match(/^(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?$/);
+  if (!m) return null;
+  const parts: number[] = [];
+  for (const part of [m[1], m[2], m[3]]) {
+    if (part === undefined || !/^\d+$/.test(part)) break;
+    parts.push(Number.parseInt(part, 10));
+  }
+  return parts;
+}
+
+/** `parts` padded with zeros to a full version. */
+function floorOf(parts: readonly number[]): ExactVersion {
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+/** The first version past every version `parts` names (`6` → `7.0.0`, `6.1` → `6.2.0`). */
+function ceilingOf(parts: readonly number[]): ExactVersion {
+  return parts.length === 1 ? [parts[0]! + 1, 0, 0] : [parts[0]!, parts[1]! + 1, 0];
+}
+
+function compareVersions(a: ExactVersion, b: ExactVersion): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+/** One bound of a desugared comparator; a comparator is the AND of its bounds. */
+interface VersionBound { op: ComparatorOperator; v: ExactVersion }
+
+/** A bound nothing satisfies — `>*`, `<*`, `<0.0.0`. */
+const NOTHING: VersionBound = { op: '<', v: [0, 0, 0] };
+
+/**
+ * One comparator of an intersection, desugared to bounds the way npm does
+ * (`^1.2` → `>=1.2.0 <2.0.0`, `>6` → `>=7.0.0`, `<=6.1` → `<6.2.0`). `null`
+ * when the token is outside {@link DEPENDENCY_RANGE_GRAMMAR}; an empty list
+ * admits every version.
+ */
+function comparatorBounds(token: string): VersionBound[] | null {
+  const peeled = peelComparatorOperator(token);
+  let op: ComparatorOperator | '=' | '^' | '~' | '' = '';
+  let rest = token;
+  if (peeled) {
+    ({ op, rest } = peeled);
+  } else if (token.startsWith('=') || token.startsWith('^') || token.startsWith('~')) {
+    op = token[0] as '=' | '^' | '~';
+    rest = token.slice(1);
+  }
+  const parts = readPartialVersion(rest.replace(/^v/i, ''));
+  if (parts === null) return null;
+  const full = parts.length === 3;
+  const any = parts.length === 0;
+  const floor = floorOf(parts);
+  switch (op) {
+    case '':
+    case '=':
+      if (full) return [{ op: '>=', v: floor }, { op: '<=', v: floor }];
+      return any ? [] : [{ op: '>=', v: floor }, { op: '<', v: ceilingOf(parts) }];
+    case '>=':
+      return any ? [] : [{ op: '>=', v: floor }];
+    case '>':
+      if (any) return [NOTHING];
+      return full ? [{ op: '>', v: floor }] : [{ op: '>=', v: ceilingOf(parts) }];
+    case '<=':
+      if (any) return [];
+      return full ? [{ op: '<=', v: floor }] : [{ op: '<', v: ceilingOf(parts) }];
+    case '<':
+      return any ? [NOTHING] : [{ op: '<', v: floor }];
+    case '~':
+      if (any) return [];
+      return [{ op: '>=', v: floor }, { op: '<', v: ceilingOf(parts.slice(0, Math.min(parts.length, 2))) }];
+    case '^': {
+      if (any) return [];
+      // The first non-zero part is the one that may not move; a part left
+      // unwritten counts as the one that moves (`^0.x` → `<1.0.0`).
+      const upper: ExactVersion = parts[0]! > 0 || parts.length === 1
+        ? [parts[0]! + 1, 0, 0]
+        : parts[1]! > 0 || parts.length === 2
+          ? [0, parts[1]! + 1, 0]
+          : [0, 0, parts[2]! + 1];
+      return [{ op: '>=', v: floor }, { op: '<', v: upper }];
+    }
+  }
+}
+
+function boundAdmits(bound: VersionBound, version: ExactVersion): boolean {
+  const c = compareVersions(version, bound.v);
+  switch (bound.op) {
+    case '>=': return c >= 0;
+    case '>': return c > 0;
+    case '<=': return c <= 0;
+    case '<': return c < 0;
+  }
+}
+
+/** One `||` alternative at exact-version granularity: the AND of its comparators' bounds. */
+function alternativeAdmitsVersion(r: string, version: ExactVersion): boolean | null {
+  if (r === '') return null;
+  // An operator separated from its version by spaces (`>= 6.1.0`) reads as
+  // one token. The class is a fixed literal set, so the replace is linear.
+  const joined = r.replace(/(>=|<=|>|<|=|\^|~)\s+/g, '$1');
+  let bounds: VersionBound[] = [];
+  const hyphen = hyphenRangeEnds(joined);
+  if (hyphen) {
+    const lo = readPartialVersion(hyphen[0].replace(/^v/i, ''));
+    const hi = readPartialVersion(hyphen[1].replace(/^v/i, ''));
+    if (lo === null || hi === null) return null;
+    if (lo.length > 0) bounds.push({ op: '>=', v: floorOf(lo) });
+    if (hi.length === 3) bounds.push({ op: '<=', v: floorOf(hi) });
+    else if (hi.length > 0) bounds.push({ op: '<', v: ceilingOf(hi) });
+  } else {
+    for (const token of joined.split(COMPARATOR_SEPARATOR).filter(Boolean)) {
+      const tokenBounds = comparatorBounds(token);
+      if (tokenBounds === null) return null;
+      bounds = bounds.concat(tokenBounds);
+    }
+  }
+  return bounds.every((bound) => boundAdmits(bound, version));
+}
+
+/**
+ * Decide whether a range admits one exact version — the reader ADR-0141 D2's
+ * dependency check needs, a sibling of {@link rangeAdmitsMajor}.
+ *
+ * Returns `true` / `false` on a positive determination, or `null` when the
+ * range is outside {@link DEPENDENCY_RANGE_GRAMMAR} or `version` is outside
+ * {@link readExactVersion}'s grammar. A `||` union admits when ANY alternative
+ * admits; when none does and any alternative is unreadable, the union is
+ * unreadable too (`null`), exactly as {@link rangeAdmitsMajor} combines them.
+ *
+ * ⛔ The handshake reads `null` as "admit with a warning"; the dependency check
+ * reads it as "not satisfied". Each caller owns that policy, so the two
+ * readers can share their parsing without sharing a verdict.
+ */
+export function rangeAdmitsVersion(range: string, version: string): boolean | null {
+  const exact = readExactVersion(version);
+  if (exact === null) return null;
+  const r = range.trim();
+  if (r.length > MAX_RANGE_LENGTH) return null;
+  let verdict: boolean | null = false;
+  for (const alternative of rangeAlternatives(r)) {
+    const admits = alternativeAdmitsVersion(alternative, exact);
+    if (admits === true) return true;
+    if (admits === null) verdict = null;
+  }
+  return verdict;
+}
+
+// ==========================================================================
+// ADR-0141 D2 — the pre-install dependency check
+// ==========================================================================
+
+/** The manifest slice the dependency check reads. */
+export interface DependencyDeclaringManifest {
+  id?: unknown;
+  name?: unknown;
+  /** `ManifestSchema.dependencies`: `{ [packageId]: versionRange }`. */
+  dependencies?: unknown;
+}
+
+/** What the check needs of an installed package: the registry row's manifest version. */
+export interface InstalledDependencyRecord {
+  manifest?: { version?: unknown };
+}
+
+/** One declared entry the check found unsatisfied, as the refusal carries it. */
+export type UnmetDependency =
+  | {
+      /** The delivered package that declares the entry. */
+      packageId: string;
+      /** The declared dependency id. */
+      dependency: string;
+      /** The declared range, as written. */
+      range: string;
+      /**
+       * `absent` — not installed and not delivered by the same act;
+       * `out-of-range` — installed at `installedVersion`, outside `range`;
+       * `unreadable-range` — `range` is outside {@link DEPENDENCY_RANGE_GRAMMAR};
+       * `unreadable-version` — installed at a version outside {@link readExactVersion}'s grammar.
+       */
+      found: 'absent' | 'out-of-range' | 'unreadable-range' | 'unreadable-version';
+      /** The installed version, as stored, when there is an installed record. */
+      installedVersion?: string;
+    }
+  | {
+      packageId: string;
+      /** `dependencies` is present but is not a `{ packageId: versionRange }` record. */
+      found: 'unreadable-declaration';
+    };
+
+/** What one install act hands {@link checkDeclaredDependencies}. */
+export interface DeclaredDependencyCheck {
+  /**
+   * The packages this act installs, each judged on its OWN entries (never a
+   * dependency's: those were judged when it was installed). One manifest for a
+   * single-package door; every package of an artifact for an artifact door.
+   */
+  delivered: readonly DependencyDeclaringManifest[];
+  /**
+   * Further ids the same act delivers without being judged itself (an
+   * artifact's own identity). Every `delivered` id counts already.
+   */
+  deliveredIds?: readonly string[];
+  /** The installed package record for an id (`SchemaRegistry.getPackage`), or `undefined`. */
+  getInstalled: (id: string) => InstalledDependencyRecord | undefined;
+}
+
+/** The id a delivered manifest is installed under — `id || name`, as the registry keys it. */
+function deliveredId(manifest: DependencyDeclaringManifest): string | undefined {
+  const id = manifest.id || manifest.name;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/**
+ * ADR-0141 D2's one predicate: every declared entry of the delivered packages
+ * that the environment does not satisfy, in declaration order — empty when the
+ * install may proceed.
+ *
+ * An entry `(id, range)` is satisfied when `id` is delivered by the same act
+ * (presence only: the packages of one artifact are one tested unit, and an
+ * in-artifact range mismatch is the author tooling's to report, not the
+ * install's), or when `id` is installed at a `manifest.version` inside `range`.
+ * Fail closed: an unreadable range or installed version does not satisfy, and
+ * a `dependencies` that is present but not a record is reported, never read as
+ * "no dependencies". Every record entry is required; the record has no
+ * optional arm. Enablement is not judged.
+ *
+ * Pure: no throwing, no I/O. Doors call {@link assertDeclaredDependencies}.
+ */
+export function checkDeclaredDependencies(check: DeclaredDependencyCheck): UnmetDependency[] {
+  const delivered = new Set<string>(check.deliveredIds ?? []);
+  for (const manifest of check.delivered) {
+    const id = deliveredId(manifest);
+    if (id !== undefined) delivered.add(id);
+  }
+  const unmet: UnmetDependency[] = [];
+  for (const manifest of check.delivered) {
+    const declared = manifest.dependencies;
+    if (declared === undefined || declared === null) continue;
+    const packageId = deliveredId(manifest) ?? '<unknown>';
+    if (typeof declared !== 'object' || Array.isArray(declared)) {
+      unmet.push({ packageId, found: 'unreadable-declaration' });
+      continue;
+    }
+    for (const [dependency, declaredRange] of Object.entries(declared as Record<string, unknown>)) {
+      if (delivered.has(dependency)) continue;
+      const range = typeof declaredRange === 'string' ? declaredRange : String(declaredRange);
+      const record = check.getInstalled(dependency);
+      const stored = record?.manifest?.version;
+      const installedVersion = record === undefined || stored === undefined || stored === null
+        ? undefined
+        : String(stored);
+      const withVersion = installedVersion === undefined ? {} : { installedVersion };
+      // Range first: an unreadable range cannot be satisfied by installing
+      // anything, so it is the fact the author acts on, present or not.
+      const rangeReadable = typeof declaredRange === 'string'
+        && rangeAdmitsVersion(declaredRange, '0.0.0') !== null;
+      if (!rangeReadable) {
+        unmet.push({ packageId, dependency, range, found: 'unreadable-range', ...withVersion });
+        continue;
+      }
+      if (record === undefined) {
+        unmet.push({ packageId, dependency, range, found: 'absent' });
+        continue;
+      }
+      const admits = typeof stored === 'string' ? rangeAdmitsVersion(range, stored) : null;
+      if (admits === null) {
+        unmet.push({ packageId, dependency, range, found: 'unreadable-version', ...withVersion });
+      } else if (!admits) {
+        unmet.push({ packageId, dependency, range, found: 'out-of-range', ...withVersion });
+      }
+    }
+  }
+  return unmet;
+}
+
+/** One `AppCompatibilityCheck` issue (`@objectstack/spec/system`) — the shape the refusal carries per unmet entry. */
+export interface DependencyMissingIssue {
+  severity: 'error';
+  category: 'dependency_missing';
+  message: string;
+}
+
+function unmetIssueMessage(entry: UnmetDependency): string {
+  if (entry.found === 'unreadable-declaration') {
+    return `Package '${entry.packageId}' declares \`dependencies\` in a shape that is not a `
+      + '{ "PACKAGE_ID": "VERSION_RANGE" } record, so what it depends on cannot be read.';
+  }
+  const head = `Package '${entry.packageId}' depends on '${entry.dependency}' ${entry.range}`;
+  switch (entry.found) {
+    case 'absent':
+      return `${head}, which is not installed. Install '${entry.dependency}' at a version inside ${entry.range} first.`;
+    case 'out-of-range':
+      return `${head}, which is installed at version ${entry.installedVersion}, outside that range. `
+        + `Install a version of '${entry.dependency}' inside ${entry.range} first.`;
+    case 'unreadable-range':
+      return `Package '${entry.packageId}' depends on '${entry.dependency}' with the range '${entry.range}', `
+        + `which is not a readable version range, so no installed version can satisfy it. Supported: ${DEPENDENCY_RANGE_GRAMMAR}.`;
+    case 'unreadable-version':
+      return `${head}, which is installed with ${entry.installedVersion === undefined ? 'no version' : `the version '${entry.installedVersion}'`}`
+        + ' — not a readable MAJOR.MINOR.PATCH version (a prerelease is outside the grammar), so it cannot be judged against the range.';
+  }
+}
+
+/**
+ * Brand for {@link DependencyMissingError}; `Symbol.for`, for the reason
+ * {@link PROTOCOL_INCOMPATIBLE_BRAND} gives.
+ */
+const DEPENDENCY_MISSING_BRAND = Symbol.for('objectstack.metadata-core.dependencyMissingError');
+
+/**
+ * ADR-0141 D2's refusal: an install whose delivered packages declare
+ * dependencies the environment does not satisfy. Nothing was registered,
+ * written or persisted.
+ *
+ * ## The status it declares: 422
+ *
+ * The status the sibling refusals at the same gate answer for a delivered
+ * manifest judged against the environment ahead of registration
+ * (`NAMESPACE_CONFLICT`, `DUPLICATE_ARTIFACT_OBJECT_NAME`); ADR-0141 merge
+ * question 5. `code` is redeclared as a literal so
+ * `check:error-status-conformance` derives this class as the producer of
+ * `DEPENDENCY_MISSING` at 422, and both status spellings are declared because
+ * doors read either one.
+ *
+ * ## What it carries
+ *
+ * `issues` — one `AppCompatibilityCheck` issue per unmet entry, the shape
+ * `AppCompatibilityCheckSchema` reserves the `dependency_missing` category in.
+ * The shared resolver (`resolveThrownHttpError`) passes a thrown `.issues`
+ * through into `error.details`, so any door answers them. `unmet` — the facts
+ * per entry (the dependent, the dependency, the range, what was found), which
+ * the resolver's closed `details` list drops; a door that recognises the error
+ * ({@link isDependencyMissingError}) answers them through
+ * {@link dependencyMissingAnswer}, and a Console renders its text from them.
+ */
+export class DependencyMissingError extends MetadataError {
+  readonly code = 'DEPENDENCY_MISSING' as const;
+  readonly status = 422;
+  readonly statusCode = 422;
+  readonly issues: readonly DependencyMissingIssue[];
+
+  constructor(public readonly unmet: readonly UnmetDependency[]) {
+    const issues = unmet.map((entry): DependencyMissingIssue => ({
+      severity: 'error',
+      category: 'dependency_missing',
+      message: unmetIssueMessage(entry),
+    }));
+    super(
+      'DEPENDENCY_MISSING',
+      `Install refused: ${unmet.length === 1 ? 'a declared dependency is' : `${unmet.length} declared dependencies are`} `
+        + `not satisfied in this environment, and nothing was installed. ${issues.map((i) => i.message).join(' ')}`
+        + ' A package installs only after every package its manifest declares in `dependencies` is installed'
+        + ' at a version inside the declared range (ADR-0141 D2).',
+    );
+    this.issues = issues;
+    (this as Record<PropertyKey, unknown>)[DEPENDENCY_MISSING_BRAND] = true;
+  }
+}
+
+/** Recognition predicate for {@link DependencyMissingError}, by brand — a lookalike is not recognised. */
+export function isDependencyMissingError(e: unknown): e is DependencyMissingError {
+  return typeof e === 'object' && e !== null
+    && (e as Record<PropertyKey, unknown>)[DEPENDENCY_MISSING_BRAND] === true;
+}
+
+/**
+ * Run ADR-0141 D2's check at an install door: returns silently when every
+ * declared entry is satisfied, throws {@link DependencyMissingError} naming
+ * EVERY unmet entry otherwise. Doors call it right after
+ * {@link assertProtocolCompat}, before anything registers.
+ */
+export function assertDeclaredDependencies(check: DeclaredDependencyCheck): void {
+  const unmet = checkDeclaredDependencies(check);
+  if (unmet.length > 0) throw new DependencyMissingError(unmet);
+}
+
+/** What an HTTP door answers for a {@link DependencyMissingError}. */
+export interface DependencyMissingAnswer {
+  status: DependencyMissingError['status'];
+  code: DependencyMissingError['code'];
+  /** The error's own prose, unchanged. */
+  message: string;
+  /**
+   * A CLOSED shape: the `AppCompatibilityCheck` verdict (`compatible` and its
+   * `issues`) and the per-entry facts, named one by one — ⛔ not a spread of
+   * the error, so a member later added to it does not reach the wire without
+   * a decision here.
+   */
+  details: {
+    compatible: false;
+    issues: readonly DependencyMissingIssue[];
+    unmet: readonly UnmetDependency[];
+  };
+}
+
+/**
+ * The ONE answer every HTTP install door gives ADR-0141 D2's refusal: a door
+ * asks {@link isDependencyMissingError} ahead of its generic catch, then
+ * answers through this. ⛔ No door restates the shape.
+ */
+export function dependencyMissingAnswer(err: DependencyMissingError): DependencyMissingAnswer {
+  return {
+    status: err.status,
+    code: err.code,
+    message: err.message,
+    details: { compatible: false, issues: err.issues, unmet: err.unmet },
+  };
 }

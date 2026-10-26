@@ -18,6 +18,9 @@ import {
   summarise,
 } from '../check-vi-mock-override-shape.mjs';
 import { COVERED_SPECIFIERS } from '../check-vi-mock-inherit.mjs';
+import { scan as preInstallScan } from '../check-pre-install-import-graph.mjs';
+
+import { globMatches, jobBlock, repoPath, rootCi, uiFilterGlobs, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#8903 — the test for `scripts/check-vi-mock-override-shape.mjs`.
@@ -454,54 +457,53 @@ describe('wiring', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
   };
-  const lint = fs.readFileSync(path.join(repoRoot, '.github/workflows/lint.yml'), 'utf8');
+  // objectstack#25712: the job is the root `ci.yml`'s `lint-ui`, where
+  // objectstack#25697 ported objectui's `lint.yml` (roster row 16), read by path.
+  const lint = jobBlock(rootCi(), UI_JOBS.lint);
 
   it('is reachable as a pnpm script', () => {
     expect(pkg.scripts['check:vi-mock-override-shape']).toBe(`node scripts/${GATE}`);
   });
 
-  it('runs in lint.yml, AFTER the install it needs', () => {
-    const gateAt = lint.indexOf(`node scripts/${GATE}`);
+  it('runs in the root Lint UI job, AFTER the install it needs', () => {
+    const gateAt = lint.indexOf(uiRun('check:vi-mock-override-shape'));
     const installAt = lint.indexOf('pnpm install --frozen-lockfile');
     expect(gateAt, 'the gate must be run by a workflow').toBeGreaterThan(-1);
     expect(installAt).toBeGreaterThan(-1);
     expect(gateAt, 'the gate imports `typescript`; before the install there is no node_modules').toBeGreaterThan(installAt);
   });
 
-  it('is NOT run by the pre-install vi-mock workflow', () => {
+  it('is NOT among the steps any workflow runs before an install', () => {
     // `check-pre-install-import-graph.mjs` would fail the moment it were: this
-    // gate reaches the package `typescript`, and that workflow deliberately has
-    // no install step. Measured on this tree by injecting the same import into
-    // `check-vi-mock-inherit.mjs`: that gate went from exit 0 to exit 1.
-    const sibling = fs.readFileSync(path.join(repoRoot, '.github/workflows/repo-gates.yml'), 'utf8');
-    expect(sibling).not.toContain(GATE);
+    // gate reaches the package `typescript`. Measured on this tree by injecting
+    // the same import into `check-vi-mock-inherit.mjs`: that gate went from
+    // exit 0 to exit 1. This used to read objectui's install-free
+    // `repo-gates.yml`; since objectstack#25712 the pre-install population is
+    // derived from the root workflows, so this asks that derivation.
+    const { scripts } = preInstallScan(repoRoot) as { scripts: string[] };
+    expect(scripts.length, 'the derivation read no pre-install step at all').toBeGreaterThan(0);
+    expect(scripts).not.toContain(`scripts/${GATE}`);
   });
 
-  it('the lint.yml skip switch cannot hide a change this gate judges', () => {
-    // The switch skips the expensive steps when only ignored paths changed.
-    // Both halves of what this gate compares live in TypeScript files, so no
-    // ignored pattern may match one. If a pattern that does is ever added, the
-    // gate silently stops seeing the pull requests most likely to trip it.
-    const patterns = [...lint.matchAll(/:\(exclude,glob\)([^'"\s]+)/g)].map((m) => m[1]);
-    expect(patterns.length, 'the ignore list moved — re-read this switch').toBeGreaterThan(0);
-
-    const toRe = (glob: string) =>
-      new RegExp(
-        `^${glob
-          .split('**')
-          .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
-          .join('.*')}$`,
-      );
+  it('the filter that starts the root Lint UI job cannot hide a change this gate judges', () => {
+    // objectui's `lint.yml` skipped its expensive steps when only ignored paths
+    // changed. The root `lint-ui` runs when the `filter` job's `ui` globs
+    // match, so that list is the switch now (objectstack#25712). Both halves of
+    // what this gate compares live in TypeScript files, so every one of them
+    // must start the job, or the gate silently stops seeing the pull requests
+    // most likely to trip it.
+    const globs = uiFilterGlobs(rootCi());
     const tsPaths = [
       'packages/app-shell/src/views/RecordDetailView.headerRefresh.test.tsx',
       'packages/collaboration/src/PresenceProvider.tsx',
       'scripts/check-vi-mock-override-shape.mjs',
       'packages/collaboration/src/index.ts',
     ];
-    for (const glob of patterns) {
-      for (const p of tsPaths) {
-        expect(toRe(glob).test(p), `ignore pattern ${glob} matches ${p} — this gate would go blind`).toBe(false);
-      }
+    for (const p of tsPaths) {
+      expect(
+        globs.some((glob) => globMatches(glob, repoPath(p))),
+        `no \`ui\` filter glob matches ${repoPath(p)} — this gate would go blind`,
+      ).toBe(true);
     }
   });
 });

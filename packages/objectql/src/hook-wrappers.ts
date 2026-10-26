@@ -23,7 +23,7 @@ import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutco
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
-import { hookRunAs, deriveHookApi, seedHookUserGrants, type HookRunAs } from './hook-run-as.js';
+import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, type HookRunAs } from './hook-run-as.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -61,6 +61,14 @@ export interface WrapDeclarativeOptions {
   logger?: HookDiagnosticsLogger;
   /** Optional per-execution metrics sink. Defaults to no-op. */
   metrics?: HookMetricsRecorder;
+  /**
+   * [#25653] The hook is app-authored: bound through the hook binder, which
+   * sets this. Its `ctx.api` is then derived through `APP_AUTHORED_HOOK_API`
+   * (`hook-run-as.ts`), so an inherited system context and its `sudo()` carry
+   * the app-automation mark. Absent for a platform hook wrapped in code (the
+   * audit builtins), whose api is handed through as before.
+   */
+  appAuthored?: boolean;
 }
 
 const noopLogger: HookDiagnosticsLogger = {
@@ -379,6 +387,7 @@ export function wrapDeclarativeHook(
   // binder skips (or, under `strict`, fails) the hook instead of running it
   // under an identity it never declared. `undefined` is the schema default.
   const runAs: HookRunAs = hookRunAs(meta as { name?: unknown; runAs?: unknown });
+  const appAuthored = opts.appAuthored === true;
 
   const runWithTimeout = async (ctx: HookContext): Promise<void> => {
     if (!timeoutMs) {
@@ -470,7 +479,12 @@ export function wrapDeclarativeHook(
     // already ran against it; the readonly strip and the session keep reading
     // it). Under `'inherit'` this is a no-op that leaves the engine-built api
     // in place by reference — and, deliberately, without an extra `await`.
-    const restoreApi = runAs === 'inherit' ? noRestore : await installRunAsApi(ctx, runAs, meta.name, logger);
+    // [#25653] An app-authored hook's api is derived first (synchronously), so
+    // its inherited elevation and its `sudo()` carry the app-automation mark.
+    const installed = runAs === 'inherit' && !appAuthored
+      ? noRestore
+      : installRunAsApi(ctx, runAs, meta.name, logger, appAuthored);
+    const restoreApi = typeof installed === 'function' ? installed : await installed;
     const startedAt = Date.now();
 
     const recordOutcome = (err?: any) => {
@@ -497,8 +511,9 @@ export function wrapDeclarativeHook(
         // first `await` returns. So a non-`'inherit'` hook runs against a
         // detached view that keeps the derived api past that restore. Under
         // `'inherit'` the context object is handed through unchanged, exactly
-        // as before this key existed.
-        const detached = runAs === 'inherit' ? ctx : { ...ctx };
+        // as before this key existed — unless the hook is app-authored, whose
+        // derived api (#25653) the same restore would take away.
+        const detached = restoreApi === noRestore ? ctx : { ...ctx };
         void runWithErrorPolicy(detached)
           .then(() => recordOutcome())
           .catch((err) => {
@@ -531,7 +546,12 @@ export function wrapDeclarativeHook(
  * it, returning the restore. `'inherit'` installs nothing and restores nothing
  * — the engine-built api stays in place BY REFERENCE, which is the "byte-
  * identical to today" guarantee the ruling's default rests on and the pin in
- * `hook-run-as.test.ts` asserts with `toBe`.
+ * `hook-run-as.test.ts` asserts with `toBe`. [#25653] Except for an
+ * app-authored hook, whose api is first derived through
+ * `APP_AUTHORED_HOOK_API`, under every `runAs`.
+ *
+ * Synchronous except for the `'user'` grant seeding, so a caller awaits only
+ * what is a promise.
  *
  * The derivation itself lives on the api (`ScopedContext.withRunAs`) because
  * only the api holds the full triggering `ExecutionContext` — `ctx.session` is
@@ -542,21 +562,27 @@ function installRunAsApi(
   runAs: HookRunAs,
   hookName: string,
   logger: HookDiagnosticsLogger,
-): Promise<() => void> {
-  if (runAs === 'inherit') return Promise.resolve(noRestore);
+  appAuthored = false,
+): (() => void) | Promise<() => void> {
   const original = ctx.api;
-  const derived = deriveHookApi(original, runAs, {
-    hook: hookName,
-    object: ctx.object,
-    event: ctx.event,
-  });
+  // [#25653] App-authored: derive the api that carries the hook's provenance
+  // BEFORE the `runAs` derivation, which keeps it. Synchronous, and the only
+  // step an `'inherit'` hook takes.
+  const base = appAuthored ? deriveAppAuthoredHookApi(original) : original;
   const install = (api: unknown) => {
+    if (api === original) return noRestore;
     ctx.api = api as HookContext['api'];
     return () => {
       ctx.api = original;
     };
   };
-  if (runAs !== 'user') return Promise.resolve(install(derived));
+  if (runAs === 'inherit') return install(base);
+  const derived = deriveHookApi(base, runAs, {
+    hook: hookName,
+    object: ctx.object,
+    event: ctx.event,
+  });
+  if (runAs !== 'user') return install(derived);
   // [#24497] A `'user'` pin carries the user's grants, peer list and email
   // (#24639), seeded through the resolver the request path uses
   // (`ScopedContext[SEED_USER_GRANTS]`, `hook-run-as.ts`). Cost: one

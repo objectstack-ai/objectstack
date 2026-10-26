@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here —
 // re-adding one is now itself an error (TS2578). See objectui#3494.
 import { classify, scan, locate, SCANNED_BYTES, KNOWN_OFFENDERS } from '../check-control-bytes.mjs';
+import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
 
 /**
  * objectstack#5425. Two raw U+0000 bytes in
@@ -473,39 +474,40 @@ describe('objectstack#5450 — the four baselined files are clean', () => {
   });
 });
 
+/**
+ * The home is the repository root's `ci.yml` now (objectstack#25712). GitHub
+ * runs only the root `.github/workflows/`, and objectstack#25902 ported
+ * objectui's `repo-gates.yml`, this gate's old home, into the root `lint-ui`
+ * job, which spells it through its alias. Both pins read that job and the root
+ * triggers, by path.
+ */
 describe('wiring — the gate is actually reachable and actually runs', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-  const workflowPath = path.join(repoRoot, '.github/workflows/repo-gates.yml');
+  const ci = rootCi();
 
   it('is exposed as a root package script', () => {
     expect(pkg.scripts['check:control-bytes']).toBe('node scripts/check-control-bytes.mjs');
   });
 
-  it('has a workflow that gates pull requests', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    expect(fs.readFileSync(workflowPath, 'utf8')).toMatch(/pull_request:/);
+  it('the root Lint UI job runs it, and the root ci.yml gates pull requests', () => {
+    expect(withoutComments(jobBlock(ci, UI_JOBS.lint)), 'a check nothing runs is not a gate').toContain(
+      `run: ${uiRun('check:control-bytes')}`,
+    );
+    expect(triggerBlock(ci)).toMatch(/^ {2}pull_request:/m);
   });
 
-  it('does NOT filter that workflow by path', () => {
-    // This is the whole reason it is its own workflow rather than a step in
-    // ci.yml or lint.yml: on a markdown-only change both of those skip every
-    // expensive step, so a gate inside either would never see it. Markdown is
-    // precisely the carrier objectstack#4890 was found in, so a path filter here
-    // would rebuild the hole this guard exists to close. `changeset-guard.yml`
-    // is in the repo for the same reason and says so in its own header.
-    //
-    // Not the reason this comment used to give — "both of those `paths-ignore`
-    // markdown, `content/**`, `docs/**` and `.changeset/**`" — which
-    // objectui#4381 corrected here and in the workflow's own header. Since
-    // objectui#3523 step 2 that filter is gone from their `pull_request` trigger
-    // and survives only on `push`, so a markdown-only PR does start both and
-    // does produce their contexts (measured — PR #3856, one markdown file, 16
-    // checks). What still skips is the work inside them: the `Decide whether
-    // this change needs a full run` step excludes markdown and skips every step
-    // below itself, and the `push` lane is filtered at the trigger as before.
-    // The conclusion outlived its premise; objectui#3857 pinned the correction.
-    const workflow = fs.readFileSync(workflowPath, 'utf8');
-    expect(workflow).not.toMatch(/paths-ignore:/);
-    expect(workflow).not.toMatch(/^\s+paths:/m);
+  it('is filtered by no path a markdown-only change could miss', () => {
+    // Markdown is precisely the carrier objectstack#4890 was found in, so a
+    // filter that skips a markdown-only change would rebuild the hole this guard
+    // exists to close. objectui's `repo-gates.yml` met that with no path filter
+    // at all. The root ci.yml filters no paths at the trigger either, and
+    // `lint-ui` runs on the `filter` job's `ui` globs, which must keep matching
+    // a markdown-only change anywhere under `ui/`.
+    expect(withoutComments(triggerBlock(ci))).not.toMatch(/^\s+paths(-ignore)?:/m);
+    const globs = uiFilterGlobs(ci);
+    const missed = ['README.md', 'content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md']
+      .map(repoPath)
+      .filter((file) => !globs.some((glob) => globMatches(glob, file)));
+    expect(missed, 'a markdown-only change under ui/ would skip Lint UI').toEqual([]);
   });
 });

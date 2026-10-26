@@ -294,7 +294,6 @@
     "defineFlow": "src/automation/flow.zod.ts#defineFlow (function)",
     "defineWebhook": "src/automation/webhook.zod.ts#defineWebhook (function)",
     "describeMissingScheduleOrganization": "src/automation/schedule-organization.zod.ts#describeMissingScheduleOrganization (function)",
-    "dollarOnlyTokenRoots": "src/automation/flow-text-slot-template.ts#dollarOnlyTokenRoots (function)",
     "exportConstructsToBpmn": "src/automation/bpmn-mapping.ts#exportConstructsToBpmn (function)",
     "findRegionEntry": "src/automation/control-flow.zod.ts#findRegionEntry (function)",
     "flowFilterOperands": "src/automation/flow-node-expression-paths.ts#flowFilterOperands (function)",

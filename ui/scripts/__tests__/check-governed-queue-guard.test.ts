@@ -3,12 +3,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 
 import { REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import {
   CHECK_CONTEXT_NAME,
-  CHECK_JOB_ID,
   CHECK_WORKFLOW,
   GOVERNED_SURFACES,
   governedPathsIn,
@@ -36,15 +34,24 @@ const WORKFLOW = `.github/workflows/${CHECK_WORKFLOW}`;
  * set. That is repository settings, which no test here can read and no agent may
  * change. What IS asserted is that this repository has written the answer down
  * where its own tooling reads it, and that every piece of the chain exists.
+ *
+ * ⚠️ The workflow half of the chain retired with objectstack#25712: `the gate
+ * script and its workflow both exist` (its workflow leg), `the job publishes
+ * exactly the check name the script declares`, `subscribes BOTH legs`,
+ * `re-fires on ready_for_review`, `carries no path filter on either leg`,
+ * `checks out full history`, `grants pull-requests: read and no write scope
+ * anywhere` and `runs the self-test BEFORE the live judgment`. Each read
+ * objectui's `governed-surface-guard.yml`, which runs nowhere under the
+ * monorepo: GitHub runs the root `.github/workflows/` alone. The root
+ * `governed-surface-guard.yml` covers the queue guard with its own register,
+ * which governs `ui/.github/workflows/**` (roster row 11, → sub-issue 4, which
+ * decides the rest of the `ui/**` surface). `CHECK_JOB_ID` and
+ * `CHECK_WORKFLOW` still name objectui's job; a port brings these pins back
+ * against the root workflow that runs this gate, by path.
  */
 describe('check-governed-queue-guard is wired, not merely present', () => {
-  const workflowText = fs.readFileSync(path.join(ROOT, WORKFLOW), 'utf8');
-  const workflow = parseYaml(workflowText);
-  const job = workflow.jobs[CHECK_JOB_ID];
-
-  it('the gate script and its workflow both exist', () => {
+  it('the gate script exists', () => {
     expect(fs.existsSync(path.join(ROOT, GATE))).toBe(true);
-    expect(fs.existsSync(path.join(ROOT, WORKFLOW))).toBe(true);
   });
 
   it('package.json aliases it, and the alias points at the script that exists', () => {
@@ -55,72 +62,12 @@ describe('check-governed-queue-guard is wired, not merely present', () => {
     }
   });
 
-  it('the job publishes exactly the check name the script declares', () => {
-    // The #6865-shape defect one repo over: renaming a job detaches a required
-    // context with nothing to say so. The name lives in two files because a name
-    // in one file is a name nothing can pin; this is the assertion that keeps
-    // the two equal.
-    expect(job.name).toBe(CHECK_CONTEXT_NAME);
-  });
-
   it('this repository has written the context down as blocking', () => {
     // `REQUIRED_CONTEXTS` is objectui's own answer to "which checks are
     // blocking" (`scripts/dependabot-merge-gate.mjs`), and it is what
     // `merge-queue-reporting.test.ts` derives the merge_group floor from. A
     // guard outside it is a guard that floor cannot see.
     expect(REQUIRED_CONTEXTS).toContain(CHECK_CONTEXT_NAME);
-  });
-
-  it('subscribes BOTH legs — the queue build refuses, the pull request warns', () => {
-    // Both, not either. Without `merge_group` there is no refusal at all;
-    // without `pull_request` a seat gets no warning before the queue, which is
-    // the moment #6183 could still have been stopped.
-    expect(workflow.on).toHaveProperty('merge_group');
-    expect(workflow.on).toHaveProperty('pull_request');
-  });
-
-  it('re-fires on ready_for_review — the first move of the incident', () => {
-    // Naming `types:` REPLACES GitHub's default set rather than extending it,
-    // so the three defaults have to be restated alongside the addition. This
-    // asserts the addition AND that restating did not drop one.
-    expect(workflow.on.pull_request.types).toEqual([
-      'opened',
-      'synchronize',
-      'reopened',
-      'ready_for_review',
-    ]);
-  });
-
-  it('carries no path filter on either leg — a skipped job counts as SUCCESS', () => {
-    // The one direction this gate may not be wrong in. A path filter that
-    // mis-scopes hands branch protection a green verdict from a job that never
-    // ran, on the one check whose entire purpose is to refuse.
-    for (const leg of ['pull_request', 'merge_group'] as const) {
-      const on = workflow.on[leg] ?? {};
-      expect(on).not.toHaveProperty('paths');
-      expect(on).not.toHaveProperty('paths-ignore');
-    }
-  });
-
-  it('checks out full history — a truncated diff answers with silence', () => {
-    const checkout = job.steps.find((s: Record<string, string>) => String(s.uses ?? '').startsWith('actions/checkout'));
-    expect(checkout, 'the job must check out the repository').toBeDefined();
-    expect(checkout.with['fetch-depth']).toBe(0);
-  });
-
-  it('grants pull-requests: read and no write scope anywhere', () => {
-    expect(workflow.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' });
-  });
-
-  it('runs the self-test BEFORE the live judgment, as its precondition', () => {
-    const runs: string[] = job.steps
-      .filter((s: Record<string, string>) => typeof s.run === 'string')
-      .map((s: Record<string, string>) => s.run);
-    const selfTestAt = runs.findIndex((r) => r.includes(`${GATE} --self-test`));
-    const liveAt = runs.findIndex((r) => r.includes(GATE) && !r.includes('--self-test'));
-    expect(selfTestAt, 'the workflow must run the self-test').toBeGreaterThan(-1);
-    expect(liveAt, 'the workflow must run the live judgment').toBeGreaterThan(-1);
-    expect(selfTestAt).toBeLessThan(liveAt);
   });
 
   it('its self-test passes — the half that makes a green run mean something', () => {
