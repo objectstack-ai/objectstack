@@ -1,3 +1,4 @@
+// test-budget: 20 — compiles the package type graph once: the compiler-API case builds one ts program over app.zod.ts and the spec type graph it imports, and that one program is most of the file's time (the other cases are in-process parses); slowest CI reading 11.90 s (run 40204927516, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 import { describe, it, expect } from 'vitest';
 // Loaded here, at module top, not inside the compiler-API case below: a
 // clocked window measures behaviour, never loading, and `typescript` alone is
