@@ -32,7 +32,7 @@ import type { NavLink, NavigationMenuItem } from '../navigation.js';
  * `base.zod.ts` — read it there before changing this line.
  */
 export const NavLinkSchema: z.ZodType<NavLink, NavLink> = z.lazy(() =>
-  z.object({
+  z.looseObject({
     label: z.string().describe('Link label'),
     href: z.string().describe('Link URL'),
     icon: z.string().optional().describe('Link icon'),
@@ -46,12 +46,12 @@ export const NavLinkSchema: z.ZodType<NavLink, NavLink> = z.lazy(() =>
 /**
  * Breadcrumb Item Schema
  */
-export const BreadcrumbItemSchema = z.object({
+export const BreadcrumbItemSchema = z.looseObject({
   label: z.string().describe('Breadcrumb label'),
   href: z.string().optional().describe('Link URL'),
   icon: z.string().optional().describe('Breadcrumb icon'),
   onClick: handlerKeyRefusal('onClick', 'retired', 'Click handler'),
-  siblings: z.array(z.object({
+  siblings: z.array(z.looseObject({
     label: z.string().describe('Sibling label'),
     href: z.string().describe('Sibling URL'),
   })).optional().describe('Sibling items for dropdown navigation'),
@@ -84,7 +84,7 @@ export const HeaderBarSchema = BaseSchema.extend({
     + '`rightContent`, `search`. For links use `crumbs`, or a `navigation-menu` / `sidebar` node.',
   ),
   crumbs: z.array(BreadcrumbItemSchema).optional().describe('Breadcrumb items'),
-  search: z.object({
+  search: z.looseObject({
     enabled: z.boolean().describe('Whether search is enabled'),
     placeholder: z.string().optional().describe('Search placeholder text'),
     shortcut: z.string().optional().describe('Keyboard shortcut (e.g., "⌘K")'),
@@ -315,7 +315,7 @@ export const PaginationSchema = BaseSchema.extend({
  * `base.zod.ts` — read it there before changing this line.
  */
 export const NavigationMenuItemSchema: z.ZodType<NavigationMenuItem, NavigationMenuItem> = z.lazy(() =>
-  z.object({
+  z.looseObject({
     label: z.string().describe('Menu item label'),
     href: z.string().optional().describe('Link URL'),
     description: z.string().optional().describe('Item description'),
@@ -350,7 +350,7 @@ export const NavigationMenuSchema = BaseSchema.extend({
 /**
  * Button Group Button Schema
  */
-export const ButtonGroupButtonSchema = z.object({
+export const ButtonGroupButtonSchema = z.looseObject({
   label: z.string().describe('Button label'),
   variant: z.enum(['default', 'secondary', 'destructive', 'outline', 'ghost', 'link']).optional(),
   size: z.enum(['default', 'sm', 'lg', 'icon']).optional(),

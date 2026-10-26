@@ -44,6 +44,34 @@ export function hasDeclaredFilter(filter: unknown): boolean {
   return false;
 }
 
+/** A whole-string session placeholder for the signed-in user, unresolved. */
+const CURRENT_USER_TOKEN_RE = /^\$?\{current_user_id\}$/;
+
+/**
+ * Whether a DECLARED filter names the signed-in user (objectstack#25898): some
+ * comparand in it is the caller's own id, or the `{current_user_id}`
+ * placeholder still unresolved. That is the "my …" view — `owner` equals the
+ * current user — whose empty list means "you have none yet", not "no record
+ * matches this view's filter".
+ *
+ * Shape-agnostic on purpose: a condition triple, a `{ field, operator, value }`
+ * condition and a MongoDB-style object all carry the comparand as a string
+ * leaf, and the filter a host hands a list is usually already resolved, so
+ * the id itself is what is left to find. Only the copy reads this; it narrows
+ * no query and grants nothing.
+ */
+export function filterNamesCurrentUser(filter: unknown, currentUserId: string | null | undefined): boolean {
+  const walk = (node: unknown): boolean => {
+    if (typeof node === 'string') {
+      return CURRENT_USER_TOKEN_RE.test(node) || (!!currentUserId && node === currentUserId);
+    }
+    if (Array.isArray(node)) return node.some(walk);
+    if (node && typeof node === 'object') return Object.values(node).some(walk);
+    return false;
+  };
+  return walk(filter);
+}
+
 /** The authored `emptyState` (the spec's `EmptyStateSchema`). */
 type AuthoredEmptyState = NonNullable<ListViewSchema['emptyState']>;
 
@@ -73,6 +101,21 @@ export interface ListEmptyStateProps {
   hasUserQuery: boolean;
   /** The declared filter narrows the query (see {@link hasDeclaredFilter}). */
   hasBaseFilter: boolean;
+  /**
+   * The declared filter names the signed-in user (see
+   * {@link filterNamesCurrentUser}): a "my …" view, emptied because the caller
+   * has none yet (objectstack#25898).
+   */
+  baseFilterNamesCurrentUser?: boolean;
+  /**
+   * Whether the caller may create a record here — the `listNew` row of the
+   * affordance-to-grant map (objectstack#25898). `false` is a KNOWN denial: the
+   * first-run invitation ("create your first record") is not shown, an empty
+   * list without a filter reads as "no records you can see", and no add-record
+   * action is drawn even when `onAddRecord` is supplied. Absent means not known
+   * (no permission answer yet, or no provider): today's copy.
+   */
+  mayCreate?: boolean;
   /** Draws the add-record action when supplied; omitted, no action is drawn. */
   onAddRecord?: () => void;
   /** The caller's `list.*` translation function. */
@@ -88,6 +131,8 @@ export function ListEmptyState({
   link,
   hasUserQuery,
   hasBaseFilter,
+  baseFilterNamesCurrentUser = false,
+  mayCreate,
   onAddRecord,
   t,
   displayLocale,
@@ -120,15 +165,29 @@ export function ListEmptyState({
   // state silently drew the default copy in every locale. A string still
   // passes through unchanged, and a map with no usable entry still falls to
   // the default.
-  const title = resolveInlineI18nLabel(authoredTitle, displayLocale)
-    ?? (hasActiveQuery ? t('list.noMatches') : t('list.firstRunTitle'));
-  const description = resolveInlineI18nLabel(authoredMessage, displayLocale)
-    ?? (hasUserQuery
-      ? t('list.noMatchesMessage')
-      : hasBaseFilter
-        ? t('list.viewFilterNoMatchesMessage')
-        : t('list.firstRunMessage'));
-  const addRecordAction = onAddRecord ? (
+  //
+  // objectstack#25898 — two more cases, read from what the list knows:
+  // - the declared filter names the signed-in user (a "my …" view): the list is
+  //   empty because the caller has none yet, so it says that, and not that a
+  //   filter matched nothing;
+  // - no filter at all and the caller may NOT create: the first-run invitation
+  //   would tell a member who may read none of the object's records that the
+  //   object is empty and invite them to create what they cannot. It reads as
+  //   "no records you can see" instead, and names who to ask.
+  const defaultCopy = hasUserQuery
+    ? { title: 'list.noMatches', message: 'list.noMatchesMessage' }
+    : hasBaseFilter && baseFilterNamesCurrentUser
+      ? { title: 'list.ownedNoneTitle', message: 'list.ownedNoneMessage' }
+      : hasActiveQuery
+        ? { title: 'list.noMatches', message: 'list.viewFilterNoMatchesMessage' }
+        : mayCreate === false
+          ? { title: 'list.noneVisibleTitle', message: 'list.noneVisibleMessage' }
+          : { title: 'list.firstRunTitle', message: 'list.firstRunMessage' };
+  const title = resolveInlineI18nLabel(authoredTitle, displayLocale) ?? t(defaultCopy.title);
+  const description = resolveInlineI18nLabel(authoredMessage, displayLocale) ?? t(defaultCopy.message);
+  // Create is offered only with the create grant (objectstack#25898): a known
+  // denial withholds the action whatever the caller handed over.
+  const addRecordAction = onAddRecord && mayCreate !== false ? (
     <Button
       variant="default"
       size="sm"

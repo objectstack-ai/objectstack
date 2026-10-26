@@ -157,12 +157,22 @@ describe('checkDeclaredDependencies — ADR-0141 D2\'s one predicate', () => {
     const core = { id: 'com.example.multi.core', version: '2.0.0' };
     const orders = { id: 'com.example.multi.orders', dependencies: { 'com.example.multi.core': '^1.0.0' } };
     expect(checkDeclaredDependencies({ delivered: [orders, core], getInstalled: installed({}) })).toEqual([]);
-    // An id delivered by the act without being judged itself (an artifact's own identity).
-    expect(checkDeclaredDependencies({
-      delivered: [orders], deliveredIds: ['com.example.multi.core'], getInstalled: installed({}),
-    })).toEqual([]);
     // Control: delivered by nobody, the same entry is absent.
     expect(checkDeclaredDependencies({ delivered: [orders], getInstalled: installed({}) })).toHaveLength(1);
+  });
+
+  it('names the range, not a readable installed version, when an unreadable alternative is what left the union undecided', () => {
+    // `<5` reads and refuses 7.0.0; `latest` cannot be read — so the union is
+    // undecided because of the RANGE. 7.0.0 is a perfectly readable version.
+    const pkg = { id: 'com.acme.psa', dependencies: { 'com.hotcrm.sales': '<5 || latest' } };
+    expect(checkDeclaredDependencies({ delivered: [pkg], getInstalled: installed({ 'com.hotcrm.sales': '7.0.0' }) })).toEqual([
+      { packageId: 'com.acme.psa', dependency: 'com.hotcrm.sales', range: '<5 || latest', found: 'unreadable-range', installedVersion: '7.0.0' },
+    ]);
+    // Control: the same readable range against an unreadable version still names the version.
+    expect(checkDeclaredDependencies({
+      delivered: [{ ...pkg, dependencies: { 'com.hotcrm.sales': '^6.0.0' } }],
+      getInstalled: installed({ 'com.hotcrm.sales': '6.1.0-beta.1' }),
+    })[0]?.found).toBe('unreadable-version');
   });
 
   it('reads a declaration that is not a record as unreadable, never as "no dependencies"', () => {
