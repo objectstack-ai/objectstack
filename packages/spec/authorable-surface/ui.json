@@ -668,6 +668,7 @@
     "ui/GroupingField:collapsed",
     "ui/GroupingField:field",
     "ui/GroupingField:order",
+    "ui/GroupingField:orderBy",
     "ui/HttpRequest:body",
     "ui/HttpRequest:headers",
     "ui/HttpRequest:method",
