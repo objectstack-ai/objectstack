@@ -58,7 +58,7 @@ import {
  *    present — this is `serve`'s `plugins = config.plugins` step, each entry by
  *    `serve`'s rule for one (`materializeStackPlugin`, `@objectstack/core`;
  *    #22506, {@link materializeHostPlugins}). On a deployment whose whole object
- *    set comes from its config (ObjectStack Cloud's control plane is the
+ *    set comes from its config (ObjectOS Cloud's control plane is the
  *    measured one: `createCloudStack()` returns the plugins, and the app has no
  *    compiled artifact at all) this is the ONLY half that matters.
  *  - **`AppPlugin(config)`**, when the config carries top-level metadata and
@@ -1230,7 +1230,7 @@ function hasPlatformObjects(plugins: readonly unknown[]): boolean {
  * the one `findSqlDriver()` resolves — and a composed host brings its own
  * engine/driver pair, so a plan can report a healthy-looking number while most
  * of the deployment's objects sit on an engine nobody diffed, or on no driver
- * at all. Measured on ObjectStack Cloud's staging control plane before this
+ * at all. Measured on ObjectOS Cloud's staging control plane before this
  * card: 36 host plugins composed, ~80 `sys_*` tables declared, **8** examined,
  * every signal green.
  *
@@ -2302,7 +2302,7 @@ export function refuseWhenHostConfigUnloadable(
  * `registerObjectMetadata()`, and the one pass that drives it for every
  * registered object lives inside `ObjectQLPlugin.start()`. A declaration-phase
  * composition suppresses `start()`; a host that brings its OWN `ObjectQLPlugin`
- * (ObjectStack Cloud's control plane does, behind a lazy wrapper) therefore
+ * (ObjectOS Cloud's control plane does, behind a lazy wrapper) therefore
  * ends the boot with its objects declared in an engine whose driver was never
  * told about one of them.
  *

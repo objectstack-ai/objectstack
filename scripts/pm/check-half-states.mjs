@@ -11159,11 +11159,12 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //            no request.
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
-// ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body may carry a
-// `## 维护者速读(草稿)` section — that is the DRAFT, written before the review
-// happened, and reading it as the brief would let the half this row exists to
-// find satisfy itself. So this row reads comment threads and nothing else, and
-// the sentence says so where a reader would otherwise assume a bug.
+// ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body carries a
+// `## 维护者速读` section of its own — the six-line DRAFT, written before the
+// review happened, under the SAME heading — and reading it as the brief would
+// let the half this row exists to find satisfy itself. So this row reads
+// comment threads and nothing else, and the sentence says so where a reader
+// would otherwise assume a bug.
 //
 // ## The fetch class this row BUYS — and why it is genuinely new
 //
@@ -11316,7 +11317,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
       : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
   const briefClause = hasBrief
     ? ''
-    : ' ⚠️ A `## 维护者速读(草稿)` section in the PR BODY does NOT satisfy this half and is not ' +
+    : ' ⚠️ A `## 维护者速读` section in the PR BODY does NOT satisfy this half and is not ' +
       'read here: the draft is written before the review happens, while the brief is the seat\'s own ' +
       'word after it — so this row reads COMMENT threads and nothing else.';
   return (
@@ -11330,6 +11331,164 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
     'seat has accepted yet is not the maintainer\'s, and nothing here asks anyone to hurry one. ' +
     'Report-only patrol INPUT, not a verdict and not a gate: nothing is blocked by this row, ⛔ no ' +
     'label is written from here, and ⛔ no seat may substitute an approving review for the maintainer.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H69 (#26155) — a GOVERNED Tier H open PR whose approvers have been ASKED
+// while the seat's `## 席位核对` record for its CURRENT HEAD is not on the
+// thread (report-only).
+//
+// ## The rule this row patrols
+//
+// The seat's record on a governed PR — the six-line 维护者速读 with 席位意见
+// filled, then `## 席位核对` with the six-item check — is a PRECONDITION of
+// the maintainer being asked to look: before `pr_ready` on Tier H and before
+// a Tier S PR is queued, that record exists on the PR for the head the
+// maintainer would read (pm-dispatch SKILL.md, ACCEPT 之后的路径分叉 ①). The
+// relay requests `GOVERNED_APPROVERS` at `pr_create` as a standing summons and
+// again at `pr_ready`, so a Tier H PR carries a pending request from its
+// first minute — which is exactly why the request alone says nothing about
+// whether the person asked has anything to read. Measured on the filing day:
+// four of six governed drafts had an approver requested and no seat record at
+// all, so the maintainer opened the dev's draft with 席位意见 empty.
+//
+// ## The three readings, each from the PR's own state
+//
+//   ASKED    `requested_reviewers` ∩ `GOVERNED_APPROVERS` is non-empty — read
+//            off the LIST row, no request. ⛔ Not H43's three-field union: an
+//            approver who already SUBMITTED a review has been handed the PR
+//            whatever the thread says (H48's question, not this row's), and
+//            the assign fallback is the author-approver's stand-in while the
+//            OTHER approver is still requested — so the request field alone
+//            carries the act this row reads.
+//   RECORD   an issue-comment on the PR whose line begins `## 席位核对` —
+//            `prCommentCache`'s thread, the class H48 buys, so this row BUYS
+//            nothing for it.
+//   HEAD     `commit.committer.date` of `head.sha` — ONE request per distinct
+//            head, bought only when a record exists at all: with NO record the
+//            comparison has nothing to date, so the common half state costs
+//            nothing extra. `committer.date` for H23's reason: an amend, a
+//            rebase or a merge of `main` moves it, and each of those is a new
+//            head the record must be re-made for.
+//
+// The half state is ASKED ∧ ¬(RECORD newer than HEAD). A record OLDER than the
+// head is the same state as no record: the seat read a diff the maintainer
+// will not be shown.
+//
+// ## Four input states, never two (#4690)
+//
+//   thread unread (undefined/null)             UNJUDGED
+//   thread read, no record                     judged — fires, no HEAD read
+//   thread read, record, HEAD unread (null)    UNJUDGED — the row never
+//                                              invents a timestamp to compare
+//   thread read, record, HEAD read             judged
+//
+// ## Report-only, and tiered as H43/H48 are
+//
+// ⛔ Nothing ships through this gap: the queue guard refuses an unapproved
+// Tier H enqueue whatever the thread says. What is wrong is that the person
+// the regime protects was summoned to a PR nobody has briefed on that head.
+// Remedy is the record itself, posted as a COMMENT for the current head —
+// ⛔ never a label, ⛔ never a review from a seat. Tier S stands down
+// (`governedLandsOnRecord`): no maintainer is summoned there, so there is no
+// request for the record to precede; its own precondition (the record before
+// the queue) is read by the queue guard, not by this row.
+// ---------------------------------------------------------------------------
+
+/**
+ * The seat's record, as a heading line — `MAINTAINER_BRIEF_MARKER`'s three
+ * mirrored properties on the literal `## 席位核对` heading: line-anchored, an
+ * optional leading blockquote, no `g` flag. A `###` sub-heading or a mention
+ * in prose (the landing comment is told ⛔ 不复述 `## 席位核对`) is no record.
+ */
+export const SEAT_RECORD_MARKER = /^\s*>?\s*## 席位核对/m;
+
+/** Governed globs named inline before the sentence degrades to a count — H43's. */
+export const H69_SURFACE_LIST_CAP = 4;
+
+/** The approvers a PR's PENDING request list names — the ASKED reading, off the list row. Pure. */
+export function h69AskedApprovers(pr, approvers) {
+  const requested = new Set(
+    (pr?.requested_reviewers ?? []).map((u) => String(u?.login ?? '')).filter(Boolean),
+  );
+  return (approvers ?? []).map((a) => String(a)).filter((a) => requested.has(a));
+}
+
+/**
+ * Which PRs this row can speak about AT ALL — H48's population (governed,
+ * Tier H, open, drafts IN) narrowed to a pending approver request. Exported
+ * for H48's reason: the predicate deciding what is counted is where a silent
+ * hole would live.
+ */
+export function h69SpeaksAbout(pr, governed, approvers) {
+  if (!h48SpeaksAbout(pr, governed)) return false;
+  return h69AskedApprovers(pr, approvers).length > 0;
+}
+
+/**
+ * Whether the HEAD reading must be bought for this PR: only when the thread
+ * was read AND carries a record at all. A thread with no record is judged
+ * without it, and an unread thread buys nothing.
+ */
+export function h69NeedsHeadRead(pr, governed, approvers, commentRows) {
+  if (!Array.isArray(commentRows)) return false;
+  if (!h69SpeaksAbout(pr, governed, approvers)) return false;
+  return latestMarkedComment(commentRows, SEAT_RECORD_MARKER) !== null;
+}
+
+/**
+ * H69 — null when clean OR unjudged, else the finding sentence.
+ *
+ * @param {{ number?: number, state?: string, merged_at?: string|null, head?: { sha?: string },
+ *   requested_reviewers?: any[] }} pr
+ * @param {{ glob: string, files?: string[] }[]} governed — the matched slice.
+ * @param {string[]} approvers — `GOVERNED_APPROVERS`, injected.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows — H48's
+ *   three states: undefined (never consulted), null (unreadable), rows (judged).
+ * @param {string|null} headCommittedAt — the head's committer date, or null when
+ *   that leg was not read; consulted only when a record exists.
+ */
+export function h69SeatRecordBehindHead(pr, governed, approvers, commentRows, headCommittedAt = null) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h69SpeaksAbout(pr, governed, approvers)) return null;
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const record = latestMarkedComment(rows, SEAT_RECORD_MARKER);
+  if (record) {
+    const headMs = Date.parse(headCommittedAt ?? '');
+    // An unread head date or an undatable record is UNJUDGED, never a verdict.
+    if (!Number.isFinite(headMs) || record.stamp === null) return null;
+    if (record.stamp > headMs) return null;
+  }
+
+  const surfaces = governed ?? [];
+  const hits = surfaces.reduce((n, s) => n + (s.files?.length ?? 0), 0);
+  const named = surfaces
+    .slice(0, H69_SURFACE_LIST_CAP)
+    .map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`)
+    .join(', ');
+  const more =
+    surfaces.length > H69_SURFACE_LIST_CAP ? `, +${surfaces.length - H69_SURFACE_LIST_CAP} more` : '';
+  const asked = h69AskedApprovers(pr, approvers)
+    .map((a) => `\`${a}\``)
+    .join(', ');
+  const sha7 = String(pr?.head?.sha ?? '').slice(0, 7) || 'unknown';
+  const missing = record
+    ? `no \`## 席位核对\` comment newer than its head commit (newest record ${record.createdAt}, ` +
+      `head committed ${headCommittedAt})`
+    : 'no comment whose line begins `## 席位核对`';
+  const staleClause = record
+    ? ` — the record on the thread predates that head, so it describes a diff the maintainer will not be shown`
+    : '';
+  return (
+    `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), with ${asked} ` +
+    `requested for review and ${missing}. The seat's record — the 维护者速读 with 席位意见 filled, then ` +
+    '`## 席位核对` with the six-item check — is what the request is supposed to FOLLOW, not precede: the relay ' +
+    'summons the approvers at `pr_create` and again at `pr_ready`, so a pending request says the maintainer was ' +
+    'asked, and only the record says there is something on this head for them to read. Remedy: post the ' +
+    `\`## 席位核对\` record as a COMMENT for head \`${sha7}\`${staleClause}. Report-only patrol INPUT, not a ` +
+    'verdict and not a gate: nothing ships through this gap (the queue guard still refuses an unapproved Tier H ' +
+    'enqueue), ⛔ no label is written from here, and ⛔ no seat may substitute an approving review for the record.'
   );
 }
 
@@ -17166,6 +17325,13 @@ export const SWEEP_COUNT_KEYS = [
   // unbought one, and either way an unjudged PR must not read as a clean one.
   'briefCandidates',
   'briefJudged',
+  // H69's coverage pair. `seatRecordCandidates` is how many governed Tier H
+  // open PRs carried a pending approver request and `seatRecordJudged` how
+  // many of those had a readable thread AND, where a record existed, a
+  // readable head date — the pair that keeps a run whose commit reads all
+  // failed separable from a board where every summons followed its record.
+  'seatRecordCandidates',
+  'seatRecordJudged',
   // H57's population reading (#17132) — the only row here whose subject is a
   // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
   // from a listing another row already paid for. `scheduledUnresolved` and
@@ -17792,6 +17958,20 @@ export function summaryLine(counts, findingCount) {
           'population at all — nor is a Tier S PR, whose landing has no maintainer inbox — and a governed ' +
           'PR with NO `**ACCEPT**` verdict is CLEAN rather than quiet'
     }. ` +
+    // H69's coverage pair. UNCONDITIONAL like every other window's, the
+    // register's availability leading it for H43's reason, and the one fetch
+    // it buys stated with its bound: a commit read per PR that carries a
+    // record, never per PR.
+    `Seat records (H69): ${
+      counts.governedRegisterReason
+        ? `NOT MEASURED — ${counts.governedRegisterReason}`
+        : `${counts.seatRecordJudged ?? 0} of ${counts.seatRecordCandidates ?? 0} governed Tier H open PRs with an ` +
+          'approver requested judged, on the thread H48 already bought plus ONE commit read per PR that carries a ' +
+          '`## 席位核对` record at all (the head\'s committer date). A PR with NO record is judged without that read; ' +
+          'one whose record exists but whose head date could not be read is UNJUDGED rather than clean, as is an ' +
+          'unreadable thread; a Tier H PR nobody has asked yet is H43\'s and out of this population, and a Tier S PR ' +
+          'has no summons for the record to precede'
+    }. ` +
     // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
     // and it carries the two disclosures this row owes: it fetches NOTHING (the
     // thread is H2's read, bought for exactly this population), and its PR side
@@ -18032,6 +18212,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h45EpicParents', 'Epic parent reads (H45): '],
   ['h47Release', 'Release records (H47): '],
   ['h48Brief', 'Maintainer briefs (H48): '],
+  ['h69SeatRecord', 'Seat records (H69): '],
   ['h49Partial', 'Partial landings (H49): '],
   ['h50ThreadRead', 'Thread-read fields (H50): '],
   ['h52OpenQuestions', 'Open questions (H52): '],
@@ -18542,6 +18723,11 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H46: 'state',
   H47: 'state',
   H48: 'state',
+  // H69 is a `state` for H48's reason, one act earlier: the maintainer was
+  // summoned to a PR whose seat record for that head is not on the thread —
+  // a half-written handoff, readable and repairable from the board by one
+  // comment. ⛔ Not `stall`: the PR may be moving perfectly well.
+  H69: 'state',
   H49: 'state',
   H50: 'state',
 
@@ -22090,6 +22276,26 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     prCommentCache.set(number, value);
     return value;
   };
+  // The HEAD-COMMIT cache (H69): `commit.committer.date` of a PR's `head.sha`,
+  // ONE `GET /repos/{owner}/{repo}/commits/{sha}` per distinct head, bought only
+  // for a PR whose thread carries a seat record to date against. Keyed by sha,
+  // so two PRs sharing a head pay once. `null` is UNREAD — a failed request,
+  // or a row without the field — never a date (#4690).
+  const prHeadCommitCache = new Map();
+  const prHeadCommittedAtFor = async (pr) => {
+    const sha = String(pr?.head?.sha ?? '');
+    if (!sha) return null;
+    if (prHeadCommitCache.has(sha)) return prHeadCommitCache.get(sha);
+    let value = null;
+    try {
+      const row = await rest(`/repos/${OWNER_REPO}/commits/${encodeURIComponent(sha)}`);
+      value = row?.commit?.committer?.date ?? row?.commit?.author?.date ?? null;
+    } catch {
+      value = null;
+    }
+    prHeadCommitCache.set(sha, value);
+    return value;
+  };
   let lastHoldError = null;
 
   // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
@@ -22745,6 +22951,24 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (rows !== null) stats.briefJudged = (stats.briefJudged ?? 0) + 1;
       const handoff = h48GovernedVerdictWithoutBrief(pr, governed, rows);
       if (handoff) findings.push([pr, 'H48', handoff]);
+    }
+
+    // H69 — the summons that ran ahead of the seat's record. H48's population
+    // narrowed to a pending approver request, H48's thread (bought there,
+    // reused here at no cost), plus ONE commit read per PR that carries a
+    // record at all. Same register, so the same silence when it did not load.
+    for (const pr of seenPrs.values()) {
+      const governed = governedByPr.get(pr.number);
+      if (!h69SpeaksAbout(pr, governed, GOVERNED_REGISTER.approvers)) continue;
+      stats.seatRecordCandidates = (stats.seatRecordCandidates ?? 0) + 1;
+      const rows = await prCommentRowsFor(pr.number);
+      const needsHead = h69NeedsHeadRead(pr, governed, GOVERNED_REGISTER.approvers, rows);
+      const headAt = needsHead ? await prHeadCommittedAtFor(pr) : null;
+      if (rows !== null && (!needsHead || headAt !== null)) {
+        stats.seatRecordJudged = (stats.seatRecordJudged ?? 0) + 1;
+      }
+      const behind = h69SeatRecordBehindHead(pr, governed, GOVERNED_REGISTER.approvers, rows, headAt);
+      if (behind) findings.push([pr, 'H69', behind]);
     }
   }
 
@@ -24032,6 +24256,13 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // yields that must withdraw nothing (no session, two sessions, a hyphen),
   // and the re-claim after a yield that must govern again.
   'Yielded claim reading': 19,
+  // Registered with the seat-record row, pin just under the count. What this
+  // battery floors is the pair the filing card pins — a record OLDER than the
+  // head fires, a NEWER one is clean — with its controls inside: the no-record
+  // case that needs no head read, the unread head that must stay UNJUDGED,
+  // the non-approver and assign-only requests that must not read as a
+  // summons, and the Tier S slice the row stands down on.
+  'H69 seat record before governed review': 40,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -31889,15 +32120,16 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
   const LABEL48 = GOVERNED_PR_DECISION_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
-  // ⚠️ The fixture BODY always carries the dev's 草稿 section, so every case
-  // below that fires with no brief COMMENT is simultaneously the "a draft in the
-  // body does not satisfy the brief half" case.
+  // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
+  // `## 维护者速读` heading the comment marker reads, so every case below that
+  // fires with no brief COMMENT is simultaneously the "a draft in the body does
+  // not satisfy the brief half" case.
   const pr48 = (labels, extra = {}) => ({
     number: 15908,
     state: 'open',
     draft: true,
     labels: labels.map((name) => ({ name })),
-    body: '## 维护者速读(草稿)\n\n这是 dev 的草稿,不是评审后的最终速读。',
+    body: '## 维护者速读\n改了什么:dev 的六行草稿,不是评审后的最终速读。',
     ...extra,
   });
   const h48row = (...args) => String(h48GovernedVerdictWithoutBrief(...args) ?? '');
@@ -31918,7 +32150,8 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
 
   // The BODY draft is not the brief — the half this row exists to find must not
   // be allowed to satisfy itself out of the text the dev wrote before review.
-  t('H48: a `## 维护者速读(草稿)` section in the BODY does NOT satisfy the brief half', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: a `## 维护者速读` section in the BODY — the dev\'s draft, same heading — does NOT satisfy the brief half', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: …and the fixture body really does carry the comment marker\'s heading, so the case is not vacuous', MAINTAINER_BRIEF_MARKER.test(pr48([LABEL48]).body), true);
   t('H48: …and the row SAYS so, where a reader would otherwise assume a bug', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('PR BODY does NOT satisfy this half'), true);
   t('H48: …and that clause is absent once the brief really is posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('PR BODY does NOT satisfy'), false);
   t('H48: a brief comment ANYWHERE on the thread counts, not only the newest', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(BRIEF48, '2026-09-05T10:00:00Z'), cm48(VERDICT48), cm48('lgtm')]), null);
@@ -32012,6 +32245,123 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H48 summary: an unloadable register reads NOT MEASURED, as H43 does', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('NOT MEASURED'), true);
   t('H48 summary: …and prints no count at all then, so nothing reads as a clean board', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('0 of 0'), false);
   t('H48 summary: a bare line renders numbers, never `undefined`', saidBy('h48Brief', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H69 — the summons that ran ahead of the seat's record (report-only) ---
+  //
+  // Driven with the governed slice AS DATA and the approver set INJECTED, as
+  // H43 and H48 are; the real register answers only the tier cases.
+  const BATTERY69 = 'H69 seat record before governed review';
+  const APP69 = ['os-zhuang', 'hotlong'];
+  const GOV69 = [{ glob: 'docs/adr/**', files: ['docs/adr/0121-x.md'] }];
+  const HEAD69 = '2026-10-26T12:00:00Z';
+  const OLDER69 = '2026-10-26T11:00:00Z';
+  const NEWER69 = '2026-10-26T13:00:00Z';
+  const pr69 = (extra = {}) => ({
+    number: 26144,
+    state: 'open',
+    draft: true,
+    labels: [],
+    head: { sha: '7cc88889e2294032fbb467107499c8f04d9a77da', ref: 'claude/project-thread-x' },
+    user: { login: 'objectstack-fleet[bot]' },
+    requested_reviewers: (extra.requested ?? ['hotlong']).map((login) => ({ login })),
+    assignees: (extra.assigned ?? []).map((login) => ({ login })),
+    body: '## 维护者速读\n改了什么:dev 的六行草稿。',
+    ...(extra.fields ?? {}),
+  });
+  const RECORD69 = '## 席位核对\n\nACCEPT · domain:skills seat 2 · head `7cc88889`';
+  const cm69 = (body, at) => ({ body, created_at: at });
+  const h69 = (pr, rows, head = HEAD69, governed = GOV69, approvers = APP69) =>
+    h69SeatRecordBehindHead(pr, governed, approvers, rows, head);
+  const h69row = (...args) => String(h69(...args) ?? '');
+
+  // The pair the filing card pins: a record OLDER than the head fires, a NEWER one is clean.
+  b(BATTERY69, 'H69: approver requested, record OLDER than the head -> finding', typeof h69(pr69(), [cm69(RECORD69, OLDER69)], HEAD69), 'string');
+  b(BATTERY69, 'H69: …and the row says the record predates the head', h69row(pr69(), [cm69(RECORD69, OLDER69)], HEAD69).includes('predates that head'), true);
+  b(BATTERY69, 'H69: …and dates both sides so the reader can check', h69row(pr69(), [cm69(RECORD69, OLDER69)], HEAD69).includes(`(newest record ${OLDER69}, head committed ${HEAD69})`), true);
+  b(BATTERY69, 'H69: approver requested, record NEWER than the head -> clean', h69(pr69(), [cm69(RECORD69, NEWER69)], HEAD69), null);
+  b(BATTERY69, 'H69: the NEWEST record decides — an old one beside a fresh one is clean', h69(pr69(), [cm69(RECORD69, OLDER69), cm69(RECORD69, NEWER69)], HEAD69), null);
+  b(BATTERY69, 'H69: …in either thread order', h69(pr69(), [cm69(RECORD69, NEWER69), cm69(RECORD69, OLDER69)], HEAD69), null);
+  b(BATTERY69, 'H69: a record at the SAME instant as the head is not newer', typeof h69(pr69(), [cm69(RECORD69, HEAD69)], HEAD69), 'string');
+  b(BATTERY69, 'H69: a NEW PUSH after a fresh record re-opens the half state', typeof h69(pr69(), [cm69(RECORD69, NEWER69)], '2026-10-26T14:00:00Z'), 'string');
+
+  // No record at all — the measured shape — needs no head read.
+  b(BATTERY69, 'H69: approver requested, NO record on the thread -> finding', typeof h69(pr69(), [cm69('lgtm', OLDER69)]), 'string');
+  b(BATTERY69, 'H69: …judged with a null head date, because there is nothing to date against', typeof h69(pr69(), [], null), 'string');
+  b(BATTERY69, 'H69: …and the row names the missing record', h69row(pr69(), []).includes('no comment whose line begins `## 席位核对`'), true);
+  b(BATTERY69, 'H69: …without the stale clause, which belongs to the dated case', h69row(pr69(), []).includes('predates that head'), false);
+  b(BATTERY69, 'H69 head read: bought only for a read thread that carries a record', [h69NeedsHeadRead(pr69(), GOV69, APP69, []), h69NeedsHeadRead(pr69(), GOV69, APP69, [cm69(RECORD69, OLDER69)]), h69NeedsHeadRead(pr69(), GOV69, APP69, null), h69NeedsHeadRead(pr69(), GOV69, APP69, undefined)].join(), 'false,true,false,false');
+  b(BATTERY69, 'H69 head read: …and never for a PR the row does not speak about', h69NeedsHeadRead(pr69({ requested: [] }), GOV69, APP69, [cm69(RECORD69, OLDER69)]), false);
+
+  // ASKED is the pending request from an approver — nothing wider.
+  b(BATTERY69, 'H69: nobody requested -> clean, that PR is H43\'s', h69(pr69({ requested: [] }), []), null);
+  b(BATTERY69, 'H69: only a NON-approver requested -> clean, the governed summons has not gone out', h69(pr69({ requested: ['some-dev'] }), []), null);
+  b(BATTERY69, 'H69: an approver merely ASSIGNED (the author fallback) with nobody requested -> clean', h69(pr69({ requested: [], assigned: ['hotlong'] }), []), null);
+  b(BATTERY69, 'H69: both approvers requested -> still a finding until the record lands', typeof h69(pr69({ requested: APP69 }), []), 'string');
+  b(BATTERY69, 'H69: the approver set is INJECTED, never baked in', typeof h69(pr69({ requested: ['some-other-account'] }), [], HEAD69, GOV69, ['some-other-account']), 'string');
+  b(BATTERY69, 'H69: an empty approver set can never fire', h69(pr69(), [], HEAD69, GOV69, []), null);
+  b(BATTERY69, 'H69 asked: the reading is the intersection, in approver order', h69AskedApprovers(pr69({ requested: ['hotlong', 'some-dev', 'os-zhuang'] }), APP69).join(), 'os-zhuang,hotlong');
+
+  // Population: governed Tier H, open, drafts IN — H48's, narrowed.
+  b(BATTERY69, 'H69: a non-governed PR is out of population', h69(pr69(), [], HEAD69, []), null);
+  b(BATTERY69, 'H69 population: …and the counting policy says so directly', h69SpeaksAbout(pr69(), [], APP69), false);
+  b(BATTERY69, 'H69: a CLOSED PR is out', h69(pr69({ fields: { state: 'closed' } }), []), null);
+  b(BATTERY69, 'H69: a MERGED PR is out', h69(pr69({ fields: { merged_at: '2026-10-26T14:00:00Z' } }), []), null);
+  b(BATTERY69, 'H69 population: ⛔ a DRAFT is IN — the summons goes out on the draft', h69SpeaksAbout(pr69(), GOV69, APP69), true);
+  b(BATTERY69, 'H69 population: …and so is a non-draft governed PR', h69SpeaksAbout(pr69({ fields: { draft: false } }), GOV69, APP69), true);
+
+  // Four input states, never two (#4690).
+  b(BATTERY69, 'H69: an unconsulted thread is UNJUDGED, never clean', h69(pr69(), undefined), null);
+  b(BATTERY69, 'H69: an UNREADABLE thread is UNJUDGED too', h69(pr69(), null), null);
+  b(BATTERY69, 'H69: a record whose head date could not be read is UNJUDGED — the row invents no timestamp', h69(pr69(), [cm69(RECORD69, OLDER69)], null), null);
+  b(BATTERY69, 'H69: …and so is a record whose own stamp cannot be parsed', h69(pr69(), [cm69(RECORD69, 'yesterday')], HEAD69), null);
+  b(BATTERY69, 'H69: a missing PR is judged on what it was handed, never a crash', h69(undefined, []), null);
+
+  // Tier S stands down — driven by the real register, as H43/H48 are.
+  const TIER_S_69 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md']) : [];
+  const MIXED_69 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md', 'docs/adr/0121-x.md']) : [];
+  b(BATTERY69, 'H69 tier: a Tier S PR (all governed paths on the record row) is OUT — no summons precedes its landing', h69(pr69(), [], HEAD69, TIER_S_69), null);
+  b(BATTERY69, 'H69 tier: …and a MIXED slice (one Tier H row) still fires', typeof h69(pr69(), [], HEAD69, MIXED_69), 'string');
+
+  // The record marker — the brief marker's three properties on the literal heading.
+  b(BATTERY69, 'record marker: the canonical heading matches', SEAT_RECORD_MARKER.test(RECORD69), true);
+  b(BATTERY69, 'record marker: a blockquoted record matches', SEAT_RECORD_MARKER.test('> ## 席位核对'), true);
+  b(BATTERY69, 'record marker: ⛔ a `###` sub-heading is not the record', SEAT_RECORD_MARKER.test('### 席位核对'), false);
+  b(BATTERY69, 'record marker: ⛔ a mention in prose is not the record', SEAT_RECORD_MARKER.test('见 ## 席位核对 评论'), false);
+  b(BATTERY69, 'record marker: ⛔ the dev\'s body brief is not the record', SEAT_RECORD_MARKER.test(pr69().body), false);
+  b(BATTERY69, 'record marker: ⛔ a landing comment that cites the record (⛔ 不复述 `## 席位核对`) is not one', SEAT_RECORD_MARKER.test('落地评论 = 两个读数的探针表,⛔ 不复述 `## 席位核对`'), false);
+  b(BATTERY69, 'record marker: a verdict-bearing brief comment is not the record', SEAT_RECORD_MARKER.test('## 维护者速读\n\n**ACCEPT** — lands as ruled'), false);
+  b(BATTERY69, 'record marker: no `g` flag, so two reads of one body agree', [SEAT_RECORD_MARKER.test(RECORD69), SEAT_RECORD_MARKER.test(RECORD69)].join(','), 'true,true');
+
+  // The sentence.
+  b(BATTERY69, 'H69 row: the remedy is the record as a COMMENT for the current head', h69row(pr69(), []).includes('post the `## 席位核对` record as a COMMENT for head `7cc8888`'), true);
+  b(BATTERY69, 'H69 row: states its report-only posture', h69row(pr69(), []).includes('Report-only patrol INPUT'), true);
+  b(BATTERY69, 'H69 row: …and refuses the label and the seat review', h69row(pr69(), []).includes('no label is written from here') && h69row(pr69(), []).includes('no seat may substitute an approving review'), true);
+  b(BATTERY69, 'H69 row: names the approver asked', h69row(pr69(), []).includes('with `hotlong` requested for review'), true);
+  b(BATTERY69, 'H69 row: names the governed surfaces it matched, from the matcher', h69row(pr69(), []).includes('`docs/adr/**`×1'), true);
+  b(BATTERY69, 'H69 row: says the request is a SUMMONS the record must precede', h69row(pr69(), []).includes('summons the approvers at `pr_create` and again at `pr_ready`'), true);
+  const many69 = Array.from({ length: H69_SURFACE_LIST_CAP + 2 }, (_, i) => ({ glob: `g${i}/**`, files: ['f'] }));
+  b(BATTERY69, 'H69 row: past the surface cap it counts the rest rather than growing', h69row(pr69(), [], HEAD69, many69).includes('+2 more'), true);
+  b(BATTERY69, 'H69 row: a PR without a head sha still renders, naming the gap', h69row(pr69({ fields: { head: {} } }), []).includes('for head `unknown`'), true);
+
+  // Adjacency: H43 reads WHO WAS ASKED; this row reads whether the record preceded the asking.
+  b(BATTERY69, 'H69 adjacency: H43 is silent on a PR both approvers were asked about…', h43GovernedReviewRequestGap(pr69({ requested: APP69 }), GOV69, APP69, []), null);
+  b(BATTERY69, 'H69 adjacency: …while H69 fires on it until the record lands', typeof h69(pr69({ requested: APP69 }), []), 'string');
+  b(BATTERY69, 'H69 adjacency: …and is silent once the record is on the head', h69(pr69({ requested: APP69 }), [cm69(RECORD69, NEWER69)], HEAD69), null);
+  b(BATTERY69, 'H69 adjacency: H48 asks a different question — a brief COMMENT is not a record', typeof h69(pr69(), [cm69('## 维护者速读\n\n一句话:…', NEWER69)], HEAD69), 'string');
+
+  // Registry, counters and the clause.
+  b(BATTERY69, 'H69 band: registered as a state row', familyBand('H69'), 'state');
+  b(BATTERY69, 'H69 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H69'), true);
+  b(BATTERY69, 'H69 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  b(BATTERY69, 'H69 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  b(BATTERY69, 'H69: both count keys ride the enumerated forwarding contract', ['seatRecordCandidates', 'seatRecordJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY69, 'H69 summary: the coverage pair is reported', saidBy('h69SeatRecord', summaryLine({ seatRecordJudged: 3, seatRecordCandidates: 4 }, 0)).includes('3 of 4 governed Tier H open PRs'), true);
+  b(BATTERY69, 'H69 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h69SeatRecord', summaryLine({}, 0)).includes('0 of 0 governed Tier H open PRs'), true);
+  b(BATTERY69, 'H69 summary: …and states the one fetch it buys, bounded per PR with a record', saidBy('h69SeatRecord', summaryLine({}, 0)).includes('ONE commit read per PR that carries a `## 席位核对` record'), true);
+  b(BATTERY69, 'H69 summary: …and says an unread head date is UNJUDGED, not clean', saidBy('h69SeatRecord', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  b(BATTERY69, 'H69 summary: an unloadable register reads NOT MEASURED, as H43/H48 do', saidBy('h69SeatRecord', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('NOT MEASURED'), true);
+  b(BATTERY69, 'H69 summary: a bare line renders numbers, never `undefined`', saidBy('h69SeatRecord', summaryLine({}, 0)).includes('undefined'), false);
+  b(BATTERY69, 'H69 floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY69) && SELF_TEST_BATTERIES[BATTERY69] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H49 — a partial dispatch landed, the card still reads TAKEN (#16003) ---
   // The rule landed together with this row, so NO card on any board carries a

@@ -159,10 +159,11 @@ export interface HttpDispatcherResult {
 /**
  * ADR-0006 generic kernel-resolution seam.
  *
- * A host (e.g. ObjectStack Cloud) injects a resolver to own per-request
- * kernel selection. The framework ships NO multi-tenant implementation — all
- * hostname→env strategy, the per-env kernel cache, and the control plane live
- * in the host distribution (`@objectstack/objectos-runtime`). When no resolver
+ * A host (e.g. the ObjectOS Cloud control plane) injects a resolver to own
+ * per-request kernel selection. The framework ships NO multi-tenant
+ * implementation — all hostname→env strategy, the per-env kernel cache, and
+ * the control plane live in the host distribution
+ * (`@objectstack/objectos-runtime`). When no resolver
  * is injected the dispatcher serves every request from its single
  * `defaultKernel` (single-environment mode).
  *

@@ -89,7 +89,6 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useRealtimeSubscription, useConflictResolution } from '@object-ui/collaboration';
 import { ActionProvider, useNavigationOverlay, SchemaRenderer, useActionTextLocalizer, useRowPredicate, RelatedRecordActionsProvider, notifyDataChanged, useCapabilityGate, usePredicateScope, useMetadata } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
@@ -126,6 +125,7 @@ import {
     dispatchViewPatches,
 } from './objectViewOptions.js';
 import { ObjectNotFoundState, useViewTabsFit, keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { useObjectViewLiveData } from './objectViewLiveData.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -1449,57 +1449,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
     });
 
-    // Real-time: auto-refresh when server reports data changes
-    const { lastMessage: realtimeMessage } = useRealtimeSubscription({
-        channel: `object:${objectDef.name}`,
-    });
-
-    // Conflict resolution: detect and queue conflicts on reconnection
-    const conflictUserId = objectDef.name ? `user-${objectDef.name}` : 'current-user';
-    const { hasConflicts, resolveAllConflicts } = useConflictResolution(conflictUserId);
-
-    useEffect(() => {
-        if (realtimeMessage) {
-            // On reconnection data change, auto-resolve with server-wins strategy
-            if (hasConflicts) {
-                resolveAllConflicts('remote');
-            }
-            refreshData();
-        }
-    }, [realtimeMessage, hasConflicts, resolveAllConflicts, refreshData]);
-    
-    // Fetch record count for footer display.
-    //
-    // `$top: 0` IS the request: give me the total, send no rows. It was written
-    // `limit: 0`, which is not a `QueryParams` key — `convertQueryParams` copies
-    // exactly the `$`-prefixed keys the type declares — so the cap reached no
-    // branch and was dropped, and the platform's GET list route has no default
-    // page size. The effect therefore did the opposite of what it says: it
-    // downloaded EVERY row of the object, on every mount and every refresh of
-    // every list view, to read one integer off the envelope. The dead spelling
-    // type-checked because `QueryParams` then carried `[key: string]: any` for
-    // adapter-specific params; `object-ui/no-unprefixed-query-params` rejects it
-    // at write time now (objectui#5458), and the index signature itself is gone
-    // (objectui#7497), so `tsc` refuses it as well.
-    //
-    // `total` is the only field that can still answer the question, so the
-    // row-counting fallbacks are gone rather than repointed. Once we ask for
-    // zero rows an empty `data` means "you asked for none", not "the object is
-    // empty" — counting the response would report a confident `0` for any
-    // adapter that does not send a total. Leaving `recordCount` `undefined`
-    // omits the footer line instead of asserting a wrong number; the render is
-    // already guarded by `typeof recordCount === 'number'`.
-    useEffect(() => {
-        if (dataSource?.find && objectDef.name) {
-            dataSource.find(objectDef.name, { $top: 0 }).then((result: any) => {
-                if (typeof result?.total === 'number') {
-                    setRecordCount(result.total);
-                }
-            }).catch(() => {
-                // Silently ignore — record count is non-critical
-            });
-        }
-    }, [dataSource, objectDef.name, refreshKey]);
+    // objectstack#25992 slice 4: the realtime refresh, conflict resolution and
+    // footer record count moved to `./objectViewLiveData.ts`; the count state stays here.
+    useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
 
     // Navigation overlay for record detail (supports drawer/modal/split/popover via config)
     // Priority: activeView.navigation > objectDef.navigation > default drawer.
