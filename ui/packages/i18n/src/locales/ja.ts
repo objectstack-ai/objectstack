@@ -217,6 +217,8 @@ const ja = {
     update: "更新",
     createSuccess: "{{object}}が作成されました",
     updateSuccess: "{{object}}が更新されました",
+    createdNamed: "{{object}}「{{title}}」を作成しました",
+    updatedNamed: "{{object}}「{{title}}」を更新しました",
     created: "作成しました",
     saved: "保存しました",
     savedNamed: "{{title}}を保存しました",
@@ -2675,6 +2677,7 @@ const ja = {
     },
     shell: {
       tenantHostHint: "このシステムにサインインしています",
+      poweredBy: "Powered by ObjectStack",
     },
     layout: {
       headline: "強力なビジネスアプリを、より速く。",
@@ -3797,7 +3800,7 @@ const ja = {
       cancel: "キャンセル",
     },
     bound: {
-      title: "ObjectStack Cloud に接続済み",
+      title: "ObjectOS Cloud に接続済み",
       runtime: "ランタイム",
       organization: "組織",
       approvedBy: "承認者",
@@ -3916,13 +3919,13 @@ const ja = {
     install: {
       dialogTitle: "{{name}} をインストール",
       dialogDescCurrent: "この環境（{{host}}）にインストールします。",
-      dialogDescPicker: "このアプリをインストールする環境を選択します。ObjectStack Cloudにサインインする必要があります。",
+      dialogDescPicker: "このアプリをインストールする環境を選択します。ObjectOS Cloudにサインインする必要があります。",
       environment: "環境",
       environmentPlaceholder: "環境を選択",
       includeSampleData: "サンプルデータを含む",
       noEnvs: "アクティブな組織に環境が見つかりません。",
       noPermission: "どの環境にもアプリをインストールする権限がありません。組織のオーナーと管理者のみインストールできます。組織の管理者にお問い合わせください。",
-      signInFirst: "最初にObjectStack Cloudにサインインしてください。",
+      signInFirst: "最初にObjectOS Cloudにサインインしてください。",
       success: "インストールが完了しました。環境を開いて新しいアプリを確認してください。",
       localSuccess: "このランタイムに v{{version}} をインストールしました。「{{name}}」がアプリスイッチャーに表示されます。",
       localLoadsAtRestart: "このランタイムに v{{version}} をインストールしました。「{{name}}」はランタイムの次回再起動時に読み込まれ、それまではアプリスイッチャーに表示されません。",
@@ -3964,7 +3967,7 @@ const ja = {
     update: {
       dialogTitle: "{{name}} を更新",
       dialogDescCurrent: "この環境（{{host}}）にインストール済みのアプリを更新します。",
-      dialogDescPicker: "インストール済みのアプリを更新する環境を選択します。ObjectStack Cloudにサインインする必要があります。",
+      dialogDescPicker: "インストール済みのアプリを更新する環境を選択します。ObjectOS Cloudにサインインする必要があります。",
       majorNotice: "メジャーバージョンの更新です（v{{fromMajor}} → v{{toMajor}}）。互換性のない変更が含まれる可能性があります。",
       releaseNotes: "v{{version}} のリリースノートを読む",
       success: "v{{version}} に更新しました。",

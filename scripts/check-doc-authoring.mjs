@@ -49,7 +49,7 @@
 // #4913 took `.claude` rather than `.claude/skills`: a new subdirectory under it
 // is covered on arrival instead of being missed the same way twice. That also
 // covers the hand-written top-level guides (`docs/protocol-upgrade-guide.md`,
-// `docs/upgrading-to-11.md`, …), which are live instructions to the reader and
+// `docs/releases-maintenance.md`, …), which are live instructions to the reader and
 // belong in scope.
 //
 // ## Dead roots are a hard error (#4916)
@@ -204,8 +204,8 @@ const SKIP_FILES = new Set(['content/docs/ai/skills-reference.mdx']);
  * the top of this file: a new subdirectory is covered on arrival instead of
  * being missed the same way twice — and a declaration that has to be extended
  * by hand is the same silent narrowing, one tool over. And it strands the
- * twelve hand-written top-level guides (`docs/protocol-upgrade-guide.md`,
- * `docs/upgrading-to-11.md`, …), which are files rather than a subtree and
+ * hand-written top-level guides (`docs/protocol-upgrade-guide.md`,
+ * `docs/releases-maintenance.md`, …), which are files rather than a subtree and
  * would have to be enumerated one literal each.
  *
  * The residual is also not new: those four subtrees derive this gate TODAY, via

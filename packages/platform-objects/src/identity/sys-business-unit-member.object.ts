@@ -28,11 +28,13 @@ export const SysBusinessUnitMember = ObjectSchema.create({
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
   // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
-  // `user_id` and `business_unit_id` are lookups, so the formula reads their stored
-  // ids: a formula is evaluated on the stored row, before `$expand`, and
-  // cannot reach a related record's own title.
+  // `titleFormat` stays for renderers that still read it first, and is the
+  // rung below the pointer where the title has no value: the console draws a
+  // lookup placeholder by the related record's name (else its email), so over
+  // an expanded row it renders the same text the formula does.
+  // `identity-display-title.test.ts` holds the two to the same text;
+  // `plugin-security/src/business-unit-member-title.test.ts` pins the title a
+  // read serves.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} in {business_unit_id}',
@@ -47,12 +49,21 @@ export const SysBusinessUnitMember = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Every source column is required, so the
-    // expression needs no null guard.
+    // read and has no stored column, so a renamed user or unit is named anew on
+    // the next read. It names the PERSON and the UNIT, not the stored ids: the
+    // user's `name`, or their `email` where the name is blank (the platform's
+    // `name || email` rule for a person's handle), and the unit's `name`, each
+    // read ONE hop through its lookup (ADR-0079 addendum, 2026-10-18), as
+    // `sys_user_permission_set`'s title does. Both hops are read under the
+    // READER's own authority: a user or unit the reader may not read, or one
+    // that no longer exists, leaves the title null, never a value computed in
+    // its place. Neither lookup is read bare beside its hop (refused,
+    // `traversal-bare-and-traversed`). Both lookups are required, and both
+    // related `name` columns are required stored text (no second hop).
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' in ' + record.business_unit_id`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' in ' + record.business_unit_id.name`,
       description: 'Record title: the user and the business unit they are assigned to (computed on read)',
       group: 'Assignment',
     }),

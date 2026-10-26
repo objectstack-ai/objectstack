@@ -44,6 +44,17 @@ const S3_LIST_MAX_KEYS = 1000;
 const KEY_PREFIX_DELIMITER = '/';
 
 /**
+ * The credentials {@link S3StorageAdapter.getPresignedUploadOrigin} signs its
+ * probe with. A signature never moves the URL's host, so the probe needs no
+ * real key, and fixed ones keep it from ever consulting the AWS SDK's
+ * credential chain, which can reach the network.
+ */
+const PRESIGN_ORIGIN_PROBE_CREDENTIALS = {
+  accessKeyId: 'PRESIGNORIGINPROBE',
+  secretAccessKey: 'presign-origin-probe',
+};
+
+/**
  * Configuration for the S3 storage adapter.
  */
 export interface S3StorageAdapterOptions {
@@ -147,6 +158,7 @@ export class S3StorageAdapter implements IStorageService {
    */
   private readonly keyPrefix: string;
   private clientPromise: Promise<any> | null = null;
+  private presignedUploadOriginPromise: Promise<string> | null = null;
 
   constructor(private readonly options: S3StorageAdapterOptions) {
     this.bucket = options.bucket;
@@ -230,27 +242,7 @@ export class S3StorageAdapter implements IStorageService {
           );
         }
         const { S3Client } = s3Mod;
-        const clientOpts: any = {
-          region: this.region,
-          // Flexible checksums only where the operation REQUIRES one. The SDK
-          // default (`WHEN_SUPPORTED`) stamps a CRC32 into every PutObject it
-          // prepares, and a presign prepares the command with NO body — so the
-          // signed upload URL would bake in `x-amz-checksum-crc32=AAAAAA==`
-          // (the CRC32 of an empty body) and `x-amz-sdk-checksum-algorithm`. A
-          // store that enforces a query-signed checksum then refuses every
-          // browser PUT with a checksum mismatch, while server-side `upload()`
-          // keeps working: presign answers 200 and the object never lands.
-          // None of the commands this adapter issues is checksum-required.
-          // `responseChecksumValidation` is the other half: it is what bakes
-          // `x-amz-checksum-mode=ENABLED` into a presigned GET, and what makes
-          // `download()` validate a response checksum. The two are set TOGETHER
-          // on purpose: the response option alone puts a CRC32 on the GET URL.
-          // Pinned in `s3-storage-adapter.presign-checksum.test.ts`.
-          requestChecksumCalculation: 'WHEN_REQUIRED',
-          responseChecksumValidation: 'WHEN_REQUIRED',
-        };
-        if (this.endpoint) clientOpts.endpoint = this.endpoint;
-        if (this.forcePathStyle) clientOpts.forcePathStyle = true;
+        const clientOpts: any = this.clientOptions();
         if (this.options.accessKeyId && this.options.secretAccessKey) {
           clientOpts.credentials = {
             accessKeyId: this.options.accessKeyId,
@@ -261,6 +253,37 @@ export class S3StorageAdapter implements IStorageService {
       })();
     }
     return this.clientPromise;
+  }
+
+  /**
+   * Everything the S3 client is built from except its credentials: the region,
+   * endpoint and addressing style that decide where a request goes. Shared by
+   * {@link getClient} and {@link getPresignedUploadOrigin}, so the origin the
+   * probe answers is the one every presigned URL carries.
+   */
+  private clientOptions(): Record<string, unknown> {
+    const clientOpts: Record<string, unknown> = {
+      region: this.region,
+      // Flexible checksums only where the operation REQUIRES one. The SDK
+      // default (`WHEN_SUPPORTED`) stamps a CRC32 into every PutObject it
+      // prepares, and a presign prepares the command with NO body — so the
+      // signed upload URL would bake in `x-amz-checksum-crc32=AAAAAA==`
+      // (the CRC32 of an empty body) and `x-amz-sdk-checksum-algorithm`. A
+      // store that enforces a query-signed checksum then refuses every
+      // browser PUT with a checksum mismatch, while server-side `upload()`
+      // keeps working: presign answers 200 and the object never lands.
+      // None of the commands this adapter issues is checksum-required.
+      // `responseChecksumValidation` is the other half: it is what bakes
+      // `x-amz-checksum-mode=ENABLED` into a presigned GET, and what makes
+      // `download()` validate a response checksum. The two are set TOGETHER
+      // on purpose: the response option alone puts a CRC32 on the GET URL.
+      // Pinned in `s3-storage-adapter.presign-checksum.test.ts`.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
+    };
+    if (this.endpoint) clientOpts.endpoint = this.endpoint;
+    if (this.forcePathStyle) clientOpts.forcePathStyle = true;
+    return clientOpts;
   }
 
   private async s3Mod(): Promise<any> {
@@ -502,6 +525,44 @@ export class S3StorageAdapter implements IStorageService {
       headers: options?.contentType ? { 'content-type': options.contentType } : undefined,
       expiresIn,
     };
+  }
+
+  /**
+   * The origin a browser sends a {@link getPresignedUpload} URL's `PUT` to: the
+   * scheme, host and port of every presigned upload this adapter hands out.
+   * The Console document's `connect-src` names it, so the page may reach the
+   * store (`@objectstack/cli`'s console mount reads it off the kernel's
+   * `storage` service).
+   *
+   * The origin comes from the presigner itself, never from string assembly:
+   * this signs a probe upload for this bucket with the client options every
+   * real presign uses, so a virtual-hosted bucket (`bucket.<endpoint host>`),
+   * a region-templated AWS host and a path-style endpoint all come out exactly
+   * as the presigned URL carries them. Only the credentials differ, and they
+   * never move the host. Signing is local computation: nothing is sent.
+   *
+   * Resolved once per adapter; a settings change builds a new adapter. A
+   * failure (the AWS SDK not installed, an endpoint the SDK refuses) rejects,
+   * the same way every presign would, and the next call tries again.
+   */
+  getPresignedUploadOrigin(): Promise<string> {
+    if (!this.presignedUploadOriginPromise) {
+      this.presignedUploadOriginPromise = (async () => {
+        const s3 = await this.s3Mod();
+        const { getSignedUrl } = await this.presignerMod();
+        const client = new s3.S3Client({ ...this.clientOptions(), credentials: PRESIGN_ORIGIN_PROBE_CREDENTIALS });
+        try {
+          const cmd = new s3.PutObjectCommand({ Bucket: this.bucket, Key: this.storageKey('presign-origin-probe') });
+          return new URL(await getSignedUrl(client, cmd, { expiresIn: 60 })).origin;
+        } finally {
+          client.destroy();
+        }
+      })();
+      this.presignedUploadOriginPromise.catch(() => {
+        this.presignedUploadOriginPromise = null;
+      });
+    }
+    return this.presignedUploadOriginPromise;
   }
 
   async getPresignedDownload(

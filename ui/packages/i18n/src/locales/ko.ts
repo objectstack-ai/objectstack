@@ -217,6 +217,8 @@ const ko = {
     update: "업데이트",
     createSuccess: "{{object}} 생성됨",
     updateSuccess: "{{object}} 업데이트됨",
+    createdNamed: "{{object}} \"{{title}}\" 생성됨",
+    updatedNamed: "{{object}} \"{{title}}\" 업데이트됨",
     created: "생성됨",
     saved: "저장됨",
     savedNamed: "{{title}} 저장됨",
@@ -2673,6 +2675,7 @@ const ko = {
     },
     shell: {
       tenantHostHint: "이 시스템에 로그인하는 중입니다",
+      poweredBy: "ObjectStack 제공",
     },
     layout: {
       headline: "강력한 비즈니스 애플리케이션을 더 빠르게.",
@@ -3794,7 +3797,7 @@ const ko = {
       cancel: "취소",
     },
     bound: {
-      title: "ObjectStack Cloud에 연결됨",
+      title: "ObjectOS Cloud에 연결됨",
       runtime: "런타임",
       organization: "조직",
       approvedBy: "승인자",
@@ -3913,13 +3916,13 @@ const ko = {
     install: {
       dialogTitle: "{{name}} 설치",
       dialogDescCurrent: "이 환경에 설치 ({{host}}).",
-      dialogDescPicker: "이 앱을 설치할 환경을 선택하세요. ObjectStack Cloud에 로그인되어 있어야 합니다.",
+      dialogDescPicker: "이 앱을 설치할 환경을 선택하세요. ObjectOS Cloud에 로그인되어 있어야 합니다.",
       environment: "환경",
       environmentPlaceholder: "환경 선택",
       includeSampleData: "샘플 데이터 포함",
       noEnvs: "활성 조직에서 환경을 찾을 수 없습니다.",
       noPermission: "환경에 앱을 설치할 권한이 없습니다. 조직 소유자 및 관리자만 설치할 수 있습니다 — 조직 관리자에게 문의하세요.",
-      signInFirst: "먼저 ObjectStack Cloud에 로그인해야 합니다.",
+      signInFirst: "먼저 ObjectOS Cloud에 로그인해야 합니다.",
       success: "설치 성공. 환경을 열어 새 앱을 확인하세요.",
       localSuccess: "이 런타임에 v{{version}} 설치됨. \"{{name}}\"이(가) 이제 앱 전환기에 표시됩니다.",
       localLoadsAtRestart: "이 런타임에 v{{version}} 설치됨. \"{{name}}\"은(는) 런타임이 다음에 다시 시작될 때 로드되며, 그때까지는 앱 전환기에 표시되지 않습니다.",
@@ -3961,7 +3964,7 @@ const ko = {
     update: {
       dialogTitle: "{{name}} 업데이트",
       dialogDescCurrent: "이 환경({{host}})에 설치된 앱을 업데이트합니다.",
-      dialogDescPicker: "설치된 앱을 업데이트할 환경을 선택하세요. ObjectStack Cloud에 로그인되어 있어야 합니다.",
+      dialogDescPicker: "설치된 앱을 업데이트할 환경을 선택하세요. ObjectOS Cloud에 로그인되어 있어야 합니다.",
       majorNotice: "메이저 버전 업데이트입니다(v{{fromMajor}} → v{{toMajor}}). 호환되지 않는 변경이 포함될 수 있습니다.",
       releaseNotes: "v{{version}} 릴리스 노트 읽기",
       success: "v{{version}}(으)로 업데이트했습니다.",

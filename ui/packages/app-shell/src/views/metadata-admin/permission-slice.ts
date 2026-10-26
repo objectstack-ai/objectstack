@@ -18,6 +18,9 @@
  * ({@link EDITOR_AUTHORED_KEYS}).
  */
 
+import type { HierarchyScope } from '@objectstack/spec/contracts';
+import type { ObjectAccessScope } from '@objectstack/spec/security';
+
 export interface ObjectPerm {
   allowCreate?: boolean;
   allowRead?: boolean;
@@ -48,6 +51,51 @@ export interface ObjectPerm {
   // the `@objectstack/spec` bump that lands the retirement.
   viewAllRecords?: boolean;
   modifyAllRecords?: boolean;
+  /**
+   * objectstack#26187 — the record-scope (access DEPTH, ADR-0057 D1) columns
+   * ADR-0084 declares for the matrix. Authored by the row's two pickers. The
+   * BASE schema refuses `readScope` beside either super-user bit and
+   * `writeScope` beside `modifyAllRecords` (#16870), so the matrix greys the
+   * pickers on those bits and drops the scope when it grants one.
+   */
+  readScope?: ObjectAccessScope;
+  writeScope?: ObjectAccessScope;
+}
+
+/** The boolean columns of a row — every {@link ObjectPerm} key but the two scopes. */
+export type ObjectPermFlag = Exclude<keyof ObjectPerm, 'readScope' | 'writeScope'>;
+
+/**
+ * objectstack#26187 — `ObjectAccessScopeSchema`'s values, narrowest first, in
+ * the spec's own order. Restated rather than imported for the reason
+ * `useTenancyPosture` gives: the `@objectstack/spec/security` value entry adds
+ * its schema modules to the console bundle for a five-value list. The type is
+ * the spec's, so a value the spec does not declare does not compile, and
+ * `PermissionMatrixEditor.recordScope-26187.test.tsx` compares this list with
+ * the schema's `options`, so one the spec adds fails CI here.
+ */
+export const OBJECT_ACCESS_SCOPES: readonly ObjectAccessScope[] = [
+  'own',
+  'own_and_reports',
+  'unit',
+  'unit_and_below',
+  'org',
+];
+
+/**
+ * The three scopes only a hierarchy resolver enforces (`HierarchyScope`):
+ * `hierarchy-security`, an enterprise capability. The open runtime resolves
+ * them to the owner alone (fails closed), so the pickers keep them selectable
+ * and say so.
+ */
+export const HIERARCHY_SCOPES: ReadonlySet<HierarchyScope> = new Set<HierarchyScope>([
+  'own_and_reports',
+  'unit',
+  'unit_and_below',
+]);
+
+export function isHierarchyScope(value: string | undefined): boolean {
+  return value !== undefined && (HIERARCHY_SCOPES as ReadonlySet<string>).has(value);
 }
 
 export interface FieldPerm {

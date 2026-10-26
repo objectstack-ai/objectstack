@@ -2,8 +2,6 @@
 
 import { defineReport } from '@objectstack/spec/ui';
 
-const task = 'showcase_task';
-
 // ADR-0021 Phase 2: the former `TaskListReport` (showcase_task_list) — a flat
 // record list — was converted to the `tabular` ListView on showcase_task
 // (src/ui/views/task.view.ts). A flat list is an object-bound row lens (ADR-0017),
