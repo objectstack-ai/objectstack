@@ -2,16 +2,32 @@
  * ObjectUI — SDUI JSX-source parser (ADR-0080)
  *
  * Types shared by the constrained JSX-source compiler. The parser turns a
- * constrained JSX/HTML+Tailwind *text* into the existing SDUI `SchemaNode`
- * tree. It PARSES — it never executes. No `import`, no `eval`, no JS.
+ * constrained JSX *text* into an SDUI node tree (`ParsedSchemaNode`, below).
+ * It PARSES — it never executes. No `import`, no `eval`, no JS.
  */
 
-/** A node in the compiled SDUI tree. Mirrors `@object-ui/types` BaseSchema. */
-export type SchemaNode = SchemaElement | string;
+/**
+ * A node in the compiled SDUI tree, as parsed: an element or a text child.
+ *
+ * Not `SchemaNode`: `@object-ui/types` publishes that name for the closed
+ * AUTHORING face, a union discriminated on a literal `type` with no index
+ * signature and with primitive children admitted. This is the parser's open,
+ * as-parsed data (any `type` string, the keys as authored), neither is
+ * assignable to the other, and this package takes no runtime dependency on
+ * `@object-ui/types` to re-export from. One exported name stood for both until
+ * this declaration was renamed (objectui#6349, batch 11).
+ */
+export type ParsedSchemaNode = SchemaElement | string;
+
+/**
+ * @deprecated Renamed {@link ParsedSchemaNode}; this alias keeps the name the
+ * package published before the two parser copies became one (objectstack#25712).
+ */
+export type SchemaNode = ParsedSchemaNode;
 
 export interface SchemaElement {
   type: string;
-  children?: SchemaNode[];
+  children?: ParsedSchemaNode[];
   [prop: string]: unknown;
 }
 
@@ -91,11 +107,6 @@ export interface ManifestInput {
    * Read the arms through `inputTypeArms(input.of)` — the same accessor
    * `type`'s arms go through, since the two fields carry the same shape and a
    * reader that forgets the array form is silently inert on it.
-   *
-   * LOCKSTEP: this key and its three readers — `validateTree`'s member check,
-   * `manifestFromConfigs`' canonicalization and the codegen's element type —
-   * are the port of objectui's copy. The two copies must agree on the accepted
-   * grammar AND on diagnostic codes; change this only together with objectui.
    */
   of?: ManifestInputType | ManifestInputType[];
   required?: boolean;
@@ -128,7 +139,7 @@ export interface ManifestInput {
    *      in `index.ts`. A union wider than the producer's is imprecision on
    *      the way out, not permissiveness on the way in.
    *   2. **Its sibling is a pure producer face.**
-   *      {@link ValidationResult.bindings}`[].kind` is written by
+   *      {@link ManifestValidationResult.bindings}`[].kind` is written by
    *      `validateTree` by copying this key, so the subset relation runs the
    *      other way there — see that declaration. The two are COUPLED by that
    *      assignment: narrowing one alone needs a cast at the only conversion
@@ -167,6 +178,19 @@ export interface ManifestComponent {
    */
   inputs: ManifestInput[];
   /**
+   * The NODE SLOTS this component's renderer reads besides `children`
+   * (objectui#11170): positions in the key-path grammar `@object-ui/types`'
+   * `NODE_SLOT_DECLARATIONS` states — `trigger`, `items[].content`,
+   * `regions[].components`. `validateTree` descends each one the way it
+   * descends `children`, so a slot-held node is judged too. Projected from
+   * that one declaration by `manifestFromConfigs`'s `slotsFor` option; the
+   * authoring tier leaves the declaration's RETIRED positions out, as the
+   * spec's own authoring walks do. ⛔ This tier keeps no slot list of its own:
+   * a manifest built without the option carries none, and the walk then
+   * follows `children` alone.
+   */
+  slots?: readonly string[];
+  /**
    * LAYOUT containment (objectui#6804, objectui#9910 Q2-A): the flag the
    * react-page JSX scope builder skips and the public layout ledger lists.
    * ⛔ Not "accepts children" — this tier's containment check does not read it.
@@ -196,8 +220,23 @@ export interface Manifest {
   components: Record<string, ManifestComponent>;
 }
 
-/** Result of validating a compiled tree against the manifest. */
-export interface ValidationResult {
+/**
+ * Result of validating a compiled tree against the MANIFEST.
+ *
+ * Named `ManifestValidationResult`, not `ValidationResult` (objectui#3161,
+ * objectstack#4115 ledger batch 7), following the convention registered on
+ * objectstack#4115 for this name: **`<what was validated>Validation<Error |
+ * Result>`**. `ValidationResult` is exported twice by the spec — `kernel` and
+ * `contracts`, both `{ valid, errors?: [{ field, message, code? }], warnings? }`
+ * for PLUGIN MANIFEST validation — and `@object-ui/core` took
+ * `SchemaNodeValidationResult` under the same convention in batch 4
+ * (objectui#3188). Three results, three subjects: a plugin, a schema node, and
+ * this one, which carries no `valid` flag at all — it returns `diagnostics`
+ * (severity lives per entry), the `requires` set the compiled page needs, and
+ * the binding sites the server must resolve. Nothing here is assignable to
+ * anything there in either direction.
+ */
+export interface ManifestValidationResult {
   diagnostics: Diagnostic[];
   /** unique plugin namespaces referenced — the page's `requires` */
   requires: string[];
@@ -214,3 +253,10 @@ export interface ValidationResult {
    */
   bindings: Array<{ tag: string; input: string; kind: 'object'; value: unknown }>;
 }
+
+/**
+ * @deprecated Renamed {@link ManifestValidationResult}; this alias keeps the
+ * name the package published before the two parser copies became one
+ * (objectstack#25712).
+ */
+export type ValidationResult = ManifestValidationResult;
