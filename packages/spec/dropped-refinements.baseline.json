@@ -1347,6 +1347,13 @@
         "options[0].timezone"
       ]
     },
+    "system/ServedTranslationData": {
+      "sites": [
+        "flows.valueType.refusals.valueType.message",
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
+      ]
+    },
     "system/ServerRateLimitConfig": {
       "sites": [
         ""
