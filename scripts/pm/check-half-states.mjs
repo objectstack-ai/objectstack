@@ -26625,11 +26625,11 @@ async function selfTest() {
       `Claim 6396126096 (\`domain:skills#1\`, \`${Y_WIN}\`, 2026-10-25T09:47Z) precedes this seat's claim 6396193561 (2026-10-25T09:54Z); the earlier claim decides.`);
   const yRepost = yRow(6396460178, '2026-10-25T10:23:20Z', yClaimA.body.replace('Claim: PM loop round 2 (serial)', 'Claim: PM loop round 2 (serial) · re-posted'));
   const yRace = [yClaimA, yClaimB, yYield];
-  const yIds = (rows) => [...yieldedClaimIndexes(rows)].map((i) => rows[i].id);
+  const yIds = (rows) => [...yieldedClaimIndexes(rows)].map((i) => rows[i].id).join(',');
   b(BATTERY_YIELD, 'yield: a claim speaks for the FIRST session on its `Session:` line — the seat, not the thread it names after', claimSessionId(yClaimA.body), Y_WIN);
   b(BATTERY_YIELD, 'yield: …a bulleted `Session:` line reads, with `claimedBranches`\'s prefix', claimSessionId(`Claim: x\n- Session: \`${Y_LOSE}\``), Y_LOSE);
   b(BATTERY_YIELD, 'yield: …and a claim with no `Session:` line speaks for nobody', claimSessionId('Claim: x\nBranch: `claude/issue-1-a`'), null);
-  b(BATTERY_YIELD, 'yield: the measured race withdraws the LOSER\'s claim alone', yIds(yRace), [6396193561]);
+  b(BATTERY_YIELD, 'yield: the measured race withdraws the LOSER\'s claim alone', yIds(yRace), '6396193561');
   b(BATTERY_YIELD, 'yield: …not the winner\'s, whose session only the yield\'s BODY names', yieldedClaimIndexes(yRace).has(0), false);
   b(BATTERY_YIELD, 'yield: the yielded claim no longer GOVERNS — the red on the winner\'s PR was this reading', claimGovernance(yRace).governing, null);
   b(BATTERY_YIELD, 'yield: …the winner\'s claim is the newest standing one, malformed to this reader (UNDETERMINED, never UNCLAIMED)', claimGovernance(yRace).malformed?.id, 6396126096);
@@ -26638,18 +26638,18 @@ async function selfTest() {
   const yWinOnIssue = { ...yClaimA, body: yClaimA.body.replace('claude/project-thread-biervl', 'claude/issue-25729-winner') };
   const yIssueRace = [yWinOnIssue, yClaimB, yYield];
   b(BATTERY_YIELD, 'yield: control — a winner on a protocol branch GOVERNS once the loser yields', govBranches(yIssueRace), 'claude/issue-25729-winner');
-  b(BATTERY_YIELD, 'yield: …and its branch is named, the loser\'s is not', [h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-winner'), h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-adr-tier-row')], [true, false]);
+  b(BATTERY_YIELD, 'yield: …and its branch is named, the loser\'s is not', [h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-winner'), h46ClaimNamesBranch(yIssueRace.map((r) => r.body), 'claude/issue-25729-adr-tier-row')].join(), 'true,false');
   const yYieldAs = (firstLine) => ({ ...yYield, body: `${firstLine}\n\n${yYield.body.split('\n').slice(2).join('\n')}` });
-  b(BATTERY_YIELD, 'yield: a yield naming NO session withdraws nothing — today\'s reading holds', yIds([yClaimA, yClaimB, yYieldAs('already claimed — yielding · seat 2')]), []);
-  b(BATTERY_YIELD, 'yield: a yield naming TWO sessions withdraws nothing', yIds([yClaimA, yClaimB, yYieldAs(`already claimed — yielding · \`${Y_LOSE}\` to \`${Y_WIN}\``)]), []);
-  b(BATTERY_YIELD, 'yield: a hyphen-written yield is no dialect', yIds([yClaimA, yClaimB, yYieldAs(`already claimed - yielding · \`${Y_LOSE}\``)]), []);
-  b(BATTERY_YIELD, 'yield: a bold-decorated yield line reads, through `markerMatches`', yIds([yClaimA, yClaimB, yYieldAs(`**already claimed — yielding** · \`${Y_LOSE}\``)]), [6396193561]);
+  b(BATTERY_YIELD, 'yield: a yield naming NO session withdraws nothing — today\'s reading holds', yIds([yClaimA, yClaimB, yYieldAs('already claimed — yielding · seat 2')]), '');
+  b(BATTERY_YIELD, 'yield: a yield naming TWO sessions withdraws nothing', yIds([yClaimA, yClaimB, yYieldAs(`already claimed — yielding · \`${Y_LOSE}\` to \`${Y_WIN}\``)]), '');
+  b(BATTERY_YIELD, 'yield: a hyphen-written yield is no dialect', yIds([yClaimA, yClaimB, yYieldAs(`already claimed - yielding · \`${Y_LOSE}\``)]), '');
+  b(BATTERY_YIELD, 'yield: a bold-decorated yield line reads, through `markerMatches`', yIds([yClaimA, yClaimB, yYieldAs(`**already claimed — yielding** · \`${Y_LOSE}\``)]), '6396193561');
   const yReclaim = yRow(6396500000, '2026-10-25T11:00:00Z', yClaimB.body);
-  b(BATTERY_YIELD, 'yield: a `Claim:` the yielding session posts AFTER its yield stands', yIds([...yRace, yReclaim]), [6396193561]);
+  b(BATTERY_YIELD, 'yield: a `Claim:` the yielding session posts AFTER its yield stands', yIds([...yRace, yReclaim]), '6396193561');
   b(BATTERY_YIELD, 'yield: …and governs', govBranches([...yRace, yReclaim]), 'claude/issue-25729-adr-tier-row');
-  b(BATTERY_YIELD, 'yield: precedence is read from the timestamps, not thread order', yIds([...yRace].reverse()), [6396193561]);
-  b(BATTERY_YIELD, 'yield: bare bodies in thread order get the rows\' answer (H46 holds bodies)', [...yieldedClaimIndexes(yRace.map((r) => r.body))], [...yieldedClaimIndexes(yRace)]);
-  b(BATTERY_YIELD, 'yield: a claim with no `Session:` line is never withdrawn', yIds([yRow(1, '2026-10-25T09:00:00Z', 'Claim: x\nBranch: `claude/issue-1-a`'), yYield]), []);
+  b(BATTERY_YIELD, 'yield: precedence is read from the timestamps, not thread order', yIds([...yRace].reverse()), '6396193561');
+  b(BATTERY_YIELD, 'yield: bare bodies in thread order get the rows\' answer (H46 holds bodies)', [...yieldedClaimIndexes(yRace.map((r) => r.body))].join(), [...yieldedClaimIndexes(yRace)].join());
+  b(BATTERY_YIELD, 'yield: a claim with no `Session:` line is never withdrawn', yIds([yRow(1, '2026-10-25T09:00:00Z', 'Claim: x\nBranch: `claude/issue-1-a`'), yYield]), '');
   b(BATTERY_YIELD, 'yield: a non-array input withdraws nothing and does not crash', yieldedClaimIndexes(undefined).size, 0);
 
   // The gathering policy — what buys a ref read at all.
