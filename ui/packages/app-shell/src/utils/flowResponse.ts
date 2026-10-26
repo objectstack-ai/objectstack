@@ -166,6 +166,18 @@
  * shared. A `refused` or failed run never reaches a `done` arm, so neither
  * shows a success toast on either end.
  *
+ * ## A flow action's post-success hop follows a COMPLETED run (objectstack#25800)
+ *
+ * The spec admits `onSuccess` beside a `type: 'flow'` action, and the
+ * ActionRunner performs that hop after a success, reading `${result.*}` off the
+ * result's `data`. On a launch only the `done` arm completes the action: its
+ * `data` is the run's `AutomationResult`, whose `output` carries the flow's
+ * `isOutput` variables, so `${result.output.VAR}` resolves. The `paused` and
+ * `refused` arms answer success too, and the runner cannot tell them apart from
+ * a completion by `silent` — that flag is about the toast, and a `done` run
+ * whose copy is the flow's own is `silent` as well. So {@link judgeFlowLaunch}
+ * marks those two `handedOff`, the member the runner reads to skip the hop.
+ *
  * ## The flow's own toasts are translated here, once (objectui#12075)
  *
  * The engine serves the flow's `successMessage` and `errorMessage` verbatim,
@@ -514,24 +526,36 @@ export interface FlowLaunchJudgement<S = unknown> {
  * drift apart again (objectui#9973 — see the header). `refreshAfter` and
  * `actionSuccessMessage` are the invoking action's own flag and copy.
  *
+ * Each arm also decides whether the action's post-success hop
+ * (`ActionSchema.onSuccess`, objectstack#25800 — see the header) fires: only
+ * the `done` arm completes the action, so it is the only one that hops.
+ *
  * - `failed` — the ActionRunner's post-execution hook surfaces `error` as a
- *   toast; nothing refreshes, because nothing changed.
+ *   toast; nothing refreshes, because nothing changed. No hop: the runner hops
+ *   only after a success.
  * - `paused` — the action only OPENED the wizard, so the action-level success
  *   toast is suppressed (`silent`) and `FlowRunner` owns completion messaging
- *   and the refresh. Byte-identical to the return this arm has always had
- *   (objectui#7707 pins it).
+ *   and the refresh. The success is a hand-off (`handedOff`), so the runner
+ *   performs no hop: navigating away would leave the screen behind, and the
+ *   run has not answered with the output the hop reads. `FlowRunner` finishing
+ *   the run later does not hop either.
  * - `refused` — the run ENDED, deliberately, and the answer was no
  *   (objectstack#14945). The result is the paused arm's, byte for byte:
- *   `silent`, because the ruling forbids the completion toast; `success: true`,
- *   because a refusal is a successful evaluation (`AutomationResult.success`
- *   stays `true`), and `success: false` would put the runner hooks' error
- *   state on it; and no `data` and no `reload`. Nothing refreshes — the run
- *   wrote nothing, and a refresh would say it did.
+ *   `silent`, because the ruling forbids the completion toast; `handedOff`,
+ *   because the Close-only notice is the follow-up and a hop would navigate
+ *   past it to a record the refusal never produced; `success: true`, because a
+ *   refusal is a successful evaluation (`AutomationResult.success` stays
+ *   `true`), and `success: false` would put the runner hooks' error state on
+ *   it; and no `data` and no `reload`. Nothing refreshes — the run wrote
+ *   nothing, and a refresh would say it did.
  * - `done` — terminal success, and the host refreshes unless the action opted
  *   out with `refreshAfter: false`. The toast follows {@link flowSuccessCopy}
  *   (objectui#12274): the runner speaks the action's copy or its own default
  *   as before, and when the copy is the flow's the result goes `silent` and
- *   carries it as `successToast` instead.
+ *   carries it as `successToast` instead. Not `handedOff`, `silent` or not: the
+ *   run completed, so the runner hops, reading `${result.*}` off `data`, the
+ *   run's `AutomationResult` (`${result.output.VAR}` is one of its `isOutput`
+ *   variables).
  */
 export function judgeFlowLaunch<S = unknown>(
     outcome: FlowResponseOutcome<S>,
@@ -543,7 +567,7 @@ export function judgeFlowLaunch<S = unknown>(
             return { result: { success: false, error: outcome.error }, refresh: false };
         case 'paused':
             return {
-                result: { success: true, silent: true },
+                result: { success: true, silent: true, handedOff: true },
                 followUp: {
                     kind: 'screen',
                     runId: outcome.runId ?? '',
@@ -554,7 +578,7 @@ export function judgeFlowLaunch<S = unknown>(
             };
         case 'refused':
             return {
-                result: { success: true, silent: true },
+                result: { success: true, silent: true, handedOff: true },
                 followUp: { kind: 'refusal', message: outcome.message },
                 refresh: false,
             };

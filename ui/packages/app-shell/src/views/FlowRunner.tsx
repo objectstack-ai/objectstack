@@ -75,8 +75,9 @@
  * route to: Submit withdrawn, a single Close. What it does NOT do is as ruled
  * as what it does — no toast of either colour, no `onComplete`, no
  * invalidation. The invoking action stays quiet on its own account, exactly as
- * today: a paused run returns `{ success: true, silent: true }` and `silent`
- * suppresses the action's `successMessage` at the ActionRunner's toast sink.
+ * today: a paused run returns `{ success: true, silent: true, handedOff: true }`
+ * and `silent` suppresses the action's `successMessage` at the ActionRunner's
+ * toast sink (`handedOff` keeps the action's `onSuccess` hop from firing).
  * ⛔ That last part is a thing that WORKS — it is pinned, not touched.
  *
  * ## A refused end shows the message alone (objectui#13342)

@@ -7,7 +7,8 @@
  * incomplete ones got wrong.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { ActionRunner } from '@object-ui/core';
 import { flowSuccessCopy, interpretFlowResponse, judgeFlowLaunch } from '../flowResponse';
 
 const ok = { ok: true, status: 200 };
@@ -302,8 +303,9 @@ describe('judgeFlowLaunch — one launch decision for both hosts', () => {
             data: { success: true, status: 'refused', refusalMessage: 'Refused: Acme Corp is a confirmed duplicate' },
         });
         // Byte-identical to the paused arm: `silent` keeps the action's
-        // `successMessage` toast off, and nothing else rides along.
-        expect(out.result).toEqual({ success: true, silent: true });
+        // `successMessage` toast off, `handedOff` keeps its `onSuccess` hop
+        // from firing (objectstack#25800), and nothing else rides along.
+        expect(out.result).toEqual({ success: true, silent: true, handedOff: true });
         expect(out.followUp).toEqual({ kind: 'refusal', message: 'Refused: Acme Corp is a confirmed duplicate' });
         expect(out.refresh).toBe(false);
     });
@@ -316,14 +318,14 @@ describe('judgeFlowLaunch — one launch decision for both hosts', () => {
 
     it('refused with no sentence: the disposition is the STATUS, the message is empty', () => {
         const out = judge({ success: true, data: { success: true, status: 'refused' } });
-        expect(out.result).toEqual({ success: true, silent: true });
+        expect(out.result).toEqual({ success: true, silent: true, handedOff: true });
         expect(out.followUp).toEqual({ kind: 'refusal', message: '' });
     });
 
     it('paused: unchanged — silent success, the screen handed to FlowRunner, no refresh', () => {
         const screen = { nodeId: 'collect', title: 'New Assignee', fields: [] };
         const out = judge({ success: true, data: { success: true, status: 'paused', runId: 'run-7', screen } });
-        expect(out.result).toEqual({ success: true, silent: true });
+        expect(out.result).toEqual({ success: true, silent: true, handedOff: true });
         expect(out.followUp).toEqual({ kind: 'screen', runId: 'run-7', screen });
         expect(out.refresh).toBe(false);
     });
@@ -347,6 +349,92 @@ describe('judgeFlowLaunch — one launch decision for both hosts', () => {
         expect(out.result).toEqual({ success: false, error: "Node 'apply' failed" });
         expect(out.followUp).toBeUndefined();
         expect(out.refresh).toBe(false);
+    });
+});
+
+// objectstack#25800 — a `type: 'flow'` action may declare `onSuccess`, and its
+// hop follows a COMPLETED run only. Each arm is judged from a real wire body and
+// its result handed to a real `ActionRunner` (the one the console builds), with
+// the router replaced by a spy: the hop is read off the navigation call itself,
+// never off a flag the test computes.
+describe('judgeFlowLaunch → ActionRunner — the onSuccess hop follows a completed run only', () => {
+    const RENEWAL_ID = 'ctr_0018';
+    const ACTION = {
+        type: 'flow',
+        name: 'start_renewal',
+        target: 'renewal_start',
+        onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}', openIn: 'self' },
+    };
+
+    /** Judge `json` as the launch host does, and let the runner act on the result. */
+    async function run(json: unknown, actionSuccessMessage?: string) {
+        const judged = judgeFlowLaunch(
+            interpretFlowResponse(ok, json, 'Flow "renewal_start"'),
+            undefined,
+            actionSuccessMessage,
+        );
+        const nav = vi.fn();
+        const runner = new ActionRunner({});
+        runner.setNavigationHandler(nav as never);
+        runner.setToastHandler(vi.fn() as never);
+        runner.registerHandler('flow', async () => judged.result);
+        const result = await runner.execute({ ...ACTION, successMessage: actionSuccessMessage } as never);
+        return { judged, result, navigated: nav.mock.calls.map(([url]) => url as string) };
+    }
+
+    const completed = (extra: Record<string, unknown> = {}) => ({
+        success: true,
+        data: { success: true, status: 'completed', output: { renewal: { id: RENEWAL_ID, renewed_from: 'ctr_0001' } }, ...extra },
+    });
+
+    it('done: the hop lands on the record the run produced, read off the run\'s `output`', async () => {
+        const { judged, result, navigated } = await run(completed(), 'Renewal draft created');
+        expect(judged.result.handedOff).toBeUndefined();
+        expect(result.success).toBe(true);
+        expect(navigated).toEqual([`/apps/clm/clm_contract/record/${RENEWAL_ID}`]);
+    });
+
+    it("done with the flow's own copy: `silent` is about the toast, so the run still hops", async () => {
+        const { judged, navigated } = await run(completed({ successMessage: 'Renewal draft created' }));
+        expect(judged.result.silent).toBe(true);
+        expect(judged.successToast).toBe('Renewal draft created');
+        expect(navigated).toEqual([`/apps/clm/clm_contract/record/${RENEWAL_ID}`]);
+    });
+
+    it('paused at a screen: a hand-off, so no hop while the wizard is open', async () => {
+        const screen = { nodeId: 'confirm', title: 'Confirm renewal', fields: [] };
+        const { judged, result, navigated } = await run({
+            success: true, data: { success: true, status: 'paused', runId: 'run-9', screen },
+        });
+        expect(judged.followUp).toMatchObject({ kind: 'screen', runId: 'run-9' });
+        expect(result.success).toBe(true);
+        expect(navigated).toEqual([]);
+    });
+
+    it('ended refused: a hand-off to the notice, so no hop past it', async () => {
+        const { judged, result, navigated } = await run({
+            success: true,
+            data: { success: true, status: 'refused', refusalMessage: 'MSA-2026-0007 already has a renewal draft MSA-2026-0018' },
+        });
+        expect(judged.followUp).toMatchObject({ kind: 'refusal' });
+        expect(result.success).toBe(true);
+        expect(navigated).toEqual([]);
+    });
+
+    it('failed: no success, so no hop', async () => {
+        const { result, navigated } = await run({ success: true, data: { success: false, error: "Node 'create' failed" } });
+        expect(result.success).toBe(false);
+        expect(navigated).toEqual([]);
+    });
+
+    it("a flow that declares no `isOutput` variable answers `output: {}`, and the path resolves to ''", async () => {
+        // The authoring gap the card's hotclm report hit: a `create_record`
+        // node's `outputVariable` that is not declared `isOutput: true` never
+        // reaches `output`. The runner's one rule for a nullish path applies
+        // (`''`), so the hop lands on the bare collection path, not on a
+        // literal `${result.output.renewal.id}`.
+        const { navigated } = await run({ success: true, data: { success: true, status: 'completed', output: {} } });
+        expect(navigated).toEqual(['/apps/clm/clm_contract/record/']);
     });
 });
 
@@ -388,7 +476,7 @@ describe('the served flowLabel is lifted once (objectui#11092)', () => {
             data: { success: true, status: 'paused', runId: 'run-7', screen, flowLabel: 'Reassign' },
         }, 'Flow "reassign"'), undefined);
         expect(out.followUp).toEqual({ kind: 'screen', runId: 'run-7', screen, flowLabel: 'Reassign' });
-        expect(out.result).toEqual({ success: true, silent: true });
+        expect(out.result).toEqual({ success: true, silent: true, handedOff: true });
     });
 });
 
@@ -463,7 +551,7 @@ describe("judgeFlowLaunch — a straight-through run's success copy (objectui#12
 
     it('refused and failed runs carry no success toast, whatever the flow declares', () => {
         const refused = done({ success: true, status: 'refused', refusalMessage: 'No.', successMessage: 'Escalation recorded' });
-        expect(refused.result).toEqual({ success: true, silent: true });
+        expect(refused.result).toEqual({ success: true, silent: true, handedOff: true });
         expect(refused.successToast).toBeUndefined();
         const failed = done({ success: false, error: 'boom', successMessage: 'Escalation recorded' });
         expect(failed.result).toEqual({ success: false, error: 'boom' });
