@@ -324,6 +324,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: ADMIN_FULL_ACCESS,
     label: 'Administrator — Full Access',
+    // Admin-facing copy on Setup → Permission Sets: one business sentence, no
+    // engineering terms (the detail lives in the comments beside each set).
+    // `permission-set-descriptions.test.ts` pins the shape for every set here.
+    description:
+      'Platform operators: read and change every record in every organization, manage all users and settings, and author apps in Studio.',
     // [#11965 / #11663 Choice 6A] The capability CONTENT (object wildcard +
     // `systemPermissions`) is the kernel platform-admin declaration exported
     // by `@objectstack/spec` — one list, imported here and read by core's
@@ -378,6 +383,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: ORGANIZATION_ADMIN,
     label: 'Organization Administrator',
+    // Inherited by `organization_admin_no_bypass` through the derivation's
+    // spread, which then writes its own.
+    description:
+      'Owners and admins of an organization: full control of its records and members in Setup, but no app authoring or platform-wide settings.',
     objects: {
       '*': {
         allowRead: true,
@@ -590,6 +599,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: 'member_default',
     label: 'Member — Standard Access',
+    // No business object is named here (see the NO-WILDCARD note below), so the
+    // copy says where business access comes from instead.
+    description:
+      "Every signed-in member's baseline: their own profile, keys and inbox and the member directory; business records come from their other sets.",
     objects: {
       // [#5491] NO `'*'` WILDCARD GRANT. This set is the additive `everyone`
       // baseline — it resolves for EVERY authenticated member — and object
@@ -1130,6 +1143,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: 'viewer_readonly',
     label: 'Viewer — Read-Only',
+    // A read wildcard without the superuser bits: row visibility is still
+    // sharing's, so the copy says "as far as sharing allows", not "every record".
+    description:
+      'Read-only users: read records across every object, as far as sharing allows, but create, edit or delete nothing.',
     objects: {
       '*': {
         allowRead: true,
@@ -1282,6 +1299,8 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: EXTERNAL_DEFAULT_PERMISSION_SET,
     label: 'External Member — Own Records',
+    description:
+      'People from outside the organization, such as customers or suppliers: their own profile and records, plus only what is shared with them.',
     objects: {
       // Self-service profile edits, bounded exactly as `member_default`'s
       // (`sys_user_self` below + the ADR-0092 D2 column whitelist).
@@ -1475,9 +1494,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: MCP_AGENT_PERMISSION_SET_READ,
     label: 'MCP Agent — Read Only',
+    // The read-only ceiling for an agent acting on behalf of a user, from the
+    // OAuth `data:read` scope; bounded by the delegating user's own
+    // permissions (the D10 intersection above).
     description:
-      'Read-only ceiling for an AI agent acting on behalf of a user (OAuth `data:read`). ' +
-      'Bounded by the delegating user\'s own permissions.',
+      'AI assistants a user connects with read access: they read what that user can read and change nothing.',
     objects: {
       '*': { allowRead: true },
     },
@@ -1485,10 +1506,12 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: MCP_AGENT_PERMISSION_SET_WRITE,
     label: 'MCP Agent — Read & Write',
+    // The read+write ceiling for an agent acting on behalf of a user, from the
+    // OAuth `data:write` scope: full CRUD, still bounded by the delegating
+    // user's own permissions. The better-auth managed identity tables stay
+    // read-only ("user and sign-in data" in the copy).
     description:
-      'Read+write ceiling for an AI agent acting on behalf of a user (OAuth `data:write`). ' +
-      'Full CRUD, still bounded by the delegating user\'s own permissions. ' +
-      'Identity tables stay read-only (better-auth managed).',
+      'AI assistants a user connects with read and write access: they read and change what that user can, except user and sign-in data.',
     objects: {
       '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
       // Even a write-scoped agent must not mutate better-auth identity tables
@@ -1500,9 +1523,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   PermissionSetSchema.parse({
     name: MCP_AGENT_PERMISSION_SET_RESTRICTED,
     label: 'MCP Agent — No Data Access',
+    // The no-object-access floor for an agent with no data scope (for example
+    // `actions:execute` only). It keeps the resolved set list non-empty so
+    // enforcement fails CLOSED, never open.
     description:
-      'No-object-access floor for an agent with no data scope (e.g. `actions:execute` only). ' +
-      'Keeps the resolved set list non-empty so enforcement fails CLOSED, never open.',
+      'AI assistants a user connects without data access: they can run the actions they were allowed, but read or change no record.',
     objects: {},
   }),
 ];
@@ -1534,6 +1559,12 @@ const baseDefaultPermissionSets: PermissionSet[] = [
 function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
   // [ADR-0105 D4 / finding F2] The description is admin copy on Setup's
   // Permission Sets page, so the decision ids stay here, not in the string.
+  // The engineering reading: organization administration WITHOUT blanket
+  // record visibility, granted instead of `organization_admin` when the tenancy
+  // posture enforces no organization wall, where nothing would bound the
+  // superuser bits. Ownership, sharing and business RLS still apply; grant
+  // `admin_full_access` (or an explicit set carrying the bits) when a
+  // deployment-wide data superuser is genuinely intended.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
   const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;
@@ -1543,11 +1574,7 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
     name: ORGANIZATION_ADMIN_NO_BYPASS,
     label: 'Organization Administrator (no record bypass)',
     description:
-      'Organization administration WITHOUT blanket record visibility. Granted instead of ' +
-      '`organization_admin` when the tenancy posture enforces no organization wall, where nothing ' +
-      'would bound the superuser bits. Ownership, sharing and business ' +
-      'RLS still apply; grant `admin_full_access` (or an explicit set carrying the bits) when a ' +
-      'deployment-wide data superuser is genuinely intended.',
+      'Organization admins on a deployment with no wall between organizations: the same administration, but only the records their ownership and sharing open.',
     objects,
   });
 }
