@@ -14,6 +14,7 @@ import {
   scan,
   staticSpecifiers,
   walkImportGraph,
+  workflowRoot,
 } from '../check-pre-install-import-graph.mjs';
 import { REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 
@@ -33,15 +34,16 @@ import { selfTestCases, stripAnsi } from './helpers/child-verdict';
  * What this file pins, in the order the gate can go wrong:
  *
  *  1. **the derivation is a derivation** — the population comes from the
- *     workflows, so moving a step across `pnpm install` moves the population. A
+ *     workflows GitHub runs (the repository root's, since objectstack#25712),
+ *     so moving a step across `pnpm install` moves the population. A
  *     gate reporting "13 steps" while reading a constant is the defect it was
  *     written to prevent, and the only way to tell the two apart is to move a
  *     step in a fixture and watch the number follow;
  *  2. **the walk follows the graph** — a package ONE HOP away must be caught
  *     and its chain named, because the assertion this generalises could not see
  *     one;
- *  3. **the floor over the real tree** — every step objectui#6148 measured is
- *     still derived, by workflow and job rather than by count;
+ *  3. **the floor over the real tree** — every step objectui#6148 measured
+ *     that still runs is still derived, by workflow and job rather than by count;
  *  4. **the wiring** — a gate nobody runs is indistinguishable from a gate that
  *     passes, so the workflow, the alias and the Dependabot classification are
  *     asserted here rather than trusted by reading;
@@ -59,6 +61,8 @@ import { selfTestCases, stripAnsi } from './helpers/child-verdict';
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const workflowDir = path.join(repoRoot, '.github/workflows');
+/** Where the gate reads `.github/workflows/`: the repository root, which GitHub runs. */
+const rootWorkflowRoot = workflowRoot(repoRoot);
 const SCRIPT = 'scripts/check-pre-install-import-graph.mjs';
 const WORKFLOW = 'repo-gates.yml';
 const CHECK_NAME = 'Pre-Install Import Graph Check';
@@ -76,7 +80,7 @@ const readWorkflow = (file: string): string => fs.readFileSync(path.join(workflo
 
 describe('the population follows the workflows', () => {
   const fixture = (installStepIndex: number): string => {
-    const gate = '      - name: Gate\n        run: node scripts/probe.mjs\n';
+    const gate = '      - name: Gate\n        run: node ui/scripts/probe.mjs\n';
     const install = '      - name: Install dependencies\n        run: pnpm install --frozen-lockfile\n';
     const filler = '      - name: Checkout code\n        uses: actions/checkout@v7\n';
     const steps = [filler, gate, filler];
@@ -98,7 +102,7 @@ describe('the population follows the workflows', () => {
   });
 
   it('counts a job that never installs entirely', () => {
-    const noInstall = 'jobs:\n  j:\n    steps:\n      - name: Gate\n        run: node scripts/probe.mjs\n';
+    const noInstall = 'jobs:\n  j:\n    steps:\n      - name: Gate\n        run: node ui/scripts/probe.mjs\n';
     expect(derive(noInstall)).toEqual(['scripts/probe.mjs']);
   });
 
@@ -109,11 +113,11 @@ describe('the population follows the workflows', () => {
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Late
-        run: node scripts/late.mjs
+        run: node ui/scripts/late.mjs
   does-not:
     steps:
       - name: Early
-        run: node scripts/early.mjs
+        run: node ui/scripts/early.mjs
 `;
     expect(derive(twoJobs)).toEqual(['scripts/early.mjs']);
   });
@@ -140,7 +144,7 @@ describe('the population follows the workflows', () => {
       - name: Browsers are not node_modules
         run: pnpm exec playwright install chromium
       - name: Gate
-        run: node scripts/probe.mjs
+        run: node ui/scripts/probe.mjs
 `;
     expect(derive(tricky)).toEqual(['scripts/probe.mjs']);
   });
@@ -151,16 +155,41 @@ describe('the population follows the workflows', () => {
     steps:
       - name: Two legs
         run: |
-          node scripts/probe.mjs --self-test
-          node scripts/probe.mjs
+          node ui/scripts/probe.mjs --self-test
+          node ui/scripts/probe.mjs
       - name: Commented out
         run: |
-          # node scripts/ghost.mjs
+          # node ui/scripts/ghost.mjs
           echo done
 `;
     // One row per (step, script) — two invocations of one script in one step is
     // one step, not two.
     expect(derive(block)).toEqual(['scripts/probe.mjs']);
+  });
+
+  it("reads the root workflows' two spellings, and leaves the root's own scripts out", () => {
+    // objectstack#25712: the root `ci.yml` runs objectui's gates as
+    // `pnpm --dir ui run <alias>` (resolved through objectui's package.json) or
+    // `node ui/scripts/<x>`. A bare `node scripts/<x>` there runs objectstack's
+    // own file of that name, and judging objectui's would be judging a file the
+    // step never loads.
+    const root = `jobs:
+  j:
+    steps:
+      - name: The root's own gate
+        run: node scripts/probe.mjs
+      - name: Through an alias
+        run: pnpm --dir ui run probe:alias
+      - name: Directly
+        run: node ui/scripts/direct.mjs
+`;
+    const rows = derivePreInstallSteps([{ file: 'root.yml', text: root }], {
+      aliases: { 'probe:alias': 'node scripts/aliased.mjs --flag' },
+    }) as Array<{ script: string; alias: string | null }>;
+    expect(rows.map((r) => [r.script, r.alias])).toEqual([
+      ['scripts/aliased.mjs', 'probe:alias'],
+      ['scripts/direct.mjs', null],
+    ]);
   });
 
   it('parses jobs and steps in order — the index is what "before" means', () => {
@@ -254,23 +283,32 @@ describe('the real tree — every step objectui#6148 measured is still derived',
   const rows = new Set(result.steps.map((s) => `${s.workflow} : ${s.job} -> ${s.script}`));
 
   /**
-   * The table objectui#6148 measured, plus `lint.yml`'s entry-guard step, which
-   * the card named separately. A FLOOR, not an inventory: the assertion is that
-   * none of these silently leaves the population. The gate's own `--list` is
-   * where the current total lives, and pinning a total here would drift.
+   * The steps of objectui#6148's table that still run, plus the root `Lint UI`
+   * job's other two pre-install gates. A FLOOR, not an inventory: the assertion
+   * is that none of these silently leaves the population. The gate's own
+   * `--list` is where the current total lives, and pinning a total here would
+   * drift.
+   *
+   * Since objectstack#25712 the rows are the repository root's `ci.yml`, the
+   * workflow GitHub runs. Two of objectui#6148's rows run there:
+   * `ci.yml : type-check` is now `type-check-ui`, and `lint.yml : lint` is now
+   * `lint-ui` (roster rows 7 and 16 of objectstack#25697). The others ran in
+   * workflows nothing runs since the monorepo merge:
+   *
+   *   - `changeset-guard.yml : no-major`, `changeset-presence.yml :
+   *     changeset-presence` and `ci.yml : changeset-check`: roster rows 3, 4
+   *     and 7 (→ sub-issue 4 of objectstack#25677);
+   *   - the four `repo-gates.yml : repo-gates` rows (`check-control-bytes`,
+   *     `check-doc-component-types`, `check-doc-links`, `check-skills-paths`):
+   *     objectstack#25880 ports those gates into `lint-ui` ahead of its
+   *     install, and they rejoin this floor under that job when
+   *     `ui/.github/workflows/` is deleted (objectstack#25712).
    */
   const MEASURED = [
-    'changeset-guard.yml : no-major -> scripts/check-changeset-no-major.mjs',
-    'changeset-presence.yml : changeset-presence -> scripts/check-changeset-presence.mjs',
-    'ci.yml : changeset-check -> scripts/check-changeset-fixed.mjs',
-    'ci.yml : type-check -> scripts/check-type-check-coverage.mjs',
-    // objectui#12214 folded these four (and eleven more) into `repo-gates.yml`,
-    // ahead of that job's install step, so they stay in the population.
-    'repo-gates.yml : repo-gates -> scripts/check-control-bytes.mjs',
-    'repo-gates.yml : repo-gates -> scripts/check-doc-component-types.mjs',
-    'repo-gates.yml : repo-gates -> scripts/check-doc-links.mjs',
-    'repo-gates.yml : repo-gates -> scripts/check-skills-paths.mjs',
-    'lint.yml : lint -> scripts/check-entry-guard.mjs',
+    'ci.yml : type-check-ui -> scripts/check-type-check-coverage.mjs',
+    'ci.yml : lint-ui -> scripts/check-lint-coverage.mjs',
+    'ci.yml : lint-ui -> scripts/check-entry-guard.mjs',
+    'ci.yml : lint-ui -> scripts/check-bash32-floor.mjs',
   ];
 
   it.each(MEASURED)('still derives %s', (row) => {
@@ -285,9 +323,27 @@ describe('the real tree — every step objectui#6148 measured is still derived',
     expect(result.modules.length).toBeGreaterThan(result.scripts.length);
   });
 
-  it('is in its own population — the gate walks its own import graph', () => {
+  it('holds its own import graph to the floor — the gate walks itself', () => {
     // A floor that exempted its own enforcer would be the first thing to rot.
-    expect(result.scripts).toContain(SCRIPT);
+    // Its home was objectui's `repo-gates.yml`, which runs nowhere since the
+    // monorepo merge, so it is not in its own DERIVED population until the root
+    // `Lint UI` job runs it (objectstack#25712 adds that step when it deletes
+    // `ui/.github/workflows/`). Until then it is walked by name.
+    const read = (rel: string): string | null => {
+      try {
+        return fs.readFileSync(path.join(repoRoot, rel), 'utf8');
+      } catch {
+        return null;
+      }
+    };
+    const graph = walkImportGraph(SCRIPT, { read }) as {
+      modules: string[];
+      violations: unknown[];
+      unresolved: unknown[];
+    };
+    expect(graph.modules).toContain('scripts/invoked-as.mjs');
+    expect(graph.violations).toEqual([]);
+    expect(graph.unresolved).toEqual([]);
   });
 
   it('finds no pre-install gate reaching a package', () => {
@@ -523,10 +579,12 @@ describe("the header's population is a pointer, not a copy", () => {
     expect(prose, `${WORKFLOW}'s header must name \`${dir}\` — the population's one live source`).toContain(dir);
 
     // …and the pointer must point at something. A named directory that holds no
-    // workflows is a measurement point in form only.
-    const present = fs.readdirSync(path.join(repoRoot, dir)).filter((f) => /\.ya?ml$/.test(f));
+    // workflows is a measurement point in form only. The gate resolves it
+    // against the repository root (objectstack#25712), so this does too, and
+    // the root `ci.yml`, whose UI jobs carry the population, must be there.
+    const present = fs.readdirSync(path.join(rootWorkflowRoot, dir)).filter((f) => /\.ya?ml$/.test(f));
     expect(present.length, `${dir} holds no workflow files — the pointer above resolves to nothing`).toBeGreaterThan(0);
-    expect(present).toContain(WORKFLOW);
+    expect(present).toContain('ci.yml');
   });
 
   /**
