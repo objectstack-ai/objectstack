@@ -2675,6 +2675,7 @@ const de = {
     },
     shell: {
       tenantHostHint: "Sie melden sich bei diesem System an",
+      poweredBy: "Bereitgestellt von ObjectStack",
     },
     layout: {
       headline: "Leistungsstarke Geschäftsanwendungen schneller entwickeln.",
@@ -3797,7 +3798,7 @@ const de = {
       cancel: "Abbrechen",
     },
     bound: {
-      title: "Mit ObjectStack Cloud verbunden",
+      title: "Mit ObjectOS Cloud verbunden",
       runtime: "Runtime",
       organization: "Organisation",
       approvedBy: "Genehmigt von",
@@ -3916,13 +3917,13 @@ const de = {
     install: {
       dialogTitle: "{{name}} installieren",
       dialogDescCurrent: "In dieser Umgebung installieren ({{host}}).",
-      dialogDescPicker: "Wählen Sie eine Umgebung, in der Sie diese App installieren möchten. Sie müssen bei ObjectStack Cloud angemeldet sein.",
+      dialogDescPicker: "Wählen Sie eine Umgebung, in der Sie diese App installieren möchten. Sie müssen bei ObjectOS Cloud angemeldet sein.",
       environment: "Umgebung",
       environmentPlaceholder: "Umgebung auswählen",
       includeSampleData: "Beispieldaten einschließen",
       noEnvs: "Keine Umgebungen in Ihrer aktiven Organisation gefunden.",
       noPermission: "Sie haben keine Berechtigung, Apps in einer Umgebung zu installieren. Nur Organisationsinhaber und Administratoren können installieren — wenden Sie sich an den Administrator Ihrer Organisation.",
-      signInFirst: "Sie müssen sich zuerst bei ObjectStack Cloud anmelden.",
+      signInFirst: "Sie müssen sich zuerst bei ObjectOS Cloud anmelden.",
       success: "Erfolgreich installiert. Öffnen Sie die Umgebung, um die neue App zu sehen.",
       localSuccess: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ sollte jetzt im App-Wechsler erscheinen.",
       localLoadsAtRestart: "v{{version}} in diesem Laufzeitsystem installiert. „{{name}}“ wird beim nächsten Neustart des Laufzeitsystems geladen und erscheint erst dann im App-Wechsler.",
@@ -3964,7 +3965,7 @@ const de = {
     update: {
       dialogTitle: "{{name}} aktualisieren",
       dialogDescCurrent: "Die in dieser Umgebung installierte Kopie aktualisieren ({{host}}).",
-      dialogDescPicker: "Wählen Sie die Umgebung, deren installierte Kopie Sie aktualisieren möchten. Sie müssen bei ObjectStack Cloud angemeldet sein.",
+      dialogDescPicker: "Wählen Sie die Umgebung, deren installierte Kopie Sie aktualisieren möchten. Sie müssen bei ObjectOS Cloud angemeldet sein.",
       majorNotice: "Dies ist ein Update auf eine neue Hauptversion (v{{fromMajor}} → v{{toMajor}}), das inkompatible Änderungen enthalten kann.",
       releaseNotes: "Versionshinweise zu v{{version}} lesen",
       success: "Auf v{{version}} aktualisiert.",

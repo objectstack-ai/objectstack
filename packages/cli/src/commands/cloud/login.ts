@@ -139,7 +139,7 @@ async function promptPassword(promptText: string): Promise<string> {
 
 export default class CloudLogin extends Command {
   static override description =
-    'Authenticate against ObjectStack Cloud (the hosted package registry). Stores credentials in ~/.objectstack/cloud.json.';
+    'Authenticate against ObjectOS Cloud (the hosted package registry). Stores credentials in ~/.objectstack/cloud.json.';
 
   static override examples = [
     '$ os cloud login',
@@ -151,7 +151,7 @@ export default class CloudLogin extends Command {
   static override flags = {
     url: Flags.string({
       char: 'u',
-      description: 'ObjectStack Cloud URL (override for self-hosted control planes)',
+      description: 'ObjectOS Cloud URL (override for self-hosted control planes)',
       default: DEFAULT_CLOUD_URL,
       env: 'OS_CLOUD_URL',
     }),
@@ -198,7 +198,7 @@ export default class CloudLogin extends Command {
       const url = flags.url.replace(/\/+$/, '');
 
       if (!flags.json) {
-        printHeader('ObjectStack Cloud Login');
+        printHeader('ObjectOS Cloud Login');
         printKV('Server', url);
         console.log('');
       }

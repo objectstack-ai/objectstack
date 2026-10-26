@@ -35,5 +35,7 @@
   "peerDependencies": {
     "react": "^19.0.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
 }

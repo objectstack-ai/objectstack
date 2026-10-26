@@ -18,6 +18,54 @@ import { strictObject } from '../shared/strict-object';
 export const ObjectAccessScopeSchema = z.enum(['own', 'own_and_reports', 'unit', 'unit_and_below', 'org']);
 export type ObjectAccessScope = z.input<typeof ObjectAccessScopeSchema>;
 
+/**
+ * [ADR-0057] Every grant in `permissionSets` whose `readScope` or `writeScope`
+ * is a HIERARCHY depth (`own_and_reports` / `unit` / `unit_and_below`) — the
+ * three only the enterprise hierarchy resolver (`hierarchy-security`) enforces;
+ * without it the open edition fails closed to owner-only.
+ *
+ * The ONE list of those three and the ONE sentence that names such a grant,
+ * read by both doors that judge it: `defineStack` refuses the stack unless it
+ * declares `requires: ['hierarchy-security']`, and the runtime metadata
+ * save/publish gate (`@objectstack/metadata-protocol`) refuses the publish, and
+ * warns on a draft save, when no resolver is mounted. Each door appends its own
+ * remedy to `finding`.
+ *
+ * Tolerant of any input shape: a value that is not an array of permission sets,
+ * or a set without an `objects` map, contributes nothing.
+ */
+export function findHierarchyScopeGrants(permissionSets: unknown): Array<{
+  permissionSet: string;
+  object: string;
+  key: 'readScope' | 'writeScope';
+  scope: 'own_and_reports' | 'unit' | 'unit_and_below';
+  /** `permission set 'NAME' grant on 'OBJECT' uses KEY='SCOPE', a HIERARCHY scope` — no closing period. */
+  finding: string;
+}> {
+  const hierarchy = new Set(['unit', 'unit_and_below', 'own_and_reports']);
+  const grants: ReturnType<typeof findHierarchyScopeGrants> = [];
+  const sets = Array.isArray(permissionSets) ? permissionSets : [];
+  for (const ps of sets) {
+    const objs = ps?.objects && typeof ps.objects === 'object' ? ps.objects : {};
+    for (const [object, grant] of Object.entries(objs)) {
+      const g = grant as Record<string, unknown> | null | undefined;
+      for (const key of ['readScope', 'writeScope'] as const) {
+        const scope = g?.[key];
+        if (typeof scope !== 'string' || !hierarchy.has(scope)) continue;
+        const permissionSet = String(ps?.name ?? '?');
+        grants.push({
+          permissionSet,
+          object,
+          key,
+          scope: scope as 'own_and_reports' | 'unit' | 'unit_and_below',
+          finding: `permission set '${permissionSet}' grant on '${object}' uses ${key}='${scope}', a HIERARCHY scope`,
+        });
+      }
+    }
+  }
+  return grants;
+}
+
 /*
  * ── Unknown-key strictness (#4001, ADR-0078) ────────────────────────────────
  *
