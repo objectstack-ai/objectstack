@@ -760,7 +760,8 @@ function planTrackedLookupReads(
  * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
  * using the field label, select option labels and referenced record titles.
  * Returns null when no tracked field changed, so the caller falls back to the
- * generic "Updated <object>".
+ * generic "Updated <object>", which names the changed fields
+ * ({@link renderChangedFieldsSummary}).
  *
  * [#7230] `translate` is the SAME locale-bound translator the three sibling
  * summary branches already resolve through (`messages.activityCreated` /
@@ -798,9 +799,7 @@ function renderTrackedChangeSummary(
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
-    const label =
-      translate(`objects.${objectName}.fields.${key}.label`) ??
-      (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
+    const label = fieldLabelForSummary(objectName, key, field, translate);
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     // Only a field that DECLARES options can consume this, so the ordinary
@@ -820,6 +819,100 @@ function renderTrackedChangeSummary(
     rendered.push(key);
   }
   return parts.length > 0 ? { text: parts.join('; '), fields: rendered } : null;
+}
+
+/**
+ * A field's label inside an activity summary: the locale bundle's
+ * (`objects.<object>.fields.<field>.label`), then the authored def label, then
+ * the machine key. One answer for both branches that name a field.
+ */
+function fieldLabelForSummary(
+  objectName: string,
+  key: string,
+  field: any,
+  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
+): string {
+  return (
+    translate(`objects.${objectName}.fields.${key}.label`) ??
+    (typeof field?.label === 'string' && field.label.length > 0 ? field.label : key)
+  );
+}
+
+/**
+ * [#25787] How many changed fields the generic update summary names before it
+ * counts the rest ("… and 3 more").
+ */
+const MAX_NAMED_CHANGED_FIELDS = 5;
+
+/**
+ * [#25787] The generic update summary, naming WHICH fields changed — never
+ * their values. Reached when no milestone fired and no `trackHistory` field
+ * changed: before this, the row said only `Updated <object> "<label>"`, so a
+ * record a rollup or flow bumps repeatedly showed a wall of identical entries
+ * nobody could read. `trackHistory` still governs what it always did — whether
+ * a field's old → new VALUES are rendered (ADR-0052 §5b.1); an untracked
+ * field's value never reaches the text, only its label does.
+ *
+ * Names fields in declaration order (keys the definition does not carry come
+ * after, by key), at most {@link MAX_NAMED_CHANGED_FIELDS}, then counts the
+ * rest. When `sys_activity.summary` declares `maxLength` (the SQL driver sizes
+ * the column `varchar(n)` from it, so an over-long text fails the whole
+ * activity insert), fewer fields are named until the text fits. Returns null
+ * when nothing changed or not even one name fits, and the caller writes the
+ * field-less frame.
+ *
+ * Returns the fields it COUNTED as well as named in `fields`: the read side
+ * drops a summary composed from a field the reader is not served
+ * (`activity-field-redaction.ts`), and "and 3 more" says three fields changed.
+ */
+function renderChangedFieldsSummary(
+  objectName: string,
+  fields: Record<string, any> | undefined | null,
+  newVals: Record<string, any> | null,
+  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
+  locale: string | undefined,
+  frame: { object: string; label: string },
+  maxLength: number | undefined,
+): { text: string; fields: string[] } | null {
+  if (!newVals) return null;
+  const changed = new Set(Object.keys(newVals));
+  if (changed.size === 0) return null;
+  const ordered = [
+    ...Object.keys(fields ?? {}).filter((key) => changed.has(key)),
+    ...[...changed].filter((key) => !fields || !(key in fields)).sort(),
+  ];
+  const labels = ordered.map((key) => fieldLabelForSummary(objectName, key, fields?.[key], translate));
+  // The list joins in the locale whose frame is used, so an English fallback
+  // frame never carries a zh-CN "、" list.
+  const localized = translate('messages.activityUpdatedFields', { ...frame, fields: '' }) !== undefined;
+  const joinList = listJoinerFor(localized ? locale : undefined);
+  const compose = (shown: number): string => {
+    const items = labels.slice(0, shown);
+    const rest = labels.length - shown;
+    if (rest > 0) {
+      items.push(translate('messages.activityMoreFields', { count: rest }) ?? `${rest} more`);
+    }
+    const list = joinList(items);
+    return (
+      translate('messages.activityUpdatedFields', { ...frame, fields: list }) ??
+      `Updated ${frame.object} "${frame.label}": ${list}`
+    );
+  };
+  for (let shown = Math.min(MAX_NAMED_CHANGED_FIELDS, labels.length); shown >= 1; shown -= 1) {
+    const text = compose(shown);
+    if (maxLength === undefined || text.length <= maxLength) return { text, fields: ordered };
+  }
+  return null;
+}
+
+/** A locale's conjunction list ("A, B, and C" / "A、B和C"); `", "` where `Intl` cannot answer. */
+function listJoinerFor(locale: string | undefined): (items: string[]) => string {
+  try {
+    const format = new Intl.ListFormat(locale ?? 'en', { style: 'long', type: 'conjunction' });
+    return (items) => format.format(items);
+  } catch {
+    return (items) => items.join(', ');
+  }
 }
 
 /**
@@ -1437,6 +1530,13 @@ export function installAuditWriters(
   const getFieldDefs = (objectName: string): Record<string, any> | null => {
     const fields = getObjectDef(objectName)?.fields;
     return fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : null;
+  };
+
+  // [#25787] The bound the registered `sys_activity.summary` declares, read
+  // from the definition like every other gate here; `undefined` = unbounded.
+  const activitySummaryMaxLength = (): number | undefined => {
+    const maxLength = getFieldDefs('sys_activity')?.summary?.maxLength;
+    return typeof maxLength === 'number' && maxLength > 0 ? maxLength : undefined;
   };
 
   /**
@@ -2125,7 +2225,8 @@ export function installAuditWriters(
     } else {
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
-      // Proposal → Closed Won", §5b.1); else the generic fallback.
+      // Proposal → Closed Won", §5b.1); else the generic fallback, naming the
+      // changed fields but not their values (#25787).
       // [#6656] Masked views, not the raw pair. The milestone branch
       // interpolates `{field}` from the after-row straight into a summary the
       // record feed and Setup dashboards render verbatim, so it must never see
@@ -2183,9 +2284,24 @@ export function installAuditWriters(
           summary = tracked.text;
           summarySources = tracked.fields;
         } else {
-          summary =
-            translate('messages.activityUpdated', { object: objectDisplay, label }) ??
-            `Updated ${objectDisplay} "${label}"`;
+          // [#25787] No tracked field changed: name the fields that did.
+          const named = renderChangedFieldsSummary(
+            ctx.object,
+            summaryFields,
+            newValue,
+            translate,
+            locale,
+            { object: objectDisplay, label },
+            activitySummaryMaxLength(),
+          );
+          if (named) {
+            summary = named.text;
+            summarySources = [...new Set([...labelSources, ...named.fields])];
+          } else {
+            summary =
+              translate('messages.activityUpdated', { object: objectDisplay, label }) ??
+              `Updated ${objectDisplay} "${label}"`;
+          }
         }
       }
     }
