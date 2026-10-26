@@ -17,7 +17,7 @@
  */
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,29 +63,73 @@ export interface CliBuildSpawns {
  * The lock is a directory, because `mkdirSync` creates one atomically or
  * throws `EEXIST`. It lives under the OS temp directory and is keyed by this
  * package's path, so it never shows in the working tree and two checkouts
- * never share one.
+ * never share one. The holder writes its pid into it.
  */
 const LOCK_DIR = join(
   tmpdir(),
   `objectui-cli-bin-build-${createHash('sha1').update(PKG_ROOT).digest('hex').slice(0, 12)}.lock`,
 );
+const LOCK_PID_FILE = 'pid';
 /** Under the 180 s hook timeout, so a wait that runs out reports why. */
 const LOCK_WAIT_MS = 170_000;
-/** Older than any build: a holder that died mid-build left it behind. */
+/**
+ * The fallback for a lock whose pid cannot be read (its holder died between
+ * the mkdir and the write): older than any build means nobody holds it.
+ */
 const LOCK_STALE_MS = 10 * 60_000;
 
-function withBuildLock(body: () => void): void {
-  const deadline = Date.now() + LOCK_WAIT_MS;
+/** Where the lock is and how long to wait for it. The tests drive both. */
+export interface BuildLockOptions {
+  readonly lockDir?: string;
+  readonly waitMs?: number;
+}
+
+/** `kill(pid, 0)` sends nothing: ESRCH means no such process, EPERM one we may not signal. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** The pid the holder wrote, or null when the file is missing or unreadable. */
+function holderPid(lockDir: string): number | null {
+  try {
+    const pid = Number.parseInt(readFileSync(join(lockDir, LOCK_PID_FILE), 'utf-8'), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A run killed while it held the lock (Ctrl-C, an OOM-killed worker) never
+ * reaches the `finally` that removes it. A dead holder pid frees the lock at
+ * once. Without a pid, only age does.
+ */
+function isAbandoned(lockDir: string): boolean {
+  const pid = holderPid(lockDir);
+  if (pid !== null) return !isAlive(pid);
+  return Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS;
+}
+
+function withBuildLock(body: () => void, options: BuildLockOptions): void {
+  const lockDir = options.lockDir ?? LOCK_DIR;
+  const waitMs = options.waitMs ?? LOCK_WAIT_MS;
+  const deadline = Date.now() + waitMs;
   for (;;) {
     try {
-      mkdirSync(LOCK_DIR);
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, LOCK_PID_FILE), String(process.pid));
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
     try {
-      if (Date.now() - statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
-        rmSync(LOCK_DIR, { recursive: true, force: true });
+      if (isAbandoned(lockDir)) {
+        rmSync(lockDir, { recursive: true, force: true });
         continue;
       }
     } catch {
@@ -94,9 +138,9 @@ function withBuildLock(body: () => void): void {
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `Timed out after ${LOCK_WAIT_MS} ms waiting for the cli-bin build lock at ${LOCK_DIR}. ` +
-          'Another test file is building @object-ui/types or @object-ui/cli. If no build is ' +
-          'running, the directory is left over from one that died: remove it.',
+        `Timed out after ${waitMs} ms waiting for the cli-bin build lock at ${lockDir}, held by ` +
+          `pid ${holderPid(lockDir) ?? '(unreadable)'}. Another test file is building ` +
+          '@object-ui/types or @object-ui/cli.',
       );
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
@@ -104,7 +148,7 @@ function withBuildLock(body: () => void): void {
   try {
     body();
   } finally {
-    rmSync(LOCK_DIR, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
   }
 }
 
@@ -119,7 +163,7 @@ function withBuildLock(body: () => void): void {
  * The presence checks run inside the lock, so a file that waited reads the
  * finished build rather than a `dist/` another file is still writing.
  */
-export function ensureCliBuilt(spawns: CliBuildSpawns): void {
+export function ensureCliBuilt(spawns: CliBuildSpawns, options: BuildLockOptions = {}): void {
   withBuildLock(() => {
     if (!existsSync(TYPES_ZOD)) {
       const result = spawns.types();
@@ -142,5 +186,5 @@ export function ensureCliBuilt(spawns: CliBuildSpawns): void {
         );
       }
     }
-  });
+  }, options);
 }

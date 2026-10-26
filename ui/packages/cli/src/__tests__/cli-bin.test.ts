@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -427,6 +427,53 @@ describe('@object-ui/cli bin', () => {
       // A spot check that the toolchain half is written too — the full anchor
       // judgement lives in `app-generator.test.ts`.
       expect(manifest.devDependencies.vite).not.toBe('^7.3.1');
+    });
+  });
+
+  // objectstack#25911. The two cli-bin files share one build behind a lock
+  // directory in `cliBin.ts`. A run killed while holding it never removes it,
+  // so the next run must read the holder's pid and take over a dead one at
+  // once, rather than wait out the hook timeout with nobody building. The
+  // control is the same lock held by a live pid, which is waited on. Both run
+  // after this file's `beforeAll`, so `dist/` is present and no build spawn may
+  // be called.
+  describe('the shared build lock (objectstack#25911)', () => {
+    const noBuild = {
+      types: (): never => {
+        throw new Error('dist/ is built by beforeAll; the types build must not run');
+      },
+      cli: (): never => {
+        throw new Error('dist/ is built by beforeAll; the cli build must not run');
+      },
+    };
+    const plantLock = (pid: number) => {
+      const lockDir = join(mkdtempSync(join(tmpdir(), 'objectui-cli-bin-lock-')), 'build.lock');
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, 'pid'), String(pid));
+      return lockDir;
+    };
+
+    it('takes over a lock whose holder pid is dead, without waiting', () => {
+      // A child that has exited and been reaped: its pid names no process.
+      const dead = spawnSync(process.execPath, ['-e', '']);
+      expect(dead.status).toBe(0);
+      const lockDir = plantLock(dead.pid);
+
+      const started = Date.now();
+      ensureCliBuilt(noBuild, { lockDir, waitMs: 60_000 });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      // Released on the way out, like any lock it acquired.
+      expect(existsSync(lockDir)).toBe(false);
+    });
+
+    it('control: waits on a lock whose holder pid is alive, and times out naming it', () => {
+      const lockDir = plantLock(process.pid);
+      expect(() => ensureCliBuilt(noBuild, { lockDir, waitMs: 600 })).toThrow(
+        new RegExp(`Timed out after 600 ms .* held by pid ${process.pid}\\.`),
+      );
+      // Not taken over: the live holder's lock is still there.
+      expect(existsSync(lockDir)).toBe(true);
+      rmSync(lockDir, { recursive: true, force: true });
     });
   });
 });
