@@ -64,6 +64,11 @@ fields: {
   RLS predicate (`rls-predicate-*` findings on `permissions[].fields[].when`):
   the fields it names must exist on the entry's object, no cross-object
   reach, no unresolvable `current_user.*` variable.
+- **In Studio.** The permission-set form offers the condition on each field
+  row under **When (edit)**, in the same CEL editor as the row-level security
+  clauses, linted the same way; a condition the publish gate would refuse
+  holds the save. Switching **Read** off clears the condition, and the
+  **Read all** / **Write all** shortcuts keep it.
 
 ## Hidden vs. Read-Only
 
