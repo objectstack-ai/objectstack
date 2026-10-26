@@ -1571,6 +1571,9 @@ async function refusalOf(run: () => Promise<unknown>): Promise<any> {
 function expectScopeViolation(err: any, object: string, reason: RegExp): void {
   expect([err.code, err.status, err.statusCode], err.message).toEqual(['DELEGATION_SCOPE_VIOLATION', 403, 403]);
   expect(err.message).toMatch(reason);
+  // The three limbs every PERMISSION_DENIED matcher reads (`isPermissionDeniedError`,
+  // `mapDataError`, `rest/src/security-routes.ts`): code, name and message prefix.
+  expect(err.name).toBe('DelegationScopeViolationError');
   expect(err.message.startsWith('[Security] Access denied'), 'the PERMISSION_DENIED matcher prefix').toBe(false);
   expect(isPermissionDeniedError(err)).toBe(false);
   const wire = mapDataError(err, object);
