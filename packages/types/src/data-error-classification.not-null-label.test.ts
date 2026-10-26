@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mapDataError, notNullViolationSite } from './data-error-classification.js';
+import { mapDataError, notNullViolationSite, driverNotNullRefusalAnswer } from './data-error-classification.js';
 
 const driverError = (message: string, fields: Record<string, unknown>) => Object.assign(new Error(message), fields);
 
@@ -94,5 +94,45 @@ describe('[#24715] the classification\'s answer for a column no field declares',
         const drift = sentences.filter((s) => /os migrate/.test(s));
         expect(drift, hint).toHaveLength(1);
         expect(drift[0], hint).toMatch(/^If the object declares neither `required` nor `storage: \{ notNull: true \}`/);
+    });
+});
+
+describe('[#26031] driverNotNullRefusalAnswer — the NOT NULL arm\'s answer, exactly where classification gives it', () => {
+    it.each([
+        ['better-sqlite3', SQLITE], ['libsql', LIBSQL], ['sql.js', SQLJS],
+        ['Postgres', POSTGRES], ['Postgres, naming no relation', POSTGRES_NO_RELATION], ['MySQL', MYSQL],
+    ])('%s: mapDataError\'s answer, the same body', (_driver, error) => {
+        const answer = driverNotNullRefusalAnswer(error, 'line_item');
+        expect(answer).toEqual(mapDataError(error, 'line_item'));
+        expect(answer?.body.code).toBe('VALIDATION_FAILED');
+        expect(typeof answer?.body.hint).toBe('string');
+    });
+
+    it('with no object, the body names none, as mapDataError\'s does', () => {
+        expect(driverNotNullRefusalAnswer(SQLITE)).toEqual(mapDataError(SQLITE));
+        expect(driverNotNullRefusalAnswer(SQLITE)?.body).not.toHaveProperty('object');
+    });
+
+    it('every other arm answers undefined, the NOT NULL text in its message notwithstanding', () => {
+        const text = 'NOT NULL constraint failed: line_item.unit_price';
+        // The engine's own refusal on a declared field: the validation arm answers it.
+        const declared = Object.assign(new Error('Sales Price is required'), {
+            name: 'ValidationError', code: 'VALIDATION_FAILED',
+            fields: [{ field: 'unit_price', code: 'required', message: 'Sales Price is required' }],
+            cause: SQLITE,
+        });
+        // A throw that declares its own status: the declared-status arm answers it.
+        const declaredStatus = Object.assign(new Error(text), { status: 409, code: 'CONFLICT' });
+        // A sandboxed body's deliberate throw: the unwrap answers it.
+        const sandboxed = Object.assign(new Error(`action 'x' threw: ${text}`), { innerMessage: text });
+        // node-postgres's fields with no NOT NULL text: classification never reaches the arm.
+        for (const error of [declared, declaredStatus, sandboxed, POSTGRES_FIELDS_ONLY]) {
+            expect(mapDataError(error, 'line_item').body.hint, String(error)).toBeUndefined();
+            expect(driverNotNullRefusalAnswer(error, 'line_item'), String(error)).toBeUndefined();
+        }
+        expect(driverNotNullRefusalAnswer(driverError('UNIQUE constraint failed: line_item.email', { code: 'SQLITE_CONSTRAINT_UNIQUE' })))
+            .toBeUndefined();
+        expect(driverNotNullRefusalAnswer(new Error('connection refused'))).toBeUndefined();
+        expect(driverNotNullRefusalAnswer(undefined)).toBeUndefined();
     });
 });

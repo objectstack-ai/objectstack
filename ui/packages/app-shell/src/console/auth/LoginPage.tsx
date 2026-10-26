@@ -14,6 +14,12 @@
  * Retry that reads it again, in place of the form (objectui#11806). The
  * sign-in request goes to the same server, so a live-looking form would only
  * have deferred that news to the submit.
+ *
+ * A visitor who arrived from an invitation link (`?redirect=/accept-invitation/ID`)
+ * is greeted for that invitation instead of as a returning user, and, where
+ * sign-up is offered, gets `InvitationSignUpPrompt` (`./invitationArrival`)
+ * above the form in place of the small "Sign up" link (#25886). The console's
+ * own login page does the same.
  */
 
 import { useEffect, useState } from 'react';
@@ -33,6 +39,7 @@ import { AuthPageLayout } from './AuthPageLayout.js';
 import { signInRefusalMessages } from './signInRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
+import { InvitationSignUpPrompt } from './invitationArrival.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -121,6 +128,11 @@ export function LoginPage() {
     ? `/register?redirect=${encodeURIComponent(redirect)}`
     : '/register';
 
+  const offerSignUp = configRead === 'known' && signUpOffer === 'form';
+  // #25886 — an invitee is greeted for the invitation, and offered the
+  // register-first prompt in place of `LoginForm`'s own small link.
+  const invitationSignUpUrl = invitationRedirect && offerSignUp ? registerUrl : undefined;
+
   if (serverUnreachable) {
     return (
       <AuthPageLayout>
@@ -129,14 +141,15 @@ export function LoginPage() {
     );
   }
 
-  return (
-    <AuthPageLayout>
+  const form = (
       <LoginForm
         onSuccess={() => navigate('/')}
-        registerUrl={configRead === 'known' && signUpOffer === 'form' ? registerUrl : undefined}
+        registerUrl={offerSignUp && !invitationRedirect ? registerUrl : undefined}
         forgotPasswordUrl="/forgot-password"
         title={t('auth.login.title')}
         description={t('auth.login.description')}
+        // An invitee's header is drawn above the prompt, below.
+        hideHeader={invitationRedirect}
         linkComponent={RouterLink}
         errorMessages={signInRefusalMessages(t)}
         labels={{
@@ -178,6 +191,23 @@ export function LoginPage() {
           backToSsoText: t('auth.login.backToSsoText'),
         }}
       />
+  );
+
+  if (!invitationRedirect) return <AuthPageLayout>{form}</AuthPageLayout>;
+
+  return (
+    <AuthPageLayout>
+      <div
+        data-testid="login-invitation-arrival"
+        className="mx-auto flex w-full flex-col justify-center space-y-6 sm:max-w-[400px]"
+      >
+        <AuthFormHeader
+          title={t('auth.login.invitationTitle')}
+          description={t('auth.login.invitationDescription')}
+        />
+        {invitationSignUpUrl ? <InvitationSignUpPrompt registerUrl={invitationSignUpUrl} /> : null}
+        {form}
+      </div>
     </AuthPageLayout>
   );
 }

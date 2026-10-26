@@ -21,6 +21,7 @@
  * | security-cbp-no-relation      (error)   | #7503 (runtime refusal #7474)   |
  * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
+ * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): an owner-keyed update policy on a detail that has not opted in cannot admit the owner |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -119,7 +120,8 @@
  * credit belongs to the schema's closed enum.
  */
 
-import { isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
+import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/formula';
+import { controlledByParentOwnerMayEdit, isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
 
@@ -138,6 +140,7 @@ export const SECURITY_DELEGATION_MISSING_REASON = 'security-delegation-missing-r
 export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relation';
 export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-ambiguous-relation';
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
+export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -400,6 +403,100 @@ function grantsObjectAccess(p: AnyRec): boolean {
     p.viewAllRecords === true ||
     p.modifyAllRecords === true
   );
+}
+
+/**
+ * [ADR-0055 §3 amendment · ruling 6398566164] The RLS write classes a policy
+ * must be in to be the `update` policy the owner arm judges: `update`, or
+ * `all`, which covers it. A `select`, `insert` or `delete` policy keyed on
+ * the caller is read scoping or another verb's rule, never this arm's subject.
+ */
+const UPDATE_CLASS_RLS_OPERATIONS: ReadonlySet<string> = new Set(['update', 'all']);
+
+/**
+ * The record fields a predicate compares to the CALLER'S identity —
+ * `FIELD == current_user.id` in either operand order, under `&&` / `||` /
+ * parentheses — in walk order, each once.
+ *
+ * Read off the canonical CEL parse (`parseCelToAst`, the one front end every
+ * consumer in this repo shares, after the SQL bridge `sqlPredicateToCel` that
+ * the compiler itself applies to a stored `owner_id = current_user.id`), and
+ * judged by SHAPE on that AST rather than compiled: this arm asks only which
+ * fields a policy keys on the caller, never whether the policy lowers — that
+ * is `rls-predicate-*`'s question, answered on the compiler's own output. A
+ * predicate that does not parse keys on nothing here; the parse rule reports
+ * it. The field spellings are the compiler's (`classify` in
+ * `cel-to-filter.ts`): a bare identifier, or `record.FIELD`; a longer path is
+ * a traversal the compiler refuses and is not a field.
+ */
+function callerIdentityKeyedFields(predicate: unknown): string[] {
+  if (typeof predicate !== 'string' || predicate.trim() === '') return [];
+  const ast = parseCelToAst(sqlPredicateToCel(predicate));
+  if (!ast) return [];
+  const fields: string[] = [];
+  const node = (v: unknown): CelAstNode | null =>
+    v !== null && typeof v === 'object' && 'op' in (v as object) ? (v as CelAstNode) : null;
+  const isCallerId = (v: unknown): boolean => {
+    const n = node(v);
+    if (!n || n.op !== '.' || !Array.isArray(n.args)) return false;
+    const [recv, member] = n.args as [unknown, unknown];
+    const r = node(recv);
+    return r !== null && r.op === 'id' && r.args === 'current_user' && member === 'id';
+  };
+  const fieldOf = (v: unknown): string | null => {
+    const n = node(v);
+    if (!n) return null;
+    if (n.op === 'id') return typeof n.args === 'string' ? n.args : null;
+    if (n.op !== '.' || !Array.isArray(n.args)) return null;
+    const [recv, member] = n.args as [unknown, unknown];
+    const r = node(recv);
+    return r !== null && r.op === 'id' && r.args === 'record' && typeof member === 'string' ? member : null;
+  };
+  const walk = (v: unknown): void => {
+    const n = node(v);
+    if (!n) return;
+    if (n.op === '==' && Array.isArray(n.args) && n.args.length === 2) {
+      const [left, right] = n.args as [unknown, unknown];
+      const field = isCallerId(left) ? fieldOf(right) : isCallerId(right) ? fieldOf(left) : null;
+      if (field !== null && !fields.includes(field)) fields.push(field);
+      return;
+    }
+    if (Array.isArray(n.args)) for (const item of n.args) walk(item);
+    else walk(n.args);
+  };
+  walk(ast);
+  return fields;
+}
+
+/**
+ * `security-controlled-by-parent-owner-policy-without-opt-in` for one policy,
+ * at `path` (the predicate that keys on the caller).
+ */
+function pushCbpOwnerPolicyWithoutOptIn(
+  findings: SecurityFinding[],
+  psName: string,
+  path: string,
+  policyName: string,
+  objName: string,
+  fields: readonly string[],
+): void {
+  const keyed = fields.map((f) => `${f} == current_user.id`).join(', ');
+  findings.push({
+    severity: 'warning',
+    rule: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+    where: `permission set "${psName}"`,
+    path,
+    // One verdict sentence; why a detail's own policy can only narrow, and
+    // what the opt-in changes, is this id's `os explain` entry.
+    message:
+      `update policy "${policyName}" keys on the caller (${keyed}) on controlled_by_parent detail ` +
+      `"${objName}", which has not opted in, so it never admits the owner: every write of a detail needs ` +
+      `edit access to its master, and this policy can only narrow master editors`,
+    // One remedy line.
+    hint:
+      `Declare sharing: { controlledByParent: { ownerMayEdit: true } } on "${objName}" so its owner_id updates ` +
+      `with read access to the master, or drop the policy`,
+  });
 }
 
 /**
@@ -728,6 +825,60 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // so an object that passes above as declared can run with two required
   // master_detail fields, or none. See {@link pushExtensionMergedCbpFindings}.
   pushExtensionMergedCbpFindings(findings, stack);
+
+  // ── [ADR-0055 §3 amendment · ruling 6398566164] an owner-keyed update ──
+  // ── policy on a detail that has not opted in ───────────────────────────
+  // A `controlled_by_parent` detail's by-id write passes the master gate
+  // (step 2.8) only with EDIT access on the master, and the detail's own
+  // row-level policies compose AND with it (step 2.7). So an `update` policy
+  // keyed on the caller — `owner_id == current_user.id` — can only NARROW the
+  // callers who may edit the master to the row's owner; it never admits an
+  // owner who merely reads the master, which is what such a policy is written
+  // to do. The opt-in `sharing.controlledByParent.ownerMayEdit: true` is what
+  // changes the gate's answer (the owner of a row updates it by id with read
+  // on the master); this arm flags the policy on a detail that has not
+  // declared it. Advisory `warning`, not `error`: a narrowing can be meant
+  // (only the owner among the master's editors), and no runtime door refuses
+  // the shape — the write is refused per row, by the master gate, as it was.
+  //
+  // Judged on the detail the policy names, as declared in THIS stack, and
+  // only where its master resolves (an object that derives no master is
+  // refused whole by the two rules above). A wildcard policy names no detail.
+  // The opt-in is read through the spec's one reader, raw or parsed, so the
+  // unparsed doors (`os lint` on a raw config) read it as the parse does.
+  const cbpDetailsWithoutOptIn = new Set<string>();
+  for (const obj of objects) {
+    if (!obj || typeof obj !== 'object' || typeof obj.name !== 'string') continue;
+    if (owdOf(obj) !== 'controlled_by_parent' || !resolveCbpRelation(obj)) continue;
+    if (!controlledByParentOwnerMayEdit(obj)) cbpDetailsWithoutOptIn.add(obj.name);
+  }
+  if (cbpDetailsWithoutOptIn.size > 0) {
+    for (let i = 0; i < permissionSets.length; i++) {
+      const ps = permissionSets[i];
+      if (!ps || typeof ps !== 'object') continue;
+      const psName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+      const policies = recordsOf(ps.rowLevelSecurity);
+      for (let j = 0; j < policies.length; j++) {
+        const policy = policies[j];
+        if (!policy || typeof policy !== 'object' || policy.enabled === false) continue;
+        if (typeof policy.object !== 'string' || !cbpDetailsWithoutOptIn.has(policy.object)) continue;
+        if (!UPDATE_CLASS_RLS_OPERATIONS.has(String(policy.operation ?? ''))) continue;
+        const policyName = typeof policy.name === 'string' ? policy.name : `(policy ${j})`;
+        for (const predicate of ['using', 'check'] as const) {
+          const fields = callerIdentityKeyedFields(policy[predicate]);
+          if (fields.length === 0) continue;
+          pushCbpOwnerPolicyWithoutOptIn(
+            findings,
+            psName,
+            `permissions[${i}].rowLevelSecurity[${j}].${predicate}`,
+            policyName,
+            policy.object,
+            fields,
+          );
+        }
+      }
+    }
+  }
 
   // [#16108] The object graph, for the FLS field-existence rule below. Built
   // ONCE here rather than per permission set: `indexObjectGraph` walks every

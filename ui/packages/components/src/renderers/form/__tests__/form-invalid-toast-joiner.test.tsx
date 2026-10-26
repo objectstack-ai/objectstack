@@ -7,8 +7,13 @@
  */
 
 /**
- * The invalid-submit toast joins the field names with a PER-LOCALE separator —
+ * A refused submit joins the field names with a PER-LOCALE separator —
  * objectstack#5407.
+ *
+ * The list was first built for the invalid-submit toast, which is gone
+ * (objectstack#25874: each field's own message carries the detail). The form's
+ * remaining field-name list is the faulted-`visibleWhen` refusal, which reads
+ * the same `validation.formInvalidJoiner` entry, so the pin moved there.
  *
  * `announceFieldErrors` used to build the list with a hardcoded `、` (U+3001).
  * That is the CJK enumeration comma: correct for zh/ja by accident, wrong in
@@ -42,6 +47,8 @@ let toastErrorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   toastErrorSpy = vi.spyOn(toast, 'error').mockImplementation(() => 'id' as any);
+  // The faulted predicates are reported once each; not what this file asserts.
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
   if (!(Element.prototype as any).scrollIntoView) {
     (Element.prototype as any).scrollIntoView = () => {};
   }
@@ -52,11 +59,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Three required fields, so the joiner appears twice and truncation does not. */
+/** A predicate the engine cannot parse: a fault whatever the record holds. */
+const BROKEN = 'record.stage ==';
+
+/** Three faulted fields, so the joiner appears twice. */
 const fields = [
-  { name: 'subject', label: 'Subject', type: 'input', required: true },
-  { name: 'account', label: 'Account', type: 'input', required: true },
-  { name: 'status', label: 'Status', type: 'input', required: true },
+  { name: 'subject', label: 'Subject', type: 'input', visibleWhen: BROKEN },
+  { name: 'account', label: 'Account', type: 'input', visibleWhen: BROKEN },
+  { name: 'status', label: 'Status', type: 'input', visibleWhen: BROKEN },
 ];
 
 function renderFormIn(language: string) {
@@ -84,7 +94,7 @@ async function toastTextAfterSubmit(language: string): Promise<string> {
   return String(toastErrorSpy.mock.calls[0][0]);
 }
 
-describe('form renderer — invalid-submit toast list joiner (objectstack#5407)', () => {
+describe('form renderer — refused-submit field list joiner (objectstack#5407)', () => {
   it('joins with a comma+space under an en session, never the CJK comma', async () => {
     const text = await toastTextAfterSubmit('en');
 
@@ -100,6 +110,6 @@ describe('form renderer — invalid-submit toast list joiner (objectstack#5407)'
     expect(text).toContain('Subject、Account、Status');
     // zh's sentence, to prove the joiner is being read from the zh pack and not
     // from an `en` fallback that happens to carry the same punctuation.
-    expect(text).toContain('请检查表单中标记的字段');
+    expect(text).toContain('无法提交');
   });
 });

@@ -1661,9 +1661,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Cannot go below 22: the downstream hotcrm smoke below clones
-          # hotcrm@v1.2.0, whose manifest pins engines.node >=22. pnpm install
-          # aborts with ERR_PNPM_UNSUPPORTED_ENGINE under that.
+          # .nvmrc's pin (check-node-version holds every workflow to it). It
+          # must also satisfy the downstream hotcrm smoke below, which clones
+          # hotcrm's latest release and installs it: pnpm install aborts with
+          # ERR_PNPM_UNSUPPORTED_ENGINE outside that release's engines.node
+          # (v6.0.0, the latest on 2026-10-26: `^22.11 || ^24 || >=26`).
           node-version: '22'
 
       # ──────────────────────────────────────────────────────────────────────
@@ -1856,50 +1858,62 @@ jobs:
         run: pnpm run build
 
       - name: Downstream backward-compat smoke (live hotcrm)
-        # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must
-        # not break a real third-party consumer pinned to a published release.
-        # The deterministic in-repo floor is @objectstack/downstream-contract;
-        # this is the live ceiling.
+        # Pre-publish check (#2035): the about-to-publish @objectstack/spec
+        # should not break a real third-party consumer pinned to a published
+        # release. The deterministic in-repo floor is
+        # @objectstack/downstream-contract, which blocks; this is the live
+        # ceiling, and it is ADVISORY: it runs and reports on every publish, and
+        # a failure does NOT block. `BLOCKING` below is the whole switch.
         #
-        # ⚠️ CURRENTLY ADVISORY — it runs and reports on every publish, but a
-        # failure does NOT block. `BLOCKING` below is the whole switch.
+        # How it got here. #3600 made it advisory for the rc pre-mode window and
+        # promised it would re-arm at `changeset pre exit`. It did (#8643,
+        # 2026-08-14), against a hand-pinned HOTCRM_REF that was still a 14.7-era
+        # hotcrm, so the re-armed gate stood between the 17.0.0 GA publish and a
+        # migration nobody had done yet: the deadlock #3600 named, one event
+        # later. It went back to advisory, and the hand pin then sat four majors
+        # behind hotcrm, so every publish emitted a warning that was certain to
+        # appear and meant nothing.
         #
-        # Why, and what changed (supersedes the #3600 amendment). #3600 made
-        # this advisory for the duration of the rc pre-mode window, keyed on
-        # `.changeset/pre.json` saying mode:"pre", with the reasoning: a major
-        # train exists precisely to ship deliberate surface removals, and a
-        # hotcrm release migrated off them cannot exist until the rc.N artifacts
-        # it would migrate against are published — blocking here deadlocks the
-        # train. It promised the gate would "re-arm by itself the moment
-        # `changeset pre exit` lands".
-        #
-        # It did exactly that (#8643, 2026-08-14) — and the deadlock was still
-        # on, because HOTCRM_REF was and is `v2.1.0`, i.e. ObjectStack 14.7. So
-        # the re-armed gate stood between the 17.0.0 GA publish and a migration
-        # nobody had done yet, which is the same deadlock #3600 named, one event
-        # later. The keying was the bug: pre-exit is not when a migrated hotcrm
-        # release starts existing. Shipping one is.
-        #
-        # So the posture is now tied to THAT event instead. Note this is a
-        # WEAKER gate than #2035 intended and it is meant to be temporary — the
-        # deterministic in-repo floor (@objectstack/downstream-contract, which
-        # still blocks) is what carries backward-compat enforcement until it is
-        # restored.
-        #
-        # TO RE-ARM: ship a hotcrm release migrated to v17, bump HOTCRM_REF to
-        # it, set BLOCKING to '1'. Nothing else changes. Because the smoke keeps
-        # running and reporting throughout, the run log shows the day it goes
-        # green — you flip the switch on evidence, not on hope.
+        # The posture now is a ruling, not a pending to-do (objectstack#25770,
+        # D10 = A, 2026-10-25): the step stays advisory, and its ref is no
+        # longer pinned by hand. It resolves at run time to hotcrm's LATEST
+        # PUBLISHED RELEASE (`releases/latest` -> `tag_name`), so the check
+        # always runs against the consumer as it ships today. ⛔ Never hard-code
+        # a tag here again. The read is fail-soft: an unresolvable tag (network
+        # error, non-200, empty or malformed `tag_name`) is a `::notice::` and a
+        # skip, never a failure. Making this blocking is a new-gate decision for
+        # the maintainer, not a switch left for someone to flip.
         env:
-          # v2.1.0: hotcrm upgraded to ObjectStack 14.7 (hotcrm#448) and
-          # dropped the agent `visibility` field that spec 15 removes as
-          # unenforced surface (ADR-0056 D8, #3216).
-          # Bump this ref whenever a deliberate spec surface removal ships a
-          # matching hotcrm release.
-          HOTCRM_REF: v2.1.0
+          # Read-only use: the releases API for a public repo. Authenticated so
+          # the call is not subject to the anonymous per-IP rate limit shared
+          # across hosted runners.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # '1' = a failure fails the publish. '0' = reported only.
           BLOCKING: '0'
         run: |
+          api='https://api.github.com/repos/objectstack-ai/hotcrm/releases/latest'
+          auth=()
+          if [ -n "${GH_TOKEN:-}" ]; then
+            auth=(-H "Authorization: Bearer ${GH_TOKEN}")
+          fi
+          body="$(mktemp)"
+          code="$(curl -sS --max-time 30 --retry 2 -o "$body" -w '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' "${auth[@]}" "$api")" || true
+          tag=''
+          if [ "$code" = '200' ]; then
+            tag="$(jq -r '.tag_name // empty' "$body" 2>/dev/null || true)"
+          fi
+          rm -f "$body"
+          # The token's only use is the read above. hotcrm's install below runs
+          # third-party lifecycle scripts, which must not inherit it.
+          unset GH_TOKEN auth
+          if ! printf '%s' "$tag" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9._/-]*'; then
+            echo "::notice::could not resolve hotcrm's latest published release from ${api} (HTTP ${code:-none}, no usable tag_name) — skipping the advisory downstream smoke. The publish continues."
+            exit 0
+          fi
+          export HOTCRM_REF="$tag"
+          echo "Resolved hotcrm's latest published release: ${HOTCRM_REF}"
+
           if bash scripts/downstream-smoke.sh; then
             echo "::notice::hotcrm@${HOTCRM_REF} is compatible with the about-to-publish @objectstack/spec."
             exit 0
@@ -1910,7 +1924,7 @@ jobs:
             exit 1
           fi
 
-          echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the about-to-publish @objectstack/spec. ADVISORY ONLY — the publish continues. HOTCRM_REF is pre-v17; ship a migrated hotcrm release, bump it, and set BLOCKING=1 in .github/workflows/release.yml to re-arm this gate."
+          echo "::warning::hotcrm@${HOTCRM_REF} (hotcrm's latest release) is incompatible with the about-to-publish @objectstack/spec. ADVISORY ONLY — the publish continues; the in-repo @objectstack/downstream-contract floor is the blocking check."
 
       # ──────────────────────────────────────────────────────────────────────
       # ADR-0087 D4 — the per-release section, and the gate that proves it.
