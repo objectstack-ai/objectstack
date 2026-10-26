@@ -384,6 +384,12 @@ const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
 const COMMENT_OBJECT = 'sys_comment';
 
 /**
+ * `sys_approval_request`'s declared recall. While the decision bar draws it,
+ * the DetailView approval band yields its own Recall (objectstack#25877).
+ */
+const APPROVAL_RECALL_ACTION = 'approval_recall';
+
+/**
  * Which writes the record feed may offer: its comment and reply composers, the
  * author's Edit and Delete on their own comment (objectui#12268), and its
  * reaction control on either store (objectui#12082).
@@ -1684,11 +1690,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // untouched by it, and the recall endpoint authorizes the recall itself.
   const approvalIsSubmitter = isSubmitterOf(approvals.pendingRequest, user?.id);
   // Does this page mount the pending request's declared decision bar
-  // (objectui#3055)? That bar carries the declared `approval_recall`, so when
-  // it is up the DetailView approval band must not draw a second Recall
-  // (objectstack#25877): one predicate decides both, so the bar and the band
-  // cannot disagree about which of them owns the lever.
+  // (objectui#3055)?
   const approvalBarMounted = approvals.available && !!approvals.pendingRequest;
+  // Recall is drawn ONCE per page (objectstack#25877). The bar reports which
+  // declared actions it actually draws, after their capability and `visible`
+  // gates; while it draws the request's own `approval_recall`, the DetailView
+  // approval band keeps its lock badge only. Read off what the bar DRAWS, not
+  // off whether it is mounted: before the request's definition loads, or on a
+  // backend too old to send a `viewer` block (every declared gate fails
+  // closed), the bar draws no recall and the band stays the lever.
+  const [approvalBarDrawn, setApprovalBarDrawn] = useState<string[]>([]);
+  const approvalRecallDrawnByHost =
+    approvalBarMounted && approvalBarDrawn.includes(APPROVAL_RECALL_ACTION);
 
   // A decision landed through the declared-action bar (objectui#3055). The
   // action itself already POSTed and the runtime already toasted; what the HOST
@@ -3682,7 +3695,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           approvalReadAnswered={approvals.answered}
           approvalProgress={approvalProgress}
           approvalIsSubmitter={approvalIsSubmitter}
-          approvalRecallDrawnByHost={approvalBarMounted}
+          approvalRecallDrawnByHost={approvalRecallDrawnByHost}
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
@@ -3821,9 +3834,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   approver, the override levers (approve / reject / reassign
                   in their name, and recall) are the exception path, so
                   `foldOverrides` collapses them into one status line and one
-                  marked menu; the approver's own bar is unchanged. The bar is
-                  also the page's one Recall: `approvalBarMounted` tells the
-                  DetailView band below to keep its lock badge only. */}
+                  marked menu; the approver's own bar is unchanged. While the
+                  bar draws the request's Recall, it is the page's one Recall:
+                  `onDrawnActionsChange` is how the page learns that and tells
+                  the DetailView band below to keep its lock badge only. */}
               {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
@@ -3833,6 +3847,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
                   foldOverrides
+                  onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}
               <RelatedRecordActionsBridge

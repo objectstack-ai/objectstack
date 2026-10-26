@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
 import React from 'react';
 
 const executeSpy = vi.fn().mockResolvedValue({ success: true });
@@ -156,18 +156,29 @@ const ADMIN_SUBMITTER = { can_act: false, is_submitter: true, can_override: true
 const ADMIN_ONLY = { can_act: false, is_submitter: false, can_override: true };
 const APPROVER = { can_act: true, is_submitter: false, can_override: false };
 
-function renderBar(viewer: Record<string, unknown>, foldOverrides = true) {
+function renderBar(
+  viewer: Record<string, unknown>,
+  foldOverrides = true,
+  onDrawnActionsChange?: (names: string[]) => void,
+  actions: any[] = ACTIONS,
+) {
   return render(
     <AdapterCtx.Provider value={null as never}>
       <DeclaredActionsBar
         objectName="sys_approval_request"
         record={{ ...REQUEST, viewer }}
         location="record_section"
-        actions={ACTIONS}
+        actions={actions}
         foldOverrides={foldOverrides}
+        onDrawnActionsChange={onDrawnActionsChange}
       />
     </AdapterCtx.Provider>,
   );
+}
+
+/** The last set the bar reported. */
+function lastReport(spy: ReturnType<typeof vi.fn>): string[] {
+  return spy.mock.calls.at(-1)?.[0] ?? [];
 }
 
 function openOverrideMenu() {
@@ -253,5 +264,39 @@ describe('DeclaredActionsBar — foldOverrides (objectstack#25877)', () => {
     for (const name of [...FOLDED, 'approval_comment']) {
       expect(screen.getByTestId(`declared-action-${name}`).tagName).toBe('BUTTON');
     }
+  });
+
+  it('reports what it draws: the folded levers while closed, never a hidden one', () => {
+    const spy = vi.fn();
+    renderBar(ADMIN_SUBMITTER, true, spy);
+    expect([...lastReport(spy)].sort()).toEqual([...FOLDED, 'approval_comment'].sort());
+
+    cleanup();
+    spy.mockClear();
+    renderBar(APPROVER, true, spy);
+    // Recall's gate admits neither arm for the approver, so it is not drawn.
+    expect(lastReport(spy)).not.toContain('approval_recall');
+    expect(lastReport(spy)).toContain('approval_approve');
+  });
+
+  it('reports an empty set when the bar goes away', () => {
+    const spy = vi.fn();
+    const { unmount } = renderBar(ADMIN_SUBMITTER, true, spy);
+    expect(lastReport(spy)).toContain('approval_recall');
+    unmount();
+    expect(lastReport(spy)).toEqual([]);
+  });
+
+  it('draws no menu when every folded lever is hidden by its own gate', () => {
+    // Folded (its gate names the override flag) yet never shown: the trigger
+    // must not open onto an empty menu.
+    const hiddenOverride = [
+      { ...ACTIONS[0], visible: 'record.viewer.can_override && record.status == "returned"' },
+      ACTIONS[4],
+    ];
+    renderBar(ADMIN_SUBMITTER, true, undefined, hiddenOverride);
+    expect(screen.getByTestId('declared-actions-approval-status')).toBeInTheDocument();
+    expect(screen.queryByTestId('declared-actions-override-menu')).toBeNull();
+    expect(screen.getByTestId('declared-action-approval_comment')).toBeInTheDocument();
   });
 });

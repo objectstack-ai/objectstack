@@ -147,6 +147,17 @@ export interface DeclaredActionsBarProps {
    * server sent no `viewer` block for render exactly as without it.
    */
   foldOverrides?: boolean;
+  /**
+   * Told which declared actions the bar DRAWS for this viewer, by name, each
+   * time that set changes, and an empty list when the bar goes away
+   * (objectstack#25877). "Drawn" is after the capability gate and the action's
+   * own `visible` verdict — a button on the bar or an item in the folded
+   * menu — so a host can yield a lever it would otherwise draw itself exactly
+   * when the bar really draws it, and not merely when the bar is mounted (the
+   * request's definition may not have loaded, or a backend too old to send a
+   * `viewer` block fails every gate closed). Pass a stable function.
+   */
+  onDrawnActionsChange?: (names: string[]) => void;
 }
 
 /**
@@ -168,6 +179,60 @@ function approvalRouteVerb(action: ActionDef): ApprovalRouteVerb | undefined {
 }
 
 /**
+ * Is this declared action SHOWN to the viewer? The one evaluation of its
+ * `visible` gate, shared by the button and by the visibility probe the folded
+ * override menu reports through (objectstack#25877), so the two cannot reach
+ * different verdicts on one action.
+ *
+ * `visible` fails CLOSED on a throwing predicate — mirrors action:button and
+ * ActionEngine.getActionsForLocation: a guard that can't be evaluated hides
+ * the action rather than exposing one whose precondition is broken.
+ *
+ * Does the action DECLARE a `visible` gate? `hasDeclaredVisibilityGate`
+ * (`!= null && !== ''`) is the one definition on the question, imported rather
+ * than re-spelled. This gate used to ask truthiness, which classified
+ * `visible: false` — the most explicit "never show this" an author can write —
+ * as "no gate declared", skipped the verdict, and rendered the action for
+ * everyone (objectui#3835, the fifth member of the objectui#3492 family).
+ *
+ * The stakes here are the highest of the family: the actions are
+ * SERVER-declared (`objectDef.actions[]`), so "the spec's `visible` has no
+ * boolean member, `objectstack build` cannot emit one" does not apply, and this
+ * bar is mounted as plain JSX by its hosts — `packages/react`'s
+ * `SchemaRenderer`, which hides a `visible`-carrying node before its component
+ * mounts, is not on this path. This is the only gate on it, in front of the
+ * approvals inbox's Approve / Reject buttons.
+ *
+ * The verdict stays with the evaluation entry: `toPredicateInput` passes a
+ * boolean through untouched and `useCondition` short-circuits it instead of
+ * calling the expression engine, so a declared `false` is `false`.
+ */
+function useDeclaredActionShown(action: ActionDef, predicateRecord: ReturnType<typeof usePredicateRecordContext>): boolean {
+  const isVisible = useCondition(toPredicateInput(action.visible), predicateRecord, {
+    throwOnError: true,
+    label: `declared action "${action.name ?? action.label ?? 'action'}" (visible)`,
+  });
+  return !(hasDeclaredVisibilityGate(action.visible) && !isVisible);
+}
+
+/**
+ * Report whether a declared action is drawn, and withdraw the report when the
+ * reporter unmounts (objectstack#25877). `onDrawn` is the toolbar's stable
+ * setter, so the effect re-runs only when the verdict or the name moves.
+ */
+function useReportDrawn(
+  name: string | undefined,
+  drawn: boolean,
+  onDrawn: ((name: string, drawn: boolean) => void) | undefined,
+): void {
+  React.useEffect(() => {
+    if (!onDrawn || !name) return undefined;
+    onDrawn(name, drawn);
+    return () => onDrawn(name, false);
+  }, [name, drawn, onDrawn]);
+}
+
+/**
  * One declared-action button. Extracted so the `visible` CEL predicate can be
  * evaluated with a hook (rules-of-hooks) and so the dispatch can carry the
  * record. Mirrors `action:button` (fail-closed `visible`) but injects the
@@ -184,7 +249,9 @@ const DeclaredActionButton: React.FC<{
    * shared, so the two forms cannot disagree about what the lever does.
    */
   asMenuItem?: boolean;
-}> = ({ action, objectName, record, asMenuItem = false }) => {
+  /** The toolbar's drawn-set reporter (objectstack#25877). */
+  onDrawn?: (name: string, drawn: boolean) => void;
+}> = ({ action, objectName, record, asMenuItem = false, onDrawn }) => {
   const { execute } = useAction();
   const [loading, setLoading] = useState(false);
   // Localize the SERVER-DECLARED strings through the `_actions.<name>.*`
@@ -242,13 +309,12 @@ const DeclaredActionButton: React.FC<{
    * `record is not defined` and `throwOnError` turns that into "hidden".
    */
   const predicateRecord = usePredicateRecordContext(record);
-  // `visible` fails CLOSED on a throwing predicate — mirrors action:button and
-  // ActionEngine.getActionsForLocation: a guard that can't be evaluated hides
-  // the action rather than exposing one whose precondition is broken.
-  const isVisible = useCondition(toPredicateInput(action.visible), predicateRecord, {
-    throwOnError: true,
-    label: `declared action "${action.name ?? action.label ?? 'action'}" (visible)`,
-  });
+  // The `visible` verdict — one evaluation, shared with the folded menu's
+  // visibility probe (`useDeclaredActionShown` states the rule).
+  const shown = useDeclaredActionShown(action, predicateRecord);
+  // A menu item does not report: it is mounted only while its menu is open,
+  // so its unmount would read as "not drawn". The probe reports for it.
+  useReportDrawn(action.name, shown, asMenuItem ? undefined : onDrawn);
   // Spec `disabled` — the same three arms as `visible` (`boolean | CEL string |
   // { dialect, source }`, disabled when TRUE), evaluated against the same record
   // context. objectstack-ai/objectstack#1885 wired it in action-button only; this bar ignored it, so a
@@ -475,25 +541,8 @@ const DeclaredActionButton: React.FC<{
     }
   }, [action, execute, loading, objectName, record, localizeActionTexts, t, overrideNotice, overrideLabel]);
 
-  // Does the action DECLARE a `visible` gate? `hasDeclaredVisibilityGate`
-  // (`!= null && !== ''`) is the one definition on the question, imported rather
-  // than re-spelled. This gate used to ask truthiness, which classified
-  // `visible: false` — the most explicit "never show this" an author can write —
-  // as "no gate declared", skipped the verdict, and rendered the action for
-  // everyone (objectui#3835, the fifth member of the objectui#3492 family).
-  //
-  // The stakes here are the highest of the family: the actions are
-  // SERVER-declared (`objectDef.actions[]`), so "the spec's `visible` has no
-  // boolean member, `objectstack build` cannot emit one" does not apply, and this
-  // bar is mounted as plain JSX by its hosts — `packages/react`'s
-  // `SchemaRenderer`, which hides a `visible`-carrying node before its component
-  // mounts, is not on this path. This is the only gate on it, in front of the
-  // approvals inbox's Approve / Reject buttons.
-  //
-  // The verdict stays with the evaluation entry above: `toPredicateInput` passes
-  // a boolean through untouched and `useCondition` short-circuits it instead of
-  // calling the expression engine, so a declared `false` is `false`.
-  if (hasDeclaredVisibilityGate(action.visible) && !isVisible) return null;
+  // The declared `visible` gate (`useDeclaredActionShown` above).
+  if (!shown) return null;
 
   const iconName = typeof (action as any).icon === 'string' ? (action as any).icon as string : undefined;
   // Map the spec's action `variant` enum (primary|secondary|danger|ghost|link)
@@ -752,12 +801,31 @@ const ApprovalWaitingStatus: React.FC<{ record: any }> = ({ record }) => {
  * action that survives. An override-only viewer gets no exemption from a
  * declared capability, and gets no new exposure either.
  */
+/**
+ * Evaluates a folded lever's `visible` gate while its menu is closed and its
+ * item is not mounted, and reports the verdict (objectstack#25877). Draws
+ * nothing.
+ */
+const DeclaredActionVisibilityProbe: React.FC<{
+  action: ActionDef;
+  record: any;
+  onDrawn: (name: string, drawn: boolean) => void;
+}> = ({ action, record, onDrawn }) => {
+  const predicateRecord = usePredicateRecordContext(record);
+  const shown = useDeclaredActionShown(action, predicateRecord);
+  useReportDrawn(action.name, shown, onDrawn);
+  return null;
+};
+
 const DeclaredActionsToolbar: React.FC<
-  Pick<DeclaredActionsBarProps, 'objectName' | 'record' | 'className' | 'label' | 'foldOverrides'> & {
+  Pick<
+    DeclaredActionsBarProps,
+    'objectName' | 'record' | 'className' | 'label' | 'foldOverrides' | 'onDrawnActionsChange'
+  > & {
     /** The located set, pre-filtered by `location` / `exclude`, ungated. */
     actions: ActionDef[];
   }
-> = ({ actions, objectName, record, className, label, foldOverrides }) => {
+> = ({ actions, objectName, record, className, label, foldOverrides, onDrawnActionsChange }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
   const permitted = useMemo(
@@ -775,6 +843,27 @@ const DeclaredActionsToolbar: React.FC<
       : []),
     [foldOverrides, record, permitted],
   );
+
+  // objectstack#25877 — which declared actions are DRAWN, by name. Each bar
+  // button and each folded lever's probe reports its own `visible` verdict;
+  // the set is read against `permitted`, so a lever the capability gate
+  // removed never counts however it last reported.
+  const [drawnByName, setDrawnByName] = useState<Readonly<Record<string, boolean>>>({});
+  const reportDrawn = useCallback((name: string, isDrawn: boolean) => {
+    setDrawnByName((prev) => ((prev[name] ?? false) === isDrawn ? prev : { ...prev, [name]: isDrawn }));
+  }, []);
+  const drawnNames = permitted
+    .map((action) => action.name)
+    .filter((name): name is string => !!name && drawnByName[name] === true);
+  // Keyed on the names themselves, not on an array identity (AGENTS.md #10).
+  const drawnKey = drawnNames.join('\n');
+  const onDrawnRef = React.useRef(onDrawnActionsChange);
+  onDrawnRef.current = onDrawnActionsChange;
+  React.useEffect(() => {
+    onDrawnRef.current?.(drawnKey ? drawnKey.split('\n') : []);
+  }, [drawnKey]);
+  React.useEffect(() => () => onDrawnRef.current?.([]), []);
+  const foldedDrawn = folded.some((action) => !!action.name && drawnByName[action.name] === true);
 
   // Nothing this viewer may invoke renders nothing — no toolbar chrome, no
   // orphan divider, same degrade as "nothing declared at this location".
@@ -804,38 +893,51 @@ const DeclaredActionsToolbar: React.FC<
                 action={action}
                 objectName={objectName}
                 record={record}
+                onDrawn={reportDrawn}
               />
             ))}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                {/* One marked control for the whole exception path: the
-                    override shield the folded levers wear, in the same amber,
-                    beside the overflow glyph. */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
-                  aria-label={overrideMenuLabel}
-                  title={overrideMenuLabel}
-                  data-testid="declared-actions-override-menu"
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-48">
-                {folded.map((action) => (
-                  <DeclaredActionButton
-                    key={action.name}
-                    action={action}
-                    objectName={objectName}
-                    record={record}
-                    asMenuItem
-                  />
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {folded.map((action) => (
+              <DeclaredActionVisibilityProbe
+                key={action.name}
+                action={action}
+                record={record}
+                onDrawn={reportDrawn}
+              />
+            ))}
+            {/* The trigger appears once a folded lever is actually shown, so a
+                set whose every gate said no leaves no empty menu behind. */}
+            {foldedDrawn && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  {/* One marked control for the whole exception path: the
+                      override shield the folded levers wear, in the same amber,
+                      beside the overflow glyph. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+                    aria-label={overrideMenuLabel}
+                    title={overrideMenuLabel}
+                    data-testid="declared-actions-override-menu"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48">
+                  {folded.map((action) => (
+                    <DeclaredActionButton
+                      key={action.name}
+                      action={action}
+                      objectName={objectName}
+                      record={record}
+                      asMenuItem
+                    />
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </div>
@@ -857,6 +959,7 @@ const DeclaredActionsToolbar: React.FC<
             action={action}
             objectName={objectName}
             record={record}
+            onDrawn={reportDrawn}
           />
         ))}
       </div>
@@ -874,6 +977,7 @@ export function DeclaredActionsBar({
   className,
   label,
   foldOverrides,
+  onDrawnActionsChange,
 }: DeclaredActionsBarProps) {
   const dataSource = useAdapter();
   // Fetch the object def (and its declared actions) unless the host passed
@@ -929,6 +1033,7 @@ export function DeclaredActionsBar({
         className={className}
         label={label}
         foldOverrides={foldOverrides}
+        onDrawnActionsChange={onDrawnActionsChange}
       />
       {runtime.dialogs}
     </ActionProvider>
