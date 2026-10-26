@@ -1489,8 +1489,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'annotate-shipped -> no version commit, an unpublished or unreadable version, an error anywhere: a warning or a plain line, nothing written, exit 0': 5,
   'changelog attribution -> a revert of a version commit restores its changesets: each entry names the commit that first added it, through the generator changeset version loads': 5,
   'changelog attribution -> a shallow clone deepens itself to the first add; with no history to fetch, or nothing to decide, the stock commit stays and the version pass goes on': 4,
+  'changelog fold -> on the stable cut each prerelease section of the cycle folds into the stable section: an entry is its summary, not its commit, and a dependency bump is superseded': 4,
+  'changelog fold -> the stable section is kept whole, and so is every older cycle; a prerelease section carrying an entry the stable section lacks stays': 5,
+  'changelog fold -> armed only on an exit-mode cut, for the CHANGELOGs whose top was a prerelease before the version pass wrote': 3,
 });
-const SELF_TEST_BATTERY_FLOOR = 31;
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 async function selfTest() {
   let failed = 0;
@@ -2021,6 +2024,71 @@ async function selfTest() {
     check(
       plain({ id: 'a' }) === undefined && plain({ id: 'gone', commit: cC }) === cC && plain({ id: 'c', commit: cC }) === cC,
       'no stock commit, a changeset this history never added, a changeset nothing restored: the stock answer, unchanged',
+    );
+
+    // The stable cut out of pre mode (#26079, ruling A′): the generator folds
+    // the cycle's prerelease sections into the stable section the version pass
+    // writes, instead of leaving them as a second copy below it.
+    const { foldPrereleaseSections, prepareFold } = await import('./changeset-changelog.mjs');
+    const OLD_CYCLE = [
+      '## 1.1.0', '', '### Minor Changes', '', '- 1111111: old feature', '',
+      '## 1.1.0-next.0', '', '### Minor Changes', '', '- 1111111: old feature', '',
+    ].join('\n');
+    const STABLE_SECTION = [
+      '## 1.2.0', '', '### Minor Changes', '',
+      '- aaaaaaa: feature A', '  with a second line', '- bbbbbbb: feature B', '- ccccccc: feature C', '',
+      '### Patch Changes', '', '- Updated dependencies [aaaaaaa, bbbbbbb, ccccccc]', '  - @demo/core@1.2.0', '',
+    ].join('\n');
+    const NEXT_1 = [
+      '## 1.2.0-next.1', '', '### Minor Changes', '', '- 9999999: feature B', '',
+      '### Patch Changes', '', '- Updated dependencies [bbbbbbb]', '  - @demo/core@1.2.0-next.1', '',
+    ].join('\n');
+    const NEXT_0 = ['## 1.2.0-next.0', '', '### Minor Changes', '', '- aaaaaaa: feature A', '  with a second line', ''].join('\n');
+    const changelog = (...sections) => `# @demo/pkg\n\n${sections.join('\n')}`;
+    const stableCut = changelog(STABLE_SECTION, NEXT_1, NEXT_0, OLD_CYCLE);
+    const folded = changelog(STABLE_SECTION, OLD_CYCLE);
+
+    battery('changelog fold -> on the stable cut each prerelease section of the cycle folds into the stable section: an entry is its summary, not its commit, and a dependency bump is superseded');
+    const f = foldPrereleaseSections(stableCut, '1.2.0-next.1');
+    check(f.folded.join() === '1.2.0-next.1,1.2.0-next.0' && f.kept.length === 0, `both prerelease sections of the cycle fold (folded: ${f.folded.join()})`);
+    check(f.text === folded, 'the folded file is the stable section, then the older cycle, and nothing else');
+    check(!f.text.includes('9999999'), 'an entry naming another commit than its stable line still folds: the summary is the entry');
+    check(!f.text.includes('@demo/core@1.2.0-next.1'), "a prerelease's dependency bump does not hold its section back");
+
+    battery('changelog fold -> the stable section is kept whole, and so is every older cycle; a prerelease section carrying an entry the stable section lacks stays');
+    check(f.text.includes(STABLE_SECTION), 'the new stable section is byte-identical to what the version pass wrote');
+    check(f.text.endsWith(OLD_CYCLE), "an older cycle's stable section and its prerelease sections are byte-identical (存量不横扫)");
+    check(foldPrereleaseSections(folded, '1.1.0').text === folded, 'a cut whose top was a stable section changes nothing');
+    const noStable = changelog(NEXT_1, NEXT_0);
+    check(foldPrereleaseSections(noStable, '1.2.0-next.0').text === noStable, 'a file that does not open with a stable section changes nothing');
+    const amended = NEXT_0.replace('feature A', 'feature A, amended');
+    const fa = foldPrereleaseSections(changelog(STABLE_SECTION, NEXT_1, amended, OLD_CYCLE), '1.2.0-next.1');
+    check(
+      fa.folded.join() === '1.2.0-next.1' && fa.kept.length === 1 && fa.text === changelog(STABLE_SECTION, amended, OLD_CYCLE),
+      'a prerelease section carrying an entry the stable section does not reproduce is kept whole; the rest fold',
+    );
+
+    battery('changelog fold -> armed only on an exit-mode cut, for the CHANGELOGs whose top was a prerelease before the version pass wrote');
+    const fd = mkdtempSync(join(tmpdir(), 'release-pending-publish-fold-'));
+    dirs.push(fd);
+    gitOk(fd, ['init', '-q']);
+    for (const d of ['.changeset', 'a', 'b']) mkdirSync(join(fd, d));
+    writeFileSync(join(fd, 'a', 'CHANGELOG.md'), changelog(NEXT_1, NEXT_0, OLD_CYCLE));
+    writeFileSync(join(fd, 'b', 'CHANGELOG.md'), changelog(OLD_CYCLE));
+    gitOk(fd, ['add', '.']);
+    check(prepareFold({ cwd: fd, log: () => {} }) === null, 'no .changeset/pre.json -> not armed');
+    writeFileSync(join(fd, '.changeset', 'pre.json'), '{"mode":"exit","tag":"next"}');
+    const foldLog = [];
+    const armed = prepareFold({ cwd: fd, log: (line) => foldLog.push(line) });
+    check(armed !== null && [...armed.tops.keys()].join() === 'a/CHANGELOG.md', 'an exit-mode cut -> armed for a/ only: b/ already opens with a stable section');
+    // What `changeset version` writes: the new stable section above the old top.
+    writeFileSync(join(fd, 'a', 'CHANGELOG.md'), stableCut);
+    writeFileSync(join(fd, 'b', 'CHANGELOG.md'), folded);
+    armed?.apply();
+    check(
+      readFileSync(join(fd, 'a', 'CHANGELOG.md'), 'utf8') === folded && readFileSync(join(fd, 'b', 'CHANGELOG.md'), 'utf8') === folded &&
+        foldLog.length === 1 && /folded 2 prerelease section\(s\) in 1 CHANGELOG/.test(foldLog[0]),
+      'after the write, a/ is folded, b/ is untouched, and one plain line says so',
     );
 
     battery('annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0');

@@ -2,7 +2,6 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "jsx": "react-jsx",
     // Drop the root tsconfig's source-tree `paths` (keeping only the local `@/*`
     // alias) so `@object-ui/*` and `@objectstack/spec` resolve through the
     // workspace dependency's built `.d.ts` instead of pulling sibling package

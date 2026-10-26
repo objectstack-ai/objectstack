@@ -323,7 +323,9 @@ function boundedDateWindow(value: unknown): [string, string] | null {
  * lowered under the name the author wrote. Zero of them, or two, is the
  * executor's error to raise — it names the candidates (`resolveCompareDimension`).
  * Guessing one renderer-side would trade a loud error for a quietly wrong
- * window, which is the failure class objectstack#5011 set out to end.
+ * window, which is the failure class objectstack#5011 set out to end. The one
+ * zero-window filter that never reaches the executor is a filter that dates
+ * nothing at all — see `filterDatesField`, which the widget asks first.
  */
 export function extractDateWindows(filter: unknown): {
   windows: DatasetTimeWindow[];
@@ -388,6 +390,46 @@ export function extractDateWindows(filter: unknown): {
     windows: Array.from(ranges, ([dimension, dateRange]) => ({ dimension, dateRange })),
     rest,
   };
+}
+
+/**
+ * Does a RESOLVED runtime filter state any date condition on `dimension` — or,
+ * with no dimension named, on any field at all? (objectstack#25970)
+ *
+ * A comparison needs a window, and a filter can lack one for two different
+ * reasons. The AUTHOR wrote a date condition that is not a closed window (a
+ * one-bound YTD `{ $gte }`, an exclusive bound, a single day): that is a
+ * metadata mistake, and it stays the executor's loud refusal — the executor
+ * and the spec define a comparison only against a two-bound window. Or the
+ * filter dates nothing at all, which is what a READER produces by picking All
+ * time on the dashboard's date-range filter: `DashboardRenderer` then merges no
+ * condition for it, and the author cannot prevent the choice. With no window
+ * there is no earlier period to compare against, so that widget asks for no
+ * comparison and shows its number, instead of a normal filter choice breaking
+ * the tile.
+ *
+ * "A date condition" is any ISO-date operand under the field, at any depth and
+ * in any position (`$or` / `$not` included) — deliberately wider than the
+ * windows `extractDateWindows` lowers, so every author-written date shape still
+ * reaches the executor and is told why it cannot be compared.
+ */
+export function filterDatesField(filter: unknown, dimension?: string): boolean {
+  const datesValue = (value: unknown): boolean => {
+    if (typeof value === 'string') return ISO_DATE_RE.test(value);
+    if (Array.isArray(value)) return value.some(datesValue);
+    if (value && typeof value === 'object') return Object.values(value as object).some(datesValue);
+    return false;
+  };
+  const walk = (node: unknown): boolean => {
+    if (Array.isArray(node)) return node.some(walk);
+    if (!node || typeof node !== 'object') return false;
+    return Object.entries(node as Record<string, unknown>).some(([key, value]) =>
+      key.startsWith('$')
+        ? walk(value)
+        : (dimension == null || key === dimension) && datesValue(value),
+    );
+  };
+  return walk(filter);
 }
 
 /** Single-value KPI widget types — rendered as a number, not a chart. */
@@ -694,7 +736,11 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
   // overlay the renderer then dropped. Gated on the CHART branch, not on the
   // widget type: a pie widget with no dimensions renders as a metric tile
   // (`isMetric`), which does show the comparison as a delta, so it keeps it.
-  const compareTo: CompareToConfig | undefined =
+  //
+  // This is the comparison the widget DECLARES for what it renders. Whether it
+  // is asked for also depends on the resolved filter (a reader's All time dates
+  // nothing), so the query and the overlay read `compareTo`, settled below.
+  const declaredCompareTo: CompareToConfig | undefined =
     !isMetric && !isTable && chartTypeIgnoresCompareTo(chartType) ? undefined : widget?.compareTo;
   // pivot with ≥2 dims → a true cross-tab: last dim spreads across as columns,
   // the rest go down as rows. Computed up-front so the fetch can also request
@@ -805,6 +851,16 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
   // widget's query byte-identical keeps this change to the path it is about.
   // See `extractDateWindows` for why the windows are MOVED and why the choice
   // of dimension is left to the executor.
+  //
+  // A filter that dates nothing on the compared field — the dashboard's date
+  // filter set to All time, with no date in the widget's own filter — asks for
+  // no comparison at all: no `compareTo`, no window lowered, the same query and
+  // tile as a widget without `compareTo` (objectstack#25970). Any date
+  // condition the author wrote, a one-bound `{ $gte }` included, still goes to
+  // the executor, whose refusal names the fix (`filterDatesField`).
+  const compareTo = declaredCompareTo && filterDatesField(runtimeFilter, declaredCompareTo.dimension)
+    ? declaredCompareTo
+    : undefined;
   const { windows: compareWindows, rest: selectionFilter } = useMemo(
     () => (compareTo
       ? extractDateWindows(runtimeFilter)

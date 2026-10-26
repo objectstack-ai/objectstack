@@ -30,7 +30,6 @@
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
     "declaration": false,
-    "jsx": "react-jsx",
     // One notch above the package build's ES2020: these suites read the last
     // emitted call with `calls.at(-1)` and use `Object.hasOwn` / `Array.at`,
     // all ES2022. Raised HERE and not in `tsconfig.json`, so the package

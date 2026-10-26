@@ -2,11 +2,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { translateMetadataDocument } from '@objectstack/spec/system';
 import { defaultPermissionSets } from './default-permission-sets.js';
 import { SecurityTranslations } from '../translations/index.js';
 
 /**
- * Every built-in permission set says who holds it.
+ * Every built-in permission set says who holds it, in every shipped locale.
  *
  * Setup → Permission Sets lists the platform's own sets beside every app's,
  * with each set's `description`. Five of them showed none and the no-bypass
@@ -15,7 +16,8 @@ import { SecurityTranslations } from '../translations/index.js';
  * member set. This pins the business fact that every set in
  * `defaultPermissionSets` carries ONE plain sentence of at most 160
  * characters, and that every translated locale of this plugin's bundle
- * carries that sentence for it. It is deliberately not a copy of the wording,
+ * carries that sentence and the set's label for it, so no row of the list
+ * reads half English. It is deliberately not a copy of the wording,
  * which `default-permission-sets.ts` and `../translations/permission-sets.ts`
  * own.
  *
@@ -23,10 +25,16 @@ import { SecurityTranslations } from '../translations/index.js';
  * full stop (`.`, or `。` in Chinese and Japanese) and holds no other sentence
  * break. Engineering terms stay in the code comments beside each set, so the
  * copy names no permission-set id and no code span.
+ *
+ * A label: a short noun phrase (at most 80 characters, no line break, no
+ * closing full stop) split by ` — ` exactly as often as the English label, so
+ * a translation keeps the "who — what access" shape the list reads by.
  */
 type AnyRec = Record<string, any>;
 
 const MAX_LENGTH = 160;
+const MAX_LABEL_LENGTH = 80;
+const LABEL_SPLIT = ' — ';
 const TRANSLATED_LOCALES = Object.keys(SecurityTranslations).filter((l) => l !== 'en');
 const SET_NAMES = defaultPermissionSets.map((ps) => ps.name);
 
@@ -43,6 +51,21 @@ function expectOneSentence(text: unknown, where: string): void {
   // No engineer-facing spellings: code spans or a set's machine name.
   expect(value, `${where}: code span`).not.toMatch(/`/);
   for (const name of SET_NAMES) expect(value, `${where}: names ${name}`).not.toContain(name);
+}
+
+function expectLabel(text: unknown, english: string, where: string): void {
+  expect(typeof text, `${where}: label missing`).toBe('string');
+  const value = String(text);
+  expect(value, `${where}: padded`).toBe(value.trim());
+  expect(value.length, `${where}: empty`).toBeGreaterThan(0);
+  expect([...value].length, `${where}: over ${MAX_LABEL_LENGTH} characters`).toBeLessThanOrEqual(MAX_LABEL_LENGTH);
+  expect(value, `${where}: line break`).not.toMatch(/[\r\n]/);
+  expect(value, `${where}: ends with a full stop`).not.toMatch(/[.。]$/);
+  expect(value, `${where}: code span`).not.toMatch(/`/);
+  for (const name of SET_NAMES) expect(value, `${where}: names ${name}`).not.toContain(name);
+  expect(value.split(LABEL_SPLIT).length, `${where}: not in the English label's shape`).toBe(
+    english.split(LABEL_SPLIT).length,
+  );
 }
 
 describe('built-in permission set descriptions', () => {
@@ -91,8 +114,32 @@ describe('built-in permission set descriptions', () => {
         const entry = group[name] as AnyRec | undefined;
         expectOneSentence(entry?.description, `${locale} ${name}`);
         expect(entry?.description, `${locale} ${name}: an English copy, not a translation`).not.toBe(set.description);
-        // Descriptions only: the labels are not translated here.
-        expect(entry && 'label' in entry, `${locale} ${name}: carries a label`).toBe(false);
+      },
+    );
+
+    it.each(defaultPermissionSets.map((ps) => [ps.name, ps] as const))(
+      '%s carries a translated label',
+      (name, set) => {
+        const entry = group[name] as AnyRec | undefined;
+        expectLabel(entry?.label, String(set.label), `${locale} ${name}`);
+        expect(entry?.label, `${locale} ${name}: an English copy, not a translation`).not.toBe(set.label);
+      },
+    );
+
+    it('gives no two sets the same label', () => {
+      const labels = SET_NAMES.map((name) => (group[name] as AnyRec | undefined)?.label);
+      expect(new Set(labels).size).toBe(labels.length);
+    });
+
+    // The overlay `GET /meta/permission` applies at the REST boundary, read
+    // through the bundle this plugin loads: the served set's label and
+    // description are this locale's, nothing else of the set changes.
+    it.each(defaultPermissionSets.map((ps) => [ps.name, ps] as const))(
+      '%s is served in this locale',
+      (name, set) => {
+        const served = translateMetadataDocument('permission', set, SecurityTranslations, { locale });
+        const entry = group[name] as AnyRec;
+        expect(served).toEqual({ ...set, label: entry.label, description: entry.description });
       },
     );
   });
