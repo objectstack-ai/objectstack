@@ -4427,6 +4427,8 @@ const fr = {
       detailLoadFailed: 'Impossible de charger les détails de la modification :',
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       detailChangedKeys: 'Également modifié :',
+      detailNewKeys: 'Inclut :',
+      generatedGroup: 'Généré par la plateforme ({{n}})',
       confirmNote: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
       confirmNote_one: 'La publication libère atomiquement {{count}} brouillon en attente de ce paquet.',
       confirmNote_many: 'La publication libère atomiquement les {{count}} de brouillons en attente de ce paquet.',

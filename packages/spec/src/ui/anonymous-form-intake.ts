@@ -44,12 +44,10 @@
  * (`anonymousFormIntakeWithdrawnIn`, a kill switch that layering may only
  * narrow, never re-open), and whether the deployment's tenancy posture lets an
  * open form take an anonymous submission (`anonymousFormIntakeUnavailability`).
- * Kept beside them is the object a candidate submits into
- * (`anonymousFormObjectName`): a pure read of the form's `data.object` and the
- * view's `list.data.object`, `form.data.object` and `object`, which reads no
- * server state and stays there because that is where this export's surface
- * was drawn. An open candidate here is therefore what the view body itself
- * declares, before any other layer or the posture is consulted.
+ * An open candidate here is what the view body itself declares, before any
+ * other layer or the posture is consulted. The object a candidate submits into
+ * (`anonymousFormObjectName`) reads no server state, so it is declared here
+ * too, and `@objectstack/metadata-core` re-exports it.
  *
  * Pure functions with no imports and no module-load work: this module links no
  * schema, so a browser bundle that reaches it pays for these functions alone.
@@ -78,6 +76,17 @@ export function anonymousFormIntakeSlug(sharing: unknown): string | null {
   if (s.allowAnonymous !== true) return null;
   if (typeof s.publicLink !== 'string' || !s.publicLink) return null;
   return publicFormSlug(s.publicLink);
+}
+
+/**
+ * The object an open form candidate submits into: the form's own `data.object`,
+ * else the view's `list.data.object`, `form.data.object` and `object`. The one
+ * rung order both anonymous doors and the authoring lint resolve by.
+ */
+export function anonymousFormObjectName(view: unknown, form: unknown): string | undefined {
+  const v = (view && typeof view === 'object' ? view : {}) as Record<string, any>;
+  const f = (form && typeof form === 'object' ? form : {}) as Record<string, any>;
+  return f.data?.object ?? v.list?.data?.object ?? v.form?.data?.object ?? v.object;
 }
 
 /** Every form candidate of a `view` body that is open to anonymous intake, in scan order. */

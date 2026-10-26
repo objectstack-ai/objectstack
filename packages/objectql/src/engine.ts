@@ -112,6 +112,19 @@ import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle
 // call; the methods of the same names below hand each body the members it
 // reads (`RealtimePublishHost`).
 import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publish.js';
+// [#25522 cut 5] The secret and internal-field bodies; the methods of the same
+// names below hand each body the members it reads (`SecretInternalFieldsHost`).
+import {
+  encryptSecretFields,
+  maskSecretFields,
+  omitInternalFields,
+  privilegedReadDriverOptions,
+  refuseEmptyPasswordFields,
+  resolveInternalField,
+  resolveSecret,
+  resolveSecretField,
+  stripSearchCompanionFromRead,
+} from './engine-secret-internal-fields.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -255,18 +268,10 @@ export type InsertManyRowOutcome =
   | { ok: false; error: unknown };
 import { CoreServiceName, StorageNameMapping } from '@objectstack/spec/system';
 import { IRealtimeService } from '@objectstack/spec/contracts';
-import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts';
+import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import {
-  collectSecretFields,
-  collectMaskedReadFields,
-  collectMaskedPasswordFields,
   collectInternalReadFields,
   collectCredentialFields,
-  makeSecretRef,
-  parseSecretRef,
-  isSecretRef,
-  EmptyCredentialWriteError,
-  SECRET_MASK,
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -274,7 +279,7 @@ import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal 
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
-import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
+import { stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
@@ -11339,79 +11344,15 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
     driverOptions: unknown,
   ): Promise<void> {
-    if (!row || typeof row !== 'object') return;
-    const schema = this._registry.getObject(object);
-
-    // Echoed-mask drop for every field the read path masks (secret + generic
-    // password). The read path returns SECRET_MASK; a client that PATCHes it
-    // back means "unchanged", so drop the key rather than persist the literal
-    // mask. Doing this up front keeps the better-auth exemption in one place
-    // (collectMaskedReadFields) and covers objects that have a password field
-    // but no secret field. (#2036, ADR-0100)
-    for (const field of collectMaskedReadFields(schema)) {
-      if (field in row && row[field] === SECRET_MASK) delete row[field];
-    }
-
-    const secretFields = collectSecretFields(schema);
-    if (secretFields.length === 0) return;
-
-    for (const field of secretFields) {
-      if (!(field in row)) continue;
-      const value = row[field];
-
-      if (value === null || typeof value === 'undefined') continue; // clear
-      // [#8559] The empty string is neither a clear (`null` is) nor a storable
-      // credential — refuse it BEFORE the crypto gates below: this is a verdict
-      // on the payload, so it must not depend on whether a CryptoProvider or
-      // sys_secret store happens to be wired.
-      if (value === '') throw new EmptyCredentialWriteError(object, field, 'secret');
-      if (isSecretRef(value)) continue; // already encrypted ref
-
-      if (!this.cryptoProvider) {
-        throw new Error(
-          `Cannot persist secret field "${object}.${field}": no CryptoProvider is registered. `
-            + 'Wire one via engine.setCryptoProvider(...) (e.g. LocalCryptoProvider in dev, '
-            + 'a KMS/Vault provider in production). Refusing to store cleartext (fail-closed).',
-        );
-      }
-
-      const plain = typeof value === 'string' ? value : JSON.stringify(value);
-      // ADR-0128 D1: this producer's own scope, so the AAD names the
-      // object-secret-field vocabulary and no other producer's context opens it.
-      const handle: CryptoHandle = await this.cryptoProvider.encrypt(plain, {
-        scope: 'object_secret_field',
-        namespace: object,
-        key: field,
-        tenantId: context?.tenantId,
-      });
-
-      let secretDriver;
-      try {
-        secretDriver = this.getDriver('sys_secret');
-      } catch {
-        throw new Error(
-          `Cannot persist secret field "${object}.${field}": the sys_secret store is not available. `
-            + 'Ensure the platform-objects (sys_secret) are registered before writing secret fields (fail-closed).',
-        );
-      }
-
-      await secretDriver.create(
-        'sys_secret',
-        {
-          id: handle.id,
-          namespace: object,
-          key: field,
-          kms_key_id: handle.kmsKeyId,
-          alg: handle.alg,
-          version: handle.version,
-          ciphertext: handle.ciphertext,
-          created_at: new Date().toISOString(),
-        },
-        driverOptions as any,
-      );
-
-      row[field] = makeSecretRef(handle.id);
-    }
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const readCryptoProvider = () => this.cryptoProvider;
+    const host: ThisParameterType<typeof encryptSecretFields> = {
+      get _registry() { return readRegistry(); },
+      get cryptoProvider() { return readCryptoProvider(); },
+      getDriver: (...a) => this.getDriver(...a),
+    };
+    return encryptSecretFields.call(host, object, row, context, driverOptions);
   }
 
   /**
@@ -11438,13 +11379,12 @@ export class ObjectQL implements IObjectQLEngine {
    * guard the same doors.
    */
   private refuseEmptyPasswordFields(object: string, row: Record<string, unknown>): void {
-    if (!row || typeof row !== 'object') return;
-    const schema = this._registry.getObject(object);
-    for (const field of collectMaskedPasswordFields(schema)) {
-      if (field in row && row[field] === '') {
-        throw new EmptyCredentialWriteError(object, field, 'password');
-      }
-    }
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof refuseEmptyPasswordFields> = {
+      get _registry() { return readRegistry(); },
+    };
+    return refuseEmptyPasswordFields.call(host, object, row);
   }
 
   /**
@@ -11461,23 +11401,13 @@ export class ObjectQL implements IObjectQLEngine {
    * {@link omitInternalFields} for why the two dispositions differ.
    */
   private maskSecretFields(object: string, rows: any): void {
-    if (!rows) return;
-    const schema = this._registry.getObject(object);
-    const maskedFields = collectMaskedReadFields(schema);
-    if (maskedFields.length > 0) {
-      const list = Array.isArray(rows) ? rows : [rows];
-      for (const row of list) {
-        if (!row || typeof row !== 'object') continue;
-        for (const field of maskedFields) {
-          if (!(field in row)) continue;
-          row[field] = row[field] == null ? null : SECRET_MASK;
-        }
-      }
-    }
-    // Runs AFTER the mask, so a field that is somehow both `secret`-typed and
-    // `internal` ends up omitted rather than masked — the stricter disposition
-    // wins, which is the only safe way for the two to compose.
-    this.omitInternalFields(object, rows);
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof maskSecretFields> = {
+      get _registry() { return readRegistry(); },
+      omitInternalFields: (...a) => this.omitInternalFields(...a),
+    };
+    return maskSecretFields.call(host, object, rows);
   }
 
   /**
@@ -11536,15 +11466,12 @@ export class ObjectQL implements IObjectQLEngine {
    * {@link resolveInternalField} — never a carve-out here.
    */
   private omitInternalFields(object: string, rows: any): void {
-    if (!rows) return;
-    const schema = this._registry.getObject(object);
-    const internalFields = collectInternalReadFields(schema);
-    if (internalFields.length === 0) return;
-    const list = Array.isArray(rows) ? rows : [rows];
-    for (const row of list) {
-      if (!row || typeof row !== 'object') continue;
-      for (const field of internalFields) delete row[field];
-    }
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof omitInternalFields> = {
+      get _registry() { return readRegistry(); },
+    };
+    return omitInternalFields.call(host, object, rows);
   }
 
   /**
@@ -11616,8 +11543,8 @@ export class ObjectQL implements IObjectQLEngine {
     requestedFields: readonly string[] | undefined,
     context: ExecutionContext | undefined,
   ): void {
-    if (context?.isSystem && isSearchCompanionRequested(requestedFields)) return;
-    stripSearchCompanion(rows);
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts`; it reads no member.
+    stripSearchCompanionFromRead(rows, requestedFields, context);
   }
 
   /**
@@ -11654,10 +11581,13 @@ export class ObjectQL implements IObjectQLEngine {
    * when there is no ambient transaction, which is the pre-existing shape.
    */
   private privilegedReadDriverOptions(object: string): { transaction: unknown } | undefined {
-    const tx = this.txStore.getStore()?.transaction;
-    if (tx === undefined) return undefined;
-    if (!this.transactionCoversDriverFor(object, tx)) return undefined;
-    return { transaction: tx };
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readTxStore = () => this.txStore;
+    const host: ThisParameterType<typeof privilegedReadDriverOptions> = {
+      get txStore() { return readTxStore(); },
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+    };
+    return privilegedReadDriverOptions.call(host, object);
   }
 
   /**
@@ -11670,37 +11600,14 @@ export class ObjectQL implements IObjectQLEngine {
    * `sys_secret` row is missing. Returns `null` when `ref` is not a secret ref.
    */
   async resolveSecret(ref: unknown, opts?: { tenantId?: string }): Promise<string | null> {
-    const id = parseSecretRef(ref);
-    if (!id) return null;
-    if (!this.cryptoProvider) {
-      throw new Error('Cannot resolve secret: no CryptoProvider is registered (fail-closed).');
-    }
-    const secretDriver = this.getDriver('sys_secret');
-    const found = await secretDriver.find(
-      'sys_secret',
-      { where: { id } },
-      this.privilegedReadDriverOptions('sys_secret'),
-    );
-    const secret: any = Array.isArray(found) ? found[0] : found;
-    if (!secret) {
-      throw new Error(`Cannot resolve secret: sys_secret row "${id}" not found (fail-closed).`);
-    }
-    const handle: CryptoHandle = {
-      id: secret.id,
-      kmsKeyId: secret.kms_key_id,
-      alg: secret.alg,
-      version: secret.version,
-      ciphertext: secret.ciphertext,
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readCryptoProvider = () => this.cryptoProvider;
+    const host: ThisParameterType<typeof resolveSecret> = {
+      get cryptoProvider() { return readCryptoProvider(); },
+      getDriver: (...a) => this.getDriver(...a),
+      privilegedReadDriverOptions: (...a) => this.privilegedReadDriverOptions(...a),
     };
-    // ADR-0128 D1: a `secret:` ref is the object-secret-field producer's
-    // holder, so the scope is that producer's. A row another producer sealed
-    // under a scoped derivation therefore does not open here.
-    return this.cryptoProvider.decrypt(handle, {
-      scope: 'object_secret_field',
-      namespace: secret.namespace,
-      key: secret.key,
-      tenantId: opts?.tenantId,
-    });
+    return resolveSecret.call(host, ref, opts);
   }
 
   /**
@@ -11739,30 +11646,15 @@ export class ObjectQL implements IObjectQLEngine {
     field: string,
     opts?: { tenantId?: string },
   ): Promise<string | null> {
-    const schema = this._registry.getObject(object);
-    if (!collectSecretFields(schema).includes(field)) {
-      throw new Error(
-        `Cannot resolve secret field "${object}.${field}": it is not declared as type 'secret'. `
-          + 'Only the encrypted secret channel is dereferenceable — a `password` field is stored as '
-          + 'plaintext at rest and is masked deliberately (ADR-0100), so dereferencing one here '
-          + 'would be a mask bypass, not a decrypt.',
-      );
-    }
-    const driver = this.getDriver(object);
-    let found: unknown;
-    try {
-      found = await driver.find(
-        object,
-        { where: { id: recordId } },
-        this.privilegedReadDriverOptions(object),
-      );
-    } catch (e) {
-      // [#21274] A boundary outside the middleware seam: the record id is bound.
-      throw redactPropagatedDriverFault(e);
-    }
-    const row: any = Array.isArray(found) ? found[0] : found;
-    if (!row) return null;
-    return this.resolveSecret(row[field], opts);
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof resolveSecretField> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      privilegedReadDriverOptions: (...a) => this.privilegedReadDriverOptions(...a),
+      resolveSecret: (...a) => this.resolveSecret(...a),
+    };
+    return resolveSecretField.call(host, object, recordId, field, opts);
   }
 
   /**
@@ -11822,47 +11714,14 @@ export class ObjectQL implements IObjectQLEngine {
     recordIds: readonly string[],
     field: string,
   ): Promise<Map<string, unknown>> {
-    const schema = this._registry.getObject(object);
-    if (!collectInternalReadFields(schema).includes(field)) {
-      const err: Error & { code?: string; status?: number; httpStatus?: number; object?: string; field?: string } =
-        new Error(
-          `Cannot resolve internal field "${object}.${field}": it is not declared \`internal: true\`. `
-            + 'Only fields the engine omits from the generic read path are dereferenceable here — '
-            + 'anything else either comes back on find/findOne already, or is protected by its own '
-            + 'channel (`secret` refs via resolveSecretField; `password` is masked deliberately, '
-            + 'ADR-0100, so dereferencing one here would be a mask bypass).',
-        );
-      err.code = 'INVALID_FIELD';
-      err.status = 400;
-      err.httpStatus = 400;
-      err.object = object;
-      err.field = field;
-      throw err;
-    }
-    const out = new Map<string, unknown>();
-    if (recordIds.length === 0) return out;
-    const driver = this.getDriver(object);
-    let found: unknown;
-    try {
-      found = await driver.find(
-        object,
-        {
-          where: { id: { $in: [...recordIds] } },
-          fields: ['id', field],
-        },
-        this.privilegedReadDriverOptions(object),
-      );
-    } catch (e) {
-      // [#21274] A boundary outside the middleware seam: the record ids are bound.
-      throw redactPropagatedDriverFault(e);
-    }
-    for (const row of Array.isArray(found) ? found : [found]) {
-      if (!row || typeof row !== 'object') continue;
-      const id = (row as Record<string, unknown>).id;
-      if (typeof id !== 'string' && typeof id !== 'number') continue;
-      out.set(String(id), (row as Record<string, unknown>)[field] ?? null);
-    }
-    return out;
+    // [#25522 cut 5] The body moved to `engine-secret-internal-fields.ts` (see `SecretInternalFieldsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof resolveInternalField> = {
+      get _registry() { return readRegistry(); },
+      getDriver: (...a) => this.getDriver(...a),
+      privilegedReadDriverOptions: (...a) => this.privilegedReadDriverOptions(...a),
+    };
+    return resolveInternalField.call(host, object, recordIds, field);
   }
 
   /**

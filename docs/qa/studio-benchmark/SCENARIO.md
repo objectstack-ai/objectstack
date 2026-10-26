@@ -13,14 +13,14 @@ Scoring rules live in [SCORING.md](./SCORING.md); the sheet a run fills in is
 |---|---|
 | app | `examples/app-showcase`, a **fresh** boot — empty database, nothing left from an earlier run |
 | boot | `OS_PORT=PORT pnpm -C ABS/examples/app-showcase exec objectstack dev --ui --seed-admin -p PORT -d file:/tmp/RUN/data.db` (the dogfood-verification §0 line; `OS_PORT` exported, not only `-p`) |
-| console | the vendored build at the `.objectui-sha` pin (`pnpm objectui:build`), served at `/_console/` — **never** an objectui HEAD dev server: the benchmark measures what users get |
+| console | the build of the same tree's `ui/apps/console` (`pnpm console:build`, into `packages/console/dist`), served at `/_console/` — **never** a console dev server: the benchmark measures what users get |
 | author | the seeded platform admin `admin@objectos.ai` / `admin123`, signed in through the form |
 | end user | a second identity minted by admin create (`POST /api/v1/auth/admin/create-user`, then `change-password`), or by invite + sign-up — a stock showcase refuses self-registration |
 | browser | Chromium at 1440×900 |
 
-Record both SHAs before step 1: `git rev-parse HEAD` of the objectstack tree you booted, and the
-contents of `.objectui-sha` (cross-check `packages/console/dist/.objectui-sha` — `os dev` refuses
-to mount a console whose stamp differs).
+Record the SHA before step 1: `git rev-parse HEAD` of the objectstack tree you booted. The console
+builds from that same tree, so it has no SHA of its own; run `pnpm console:build` on that HEAD
+before booting, because `pnpm build` does not refresh `packages/console/dist`.
 
 ## The rules of the run
 
