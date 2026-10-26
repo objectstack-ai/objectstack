@@ -4343,6 +4343,8 @@ const ja = {
       detailLoadFailed: '変更の詳細を読み込めませんでした：',
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
       detailChangedKeys: 'その他の変更：',
+      detailNewKeys: '含まれるもの：',
+      generatedGroup: 'プラットフォームが生成（{{n}}）',
       confirmNote: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
       confirmNote_one: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
       confirmNote_other: '公開すると、このパッケージの保留中ドラフト {{count}} 件がまとめて（アトミックに）公開されます。',
