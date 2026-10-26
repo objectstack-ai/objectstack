@@ -62,7 +62,7 @@ export function isSeedFilePath(path: unknown): path is string {
 export const SeedFilePathSchema = lazySchema(() => z.string()
   .regex(SEED_FILE_PATH_PATTERN, SEED_FILE_PATH_RULE)
   .describe('Path of a file the package ships, relative to the package root (e.g. `fixtures/nda-v1.pdf`)'));
-export type SeedFilePath = z.infer<typeof SeedFilePathSchema>;
+export type SeedFilePath = z.input<typeof SeedFilePathSchema>;
 
 /** A MIME type: `type/subtype`, the shape a `sys_file.mime_type` carries. */
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
@@ -86,6 +86,7 @@ export const SeedFileReferenceSchema = lazySchema(() => strictObject({
 
 /** Author-time shape of {@link SeedFileReferenceSchema}. */
 export type SeedFileReference = z.input<typeof SeedFileReferenceSchema>;
+export type SeedFileReferenceParsed = z.infer<typeof SeedFileReferenceSchema>;
 
 /**
  * The bytes of one seed file, as `os build` bundles them into a dataset's
@@ -106,6 +107,7 @@ export const SeedFileContentSchema = lazySchema(() => strictObject({
 
 /** Author-time shape of {@link SeedFileContentSchema}. */
 export type SeedFileContent = z.input<typeof SeedFileContentSchema>;
+export type SeedFileContentParsed = z.infer<typeof SeedFileContentSchema>;
 
 /**
  * Write a file the package ships into a file field from a seed record.

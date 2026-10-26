@@ -62,7 +62,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import { registerStorageFamily } from './storage-routes.js';
 import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
-import { installFileReferenceHooks, type FileReferenceReadAuthorizer } from './file-reference-lifecycle.js';
+import { installFileReferenceHooks, type FileReferenceEngine, type FileReferenceReadAuthorizer } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
@@ -408,7 +408,10 @@ export class StorageServicePlugin implements Plugin {
       new FieldFileService({
         getEngine: () => {
           try {
-            return ctx.getService<any>('objectql') ?? null;
+            // The kernel's data engine is ObjectQL, which also carries the
+            // hook and lookup surface the lifecycle's release reads.
+            const engine: (IDataEngine & FileReferenceEngine) | undefined = ctx.getService<IDataEngine & FileReferenceEngine>('objectql');
+            return engine ?? null;
           } catch {
             return null;
           }

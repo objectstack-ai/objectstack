@@ -12,6 +12,7 @@ import type {
   StoreFieldFileInput,
 } from '@objectstack/spec/contracts';
 import { RAW_FILE_VALUES_CONTEXT_KEY, seedFile } from '@objectstack/spec/data';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
  * [#25779] A seed record writes `seedFile(path)` into a file field; `os build`
@@ -33,17 +34,22 @@ function createEngine(): { engine: IDataEngine; store: Record<string, any[]>; fi
   const store: Record<string, any[]> = {};
   const findContexts: unknown[] = [];
   let next = 0;
+  /** Equality on plain keys; a combinator or operator this fake does not implement is refused, never misread. */
+  const matches = (row: Record<string, any>, where: Record<string, unknown>) =>
+    Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row[k] === v;
+    });
   const engine = {
     find: vi.fn(async (object: string, query?: any) => {
       findContexts.push(query?.context);
       let rows = store[object] ?? [];
-      if (query?.where) rows = rows.filter((r) => Object.entries(query.where).every(([k, v]) => r[k] === v));
+      if (query?.where) rows = rows.filter((r) => matches(r, query.where));
       return rows.map((r) => ({ ...r }));
     }),
     findOne: vi.fn(async (object: string, query?: any) => {
-      const rows = (store[object] ?? []).filter((r) =>
-        Object.entries(query?.where ?? {}).every(([k, v]) => r[k] === v),
-      );
+      assertEngineFindOnePredicate(object, query);
+      const rows = (store[object] ?? []).filter((r) => matches(r, query?.where ?? {}));
       return rows[0] ? { ...rows[0] } : null;
     }),
     insert: vi.fn(async (object: string, data: any) => {
@@ -56,12 +62,16 @@ function createEngine(): { engine: IDataEngine; store: Record<string, any[]>; fi
       return Array.isArray(data) ? data.map(one) : one(data);
     }),
     update: vi.fn(async (object: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const rows = store[object] ?? [];
       const i = rows.findIndex((r) => r.id === data.id);
       if (i >= 0) rows[i] = { ...rows[i], ...data };
       return data;
     }),
-    delete: vi.fn(async () => ({ deleted: 1 })),
+    delete: vi.fn(async (_object: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    }),
     count: vi.fn(async (object: string) => (store[object] ?? []).length),
     aggregate: vi.fn(async () => []),
   } as unknown as IDataEngine;
