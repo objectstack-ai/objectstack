@@ -166,7 +166,8 @@ export async function reportShadowedAuthoredQueues(
   for (const row of Array.isArray(rows) ? rows : []) {
     const name = present(row?.name);
     if (!name || !queues.isDeclaredQueueName(name)) continue;
-    (logger?.error ?? logger?.warn)?.(
+    (logger?.error ?? logger?.warn)?.call(
+      logger,
       `[queue] an organization's queue '${name}' is shadowed by a queue an installed app declares under the same ` +
         'name — the declared queue answers for it. Rename the organization\'s queue to keep it.',
       { queue: name, organization: present(row?.organization_id) },

@@ -44,14 +44,12 @@ function makeEngine(opts: {
   declared?: Row[];
   tables?: Record<string, Row[]>;
   schemas?: Record<string, any>;
-  failOn?: Set<string>;
+  failOn?: string[];
 } = {}) {
   const tables: Record<string, Row[]> = { ...(opts.tables ?? {}) };
-  const reads: string[] = [];
   const hooks: Array<{ event: string; object: string; handler: (ctx: any) => any; packageId?: string }> = [];
   const engine = {
     _tables: tables,
-    reads,
     hooks,
     registry: {
       listItems: (type: string) => (type === 'queue' ? (opts.declared ?? []) : []),
@@ -59,10 +57,10 @@ function makeEngine(opts: {
     },
     getSchema: (name: string) => opts.schemas?.[name],
     async find(object: string, options?: any) {
-      reads.push(object);
-      if (opts.failOn?.has(object)) throw new Error(`${object} unavailable`);
+      if (opts.failOn?.includes(object)) throw new Error(`${object} unavailable`);
       const filter = options?.filter ?? options?.where;
-      return (tables[object] ?? []).filter((r) => matches(r, filter)).slice(0, options?.limit ?? 1000);
+      const rows = (tables[object] ?? []).filter((r) => matches(r, filter));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) {
       (tables[object] ??= []).push({ ...data });
@@ -179,7 +177,7 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 
   it('a failed member-table read contributes nobody and is logged once', async () => {
     const warn = vi.fn();
-    const svc = service(makeEngine({ tables: BASE_TABLES(), failOn: new Set(['sys_queue_member']) }), { warn });
+    const svc = service(makeEngine({ tables: BASE_TABLES(), failOn: ['sys_queue_member'] }), { warn });
     expect(await svc.expandMembers('billing', 'org_a')).toEqual([]);
     expect(await svc.expandMembers('billing', 'org_a')).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -188,7 +186,7 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 
   it('a failed ledger read leaves the declared default — on — and says so', async () => {
     const warn = vi.fn();
-    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: new Set([METADATA_ACTIVATION_TABLE]) }), { warn });
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [METADATA_ACTIVATION_TABLE] }), { warn });
     expect(await svc.expandMembers('support_tier1', 'org_a')).toEqual(['u_a', 'u_b', 'u_d']);
     expect(warn).toHaveBeenCalled();
   });

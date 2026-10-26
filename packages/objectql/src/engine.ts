@@ -15935,7 +15935,7 @@ export class ObjectQL implements IObjectQLEngine {
     id: unknown,
     data: Record<string, unknown>,
     expect: Readonly<Record<string, unknown>>,
-    options: unknown,
+    options: Parameters<IDataDriver['findOne']>[2],
   ): Promise<unknown> {
     if (typeof driver.updateMany !== 'function') {
       if (!this.preconditionDegradedWarned) {
@@ -15947,11 +15947,11 @@ export class ObjectQL implements IObjectQLEngine {
           { object },
         );
       }
-      return driver.update(object, id as string, data, options as any);
+      return driver.update(object, id as string, data, options);
     }
-    const affected = await driver.updateMany(object, { object, where: { ...expect, id } } as QueryAST, data, options as any);
+    const affected = await driver.updateMany(object, { object, where: { ...expect, id } } as QueryAST, data, options);
     if (!(Number(affected) > 0)) throw new ConcurrentUpdateError(object, String(id));
-    return driver.findOne(object, { object, where: { id }, limit: 1 } as QueryAST, options as any);
+    return driver.findOne(object, { object, where: { id }, limit: 1 } as QueryAST, options);
   }
 
   /** [ADR-0142 D4] Set once the precondition's no-`updateMany` degradation has been logged. */
@@ -18754,7 +18754,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // `OperationContext.writePrecondition`.
                    const precondition = opCtx.writePrecondition;
                    result = precondition && Object.keys(precondition).length > 0
-                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, hookContext.input.options)
+                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, hookContext.input.options as Parameters<IDataDriver['findOne']>[2])
                      : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
                    throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
