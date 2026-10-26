@@ -52,12 +52,28 @@
  * module is the only copy), has no `OS_PORT` at all, and the materialized
  * `baseUrl` must read N.
  *
+ * ## #26270 — a busy port's shift is the port the config reads
+ *
+ * `os dev` shifts off a busy port, but the shift happened in the `serve`
+ * child after the parent's compile and the child's config load had both read
+ * the requested port. Measured on the showcase with 41310 held: `os dev -p
+ * 41310` served on 41311, `/api/v1/meta/connector/showcase_status_api` named
+ * 41310 and the self-ping flow answered `400 FLOW_FAILED`. The `os dev` parent
+ * now runs the child's walk before it compiles and exports the port it lands
+ * on (`portFlagEnv`).
+ *
+ * So the third boot here holds a port for its whole life (`holdPort`), asks
+ * `os dev -p` for it, and reads the shifted port out of the child's own
+ * banner. The served and the materialized `baseUrl` must both name that port,
+ * and a flow pinging the app through the connector (`fxp_ping`, the fixture's
+ * `showcase_declarative_connector_ping`) must succeed there.
+ *
  * ## Spawn shape
  *
  * `bin/run.js` with `NODE_ENV` unset, the shipped entry resolving commands from
  * `dist/` (`requireBuiltCli`), in its own process group (`dev` supervises a
  * `serve` grandchild). Each boot asks for a NON-ZERO port drawn with
- * `reservePort()`, because that number is the subject: the config must read
+ * `reservePort()` (the busy-port boot holds its own with `holdPort()`), because that number is the subject: the config must read
  * the port the flag names, before the boot, and a kernel-assigned `-p 0` read
  * back afterwards cannot be known to the config (the draw is ledgered in
  * `released-port-production-spawn.pin.test.ts`). A lost race on that draw is
@@ -73,9 +89,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  boundPortFromBanner,
   childEnv,
   E2E_AUTH_SECRET,
   E2E_SECRET_KEY,
+  holdPort,
   portContentionError,
   portDriftError,
   probeThroughChild,
@@ -101,6 +119,8 @@ const selfUrlFor = (port: number | string) => `http://127.0.0.1:${port}`;
 const CONNECTOR = 'fxp_self';
 /** Where the fixture provider's factory records the `providerConfig` it was handed. */
 const MATERIALIZED_FILE = 'materialized-provider-config.json';
+/** The flow that pings the app through the connector, as the showcase's self-ping does. */
+const PING_FLOW = 'fxp_ping';
 /** The development dev-admin seed — the operator on this boot. */
 const EMAIL = 'admin@objectos.ai';
 const PASSWORD = 'admin123';
@@ -130,7 +150,9 @@ const connector = (baseUrl: string) => ({
  * `examples/app-showcase/src/system/self-url.ts` reads it; its one plugin
  * contributes the `fxp` provider in `init()` (before the automation service
  * materializes in `start()`), and the factory writes what it was handed to
- * the project directory, the `serve` child's cwd.
+ * the project directory, the `serve` child's cwd. Its one action, `ping`,
+ * dials `/api/v1/health` at that `baseUrl` and fails on anything but a 2xx,
+ * so `PING_FLOW` succeeds only when the `baseUrl` is the app's own address.
  */
 const CONFIG_SOURCE = `import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -150,9 +172,33 @@ export default defineStack({
     init: async (ctx: any) => {
       ctx.getService('automation').registerConnectorProvider('fxp', (c: any) => {
         writeFileSync(join(process.cwd(), '${MATERIALIZED_FILE}'), JSON.stringify(c.providerConfig));
-        return { def: { name: c.name, label: c.label, type: c.type, actions: [] }, handlers: {} };
+        return {
+          def: { name: c.name, label: c.label, type: c.type, actions: [{ key: 'ping', label: 'Ping' }] },
+          handlers: {
+            ping: async () => {
+              const r = await fetch(\`\${c.providerConfig.baseUrl}/api/v1/health\`, { signal: AbortSignal.timeout(5000) });
+              if (!r.ok) throw new Error(\`health answered \${r.status}\`);
+              return { status: r.status };
+            },
+          },
+        };
       });
     },
+  }],
+  flows: [{
+    name: '${PING_FLOW}',
+    label: 'Ping',
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'ping', type: 'connector_action', label: 'Ping', connectorConfig: { connectorId: '${CONNECTOR}', actionId: 'ping', input: {} } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'ping' },
+      { id: 'e2', source: 'ping', target: 'end' },
+    ],
   }],
 });
 `;
@@ -162,6 +208,8 @@ interface Reading {
   port?: number;
   served?: unknown;
   materialized?: unknown;
+  /** The status and body `POST /api/v1/automation/PING_FLOW/trigger` answered. */
+  ping?: { status: number; body: unknown };
   error?: Error;
 }
 
@@ -169,6 +217,7 @@ const groups: ChildProcess[] = [];
 let dir: string;
 let devReading: Reading = {};
 let serveReading: Reading = {};
+let shiftReading: Reading = {};
 
 interface Live {
   child: ChildProcess;
@@ -178,9 +227,16 @@ interface Live {
 
 /**
  * Boot `bin/run.js ARGS` asking for `port`, resolved once the banner tail shows
- * the child listening on exactly that port.
+ * the child listening on exactly that port; or, with `shiftsOff` (the port is
+ * held), on the port its banner names, which must be another one.
  */
-function boot(what: string, args: string[], port: number, env: Record<string, string | undefined>): Promise<Live> {
+function boot(
+  what: string,
+  args: string[],
+  port: number,
+  env: Record<string, string | undefined>,
+  shiftsOff = false,
+): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(
       process.execPath,
@@ -224,8 +280,16 @@ function boot(what: string, args: string[], port: number, env: Record<string, st
     );
     const onData = (d: unknown) => {
       out += String(d);
+      if (!READY.test(out)) return;
+      if (shiftsOff) {
+        const readback = boundPortFromBanner(out);
+        settle(readback.state === 'bound' && readback.port !== port
+          ? readback.port
+          : new Error(`${what} held ${port} yet its banner reads ${JSON.stringify(readback)}\n--- output ---\n${out.slice(-4000)}`));
+        return;
+      }
       // A boot on another port than the drawn one lost the draw's race; say so.
-      if (READY.test(out)) settle(portDriftError(out, what, port) ?? port);
+      settle(portDriftError(out, what, port) ?? port);
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
@@ -346,8 +410,39 @@ beforeAll(async () => {
     devReading = { error: error instanceof Error ? error : new Error(String(error)) };
   } finally {
     if (live) await stopGroup(live.child);
+    live = undefined;
+    rmSync(materializedPath, { force: true });
   }
-}, 2 * BOOT_TIMEOUT_MS + 60_000);
+
+  // `os dev -p N` with N held for the whole boot: the server shifts off it.
+  const held = await holdPort();
+  try {
+    live = await boot(
+      'os dev -p (held)',
+      ['dev', '--no-watch', '--no-restart', '-d', 'file:shift.db', '-p', String(held.port)],
+      held.port,
+      {},
+      true,
+    );
+    const port = Number(new URL(live.base).port);
+    const signIn = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
+    const token = signIn.body?.token;
+    if (signIn.status !== 200 || typeof token !== 'string') {
+      throw new Error(`sign-in answered ${signIn.status}: ${JSON.stringify(signIn.body)}\n--- output ---\n${live.output().slice(-3000)}`);
+    }
+    const meta = await http(live, 'GET', `/api/v1/meta/connector/${CONNECTOR}`, token);
+    if (meta.status !== 200) {
+      throw new Error(`GET /api/v1/meta/connector/${CONNECTOR} answered ${meta.status}: ${JSON.stringify(meta.body)}`);
+    }
+    const ping = await http(live, 'POST', `/api/v1/automation/${PING_FLOW}/trigger`, token, {});
+    shiftReading = { port, served: servedBaseUrl(meta.body), materialized: materialized(live), ping };
+  } catch (error) {
+    shiftReading = { error: error instanceof Error ? error : new Error(String(error)) };
+  } finally {
+    if (live) await stopGroup(live.child);
+    await held.release();
+  }
+}, 3 * BOOT_TIMEOUT_MS + 60_000);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
@@ -375,5 +470,22 @@ describe('#26243 — `os serve --port N` with no OS_PORT', () => {
   it('dispatch materializes the connector on the flag\'s port, not the 3000 default', () => {
     const { port, materialized } = recorded(serveReading);
     expect(materialized).toBe(selfUrlFor(port));
+  });
+});
+
+describe('#26270 — `os dev -p N` with N held serves, dispatches and pings on the port it shifted to', () => {
+  it('dispatch materializes the connector on the bound port, not the held one', () => {
+    const { port, materialized } = recorded(shiftReading);
+    expect(materialized).toBe(selfUrlFor(port));
+  });
+
+  it('/api/v1/meta/connector/NAME serves that same baseUrl', () => {
+    const { port, served } = recorded(shiftReading);
+    expect(served).toBe(selfUrlFor(port));
+  });
+
+  it('a flow pinging the app through the connector succeeds', () => {
+    const { ping } = recorded(shiftReading);
+    expect(ping.status, JSON.stringify(ping.body)).toBe(200);
   });
 });
