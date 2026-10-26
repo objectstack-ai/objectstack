@@ -653,7 +653,11 @@ describe('registered-type closure is derived, not tallied', () => {
     // 27 → 28 on 2026-10-19: `sharing_rule` JOINED the registry (ADR-0131 D6,
     // regime C), closed — `SharingRuleSchema` is `.strict()` and an authoring
     // surface only — so the closed count moves with it.
-    expect(closed.length).toBe(27);
-    expect(types.length).toBe(28);
+    //
+    // 28 → 30 on 2026-10-26: `queue` and `assignment_rule` JOINED the registry
+    // (ADR-0142 D1/D5, regime C), both closed from birth (`strictObject`
+    // authoring surfaces), so the closed count moves with them, 27 → 29.
+    expect(closed.length).toBe(29);
+    expect(types.length).toBe(30);
   });
 });

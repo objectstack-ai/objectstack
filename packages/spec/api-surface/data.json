@@ -594,6 +594,7 @@
     "QUERY_TRANSPORT_ALIAS_SLOTS (const)",
     "QUERY_TRANSPORT_DOLLAR_ALIASES (const)",
     "QUERY_TRANSPORT_DOLLAR_PARAMS (const)",
+    "QUEUE_FIELD_DEF (const)",
     "QueryAST (type)",
     "QueryAliasConflict (interface)",
     "QueryAliasSlot (interface)",

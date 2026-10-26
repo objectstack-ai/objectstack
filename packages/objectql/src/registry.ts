@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -11,6 +11,7 @@ import {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  QUEUE_FIELD_DEF,
   // [#7774] The i18n-bundle identity table and its value reader, sunk into
   // metadata-core so this registry and the `/meta` list merge in
   // `@objectstack/metadata-protocol` answer "what is this type's identity?"
@@ -764,7 +765,7 @@ export interface SchemaRegistryOptions {
  * two field sets, and nothing telling the caller which it had received. The read
  * exits and this injection now derive one answer from one table.
  */
-export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
+export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF, QUEUE_FIELD_DEF };
 
 /**
  * [#7865] Injected-column PROVENANCE — the registry face of the 2026-08-12
@@ -814,6 +815,9 @@ export { AUDIT_FIELD_GOVERNANCE };
  */
 const OWNING_BUSINESS_UNIT_FIELD: typeof SystemFieldName.OWNING_BUSINESS_UNIT_ID =
   'owning_business_unit_id';
+
+/** [ADR-0142 D3] The injected ownership-queue column, annotated the same way. */
+const QUEUE_FIELD: typeof SystemFieldName.QUEUE = 'queue';
 
 export function applySystemFields(
   schema: ServiceObject,
@@ -939,6 +943,9 @@ export function applySystemFields(
   // reaches the same verdict instead of guessing (#5378).
   const wantOwner = plan.owner;
   const wantOwningBusinessUnit = plan.owningBusinessUnit;
+  // [ADR-0142 D3] The queue column rides with the owner anchor (the plan's
+  // `queue` is its `owner`): "sits in Q" is `queue == Q AND owner_id IS NULL`.
+  const wantQueue = plan.queue;
 
   // Nothing to INJECT — the two opt-out rows (`systemFields: false`,
   // `managedBy: 'better-auth'`) and objects whose every column is already
@@ -952,7 +959,7 @@ export function applySystemFields(
   // `systemFields.tenant` only, so `systemFields: false` leaves the wall live).
   // Returning `schema` here was the last exit that decided the index by NOT
   // asking, which is how the withholding survived #8375's convergence.
-  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit) {
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue) {
     return provisionTenantScopeIndex(schema, opts);
   }
 
@@ -1066,6 +1073,22 @@ export function applySystemFields(
   // `organization_id`'s index on `multiTenant`.
   if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
     additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
+  }
+
+  // [ADR-0142 D3] The ownership-queue column: the queue machine name a record
+  // with no owner SITS IN, and an owned record's home queue. Text, not a lookup
+  // (a declared queue has no row to point at); `readonly: false` like
+  // `owner_id`, because its writers are adjudicated where the owner's are — the
+  // assignment seam stamps it as the platform, and a client's move is a
+  // transfer-class write at plugin-security's step 3.5. `hidden: true`: the
+  // Console's queue affordances read it by name, and a raw machine name on every
+  // layout is not a reading a person needs. Landed with its writers, never ahead
+  // of them (ADR-0078). A declared `queue` never reaches this line on an
+  // eligible object: `registerObject` refuses it ({@link objectQueueColumnRefusal}),
+  // so the `!schema.fields` guard below only ever admits the platform's own
+  // definition coming back through a re-registration.
+  if (wantQueue && !schema.fields?.[QUEUE_FIELD]) {
+    additions[QUEUE_FIELD] = { ...QUEUE_FIELD_DEF };
   }
 
   // [#8375] The tenant INDEX is decided over the MERGED result, never over the
@@ -1709,6 +1732,63 @@ class ExtensionMembershipKeysRefusedError extends Error {
 export function objectFieldTypeRefusal(schema: unknown): ObjectFieldTypeRefusal | null {
   const violation = findUndeclarableFieldType(schema);
   return violation ? new ObjectFieldTypeRefusedError(violation) : null;
+}
+
+/**
+ * {@link ObjectQueueColumnRefusedError}'s code — `INVALID_METADATA`, as
+ * {@link ObjectFieldTypeRefusedError}'s is: a body this registry cannot
+ * register as written. ⛔ Not a new code; the condition is named by the
+ * error's `name`.
+ */
+export const OBJECT_QUEUE_COLUMN_REFUSED_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * [ADR-0142 D3, merge question 15] An object the platform injects `queue` on
+ * (`ownership: 'user'`, the default tier) declared its own field named
+ * `queue`.
+ *
+ * `owner_id`'s "the author's declaration wins" rule is deliberately not copied
+ * here: a skipped anchor would leave every queue admission — the sitting-record
+ * access path, the claim, the move, the assignment seam — silently
+ * inapplicable on that object, because each of them reads the platform's
+ * column by name and would read the author's business field instead. So the
+ * declaration is refused with a prescription, at the door Studio and the
+ * metadata API reach at request time. A body carrying the platform's own
+ * definition (a served document coming back) is the platform's and passes.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`), never a bare throw.
+ */
+class ObjectQueueColumnRefusedError extends Error {
+  readonly code = OBJECT_QUEUE_COLUMN_REFUSED_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  readonly objectName: string;
+  readonly fieldName = QUEUE_FIELD;
+
+  constructor(objectName: string) {
+    super(
+      `Object "${objectName}" declares a field named \`queue\`, which the platform reserves on an object ` +
+        'whose records have a user owner (`ownership: \'user\'`, the default): it holds the ownership queue a ' +
+        'record without an owner sits in, and the platform injects it. Rename the business field (for ' +
+        'example `support_queue`), or, when the object\'s records have no user owner, declare ' +
+        '`ownership: \'business_unit\'`, `\'org\'` or `\'none\'`.',
+    );
+    this.name = 'ObjectQueueColumnRefusedError';
+    this.objectName = objectName;
+  }
+}
+
+/**
+ * [ADR-0142 D3] The registration-door `queue` check: the refusal when the
+ * platform plans the `queue` column on this object and the body declares a
+ * `queue` field that is not the platform's own definition; `null` otherwise.
+ */
+export function objectQueueColumnRefusal(schema: unknown): Error | null {
+  if (!resolveInjectedSystemColumns(schema).queue) return null;
+  if (injectedColumnProvenance(schema, QUEUE_FIELD) !== 'author') return null;
+  const name = (schema as { name?: unknown })?.name;
+  return new ObjectQueueColumnRefusedError(typeof name === 'string' ? name : '(unnamed)');
 }
 
 /**
@@ -3516,6 +3596,15 @@ export class SchemaRegistry {
     // its own. See {@link ObjectFieldTypeRefusedError}.
     const fieldTypeRefusal = objectFieldTypeRefusal(schema);
     if (fieldTypeRefusal) throw fieldTypeRefusal;
+
+    // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
+    // `queue` field is refused before the injection could be skipped for it —
+    // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
+    // body is never planned on its own (#24314, below).
+    if (ownership !== 'extend') {
+      const queueRefusal = objectQueueColumnRefusal(schema);
+      if (queueRefusal) throw queueRefusal;
+    }
 
     // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
     // the object's default row scope — see

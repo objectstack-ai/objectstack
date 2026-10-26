@@ -34,7 +34,7 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional (default: `true`) |  |
 | **accessLevel** | `Enum<'read' \| 'edit'>` | optional (default: `"read"`) |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'field'>; value: string }` | ✅ | The recipient of the shared access: a principal resolved once per rule, or — `type: field` — the user or users named by a field on each matched record |
+| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'queue' \| 'field'>; value: string }` | ✅ | The recipient of the shared access: a principal resolved once per rule, or — `type: field` — the user or users named by a field on each matched record |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -49,8 +49,8 @@ const result = CriteriaSharingRuleSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'field'>` | ✅ |  |
-| **value** | `string` | ✅ | The recipient principal: the id or code of the user / team / position / business unit — or, for `type: 'field'`, the snake_case name of a user-typed field on the record whose value names the user or users to share each matched record with |
+| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'queue' \| 'field'>` | ✅ |  |
+| **value** | `string` | ✅ | The recipient principal: the id or code of the user / team / position / business unit, the machine name of a queue — or, for `type: 'field'`, the snake_case name of a user-typed field on the record whose value names the user or users to share each matched record with |
 
 
 ---
@@ -76,6 +76,7 @@ const result = CriteriaSharingRuleSchema.parse(data);
 * `position`
 * `unit_and_subordinates`
 * `business_unit`
+* `queue`
 * `field`
 
 
@@ -103,7 +104,7 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **active** | `boolean` | optional (default: `true`) |  |
 | **accessLevel** | `Enum<'read' \| 'edit'>` | optional (default: `"read"`) |  |
-| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'field'>; value: string }` | ✅ | The recipient of the shared access: a principal resolved once per rule, or — `type: field` — the user or users named by a field on each matched record |
+| **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'queue' \| 'field'>; value: string }` | ✅ | The recipient of the shared access: a principal resolved once per rule, or — `type: field` — the user or users named by a field on each matched record |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -118,8 +119,8 @@ const result = CriteriaSharingRuleSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'field'>` | ✅ |  |
-| **value** | `string` | ✅ | The recipient principal: the id or code of the user / team / position / business unit — or, for `type: 'field'`, the snake_case name of a user-typed field on the record whose value names the user or users to share each matched record with |
+| **type** | `Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit' \| 'queue' \| 'field'>` | ✅ |  |
+| **value** | `string` | ✅ | The recipient principal: the id or code of the user / team / position / business unit, the machine name of a queue — or, for `type: 'field'`, the snake_case name of a user-typed field on the record whose value names the user or users to share each matched record with |
 
 
 ---
