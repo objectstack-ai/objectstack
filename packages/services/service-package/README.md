@@ -115,7 +115,7 @@ If the database refuses any of this DDL, `start()` fails with that refusal and l
 
 ## Requirements
 
-- A driver plugin that registers an `IDataEngine` under the service name `'objectql'` with `execute()` support — typically [`@objectstack/driver-sql`](../../drivers/driver-sql). `@objectstack/driver-memory` can be used for tests but does not persist across restarts. (ObjectStack Cloud additionally ships `@objectstack/driver-turso` for edge/multi-tenant.)
+- A driver plugin that registers an `IDataEngine` under the service name `'objectql'` with `execute()` support — typically [`@objectstack/driver-sql`](../../drivers/driver-sql). `@objectstack/driver-memory` can be used for tests but does not persist across restarts. (ObjectOS Cloud additionally ships `@objectstack/driver-turso` for edge/multi-tenant.)
 
 ## When to use
 
@@ -133,7 +133,7 @@ If the database refuses any of this DDL, `start()` fails with that refusal and l
 
 - [`@objectstack/core`](../../core) — kernel hosting this plugin.
 - [`@objectstack/spec`](../../spec) — provides `ObjectStackManifest` and `IDataEngine` contracts.
-- [`@objectstack/driver-sql`](../../drivers/driver-sql) — supplies the `'objectql'` service. (ObjectStack Cloud also ships `@objectstack/driver-turso`.)
+- [`@objectstack/driver-sql`](../../drivers/driver-sql) — supplies the `'objectql'` service. (ObjectOS Cloud also ships `@objectstack/driver-turso`.)
 
 ## Links
 

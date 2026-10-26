@@ -92,7 +92,7 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     dbFile = join(dir, 'control.db');
 
     // A host config whose whole object set comes from a plugin — the shape
-    // ObjectStack Cloud's control plane has (`createCloudStack()` returns the
+    // ObjectOS Cloud's control plane has (`createCloudStack()` returns the
     // plugins; the app has no compiled artifact at all).
     mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
     symlinkSync(
@@ -385,7 +385,7 @@ describe('an artifact-less, config-less project is unchanged (#12938 baseline pi
  * fills the `managedObjectFields` map `detectManagedDrift()` diffs) happens by
  * itself, and the composition looks complete.
  *
- * A real control plane does not have that shape. ObjectStack Cloud's config
+ * A real control plane does not have that shape. ObjectOS Cloud's config
  * brings its own `ObjectQLPlugin`, behind a lazy wrapper, under the FRAMEWORK'S
  * OWN plugin name — deliberately, so the CLI's capability injector de-dups
  * against it. Duplicate registration OVERWRITES by name
@@ -430,7 +430,7 @@ describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measur
         "import { ObjectQLPlugin } from '@objectstack/objectql';",
         "import { SecurityPlugin } from '@objectstack/plugin-security';",
         '',
-        '// `lazyPlugin` from ObjectStack Cloud\'s control-plane preset, in shape:',
+        '// `lazyPlugin` from ObjectOS Cloud\'s control-plane preset, in shape:',
         '// construction deferred to init(), start()/stop() forwarded, and NO',
         '// `destroy` — which is the other half of this seam (#13027).',
         'function lazyPlugin(name: string, factory: () => Promise<any>): any {',
