@@ -95,8 +95,9 @@ const CENSUS: readonly string[] = SPEC_FIELD_TYPES.filter((t) => !DESIGNER_TYPES
 /**
  * Measured on `@objectstack/spec` 17.3.0 with `DESIGNER_FIELD_TYPES` at 27
  * members. Restated here as a LITERAL so the derivation above cannot quietly
- * answer something else: if either vocabulary moves, this fails and a human
- * reads the new difference rather than inheriting a stale one.
+ * answer something else: every member must still be in the census. A type the
+ * spec adds later joins the census and is round-tripped by the same pins, so
+ * the census is held as a superset of this list, not equal to it (#26238).
  */
 const CENSUS_AT_FILING = [
   'audio', 'avatar', 'checkboxes', 'composite', 'json', 'master_detail',
@@ -224,19 +225,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('objectui#8060 · C0 the census', () => {
-  it('is non-empty, is exactly the 22 measured members, and is the SPEC minus the DESIGNER set', () => {
-    expect(SPEC_FIELD_TYPES).toHaveLength(49);
+  it('is non-empty, holds every measured member, and is the SPEC minus the DESIGNER set', () => {
     expect(DESIGNER_TYPES).toHaveLength(27);
 
     // ⚠️ The vacuity guard. Every iterating pin below is green over an empty
-    // set; these three lines are what makes an emptied census fail loudly.
+    // set; these lines are what makes an emptied census fail loudly.
     expect(CENSUS.length).toBeGreaterThan(0);
-    expect(CENSUS).toHaveLength(22);
-    expect([...CENSUS].sort()).toEqual([...CENSUS_AT_FILING]);
+    for (const type of CENSUS_AT_FILING) expect(CENSUS).toContain(type);
 
     // Why direction 1 (preserve + read-only) is viable at all: the designer's
     // vocabulary is a strict SUBSET of the spec's, so nothing it can author is
-    // unknown to the spec, and 27 + 22 = 49 accounts for every declared type.
+    // unknown to the spec, and designer + census accounts for every declared type.
     expect(DESIGNER_TYPES.filter((t) => !SPEC_FIELD_TYPES.includes(t))).toEqual([]);
     expect(DESIGNER_TYPES.length + CENSUS.length).toBe(SPEC_FIELD_TYPES.length);
   });

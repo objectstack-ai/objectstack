@@ -184,8 +184,9 @@ describe('the form option stops at the spec form-view option boundary (objectui#
     });
   }
 
-  it('(b) the derived difference of the two spec shapes is `default` and `kind`', () => {
-    expect(objectFieldOnlyKeys).toEqual(['default', 'kind']);
+  it('(b) the derived difference of the two spec shapes holds `default` and `kind`', () => {
+    // Membership (#26238): these two are the boundary this file is about.
+    expect(objectFieldOnlyKeys).toEqual(expect.arrayContaining(['default', 'kind']));
   });
 
   it('(b) the twin states the form-view keys, the two UI-only keys, and the refusals — nothing else', () => {
