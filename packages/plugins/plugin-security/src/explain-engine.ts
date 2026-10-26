@@ -2490,15 +2490,21 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // (`directPermissions`, `resolveUserAuthzGrants` §6) says which, so such a
   // set names both, and revoking the position is not read as removing it. A
   // context the resolver did not build carries no split, and a set a held
-  // definition names is then attributed to that position alone.
+  // definition names is then attributed to that position alone — unless the
+  // caller marked the split as one it tried and could not read
+  // (`directPermissionsUnread`), which is said rather than guessed.
   const boundBy = await positionBindingsOf(deps, positions);
   const direct: readonly string[] = Array.isArray(context?.directPermissions) ? context.directPermissions : [];
+  const directUnread = context?.directPermissionsUnread === true;
   const viaOf = (name: string): string => {
     if (baselineNames.includes(name)) {
       return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
     }
     const position = boundBy?.get(name);
-    if (position !== undefined) return direct.includes(name) ? `direct grant + position:${position}` : `position:${position}`;
+    if (position !== undefined) {
+      if (direct.includes(name)) return `direct grant + position:${position}`;
+      return directUnread ? `position:${position} (whether a direct grant also names it could not be read)` : `position:${position}`;
+    }
     if ((context?.permissions ?? []).includes(name)) {
       return boundBy ? 'direct grant' : 'direct grant or position definition (the position definitions could not be read)';
     }

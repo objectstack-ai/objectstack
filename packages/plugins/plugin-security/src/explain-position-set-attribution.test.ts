@@ -21,7 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
-import { explainAccess, type ExplainEngineDeps } from './explain-engine';
+import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const set = (name: string) => PermissionSetSchema.parse({ name, objects: { leave_request: { allowRead: true } } });
@@ -98,6 +98,35 @@ describe('[ADR-0131 D3/D4; #24757] explain attributes a set to a position only t
     // The other two are direct only, through either reading.
     expect(out.forecasting).toBe('direct grant');
     expect(out.sales_manager).toBe('direct grant');
+  });
+
+  it('…and the explain API\'s own principal builder carries that split through, so explaining by userId reads it too', async () => {
+    const ORG = 'org_x';
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+      sys_member: [{ user_id: 'u1', organization_id: ORG, role: 'member' }],
+      sys_user_position: [{ user_id: 'u1', position: 'sales_rep', organization_id: ORG }],
+      sys_user_permission_set: [
+        { user_id: 'u1', permission_set: 'crm_sales_user', organization_id: ORG },
+        { user_id: 'u1', permission_set: 'forecasting', organization_id: ORG },
+      ],
+    };
+    const ql = bindTestSecurityCatalog({
+      getSchema: () => SCHEMA,
+      async find(object: string, opts: any) {
+        const where = opts?.where ?? {};
+        return (tables[object] ?? []).filter((row) => Object.entries(where).every(([k, v]) =>
+          v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(row[k]) : (v === null ? (row[k] ?? null) === null : row[k] === v)));
+      },
+    }, {
+      positions: [{ name: 'sales_rep', permissionSets: ['crm_sales_user'] }],
+      permissions: [BOUND, DIRECT],
+    });
+    const context = await buildContextForUser(ql, 'u1', Date.now(), ORG);
+    expect(context.directPermissions).toEqual(['crm_sales_user', 'forecasting']);
+    const out = await attributions(ql, context);
+    expect(out.crm_sales_user).toBe('direct grant + position:sales_rep');
+    expect(out.forecasting).toBe('direct grant');
   });
 
   it('with the definitions unreadable it says it cannot tell the two apart, rather than guessing either', async () => {
