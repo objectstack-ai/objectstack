@@ -502,22 +502,14 @@ export interface ActionDef {
    * active language before dispatch, because the runner has no language.
    */
   outcomeMessages?: SpecActionInput['outcomeMessages'];
-  /**
-   * @deprecated Retired in `@objectstack/spec` 17 as a `retiredKey()` tombstone —
-   * authoring it is a hard parse rejection, so this resolves to `undefined` and
-   * assigning a value is a compile error. A HOST may still pass a shortcut
-   * explicitly via `ActionEngine.registerAction(action, { shortcut })`; it is
-   * only no longer sourced from authored metadata. No replacement key.
-   */
-  shortcut?: SpecActionInput['shortcut'];
-  /**
-   * @deprecated Retired in `@objectstack/spec` 17 as a `retiredKey()` tombstone —
-   * authoring it is a hard parse rejection, so this resolves to `undefined` and
-   * assigning a value is a compile error. Use the list view's `bulkActions` /
-   * `bulkActionDefs` instead; `ActionEngine.registerAction(action, { bulkEnabled })`
-   * remains available to a HOST passing it explicitly.
-   */
-  bulkEnabled?: SpecActionInput['bulkEnabled'];
+  // No `shortcut` and no `bulkEnabled`: spec 17 retired both as `retiredKey()`
+  // tombstones and this interface mirrored each as `SpecActionInput['…']`
+  // (always `undefined`) until objectstack#25767 aged the ≤16.x kits out of
+  // the schema one major on, which left nothing to mirror. A HOST still passes
+  // either one explicitly through `ActionEngine.registerAction(action,
+  // { shortcut, bulkEnabled })`; neither is sourced from authored metadata,
+  // and a bulk action is declared in the list view's `bulkActions` /
+  // `bulkActionDefs`.
 }
 
 /**

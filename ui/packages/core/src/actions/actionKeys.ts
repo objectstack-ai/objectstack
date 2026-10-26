@@ -199,8 +199,8 @@ export const ACTION_DEF_KEYS = [
   // Spec 17.6.0's success copy per handler outcome (objectui#11344), declared
   // when the runner learned to read it: the success toast's first rung.
   'outcomeMessages',
-  'shortcut',
-  'bulkEnabled',
+  // `shortcut` and `bulkEnabled` left with their spec tombstones
+  // (objectstack#25767): `ActionDef` no longer declares either.
 ] as const;
 
 /**
@@ -234,7 +234,6 @@ export const SPEC_ACTION_KEYS = [
   'body',
   'bodyExtra',
   'bodyShape',
-  'bulkEnabled',
   'component',
   'confirmText',
   // Added to `ActionSchema` in @objectstack/spec 17.0.0-rc.6. Listed here purely
@@ -248,7 +247,12 @@ export const SPEC_ACTION_KEYS = [
   'description',
   'disabled',
   'errorMessage',
-  'execute',
+  // No `execute`: its spec-17 tombstone (`retiredKey()`, objectstack#3855) aged
+  // out of `ActionSchema` at objectstack#25767 — the spec now refuses it as an
+  // unknown key naming the protocol upgrade guide — so the spec no longer
+  // declares it and this inventory, which restates the spec's declared keys,
+  // drops the row. `RETIRED_ACTION_KEYS` below still carries the console's own
+  // rename prescription: a stored row can reach the runner unparsed.
   // Added to `ActionSchema` in @objectstack/spec 17.5.0 (objectui#11073): the
   // bulk dispatch contract the action's body is written for, in
   // `bulkActionDefs`' own `'perRecord' | 'aggregate'` vocabulary. Listed for the
@@ -310,7 +314,6 @@ export const SPEC_ACTION_KEYS = [
   // question.
   'requiresMembershipReach',
   'resultDialog',
-  'shortcut',
   'successMessage',
   'target',
   'type',

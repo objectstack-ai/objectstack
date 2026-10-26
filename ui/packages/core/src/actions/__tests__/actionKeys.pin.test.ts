@@ -140,7 +140,7 @@ describe('action key inventory (objectstack#4075 step 1)', () => {
     expect({ missing, stale }).toEqual({ missing: [], stale: [] });
   });
 
-  it('`execute` is still a live spec tombstone, so it must not count as known', () => {
+  it('`execute` is still refused by the spec (the 17 tombstone aged out at objectstack#25767; the strict unknown-key refusal took over), so it must not count as known', () => {
     const parsed = SpecActionSchema.safeParse({
       name: 'mark_done',
       label: 'Mark Done',
