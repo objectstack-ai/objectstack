@@ -489,6 +489,21 @@ describe('connect-src names the host the storage service presigns browser upload
     }
   });
 
+  it('adds nothing, and says so once, when the store\'s endpoint is one the presigner refuses', async () => {
+    const warnings: string[] = [];
+    const services = await storageServices({ adapter: 's3', s3: { bucket: 'csp-uploads', region: 'auto', endpoint: 'not a url', keyPrefix: null } });
+    const request = await mount({ services, warnings });
+    for (let i = 0; i < 2; i += 1) {
+      const res = await request('/_console/');
+      expect(res.status).toBe(200);
+      expect(directives(res.headers.get('content-security-policy')).get('connect-src')).toEqual([
+        "'self'",
+        'https://demotiles.maplibre.org',
+      ]);
+    }
+    expect(warnings.filter((w) => w.includes('presigns uploads to'))).toHaveLength(1);
+  });
+
   it('keeps OS_CONSOLE_CSP_CONNECT_SRC working beside it, after the storage origin', async () => {
     process.env.OS_CONSOLE_CSP_CONNECT_SRC = 'https://glyphs.example.com';
     const request = await mount({ services: await storageServices(R2_STORAGE) });
