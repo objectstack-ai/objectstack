@@ -29,10 +29,11 @@
  * ## What "equal to the native face" covers
  *
  * The face orders with the package's one row comparator (`applyOrdering`).
- * The native face's `ORDER BY` follows the driver: SQLite sorts NULL lowest and
- * PostgreSQL highest, and text follows the column collation. The fixtures
- * below therefore carry no NULL, no `''`, no numeric text and no mixed case in
- * an ordered column, which is where the two faces agree on both drivers.
+ * The native face's `ORDER BY` text follows the column collation, and its NULL
+ * placement is stated (`NULLS LAST` on SQLite and PostgreSQL, #25907, pinned
+ * in `native-sql-empty-sum-order-window.test.ts`). The fixtures below carry no
+ * NULL, no `''`, no numeric text and no mixed case in an ordered column, which
+ * is where the two faces agree on both drivers.
  *
  * ## The dialect axis of THIS file
  *
@@ -315,7 +316,8 @@ for (const cell of CELLS) {
       it('the echoed sql, run on the same driver, answers the rows the ObjectQL face answered', async () => {
         const query = { cube: CUBE, measures: ['amount_sum'], dimensions: ['note'], order: { amount_sum: 'desc' }, offset: 1, limit: 2 };
         const { res } = await ask('objectql', query);
-        expect(res.sql).toContain('ORDER BY "amount_sum" DESC LIMIT 2 OFFSET 1');
+        // [#25907] The echo states the NULL placement the face applies.
+        expect(res.sql).toContain('ORDER BY "amount_sum" DESC NULLS LAST LIMIT 2 OFFSET 1');
         const ran = (await driver.execute(res.sql)) as unknown;
         const echoed = Array.isArray(ran) ? ran : (ran as { rows: Row[] }).rows;
         expect(tuples(res.rows, ['note', 'amount_sum'])).toEqual(tuples(echoed, ['note', 'amount_sum']));
