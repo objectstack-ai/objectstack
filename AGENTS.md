@@ -261,8 +261,9 @@ localStorage / auth gotchas.
     When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
     `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
-14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
-    approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
+14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand (a direct merge, or
+    an enqueue from an account in `GOVERNED_APPROVERS`) or by an authorized approval, Tier S by the owning seat on a
+    contract-tier review of record; before that record no AI seat merges,
     queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
     `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
     `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
@@ -280,13 +281,16 @@ localStorage / auth gotchas.
     (人合: every register row except `.claude/**`): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
     spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
-    ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
+    ONE batch of at most five rows, and the click stays the maintainer's. The maintainer's own enqueue from an account
+    in `GOVERNED_APPROVERS` is a review record too — the queue guard clears that entry with no approval — for that
+    entry only: re-entry after an ejection needs the approval or another such enqueue. **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
     seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
     paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified
     recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a
-    governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green" carries no
+    governed-surface PR, nor queues or arms auto-merge on one before its record, under any account** — an authorized
+    account is agent-operated too; "CI is green" carries no
     information about a governance change.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
@@ -516,7 +520,7 @@ Even inside your own worktree, operate defensively:
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
    release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 3,000** (`additions + deletions`,
    generated files included) — it lands the way a Tier H surface does: an authorized APPROVED review and then
-   the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before
+   the owning seat, or the maintainer's own merge or enqueue from an account in `GOVERNED_APPROVERS`. Read the PR's file list (`get_files`), **its author and its size** before
    you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure

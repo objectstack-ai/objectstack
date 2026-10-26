@@ -141,6 +141,68 @@
  * agreed to. It is printed loudly as an informational line so a reader is
  * never surprised by it. Widening it is a one-line maintainer decision.
  *
+ * ## The ENQUEUE leg — the maintainer's own enqueue IS the review (2026-10-26)
+ *
+ * The maintainer, on the phone, where the button is "Merge when ready" (an
+ * enqueue) and the queue guard then still wanted a separate Approve — verbatim
+ * and untranslated (#26066):
+ *
+ *   > 也就是说推送到我的手机上，以前都是需要我点一下核准，然后再点合并，以后我可以直接点合并是吗
+ *   > 大部分我还是希望入队，但是我想省掉 Approve
+ *
+ * and the logins behind that click: 「os-zhuang 或 hotlong」 — both already in
+ * `GOVERNED_APPROVERS`, which stays the single source and does not grow. So the
+ * `merge_group` leg passes a governed pull request iff EITHER an authorized
+ * account holds a latest-decisive APPROVED review (the 2026-09-04 predicate
+ * above, unchanged and read FIRST) OR the account that put this entry in the
+ * queue is an authorized one. Everything else stands: an enqueue by any other
+ * account still needs the approval, Tier S still lands on its record, a fork is
+ * still lifted by nothing, and the bypass-rules direct merge is still the other
+ * landing.
+ *
+ * ⭐ WHY THIS IS NOT THE ACTOR-FIELD ATTRIBUTION #11704 RETRACTED. That
+ * retraction refused to read "who pushed or merged" as a review. The ruling
+ * that founded this regime (2026-08-18, carried in `check-governed-merges.mjs`)
+ * already named the enqueue as the record — 「人工合并即人工审核:governed PR 的审核
+ * 记录 = 你按下合并/入队那个动作本身」 — and the identity concern behind the
+ * retraction is answered for this leg exactly as it is for the approval leg,
+ * normatively: ⛔ no agent seat enqueues or arms auto-merge on an unapproved
+ * governed PR, under ANY account (AGENTS.md Prime Directive #14). An entry an
+ * authorized account made can therefore only be the human's click, as an
+ * authorized approval can only be the human's review. With this leg that
+ * prohibition carries the same weight the approval-side one does: it is the
+ * ONLY thing between an agent seat holding an authorized account and a governed
+ * landing it cleared for itself, and the post-merge audit reads the enqueuer
+ * the way it reads the approver.
+ *
+ * ⭐ THE READING, MEASURED on this repository on 2026-10-26 (REST): the actor
+ * of the NEWEST `added_to_merge_queue` timeline event. "Merge when ready" with
+ * checks pending ARMS auto-merge and the platform enqueues later; the add
+ * event's actor is then the account that armed it (#26154, #26011). A direct
+ * enqueue leaves an add event and never sets `auto_merge` (#26166). The pull
+ * object's `auto_merge.enabled_by` therefore answers the first path only, is
+ * null on the second and after a merge, and is not read. The timeline route
+ * answers `X-Accepted-GitHub-Permissions: issues=read; pull_requests=read`, so
+ * the workflow's existing `pull-requests: read` covers it.
+ *
+ * ⛔ UNDETERMINED IS NEVER A PASS, and never a refusal of its own: no add event,
+ * an add with no actor, an unreadable or truncated timeline (the newest event is
+ * on the LAST page), and a newest queue event that is a REMOVAL — the entry this
+ * build judges not yet on the timeline, so the add before it is an entry that
+ * already left — all leave the approval leg to decide alone, on its own exit
+ * code. ⚖️ The accepted cost, stated where it is paid: as with an approval on
+ * any commit, a push made after the click and before the entry lands is not
+ * re-reviewed here; and the click counts for THAT entry only — a seat's
+ * re-enqueue after an ejection is a new entry by a seat account, which needs
+ * the approval or another such click.
+ *
+ * ⚖️ THE COST: one timeline read per governed pull request the approval did
+ * not satisfy — never for one it did (MONOTONE, read SECOND, and a Tier S
+ * record is consulted only after it). The SIZE leg follows the same predicate
+ * through the sibling's lift (`sizeLiftFrom`, which reads the enqueue reading
+ * handed to it beside the approval verdict); an oversized pull request the
+ * governed leg already read costs no second timeline read.
+ *
  * ## Ordering: the path test runs FIRST, and a clear diff costs zero API calls
  *
  * ⛔ Fail-open on an API error is WRONG in this file — this guard exists
@@ -429,12 +491,15 @@
  *
  *   0  CLEAR    — nothing governed in the diff (no API call was made), or every
  *                 governed PR carries an authorized APPROVED review (on ANY
- *                 commit — 2026-09-04), or this is the `pull_request`
+ *                 commit — 2026-09-04) or was enqueued by an authorized
+ *                 account (2026-10-26), or this is the `pull_request`
  *                 early-warning run.
  *   3  REFUSED  — governed, and at least one governed PR carries no authorized
  *                 APPROVED review (none at all, unauthorized account, dismissed
- *                 or superseded) — and, on the references tier, no review of
- *                 record on its current head either.
+ *                 or superseded) and was not enqueued by an authorized account
+ *                 (another account, or an UNDETERMINED enqueuer) — and, on the
+ *                 references tier, no review of record on its current head
+ *                 either.
  *                 Deliberately 3, the same code the sibling's `--test`
  *                 answers "GOVERNED" with, so the two tools agree on the number
  *                 that means "this diff is governed and unsatisfied".
@@ -456,7 +521,8 @@
  *                 `HUMAN_MERGE_LINE_THRESHOLD`, generated files included
  *                 (#19036, the 2026-09-18 ruling) — and NO authorized APPROVED
  *                 review lifts it (none, unauthorized, dismissed/superseded, or
- *                 the review list could not be read; 2026-09-27, #20153). The
+ *                 the review list could not be read; 2026-09-27, #20153), nor
+ *                 an enqueue by an authorized account (2026-10-26). The
  *                 SIZE leg, not the governed one; its remedies are an authorized
  *                 approval and then the owning seat's landing, or a human merge.
  *   9  REFUSED  — the SIZE leg could not READ a queued pull request's size (the
@@ -5084,7 +5150,10 @@ export async function selfTest() {
       'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable — and the ' +
       'queued pull-back: every refusal kind on both legs sends the queued pull request to the maintainer\'s manual ' +
       'removal, disarms it and confirms from the remote, and no rendering claims a DRAFT conversion dequeues it, ' +
-      'with a detector control that fires on every listed spelling.',
+      'with a detector control that fires on every listed spelling — and the 2026-10-26 ENQUEUE leg: an entry an ' +
+      'account in GOVERNED_APPROVERS put in the queue clears with no APPROVED review and lifts the size limb through ' +
+      'the sibling, a seat enqueue still refuses, an UNDETERMINED enqueuer (no add, a removal newest, an unreadable or ' +
+      'truncated timeline) is never a pass, and the approval is still read first.',
   );
 
   selfTestReachedVerdict = true;
