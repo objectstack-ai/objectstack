@@ -1,0 +1,42 @@
+{
+  "type": "chart",
+  "chartType": "area",
+  "data": [
+    {
+      "month": "Jan",
+      "users": 1200
+    },
+    {
+      "month": "Feb",
+      "users": 1450
+    },
+    {
+      "month": "Mar",
+      "users": 1680
+    },
+    {
+      "month": "Apr",
+      "users": 1920
+    },
+    {
+      "month": "May",
+      "users": 2100
+    },
+    {
+      "month": "Jun",
+      "users": 2350
+    }
+  ],
+  "xAxisKey": "month",
+  "series": [
+    {
+      "dataKey": "users"
+    }
+  ],
+  "config": {
+    "users": {
+      "label": "Users",
+      "color": "#8884d8"
+    }
+  }
+}

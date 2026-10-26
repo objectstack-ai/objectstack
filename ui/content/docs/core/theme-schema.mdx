@@ -1,0 +1,440 @@
+---
+title: "Theme Schema (Theme)"
+description: "Theming with the Theme document — color palettes, light/dark/auto modes, and CSS variables"
+---
+
+import { SchemaExample } from '@/app/components/ComponentDemo';
+
+# Theme Schema
+
+ObjectUI theming is driven by a **theme document** — a JSON object typed as `Theme` from
+`@object-ui/types`. A theme is **not a component**: there is no `type: 'theme'` node to declare on
+a page (the component wrapper this page documented until objectui#5489 was never implemented by any
+renderer — declaring one produced an "Unknown component type" panel, never a theme manager).
+Instead, the document is handed to `ThemeProvider`, which turns it into CSS custom properties and
+applies them to the DOM.
+
+The theme system has three parts:
+
+- **`Theme`** (`@object-ui/types`) — the authoring document: colors, typography, border radii,
+  shadows, custom variables, inheritance. `@object-ui/types` owns this vocabulary: the spec
+  retired its theme module, and the shapes moved here (objectui#5716).
+- **ThemeEngine** (`@object-ui/core`) — pure functions that convert a `Theme` into a CSS
+  custom-property map (`generateThemeVars`), resolve inheritance (`resolveThemeInheritance`) and
+  resolve the effective mode (`resolveMode`).
+- **`ThemeProvider` / `useTheme`** (`@object-ui/react`) — the React context that injects the
+  variables, toggles the `light` / `dark` class, and optionally persists the user's choice.
+
+## Interactive Examples
+
+### Color Palette Preview
+
+<SchemaExample id="theme/semantic-color-palette" />
+
+### Theme-Aware Components
+
+<SchemaExample id="theme/theme-aware-ui-elements" />
+
+## Basic Usage
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const professional: Theme = {
+  name: 'professional',
+  label: 'Professional',
+  mode: 'auto',
+  colors: {
+    primary: '#3b82f6',
+    background: '#ffffff',
+    text: '#0f172a',
+  },
+};
+```
+
+`name`, `label` and `colors` are required; `colors.primary` is the only required color. Everything
+else is optional — an absent `mode` is treated as `'auto'`.
+
+## Applying a Theme
+
+`ThemeProvider` wraps a subtree, registers the available themes, resolves inheritance and mode,
+generates the CSS variables and injects them (on `document.documentElement` by default):
+
+```tsx
+import type { ReactNode } from 'react';
+import type { Theme } from '@object-ui/types';
+import { ThemeProvider } from '@object-ui/react';
+
+const corporate: Theme = {
+  name: 'corporate',
+  label: 'Corporate',
+  colors: { primary: '#2563eb' },
+};
+
+export function App({ children }: { children: ReactNode }) {
+  return (
+    <ThemeProvider themes={[corporate]} defaultTheme="corporate" defaultMode="auto" persist>
+      {children}
+    </ThemeProvider>
+  );
+}
+```
+
+Inside the provider, `useTheme()` exposes the resolved state and the switching actions:
+
+```tsx
+import { useTheme } from '@object-ui/react';
+
+export function ThemeControls() {
+  const { resolvedMode, setMode, setTheme, themes } = useTheme();
+  return (
+    <div>
+      <button onClick={() => setMode(resolvedMode === 'dark' ? 'light' : 'dark')}>
+        Switch to {resolvedMode === 'dark' ? 'light' : 'dark'} mode
+      </button>
+      {themes.map((t) => (
+        <button key={t.name} onClick={() => setTheme(t.name)}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+`useTheme()` throws outside a provider; `useOptionalTheme()` returns `null` instead.
+
+### ThemeProvider Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `themes` | `Theme[]` | `[]` | Available theme documents |
+| `defaultTheme` | `string` | first theme's `name` | Initially active theme |
+| `defaultMode` | `ThemeMode` | `'auto'` | Initial mode |
+| `persist` | `boolean` | `false` | Persist theme + mode to `localStorage` |
+| `storageKey` | `string` | `'objectui-theme'` | `localStorage` key prefix (stored as `<key>-name` / `<key>-mode`) |
+| `target` | `HTMLElement \| null` | `document.documentElement` | Element receiving the CSS variables and mode class |
+
+Persistence is a **provider** concern — there is no `persistPreference` or `storageKey` key on the
+theme document itself.
+
+## Theme Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | yes | Unique theme identifier |
+| `label` | `string` | yes | Human-readable display name |
+| `description` | `string` | no | Optional description |
+| `mode` | `'light' \| 'dark' \| 'auto'` | no | Display mode; absence means `'auto'` |
+| `colors` | `ColorPalette` | yes | Color palette — the only required token group |
+| `typography` | `{ fontFamily?: { base?: string } }` | no | Only `fontFamily.base` is live (see [Typography](#typography)) |
+| `borderRadius` | scale object | no | Rounded-corner scale (see [Border Radius](#border-radius)) |
+| `shadows` | scale object | no | Box-shadow scale (see [Shadows](#shadows)) |
+| `customVars` | `Record<string, string>` | no | Emitted verbatim as `--<key>: <value>` |
+| `extends` | `string` | no | Name of a theme to inherit from |
+
+## Theme Modes
+
+`ThemeMode` is `'light' | 'dark' | 'auto'` — **there is no `'system'` member**; the OS-following
+mode is spelled `'auto'`. The vocabulary is also exported as a runtime tuple:
+
+```ts
+import { THEME_MODES, type ThemeMode } from '@object-ui/types';
+
+const mode: ThemeMode = 'auto';
+console.log(mode, THEME_MODES); // auto ['auto', 'light', 'dark']
+```
+
+With `'auto'`, `ThemeProvider` resolves the effective mode from `prefers-color-scheme` and
+re-resolves live when the OS preference changes. The resolved mode is applied as a `light` /
+`dark` class on the target element, so Tailwind `dark:` variants respond to it.
+
+A theme document carries a **single `colors` map**, not per-mode palettes: the same variables are
+injected in both modes. For a palette that differs between light and dark, author two theme
+documents — typically a dark variant that `extends` the light one (see
+[Theme Inheritance](#theme-inheritance)) — and switch between them with `setTheme`.
+
+## Color Palette
+
+`colors.primary` is required; every other key is optional. Keys are emitted as the Shadcn CSS
+variables ObjectUI components already consume:
+
+| Key | Required | CSS variable |
+|-----|----------|--------------|
+| `primary` | yes | `--primary` |
+| `secondary` | | `--secondary` |
+| `accent` | | `--accent` |
+| `success` | | `--success` |
+| `warning` | | `--warning` |
+| `error` | | `--destructive` |
+| `info` | | `--info` |
+| `background` | | `--background` |
+| `surface` | | `--card` |
+| `text` | | `--foreground` |
+| `textSecondary` | | `--muted-foreground` |
+| `border` | | `--border` |
+| `disabled` | | `--muted` |
+| `primaryLight` | | `--primary-light` |
+| `primaryDark` | | `--primary-dark` |
+| `secondaryLight` | | `--secondary-light` |
+| `secondaryDark` | | `--secondary-dark` |
+
+Hex values (`#3b82f6`) are converted to the `H S% L%` channel format Shadcn variables expect; any
+other CSS color syntax (`rgb(...)`, `hsl(...)`, `oklch(...)`) passes through unchanged.
+
+```ts
+import type { ColorPalette } from '@object-ui/types';
+
+const colors: ColorPalette = {
+  primary: '#3b82f6',
+  secondary: '#64748b',
+  accent: '#8b5cf6',
+  error: '#ef4444',
+  background: '#ffffff',
+  surface: '#f8fafc',
+  text: '#0f172a',
+  textSecondary: '#64748b',
+  border: '#e2e8f0',
+};
+```
+
+## Typography
+
+`typography.fontFamily.base` is the only live typography key — it is emitted as `--font-sans`:
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const branded: Theme = {
+  name: 'branded',
+  label: 'Branded',
+  colors: { primary: '#3b82f6' },
+  typography: {
+    fontFamily: { base: 'Inter, system-ui, sans-serif' },
+  },
+  customVars: {
+    'font-size-base': '16px',
+    'line-height-base': '1.5',
+  },
+};
+```
+
+The former typography scales (`fontSize`, `fontWeight`, `lineHeight`, `letterSpacing`,
+`fontFamily.heading`, `fontFamily.mono`) were retired upstream (objectstack#5021): a
+theme declaring them is **refused, not accepted-and-stripped**. `customVars`
+is the declared replacement — an entry is emitted verbatim, so
+`customVars: { 'font-size-lg': '1.125rem' }` puts the same `--font-size-lg` on the document that
+the retired scale used to. The retired keys are typed `never`, which makes the refusal a
+compile-time error:
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const legacy: Theme = {
+  name: 'legacy',
+  label: 'Legacy',
+  colors: { primary: '#3b82f6' },
+  typography: {
+    // @ts-expect-error -- `fontSize` was retired (objectstack#5021); author `customVars` instead
+    fontSize: 16,
+  },
+};
+```
+
+## Border Radius
+
+The key is `borderRadius` (not `radius`), and the middle step is `base` (not `default`):
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const rounded: Theme = {
+  name: 'rounded',
+  label: 'Rounded',
+  colors: { primary: '#3b82f6' },
+  borderRadius: {
+    sm: '0.25rem',
+    base: '0.5rem',
+    md: '0.75rem',
+    lg: '1rem',
+    xl: '1.5rem',
+  },
+};
+```
+
+| Key | CSS variable |
+|-----|--------------|
+| `none` | `--radius-none` |
+| `sm` | `--radius-sm` |
+| `base` | `--radius` |
+| `md` | `--radius-md` |
+| `lg` | `--radius-lg` |
+| `xl` | `--radius-xl` |
+| `2xl` | `--radius-2xl` |
+| `full` | `--radius-full` |
+
+## Shadows
+
+The `shadows` scale has the same shape, with `inner` in place of `full`:
+
+| Key | CSS variable |
+|-----|--------------|
+| `none` | `--shadow-none` |
+| `sm` | `--shadow-sm` |
+| `base` | `--shadow` |
+| `md` | `--shadow-md` |
+| `lg` | `--shadow-lg` |
+| `xl` | `--shadow-xl` |
+| `2xl` | `--shadow-2xl` |
+| `inner` | `--shadow-inner` |
+
+## Custom Variables
+
+`customVars` entries are emitted verbatim onto the target element as `--<key>: <value>` (a leading
+`--` is added when the key does not carry one). This is the declared door for any token the schema
+does not model — z-index steps, animation durations, layout dimensions:
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const dashboard: Theme = {
+  name: 'dashboard',
+  label: 'Dashboard',
+  colors: { primary: '#3b82f6' },
+  customVars: {
+    'header-height': '4rem',
+    'sidebar-width': '16rem',
+    '--z-modal': '1400',
+  },
+};
+```
+
+## Theme Inheritance
+
+A theme can extend another by `name`. On resolution the chain is merged deep for `colors`,
+`typography`, `borderRadius`, `shadows` and `customVars` — the child overrides key by key and
+inherits the rest. Cycles are detected and stop the walk.
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const acmeLight: Theme = {
+  name: 'acme-light',
+  label: 'Acme',
+  colors: { primary: '#3b82f6', background: '#ffffff', text: '#0f172a' },
+  borderRadius: { base: '0.5rem' },
+};
+
+const acmeDark: Theme = {
+  name: 'acme-dark',
+  label: 'Acme Dark',
+  extends: 'acme-light',
+  colors: { primary: '#60a5fa', background: '#0f172a', text: '#f1f5f9' },
+};
+```
+
+Register both on the provider: `acme-dark` resolves against `acme-light`, inheriting the
+`borderRadius` scale while its `colors` override key by key.
+
+The engine functions are exported for direct use:
+
+```ts
+import { generateThemeVars, resolveMode } from '@object-ui/core';
+import type { Theme } from '@object-ui/types';
+
+const probe: Theme = {
+  name: 'probe',
+  label: 'Probe',
+  colors: { primary: '#3b82f6' },
+};
+
+const vars = generateThemeVars(probe); // { '--primary': '217 91% 60%' }
+const effective = resolveMode('auto'); // 'light' | 'dark', from prefers-color-scheme
+console.log(vars, effective);
+```
+
+## Validation
+
+Theme documents are validated at the **type level**: retired keys are `never`-typed tombstones, so
+an invalid document fails to compile rather than being silently stripped at runtime. There is no
+runtime validator for theme documents — the zod schemas `@objectstack/spec` used to publish
+(`ThemeDefinitionSchema` and its token sub-schemas) were retired with its theme module, and
+`@object-ui/types/zod` does not export a replacement.
+
+For the runtime check that matters to theming — accessibility — the engine ships WCAG helpers:
+
+```ts
+import { contrastRatio, meetsContrastLevel } from '@object-ui/core';
+
+const ratio = contrastRatio('#0f172a', '#ffffff'); // ≈ 14.9
+const readable = meetsContrastLevel('#0f172a', '#ffffff', 'AA'); // true
+console.log(ratio, readable);
+```
+
+## Complete Theme Example
+
+```ts
+import type { Theme } from '@object-ui/types';
+
+const professional: Theme = {
+  name: 'professional',
+  label: 'Professional',
+  description: 'Default corporate look',
+  mode: 'auto',
+
+  colors: {
+    primary: '#3b82f6',
+    secondary: '#64748b',
+    accent: '#8b5cf6',
+    success: '#10b981',
+    warning: '#f59e0b',
+    error: '#ef4444',
+    info: '#0ea5e9',
+    background: '#ffffff',
+    surface: '#f8fafc',
+    text: '#0f172a',
+    textSecondary: '#64748b',
+    border: '#e2e8f0',
+  },
+
+  typography: {
+    fontFamily: { base: 'Inter, system-ui, sans-serif' },
+  },
+
+  borderRadius: {
+    sm: '0.25rem',
+    base: '0.5rem',
+    md: '0.75rem',
+    lg: '1rem',
+  },
+
+  shadows: {
+    sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    base: '0 1px 3px 0 rgb(0 0 0 / 0.1)',
+    lg: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+  },
+
+  customVars: {
+    'header-height': '4rem',
+    'sidebar-width': '16rem',
+  },
+};
+```
+
+## Best Practices
+
+1. **Use the semantic keys** — map brand colors onto `primary` / `accent` / `error` rather than
+   inventing custom variables for tokens the palette already models.
+2. **Test both modes** — an `'auto'` theme renders under both the `light` and `dark` classes.
+3. **Maintain contrast** — check WCAG pairs with `meetsContrastLevel` from `@object-ui/core`.
+4. **Default to `'auto'`** — respect the OS preference; it is the provider's default mode.
+5. **Persist on the provider** — user preference is `ThemeProvider`'s `persist` / `storageKey`,
+   not a key on the theme document.
+6. **Share tokens with `extends`** — author variants as small overrides of a base theme.
+
+## Related
+
+- [App Schema](/docs/core/app-schema) - Application configuration
+- [Schema Overview](/docs/guide/schema-overview) - Where theming sits among the schema families
+- [CSS Variables](https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties) - MDN documentation
+- [Tailwind Theming](https://tailwindcss.com/docs/theme) - Tailwind CSS theming guide

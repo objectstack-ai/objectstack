@@ -1,0 +1,25 @@
+---
+title: "Label"
+description: "Text label for form elements"
+---
+
+The Label component renders accessible labels for form fields.
+
+## Basic Usage
+
+<SchemaExample id="components-form-label/form-label" />
+
+## With a Password Input
+
+<SchemaExample id="components-form-label/password-label" />
+
+## Schema
+
+```ts
+interface LabelSchema {
+  type: 'label';
+  text: string;                   // Label text
+  htmlFor?: string;               // Associated input ID
+  className?: string;
+}
+```

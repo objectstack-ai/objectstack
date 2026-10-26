@@ -1,0 +1,43 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This project is now the ONLY one that compiles `spec-symbol-batch6.test.ts`,
+  // whose whole value is compile-time assertions (objectui#3181). It used to be
+  // rescued by a narrow `tsconfig.typetests.json` next door, which named that one
+  // file while the rest of the tree was still in TEST_DEBT; the package graduated
+  // in objectui#4040 and the narrow project was retired in objectui#4291, after
+  // `--listFiles` showed this project reads the same file and a provably-false
+  // `Assert` appended to it turned this project red. Keep the file compiling
+  // here: those assertions are erased at runtime, so vitest proves nothing
+  // about them and `tsc` is the only thing that can.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // Two global augmentations, neither of them an import:
+    //   - `node` for `spec-symbol-batch6.test.ts`, which resolves
+    //     `@objectstack/spec`'s own `.d.ts` off disk (createRequire /
+    //     readFileSync / node:path) and walks `src/elements/`.
+    //   - `@testing-library/jest-dom` for the `toBeInTheDocument` matchers in
+    //     the four `ChatbotEnhanced` / `FloatingChatbot` suites; it does not live
+    //     under `@types/`, so it is never picked up automatically.
+    // Naming `types` at all switches off automatic `@types/*` inclusion, so both
+    // have to be listed here.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

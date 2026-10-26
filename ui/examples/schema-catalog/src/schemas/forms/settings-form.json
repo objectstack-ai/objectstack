@@ -1,0 +1,250 @@
+{
+  "type": "stack",
+  "gap": 6,
+  "children": [
+    {
+      "type": "stack",
+      "gap": 2,
+      "children": [
+        {
+          "type": "text",
+          "content": "Settings",
+          "className": "text-3xl font-bold"
+        },
+        {
+          "type": "text",
+          "content": "Manage your account settings and preferences.",
+          "className": "text-muted-foreground"
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "children": [
+        {
+          "type": "stack",
+          "gap": 6,
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Profile",
+                      "className": "text-lg font-semibold"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Update your personal information",
+                      "className": "text-sm text-muted-foreground"
+                    }
+                  ]
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "username",
+                      "label": "Username"
+                    },
+                    {
+                      "type": "input",
+                      "id": "username",
+                      "name": "username",
+                      "placeholder": "johndoe",
+                      "defaultValue": "johndoe"
+                    }
+                  ]
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "email",
+                      "label": "Email"
+                    },
+                    {
+                      "type": "input",
+                      "id": "email",
+                      "name": "email",
+                      "inputType": "email",
+                      "placeholder": "john@example.com",
+                      "defaultValue": "john@example.com"
+                    }
+                  ]
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "bio",
+                      "label": "Bio"
+                    },
+                    {
+                      "type": "textarea",
+                      "id": "bio",
+                      "name": "bio",
+                      "placeholder": "Tell us about yourself",
+                      "rows": 3
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "content": "Preferences",
+                      "className": "text-lg font-semibold"
+                    },
+                    {
+                      "type": "text",
+                      "content": "Customize your experience",
+                      "className": "text-sm text-muted-foreground"
+                    }
+                  ]
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "stack",
+                        "gap": 1,
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Email Notifications",
+                            "className": "text-sm font-medium"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Receive email updates about your activity",
+                            "className": "text-sm text-muted-foreground"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "switch",
+                        "id": "emailNotifications",
+                        "name": "emailNotifications",
+                        "defaultChecked": true
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "justify": "between",
+                    "children": [
+                      {
+                        "type": "stack",
+                        "gap": 1,
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Marketing Emails",
+                            "className": "text-sm font-medium"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Receive updates about new features and products",
+                            "className": "text-sm text-muted-foreground"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "switch",
+                        "id": "marketingEmails",
+                        "name": "marketingEmails"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "stack",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "label",
+                      "htmlFor": "language",
+                      "label": "Language"
+                    },
+                    {
+                      "type": "select",
+                      "id": "language",
+                      "name": "language",
+                      "options": [
+                        {
+                          "value": "en",
+                          "label": "English"
+                        },
+                        {
+                          "value": "es",
+                          "label": "Spanish"
+                        },
+                        {
+                          "value": "fr",
+                          "label": "French"
+                        },
+                        {
+                          "value": "de",
+                          "label": "German"
+                        }
+                      ],
+                      "defaultValue": "en"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "justify": "end",
+                "gap": 2,
+                "children": [
+                  {
+                    "type": "button",
+                    "label": "Cancel",
+                    "variant": "outline"
+                  },
+                  {
+                    "type": "button",
+                    "label": "Save Changes",
+                    "variant": "default"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

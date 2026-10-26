@@ -1,0 +1,16 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "order_number": "ORD-0001"
+  },
+  "fields": [
+    {
+      "name": "order_number",
+      "label": "Order Number",
+      "type": "auto_number",
+      "readonly": true
+    }
+  ]
+}

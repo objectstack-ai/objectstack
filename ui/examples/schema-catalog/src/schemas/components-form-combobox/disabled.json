@@ -1,0 +1,11 @@
+{
+  "type": "combobox",
+  "placeholder": "Disabled combobox",
+  "disabled": true,
+  "options": [
+    {
+      "value": "1",
+      "label": "Option 1"
+    }
+  ]
+}

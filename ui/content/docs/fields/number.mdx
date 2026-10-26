@@ -1,0 +1,97 @@
+---
+title: "Number Field"
+description: "Numeric input field for integer and decimal numbers"
+---
+
+The Number Field component provides a numeric input for collecting integer or decimal numbers, with an optional number of decimal places (`scale`).
+
+## Basic Usage
+
+<SchemaExample id="fields-number/basic-number-field" />
+
+## With Decimal Places
+
+<SchemaExample id="fields-number/with-decimal-places" />
+
+## With Min/Max
+
+<SchemaExample id="fields-number/range-validation" />
+
+## Field Schema
+
+A number field is authored as `NumberFieldMetadata` (`@object-ui/types`), which is the
+source of truth for the key set: it extends `BaseFieldMetadata` with the numeric
+bounds, the stored precision and scale, the stepper increment, and the display
+hint `useGrouping` (see [Cell Renderer](#cell-renderer)).
+
+```ts
+import type { NumberFieldMetadata } from '@object-ui/types';
+
+const quantity: NumberFieldMetadata = {
+  type: 'number',
+  name: 'quantity',
+  label: 'Quantity',
+  placeholder: '0',
+  required: true,
+  min: 0,
+  max: 9999,
+  precision: 10,
+  scale: 0,
+  step: 1,
+  useGrouping: true,
+};
+```
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## What the browser rewrites before this field sees it
+
+This widget renders a native `type="number"` input, so the browser decides what
+the box accepts. Two things can happen and **only one of them is announced**:
+
+- **Announced.** Text the browser cannot read at all — `1e`, a lone `-`, a lone
+  `.` — leaves the box visibly showing what was typed while its value reads
+  empty. The field is marked `aria-invalid` and draws
+  *"Not saved: the text in this box is not a number."*
+- ⚠️ **Not announced.** Entries the browser silently **truncates**: pasting
+  ``1.2.3`` stores ``1.23``, and `0x10` stores ``10``. No warning is
+  possible here — the browser discards the extra characters as they arrive, so
+  nothing reaches ObjectUI to check.
+
+⛔ **"No warning" therefore does not mean "the value is right."** Full
+explanation and the reasoning: [What a number field silently
+rewrites](/docs/guide/fields#what-a-number-field-silently-rewrites).
+
+## Use Cases
+
+- **Quantities**: Order quantities, stock levels
+- **Measurements**: Dimensions, weights, distances
+- **Ratings**: Numeric ratings or scores
+- **Ages**: User age or duration values
+
+## Cell Renderer
+
+In tables/grids, numbers are displayed with tabular formatting:
+
+```ts
+import { NumberCellRenderer } from '@object-ui/fields';
+
+// Renders in a tabular-nums font, to the field's `scale`:
+// a stored 1234.5 on a field declaring `scale: 2` renders: 1,234.50
+// the same value on a field with no `scale` renders: 1,234.5
+```
+
+Whether the value gets thousands separators is the field's `useGrouping`:
+
+| `useGrouping` | `scale` | Thousands separators |
+|---|---|---|
+| `false` | any | no: `12345.5` |
+| `true` | any | yes: a scale-0 count reads `2,026` |
+| not set | `0` | no: read as a year or another ordinal, `2026` |
+| not set | anything else, or not set | yes: `12,345.5` |
+
+`useGrouping` is the `@objectstack/spec` field key of the same name. An authored
+`true` always groups, even in a locale that leaves four-digit numbers alone by
+default (es-ES renders `1.234`). With the key unset, the grouped rows follow the
+locale's own convention.

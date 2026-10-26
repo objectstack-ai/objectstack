@@ -1,0 +1,38 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    // The `toBeInTheDocument` / `toHaveTextContent` matchers these tests use are
+    // a global augmentation, not an import, and `@testing-library/jest-dom` does
+    // not live under `@types/` — so it is never picked up automatically and has
+    // to be named here. Naming `types` at all switches off automatic `@types/*`
+    // inclusion.
+    // `node` is named too (the shape `plugin-calendar` and `plugin-chatbot` use):
+    // `ObjectMap.catalogRecordSource-6939.test.tsx` reads the schema-catalog
+    // fixtures off disk with `node:fs`.
+    "types": ["@testing-library/jest-dom", "node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  // `src/global.d.ts` is pulled in explicitly. The build program gets it for
+  // free from `"include": ["src"]`, but an ambient declaration file is only a
+  // program input when a pattern names it — being imported is not enough,
+  // because nothing imports it. Without it `ObjectMap.tsx`'s side-effect import
+  // of `maplibre-gl/dist/maplibre-gl.css` is TS2882 here and nowhere else,
+  // which reads as a defect in the source the build compiles cleanly.
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"]
+}

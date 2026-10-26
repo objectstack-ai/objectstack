@@ -1,0 +1,9 @@
+{
+  "type": "aspect-ratio",
+  "ratio": 2.3333333333333335,
+  "children": {
+    "type": "card",
+    "className": "flex h-full items-center justify-center",
+    "children": "21:9 Ratio"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "type": "carousel",
+  "orientation": "horizontal",
+  "showArrows": true,
+  "className": "w-full max-w-sm",
+  "items": [
+    [
+      {
+        "type": "card",
+        "className": "p-6",
+        "children": [
+          {
+            "type": "text",
+            "content": "Product 1",
+            "className": "text-xl font-bold mb-2"
+          },
+          {
+            "type": "text",
+            "content": "Amazing features and quality",
+            "className": "text-muted-foreground mb-4"
+          },
+          {
+            "type": "text",
+            "content": "$99.99",
+            "className": "text-2xl font-bold text-green-600"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "card",
+        "className": "p-6",
+        "children": [
+          {
+            "type": "text",
+            "content": "Product 2",
+            "className": "text-xl font-bold mb-2"
+          },
+          {
+            "type": "text",
+            "content": "Premium quality guarantee",
+            "className": "text-muted-foreground mb-4"
+          },
+          {
+            "type": "text",
+            "content": "$149.99",
+            "className": "text-2xl font-bold text-green-600"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "card",
+        "className": "p-6",
+        "children": [
+          {
+            "type": "text",
+            "content": "Product 3",
+            "className": "text-xl font-bold mb-2"
+          },
+          {
+            "type": "text",
+            "content": "Best value for money",
+            "className": "text-muted-foreground mb-4"
+          },
+          {
+            "type": "text",
+            "content": "$79.99",
+            "className": "text-2xl font-bold text-green-600"
+          }
+        ]
+      }
+    ]
+  ]
+}

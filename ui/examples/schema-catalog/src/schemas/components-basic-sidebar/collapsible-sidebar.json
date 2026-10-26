@@ -1,0 +1,25 @@
+{
+  "type": "sidebar",
+  "collapsible": false,
+  "className": "gap-1 border-r p-2",
+  "children": [
+    {
+      "type": "button",
+      "label": "Home",
+      "variant": "ghost",
+      "className": "w-full justify-start"
+    },
+    {
+      "type": "button",
+      "label": "Files",
+      "variant": "ghost",
+      "className": "w-full justify-start"
+    },
+    {
+      "type": "button",
+      "label": "Settings",
+      "variant": "ghost",
+      "className": "w-full justify-start"
+    }
+  ]
+}

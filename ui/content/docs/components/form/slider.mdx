@@ -1,0 +1,22 @@
+---
+title: "Slider"
+description: "Select a value from a range"
+---
+
+## Examples
+
+  <SchemaExample id="components-form-slider/basic-slider" />
+
+## Schema
+
+```ts
+interface SliderSchema {
+  type: 'slider';
+  name?: string;
+  label?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  defaultValue?: number | number[];
+}
+```

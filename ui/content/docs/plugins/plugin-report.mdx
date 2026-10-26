@@ -1,0 +1,354 @@
+---
+title: "Plugin Report"
+description: "Dataset-bound reports for Object UI — tabular, summary, matrix and joined views over a semantic-layer dataset, with server-computed totals, declared ordering, drill-down and printable export"
+---
+
+# @object-ui/plugin-report
+
+Report engine for Object UI. It renders the four report variants defined by
+`@objectstack/spec` (`tabular` / `summary` / `matrix` / `joined`).
+
+Since the ADR-0021 single-form cutover a report is **dataset-bound**: it names a
+semantic-layer `dataset` and selects that dataset's measures (`values`) grouped
+by that dataset's dimensions (`rows`, and for a matrix also `columns`). Every
+name in a report is a name **defined in the dataset** — the report never
+declares an object, a field, an aggregate or a date bucket of its own, and the
+aggregation runs in the semantic layer rather than in the browser.
+
+## Installation
+
+```bash
+pnpm add @object-ui/plugin-report
+```
+
+## At a glance
+
+| Variant   | What it shows                                                                     |
+| --------- | --------------------------------------------------------------------------------- |
+| `tabular` | The selection as a flat list — `rows` + `values`, no totals                        |
+| `summary` | The same table plus a server-computed grand-total footer                           |
+| `matrix`  | A cross-tab: `rows` down × `columns` across, measures in the cells, plus subtotals |
+| `joined`  | A vertical stack of blocks, each its own dataset-bound table                       |
+
+All four are dispatched by a single `<ReportRenderer schema={...} />`. The
+**declared `type` picks the presentation** — never the shape of the data that
+comes back. The same report can be embedded in any JSON schema tree as
+`{ "type": "report", "report": { ... } }`; the dispatcher unwraps the wrapper
+and renders the report inside it.
+
+## The authoring shape
+
+The authoring shape is `Report`, declared by `@objectstack/spec/ui`
+(`ReportSchema`) and shipped as `json-schema/ui/Report.json` — the same
+declaration `defineReport` validates against.
+
+| Key             | Type                              | Meaning                                                                        |
+| --------------- | --------------------------------- | ------------------------------------------------------------------------------ |
+| `name`          | `string` (required)               | Identifier, at least 2 characters.                                              |
+| `label`         | `string` \| `Record<string,string>` (required) | Display title; the record form is the i18n shape.                  |
+| `type`          | `tabular` \| `summary` \| `matrix` \| `joined` | Defaults to `tabular`.                                             |
+| `dataset`       | `string`                          | The semantic-layer dataset this report reads.                                   |
+| `rows`          | `string[]`                        | Dimension **names** to group down.                                              |
+| `columns`       | `string[]`                        | Dimension **names** across — the matrix pivot axis.                             |
+| `values`        | `string[]`                        | Measure **names** to display.                                                   |
+| `runtimeFilter` | filter condition                  | Scope filter, merged with any filter the host passes at render time.            |
+| `order`         | `{ by, direction }[]`             | Result ordering, most significant key first.                                    |
+| `drilldown`     | `boolean`                         | Defaults to `true`; set `false` to make rows and cells unclickable.             |
+| `chart`         | object                            | Embedded visualization over the same selection (see below).                     |
+| `blocks`        | report[]                          | `joined` only — the stacked sub-reports.                                        |
+
+The schema is **strict**: a key it does not declare is rejected, not ignored.
+`columns` in particular is a list of dimension *names* — passing column
+*definition objects* fails validation.
+
+## Quick start
+
+`defineReport` validates the definition at authoring time, so a typo is a build
+error rather than an empty grid:
+
+```ts
+import { defineReport } from '@objectstack/spec/ui';
+
+export const OpportunitiesByStage = defineReport({
+  name: 'opp_by_stage',
+  label: 'Opportunities by Stage',
+  type: 'summary',
+  dataset: 'opportunity_pipeline',
+  rows: ['stage'],
+  values: ['amount_sum', 'deal_count'],
+});
+```
+
+`amount_sum` and `deal_count` are measures the `opportunity_pipeline` dataset
+defines; `stage` is one of its dimensions. The report picks from that
+vocabulary and adds nothing to it.
+
+{/* doc-snippet: fragment — renders the report defined in the block above, with the host's data source */}
+```tsx
+import { ReportRenderer } from '@object-ui/plugin-report';
+
+<ReportRenderer schema={OpportunitiesByStage} dataSource={dataSource} />
+```
+
+The `dataSource` must implement `queryDataset(dataset, selection)`. A data
+source without it renders an explicit error — "This data source does not
+support dataset queries" — rather than an empty table.
+
+## Matrix reports (row × column pivot)
+
+A `matrix` adds `columns`: a second list of **dimension names**, used as the
+across axis.
+
+```ts
+import { defineReport } from '@objectstack/spec/ui';
+
+export const PipelineByQuarter = defineReport({
+  name: 'pipeline_by_quarter',
+  label: 'Pipeline Coverage by Quarter',
+  type: 'matrix',
+  dataset: 'opportunity_pipeline',
+  rows: ['forecast_category'],
+  columns: ['close_quarter'],
+  values: ['amount_sum'],
+});
+```
+
+Period pivots come from the **dataset**: `close_quarter` is a time dimension the
+dataset declares at that grain. A report cannot bucket a date itself — there is
+no per-grouping granularity key in the report shape, because the grain a
+measure is valid at is a property of the semantic layer, not of one report.
+
+Row subtotals, column subtotals and the grand total are **server-computed**: the
+selection asks for them and the renderer only places the pre-aggregated rows it
+is handed. It never re-combines bucketed values client-side, since measures like
+an average cannot be recombined without drifting from the semantic layer. An
+older server that returns no totals renders the plain cross-tab without the
+totals row and column, and a `matrix` that declares no `columns` degrades to the
+flat grouped table.
+
+## Joined reports
+
+A `joined` report stacks independent blocks vertically — each block is its own
+dataset-bound report, so different panels may read different datasets.
+
+```ts
+import { defineReport } from '@objectstack/spec/ui';
+
+export const CustomerChurnSignals = defineReport({
+  name: 'customer_churn_signals',
+  label: 'Customer Churn Signals',
+  type: 'joined',
+  blocks: [
+    {
+      name: 'at_risk_accounts',
+      label: 'At-Risk Accounts',
+      type: 'summary',
+      dataset: 'account_health',
+      rows: ['industry'],
+      values: ['account_count'],
+      runtimeFilter: { is_active: true },
+    },
+    {
+      name: 'recently_lost',
+      label: 'Recently Lost Opportunities',
+      type: 'summary',
+      dataset: 'opportunity_pipeline',
+      rows: ['owner'],
+      values: ['amount_sum', 'deal_count'],
+      runtimeFilter: { stage: 'closed_lost' },
+    },
+  ],
+});
+```
+
+Block rules, as the renderer applies them:
+
+- Each block names its **own** `dataset` — there is no container-level dataset to
+  inherit.
+- The container's `runtimeFilter` is merged into every block; the block's own
+  keys win on collision.
+- Each block orders itself through its own `order`; a joined container has no
+  report-level ordering to hand down.
+- A block's declared `type` picks its presentation, exactly as at top level, and
+  a block must not itself be `joined` (no recursion).
+
+## Ordering
+
+`order` is a list, most significant key first, and it is lowered onto the
+dataset selection — the **server** orders the query:
+
+```ts
+order: [
+  { by: 'stage', direction: 'asc' },
+  { by: 'amount_sum', direction: 'desc' },
+]
+```
+
+`by` names a dimension the report groups by or a measure it displays. Because
+the server sorts, ordering by a derived measure works and the sort applies to
+the whole result rather than to one fetched page. For a matrix the across axis
+reads left-to-right in row-arrival order, so ordering by the across dimension is
+what makes the columns come out in that order; declaring nothing still reads
+correctly, because a selected time dimension defaults to ascending.
+
+With no `order`, a **select** dimension follows its field's declared option
+order: the table rows, a matrix's row and column headers, and the embedded
+chart's categories. The declared options come first, in their order; a value the
+options do not declare comes next, in the order the dataset returned it; the
+empty bucket comes last. With several grouping dimensions the outer one is laid
+out first and the inner one within each outer group, and a dimension whose field
+declares no options keeps the order the dataset returned it in. An authored
+`order` keeps the server's order.
+
+## Embedded chart
+
+A report may carry a `chart` object rendered over the same selection. Its
+`type` is one of the spec's chart names, and `xAxis` / `yAxis` are **bare
+dimension and measure names** taken from the report's own selection — not field
+paths and not expressions. `title`, `subtitle`, `series`, `colors`, `height`,
+`showLegend`, `showDataLabels`, `annotations` and `interaction` are passed
+through as authored. See the [package README](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-report)
+for a complete `chart` block.
+
+The chart runs its own `xAxis` × `yAxis` dataset query, so it binds the same way
+on every non-`joined` type. It draws above a `tabular` or `summary` table, and
+below the cross-tab of a `matrix` that declares `columns`; there `xAxis` may name
+a `rows` or a `columns` dimension.
+
+## Drill-down
+
+Drill-down is a **host callback**, not a registered handler. Pass `onDrill` and
+every aggregated row and matrix cell becomes clickable; supply nothing and
+nothing is clickable. The report emits *what was clicked* and the host decides
+where that goes, because the renderer only knows dimension names:
+
+{/* doc-snippet: fragment — renders the report defined above and calls the host's own router */}
+```tsx
+import { ReportRenderer, type DatasetDrillArgs } from '@object-ui/plugin-report';
+
+<ReportRenderer
+  schema={OpportunitiesByStage}
+  dataSource={dataSource}
+  onDrill={(args: DatasetDrillArgs) => {
+    const filter = { ...args.objectFilter, ...args.runtimeFilter };
+    router.push(`/records/${args.object}?filter=${encodeURIComponent(JSON.stringify(filter))}`);
+  }}
+/>
+```
+
+| `DatasetDrillArgs` | Meaning                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `dataset`          | Dataset the clicked aggregate was computed over.                                     |
+| `groupKey`         | Dimension **name** → clicked bucket value (row dimensions, plus across dimensions for a matrix cell). |
+| `runtimeFilter`    | The effective render-time scope filter, if any.                                      |
+| `object`           | The dataset's base object, when the server supplied it.                              |
+| `objectFilter`     | Exact record-list filter (object **field** name → raw stored value) for the clicked bucket, present only when the server returned the dimension→field mapping and the raw grouped values. It is what lets select and lookup dimensions filter precisely instead of by display label. |
+
+A report can opt out with `drilldown: false` even when the host passes
+`onDrill`.
+
+## Where the numbers come from
+
+The renderer posts one dataset selection — dimensions, measures, and optionally
+`runtimeFilter`, `totals` and `order` — through `dataSource.queryDataset`. That
+is the same governed path dataset-bound dashboard widgets and the dataset
+preview use, which is why a number shown in a report matches the same number
+shown on a dashboard.
+
+Presentation follows from what the server returns: column headers use the
+dataset's server-supplied display label, and measure cells are formatted with
+the field's declared currency and numeral format rather than the raw measure
+name.
+
+## Stored pre-9.0 documents — migration only
+
+<Callout type="warn" title="Not an authoring option">
+  **This section is about documents that already exist in storage. The shape it
+  describes is not available for authoring.** Everything above is how a report is
+  written; nothing below is.
+</Callout>
+
+Before the ADR-0021 cutover a report carried its own query: an `objectName`,
+`columns` as column definition objects with `aggregate`, and
+`groupingsDown` / `groupingsAcross` with `sortOrder` and `dateGranularity`.
+That form is **rejected by the current schema** — `objectName` and
+`groupingsDown` come back as unrecognized keys, and object-shaped `columns`
+fails as the wrong type.
+
+Stored documents in that shape still render, through a deliberately lossy
+bridge: the dispatcher converts them to a presentation-layer report and hands
+them to the viewer. The conversion reads the *current* keys, so a pre-9.0
+document arrives with none of them — what it produces is the report's title and
+an **empty column set**. The document renders; its columns, groupings,
+aggregates and sort do not. There is no diagnostic, which is exactly why the
+bridge is a waiting room and not a supported way to write a report.
+
+Migrating one is a re-expression against the dataset:
+
+| Pre-9.0 key                                    | Where it goes now                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| `objectName`                                   | Gone from the report — the `dataset` owns the object.                  |
+| `columns: [{ field, aggregate }]`              | `values: string[]`; the aggregate becomes a **measure** in the dataset.|
+| `columns: [{ field }]` (non-aggregated)        | `rows: string[]`, as a dimension.                                      |
+| `groupingsDown: [{ field }]`                   | `rows: string[]`.                                                      |
+| `groupingsAcross: [{ field }]`                 | `columns: string[]`.                                                   |
+| `sortOrder` on a grouping                      | `order: [{ by, direction }]` on the report.                            |
+| `dateGranularity` on a grouping                | A time dimension declared at that grain **in the dataset**.            |
+| `filter`                                       | `runtimeFilter`.                                                       |
+
+The work that has no mechanical equivalent is the dataset itself: measures and
+time dimensions the old report declared inline have to exist in the semantic
+layer before the migrated report can name them.
+
+## Filter-time date helpers — current limitation
+
+The server does **not** currently evaluate `` cel`...` `` expressions embedded
+inside filter values; the unevaluated template object reaches the driver.
+Compute concrete ISO date strings instead and treat the report as a snapshot:
+
+```ts
+// Module-load helper. Re-evaluates each time the app boots.
+const daysAgo = (n: number): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+};
+
+runtimeFilter: { last_activity_date: { $lt: daysAgo(60) } }
+```
+
+For a sliding window, recompute on each render or key a `useMemo` on a one-hour
+bucket. Native filter-time CEL evaluation is tracked for a future major version.
+
+## Schema-driven embedding
+
+Importing the package registers two component types with `ComponentRegistry`:
+`report` (the dispatcher) and `report-viewer` (the presentation-layer viewer).
+To embed a report in any JSON schema tree, put it in a `report` node's `report`
+member:
+
+```json
+{
+  "type": "report",
+  "report": {
+    "name": "opp_by_stage",
+    "label": "Opportunities by Stage",
+    "type": "summary",
+    "dataset": "opportunity_pipeline",
+    "rows": ["stage"],
+    "values": ["amount_sum"]
+  }
+}
+```
+
+There is no `report-builder` component type: report authoring lives in the
+console designer, not in this package. `spec-report` is retired (objectui#11440):
+it was an alias of `report` carrying the same wrapper, and a node declaring it
+now resolves to nothing. Write `"type": "report"`; the `report` member is
+unchanged.
+
+## Further reading
+
+- 📦 [`@object-ui/plugin-report` on npm](https://www.npmjs.com/package/@object-ui/plugin-report)
+- 📝 [Package README](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-report)
+- 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

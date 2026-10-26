@@ -1,0 +1,62 @@
+{
+  "type": "carousel",
+  "orientation": "horizontal",
+  "showArrows": true,
+  "className": "w-full max-w-2xl",
+  "items": [
+    [
+      {
+        "type": "box",
+        "className": "p-8 bg-slate-50 rounded-lg text-center",
+        "children": [
+          {
+            "type": "text",
+            "content": "\"This product changed my life!\"",
+            "className": "text-xl italic mb-4 block"
+          },
+          {
+            "type": "text",
+            "content": "— Sarah Johnson",
+            "className": "font-semibold"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "box",
+        "className": "p-8 bg-slate-50 rounded-lg text-center",
+        "children": [
+          {
+            "type": "text",
+            "content": "\"Absolutely fantastic experience.\"",
+            "className": "text-xl italic mb-4 block"
+          },
+          {
+            "type": "text",
+            "content": "— Mike Chen",
+            "className": "font-semibold"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "type": "box",
+        "className": "p-8 bg-slate-50 rounded-lg text-center",
+        "children": [
+          {
+            "type": "text",
+            "content": "\"Highly recommended to everyone!\"",
+            "className": "text-xl italic mb-4 block"
+          },
+          {
+            "type": "text",
+            "content": "— Emma Davis",
+            "className": "font-semibold"
+          }
+        ]
+      }
+    ]
+  ]
+}

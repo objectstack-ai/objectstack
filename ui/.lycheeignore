@@ -1,0 +1,9 @@
+# Ignore localhost links (development/testing)
+http://localhost*
+
+# Ignore example links
+https://example.com
+
+# Ignore social media links (anti-scraping measures)
+https://twitter.com*
+https://x.com*

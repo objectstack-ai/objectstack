@@ -334,6 +334,11 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * is right. Budgeting around it would only arm the trap for the next author
  * who legitimately names the live job.
  *
+ * `Console Pin Gate` IS dead since #25697 deleted its job with the objectui pin
+ * gates. It still takes no RETIRED_CONTEXT_NAMES row: it never sat in any
+ * reading of the required set, and the instruction files no longer name it as
+ * a live check (`docs/releases-maintenance.md` keeps it in the past tense).
+ *
  * ⚠️ The cost of the drop, stated rather than discovered later: these two
  * `name:` literals are now pinned by NOTHING, while prose elsewhere still refers
  * to the jobs by name — `docs/releases-maintenance.md`,
@@ -437,6 +442,24 @@ export const REQUIRED_CONTEXTS = [
       '#12427 maintainer confirmation, closed `completed` 2026-08-27T07:51Z on the verbatim 「Governed Surface Queue Guard 已添加」 (comment 5436049459); ' +
       'read back live in the ruleset sweep of 2026-09-10 that carries the director ruling enrolling this row (#15233)',
     carries: 'the governed-surface refusal — the `merge_group` leg that refuses a governed diff carrying no ruled approval',
+  },
+  {
+    workflow: 'ci.yml',
+    job: 'lint-ui',
+    context: 'Lint UI',
+    authorized:
+      '#25752 step 6, maintainer ruling 2026-10-26T00:25Z in the director thread, verbatim 「加上了」 — ' +
+      'added to the `main` ruleset the same minute; this row is the repo half (#25853)',
+    carries: 'the ESLint + repo-gate family of the `ui/` workspace',
+  },
+  {
+    workflow: 'ci.yml',
+    job: 'build-e2e-ui',
+    context: 'Build & E2E UI',
+    authorized:
+      '#25752 step 6, maintainer ruling 2026-10-26T00:25Z in the director thread, verbatim 「加上了」 — ' +
+      'added to the `main` ruleset the same minute; this row is the repo half (#25853)',
+    carries: 'the Console build from `ui/apps/console` and its Playwright e2e',
   },
 ];
 
@@ -551,8 +574,9 @@ export const INSTRUCTION_SURFACES = [
     // 6→7 by #17798 — the same misclassification, one enrolment later and
     // with every gate green, which is what put the exclusivity rule below in
     // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
-    // contexts moved to the full battery). The full set is pinned here so the
-    // corrected sentence cannot rot back — a rename in ANY of the five
+    // contexts moved to the full battery). Then 5→7 by #25853 (the `ui/`
+    // import's `Lint UI` and `Build & E2E UI`). The full set is pinned here so
+    // the corrected sentence cannot rot back — a rename in ANY of the seven
     // reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
@@ -562,6 +586,8 @@ export const INSTRUCTION_SURFACES = [
       'Test Core',
       'Build Core',
       'Governed Surface Queue Guard',
+      'Lint UI',
+      'Build & E2E UI',
     ],
   },
   {
@@ -590,6 +616,8 @@ export const INSTRUCTION_SURFACES = [
       // equal to the registry by the exclusivity rule in
       // judgeInstructionSurfaces — that makes the seat's copy non-optional.
       'Governed Surface Queue Guard',
+      'Lint UI',
+      'Build & E2E UI',
     ],
   },
   {
@@ -612,7 +640,7 @@ export const INSTRUCTION_SURFACES = [
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for every
- * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998). Editing the merge-queue
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *

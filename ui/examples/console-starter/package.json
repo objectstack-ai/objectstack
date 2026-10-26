@@ -1,0 +1,51 @@
+{
+  "name": "@object-ui/example-console-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Opinionated, fork-ready console template built on @object-ui/app-shell with the full plugin set wired up.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint .",
+    "test": "vitest run --root ../.. examples/console-starter/",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@object-ui/app-shell": "workspace:*",
+    "@object-ui/auth": "workspace:*",
+    "@object-ui/components": "workspace:*",
+    "@object-ui/i18n": "workspace:*",
+    "@object-ui/mobile": "workspace:*",
+    "@object-ui/plugin-calendar": "workspace:*",
+    "@object-ui/plugin-charts": "workspace:*",
+    "@object-ui/plugin-chatbot": "workspace:*",
+    "@object-ui/plugin-dashboard": "workspace:*",
+    "@object-ui/plugin-designer": "workspace:*",
+    "@object-ui/plugin-detail": "workspace:*",
+    "@object-ui/plugin-editor": "workspace:*",
+    "@object-ui/plugin-form": "workspace:*",
+    "@object-ui/plugin-grid": "workspace:*",
+    "@object-ui/plugin-kanban": "workspace:*",
+    "@object-ui/plugin-list": "workspace:*",
+    "@object-ui/plugin-report": "workspace:*",
+    "@object-ui/plugin-view": "workspace:*",
+    "@object-ui/providers": "workspace:*",
+    "@object-ui/react-runtime": "workspace:*",
+    "@object-ui/sdui-parser": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router-dom": "^7.18.2",
+    "sonner": "^2.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.1"
+  }
+}

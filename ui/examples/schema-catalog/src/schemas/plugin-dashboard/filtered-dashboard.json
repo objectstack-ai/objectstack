@@ -1,0 +1,55 @@
+{
+  "type": "dashboard",
+  "columns": 2,
+  "gap": 4,
+  "dateRange": {
+    "field": "created_at",
+    "defaultRange": "last_30_days",
+    "allowCustomRange": true
+  },
+  "globalFilters": [
+    {
+      "name": "region",
+      "field": "region",
+      "label": "Region",
+      "type": "select",
+      "options": [
+        { "value": "EMEA", "label": "EMEA" },
+        { "value": "APAC", "label": "APAC" },
+        { "value": "AMER", "label": "AMER" }
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "invoices_by_status",
+      "title": "Invoices by Status",
+      "type": "bar",
+      "dataset": "invoices",
+      "dimensions": ["status"],
+      "values": ["count"]
+    },
+    {
+      "id": "accounts_signed",
+      "title": "Accounts Signed",
+      "type": "line",
+      "dataset": "accounts",
+      "dimensions": ["signed_month"],
+      "values": ["count"],
+      "filterBindings": {
+        "dateRange": "signed_at",
+        "region": "sales_region"
+      }
+    },
+    {
+      "id": "total_invoices",
+      "title": "Total Invoices (all regions)",
+      "type": "metric",
+      "dataset": "invoices",
+      "values": ["count"],
+      "filterBindings": {
+        "region": false
+      }
+    }
+  ]
+}

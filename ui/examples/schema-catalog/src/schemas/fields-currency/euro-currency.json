@@ -1,0 +1,17 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "price_eur",
+      "label": "Price (EUR)",
+      "type": "currency",
+      "placeholder": "€0.00",
+      "currencyConfig": {
+        "currencyMode": "fixed",
+        "defaultCurrency": "EUR"
+      }
+    }
+  ]
+}

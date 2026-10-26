@@ -1,0 +1,636 @@
+---
+title: "Plugin Map"
+---
+
+import { InteractiveDemo } from '@/app/components/InteractiveDemo';
+import { PluginLoader } from '@/app/components/PluginLoader';
+
+Map visualization component for ObjectQL data sources - displays database records as map markers based on location data.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-map
+```
+
+## Overview
+
+The `@object-ui/plugin-map` plugin provides map visualization for ObjectQL data sources. It's designed to work with object-based data providers and automatically maps record fields to map markers/pins.
+
+**Note**: This is a basic implementation suitable for simple use cases. For production applications with advanced mapping needs, consider integrating a dedicated mapping library like Mapbox, Leaflet, or Google Maps.
+
+## Features
+
+- **ObjectQL Integration**: Works seamlessly with object/value data providers
+- **Automatic Field Mapping**: Maps database fields to map markers
+- **Location Support**: Handle latitude/longitude or combined location fields
+- **Marker Customization**: Configurable marker titles and descriptions
+- **Marker Clustering**: Group nearby markers (when many points)
+- **Popup/Tooltip**: Show details on marker click
+- **Interactive**: Click handling for markers
+
+<PluginLoader plugins={['map']}>
+
+## Interactive Examples
+
+### Store Locations
+
+<SchemaExample id="plugin-map/store-locator-map" />
+
+### Delivery Tracking
+
+<SchemaExample id="plugin-map/real-time-delivery-tracking" />
+
+### Event Venues
+
+<SchemaExample id="plugin-map/event-venue-finder" />
+
+</PluginLoader>
+
+## Usage
+
+An `object-map` node takes its props in its `properties` bag, whose members are
+`@objectstack/spec`'s `ComponentPropsMap['object-map']` row. `objectui validate`
+judges the bag against that row and refuses a prop written flat on the node by
+name, naming its bag member (`Did you mean objectName → properties.objectName?`),
+as the spec's own page component does (objectui#10859). `SchemaRenderer` hoists
+the bag onto the node before `ObjectMap` runs, so `ObjectMapSchema` is the node as
+the renderer reads it, and as code composes it.
+
+### Basic Usage with ObjectQL
+
+```tsx
+import '@object-ui/plugin-map'
+import type { ObjectMapBlockNode } from '@object-ui/types'
+
+const schema: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'locations',  // Your ObjectQL object
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'name',
+      descriptionField: 'address'
+    }
+  }
+}
+```
+
+### With Static Data
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types'
+
+const schema: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    staticData: [
+      {
+        id: 1,
+        name: 'Office HQ',
+        lat: 37.7749,
+        lng: -122.4194,
+        address: '123 Main St, San Francisco, CA'
+      },
+      {
+        id: 2,
+        name: 'Warehouse',
+        lat: 37.8044,
+        lng: -122.2711,
+        address: '456 Oak Ave, Oakland, CA'
+      }
+    ],
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'name',
+      descriptionField: 'address'
+    }
+  }
+}
+```
+
+## Schema API
+
+```plaintext
+{
+  type: 'object-map',
+  dataSource?: ElementDataSource,     // Per-element binding; its object stands in for objectName
+  properties: {                       // The spec's ComponentPropsMap['object-map'] row
+    objectName?: string,              // ObjectQL object name (read third)
+    staticData?: Array<any>,          // Static data array (read second)
+    data?: ViewData,                  // Advanced data configuration (read first)
+                                      // At least one of data / staticData / objectName is
+                                      // required, or the node's dataSource binding
+    filter?: Array<any>,              // Query filter, sent as $filter
+    sort?: SortConfig[],              // Sort, sent as $orderby
+    map?: ObjectMapConfig,            // Map-specific configuration
+    enableClustering?: boolean,       // Cluster nearby markers (auto past 100; false turns it off)
+    navigation?: NavigationConfig,    // What a marker click opens (see Marker click navigation)
+    mapStyle?: string                 // MapLibre style URL; read before `map.style`
+  },
+  className?: string
+  // `onMarkerClick` is no node key: a React host passes it as a prop (see Marker Click)
+}
+```
+
+`filter` and `sort` are not object-only keys (objectui#9061). They narrow and
+order inline rows — `staticData` or `data: { provider: 'value', items }` —
+exactly as they narrow and order fetched ones. A bare array under `data` is not
+a record source on the map (objectui#8348): the ladder falls through to
+`staticData`, then `objectName`, so inline rows belong under `staticData`. The
+platform row ceiling (2,000 plotted rows with a footnote naming both numbers)
+applies to inline rows too. The ceiling is applied to the **filtered**
+set, so a large inline array that a `filter` cuts below the ceiling plots every
+matching row and shows no footnote. Inline rows reach the map as the in-memory
+adapter's own deep copy, so they must be JSON-serializable and a record handed
+to `onMarkerClick` is not `===` the authored object.
+
+### ObjectMapConfig
+
+```plaintext
+{
+  latitudeField?: string,      // Field containing latitude
+  longitudeField?: string,     // Field containing longitude
+  locationField?: string,      // Field with combined location (alternative)
+  titleField?: string,         // Field to use as marker title
+  descriptionField?: string,   // Field for marker description
+  zoom?: number,               // Zoom level (1-20) — opts out of the auto-fit
+  center?: [number, number],   // Center coordinates [lat, lng] — opts out of the auto-fit
+  style?: string               // MapLibre style URL/spec (overrides the demo default)
+}
+```
+
+The block is closed (objectui#5157). A key it does not declare — a typo such as
+`latitudeFieId` — is refused by `objectui validate` with an `unrecognized_keys`
+issue at `properties.map` that names the key (on a root node; a nested node reports under
+`invalid_union` at `children`, with the key in the arm detail). At runtime
+`ObjectMap` does not throw: it renders from the declared keys, and the console
+warns `[ObjectMap] Invalid map configuration`, naming the same key. A typo that
+leaves the block with no coordinate binding, as `latitudeFieId` does, draws the
+refusal described under "An unconfigured map refuses" rather than a map.
+
+## Configuration
+
+### An unconfigured map refuses
+
+The `map` block is **required** for the map to render anything. With no
+coordinate binding — no `map` block at all, a block that names only
+`titleField`, or a `latitudeField` with no `longitudeField` beside it — the
+component renders
+
+> Map configuration required — declare `map.locationField` or `map.latitudeField` + `map.longitudeField`
+
+in place of the map. It does **not** fall back to field names of its own
+(objectui#8169, ruled 2026-09-07): a guess that happens to hit plots records on a
+view whose author never said where its coordinates live, and a guess that misses
+paints an empty map that looks like broken data. Neither says what is missing.
+
+⚠️ This is a behaviour change for metadata written before the ruling. A view
+whose records carry `latitude` / `longitude` (or `location`) columns used to plot
+without declaring anything, because those four names were the component's
+defaults and the list / view relays floored `locationField` to `'location'` on
+the way in. Both are gone. Declare the binding:
+
+### Field Mapping - Separate Coordinates
+
+When your data has separate latitude and longitude fields:
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const storeMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'stores',
+    map: {
+      latitudeField: 'latitude',
+      longitudeField: 'longitude',
+      titleField: 'storeName',
+      descriptionField: 'storeAddress'
+    }
+  }
+};
+```
+
+### Field Mapping - Combined Location
+
+When your data has a combined location field:
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const placeMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'places',
+    map: {
+      locationField: 'coordinates',  // e.g., "37.7749,-122.4194" or {lat: 37.7749, lng: -122.4194}
+      titleField: 'placeName',
+      descriptionField: 'description'
+    }
+  }
+};
+```
+
+### Initial Camera
+
+By default the map has no fixed camera: on load it **fits the records it queried**.
+The marker set's bounding box is measured along the shortest arc that contains
+every marker — so a set straddling the antimeridian is framed across the line
+rather than around the far side of the planet — and the map fits that box with
+padding, up to a city-scale zoom ceiling (a single record does not become a
+rooftop view). A view with data therefore never opens on an empty viewport.
+
+Two cases sit outside the fit:
+
+- **No records** (empty result, or every record missing coordinates): nothing to
+  fit, so the map opens on the whole world.
+- **A declared camera** (below): the declaration wins and the fit is skipped.
+
+### Zoom and Center
+
+Declare either one to take the camera over and opt this view out of the auto-fit:
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const cameraMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'locations',
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'name',
+      zoom: 12,                    // Zoom level (1-20)
+      center: [37.7749, -122.4194] // [latitude, longitude]
+    }
+  }
+};
+```
+
+Declaring only one half keeps the other derived: `zoom` on its own is applied at
+the centre of the records, `center` on its own at a continental zoom.
+
+## Data Providers
+
+### Object Provider (Database)
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const retailStores: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'retail_stores',
+    map: {
+      latitudeField: 'store_lat',
+      longitudeField: 'store_lng',
+      titleField: 'store_name',
+      descriptionField: 'store_address'
+    }
+  }
+};
+```
+
+### Value Provider (Static)
+
+```tsx
+const staticLocations = {
+  type: 'object-map',
+  properties: {
+    staticData: [
+      { id: 1, name: 'Location 1', lat: 37.7749, lng: -122.4194 },
+      { id: 2, name: 'Location 2', lat: 37.8044, lng: -122.2711 }
+    ],
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'name'
+    }
+  }
+};
+```
+
+### No API provider
+
+The view-level `data.provider: 'api'` is retired in `@objectstack/spec`
+(objectstack#23082), and `ObjectMap` has no branch for it: a schema that still
+carries one plots no markers and requests nothing. Without a `DataSource` it
+fails one step earlier, with the error an object-bound map gets:
+`DataSource required for the object provider`.
+A metadata-declared API call is the page element's `dataSource` binding.
+
+Read from the database with the **Object Provider** above, or pass records you
+already hold with the **Value Provider**.
+
+## Event Handling
+
+### Marker click navigation
+
+`navigation` takes the spec's `NavigationConfig` (`{ mode, size, width,
+openNewTab, preventNavigation }`), the block a list view declares. On a map no
+parent view navigates for:
+
+- **Absent**: a marker click opens nothing. This renderer supplies no drawer
+  default.
+- `drawer`, `modal` and `popover` open the marker's record in that overlay.
+  `split` opens nothing: the map hands the split shell no main panel.
+- `new_window` opens `/{objectName}/record/{id}` in a new tab. `none` opens
+  nothing.
+- `page`, and a block without `mode` (it takes the spec's `page` default), open
+  the record page of the map's `objectName` through the record navigator the
+  host publishes (the console publishes one on its custom pages, record pages
+  and list views). Under a host that publishes none, such as an embedded
+  renderer, or on a map that names no `objectName`, there is no record page to
+  open and the click opens nothing.
+- `preventNavigation: true` opens nothing whatever the mode. `openNewTab: true`
+  opens the record page in a new tab and outranks every mode except `none`.
+- `size` picks the overlay width bucket; the deprecated `width` wins over it.
+
+A click handler from a parent view (`onRowClick`) outranks the whole key.
+
+### Marker Click
+
+`onMarkerClick` is a function, so it is no member of the `properties` bag (the
+spec's row declares none) and no key of the node either: a React host passes it
+as a prop, and `SchemaRenderer` forwards it to the map. `ObjectMapBlockNode` is
+the node with its bag closed, so a misspelled key inside it is a compile error.
+
+```tsx
+import { SchemaRenderer } from '@object-ui/react';
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const clickableMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'locations',
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'name'
+    }
+  }
+};
+
+export function ClickableMap() {
+  return (
+    <SchemaRenderer
+      schema={clickableMap}
+      onMarkerClick={(location: Record<string, unknown>) => {
+        console.log('Marker clicked:', location);
+        // Show location details, navigate to the location page, or open directions
+      }}
+    />
+  );
+}
+```
+
+## Examples
+
+### Store Locator
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const storeLocator: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'retail_locations',
+    map: {
+      latitudeField: 'latitude',
+      longitudeField: 'longitude',
+      titleField: 'storeName',
+      descriptionField: 'fullAddress',
+      zoom: 10,
+      center: [37.7749, -122.4194]  // San Francisco
+    }
+  }
+}
+// Store details (hours, phone) come from `onMarkerClick`, a prop the host passes (see Marker Click).
+```
+
+### Delivery Tracking
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const deliveryMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'active_deliveries',
+    map: {
+      latitudeField: 'current_lat',
+      longitudeField: 'current_lng',
+      titleField: 'driver_name',
+      descriptionField: 'delivery_address'
+    }
+  }
+}
+// Delivery details and contacting the driver come from `onMarkerClick`, a prop the host passes (see Marker Click).
+```
+
+### Real Estate Listings
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const propertyMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'properties',
+    map: {
+      latitudeField: 'property_lat',
+      longitudeField: 'property_lng',
+      titleField: 'property_address',
+      descriptionField: 'property_details',
+      zoom: 12
+    }
+  }
+}
+// Property details (photos, price) come from `onMarkerClick`, a prop the host passes (see Marker Click).
+```
+
+### Event Venues
+
+```tsx
+const venueMap = {
+  type: 'object-map',
+  properties: {
+    staticData: [
+      {
+        id: 1,
+        venueName: 'Conference Center',
+        lat: 37.7833,
+        lng: -122.4167,
+        details: 'Capacity: 500 people'
+      },
+      {
+        id: 2,
+        venueName: 'Exhibition Hall',
+        lat: 37.7891,
+        lng: -122.3894,
+        details: 'Capacity: 1000 people'
+      },
+      {
+        id: 3,
+        venueName: 'Outdoor Amphitheater',
+        lat: 37.7694,
+        lng: -122.4862,
+        details: 'Capacity: 2000 people'
+      }
+    ],
+    map: {
+      latitudeField: 'lat',
+      longitudeField: 'lng',
+      titleField: 'venueName',
+      descriptionField: 'details',
+      zoom: 11
+    }
+  }
+}
+// Venue details and booking come from `onMarkerClick`, a prop the host passes (see Marker Click).
+```
+
+### Field Service Map
+
+```tsx
+import type { ObjectMapBlockNode } from '@object-ui/types';
+
+const serviceMap: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'service_calls',
+    map: {
+      latitudeField: 'customer_latitude',
+      longitudeField: 'customer_longitude',
+      titleField: 'customer_name',
+      descriptionField: 'service_type',
+      zoom: 10
+    }
+  }
+}
+// Service-call details, assigning a technician and directions come from `onMarkerClick`, a prop the host passes (see Marker Click).
+```
+
+## Typical Use Cases
+
+1. **Store Locator**: Display retail store locations
+2. **Fleet Tracking**: Show vehicle or delivery locations
+3. **Real Estate**: Display property listings on a map
+4. **Event Venues**: Show event or venue locations
+5. **Field Service**: Track service calls or technician locations
+6. **Customer Locations**: Visualize customer distribution
+7. **Asset Tracking**: Show location of equipment or assets
+
+## Location Data Formats
+
+### Separate Fields
+
+{/* doc-snippet: fragment — a SHAPE excerpt of one of the READER's own data records, not an expression: a bare object literal at statement position parses as a block with labels (measured: TS1005 x3). No ObjectUI type describes it — these are the caller's own row fields, named by `map.latitudeField` / `map.longitudeField` above */}
+
+```tsx
+{
+  id: 1,
+  name: 'Location',
+  latitude: 37.7749,
+  longitude: -122.4194
+}
+```
+
+### Combined String
+
+{/* doc-snippet: fragment — a SHAPE excerpt of one of the READER's own data records, not an expression: a bare object literal at statement position parses as a block with labels (measured: TS1005 x2). No ObjectUI type describes it — `coordinates` is the caller's own field, named by `map.locationField` above */}
+
+```tsx
+{
+  id: 1,
+  name: 'Location',
+  coordinates: '37.7749,-122.4194'
+}
+```
+
+### Object Format
+
+{/* doc-snippet: fragment — a SHAPE excerpt of one of the READER's own data records, not an expression: a bare object literal at statement position parses as a block with labels (measured: TS1005 x3). No ObjectUI type describes it — `location` is the caller's own field, named by `map.locationField` above */}
+
+```tsx
+{
+  id: 1,
+  name: 'Location',
+  location: {
+    lat: 37.7749,
+    lng: -122.4194
+  }
+}
+```
+
+## Map Controls
+
+The map typically includes:
+- **Zoom controls**: Zoom in/out buttons
+- **Pan**: Drag to move around the map
+- **Marker click**: Click markers to show details
+- **Auto-fit**: Automatically adjust view to show all markers
+
+## Integration with Full-featured Map Libraries
+
+For production applications, you may want to integrate with:
+
+- **Mapbox**: Advanced styling, 3D maps, routing
+- **Google Maps**: Street view, directions, extensive POI data
+- **Leaflet**: Open-source, lightweight, customizable
+- **OpenStreetMap**: Free, community-driven map data
+
+This plugin provides a basic implementation. For advanced features like:
+- Directions/routing
+- Street view
+- 3D buildings
+- Traffic data
+- Custom map styles
+- Advanced geocoding
+
+Consider using one of the full-featured mapping libraries above.
+
+## TypeScript Support
+
+`ObjectMapConfig` types the `map` block. `ObjectMapSchema` is the node as
+`ObjectMap` reads it, after `SchemaRenderer` hoists the `properties` bag, or as
+code hands it to the component directly (`<ObjectMap schema={…} />`); an
+authored node writes its props in the bag.
+
+```ts
+import type { ObjectMapBlockNode, ObjectMapSchema, ObjectMapConfig } from '@object-ui/types'
+
+const mapConfig: ObjectMapConfig = {
+  latitudeField: 'lat',
+  longitudeField: 'lng',
+  titleField: 'name',
+  descriptionField: 'description',
+  zoom: 12,
+  center: [37.7749, -122.4194]
+}
+
+// The authored node: its props in the `properties` bag.
+const mapNode: ObjectMapBlockNode = {
+  type: 'object-map',
+  properties: {
+    objectName: 'locations',
+    map: mapConfig
+  }
+}
+
+// The node as `ObjectMap` reads it, after the hoist.
+const mapSchema: ObjectMapSchema = {
+  type: 'object-map',
+  objectName: 'locations',
+  map: mapConfig
+}
+```
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/guide/plugins)
+- [Package README](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-map)

@@ -1,0 +1,162 @@
+name: Changeset Guard
+
+# Why this is its own workflow instead of a job in `ci.yml`: on a PR that adds
+# only a changeset, every gate inside `ci.yml` and `lint.yml` skips, so nothing
+# in either of them ever reads the changeset — which is exactly the PR this check
+# needs to see. It has to run outside that decision.
+#
+# That is no longer the reason this header used to give. It said both `ci.yml`
+# and `lint.yml` list `'**/*.md'` AND `.changeset/**` under `paths-ignore`, so a
+# changeset-only PR "starts no workflow at all". objectui#3523 step 2 deleted
+# `paths-ignore` from their `pull_request` trigger; it remains ONLY on `push`.
+# Such a PR does start both workflows and does produce their contexts — measured:
+# PR #3856 (one markdown file) 16 checks, PR #4339 (one line added to AGENTS.md)
+# 17. The correction is objectui#3857; an author had already acted on the old
+# sentence and got the opposite result.
+#
+# What #3523 moved rather than deleted is the path DECISION: it is now the
+# `Decide whether this change needs a full run` step in `ci.yml`, with a twin in
+# `lint.yml`, and its exclusion list is that `push` filter unchanged —
+# `'**/*.md'` and `.changeset/**` included, held identical to it by
+# `scripts/__tests__/merge-queue-reporting.test.ts`. Both workflows therefore
+# start, report, and skip every expensive step on precisely this PR. GitHub has
+# no per-job path filter either, so the gate lives here, with the inverse
+# trigger: it runs *only* when `.changeset/**` changes.
+#
+# It needs no install and no build — a checkout plus a `node` call per job, a
+# few seconds — so keep it that way if you add checks to it.
+#
+# ── Two jobs, opposite questions ─────────────────────────────────────────────
+#
+#   `no-major`  — the LEVEL a pending changeset declares. Reads the tree.
+#   `overwrite` — whether this change touched a changeset it did not ADD. Reads
+#                 the diff against the merge base, so it alone needs
+#                 `fetch-depth: 0` (objectui#6336). Report-only; the script's
+#                 header carries the history that chose that over blocking.
+#
+# ── Self-coverage (objectui#6321) ────────────────────────────────────────────
+#
+# The `.changeset/**` entry above is the inverse trigger this file exists for;
+# the two entries below it are a DIFFERENT thing — ordinary self-coverage, so a
+# change to the gate itself is exercised by the PR that makes it rather than by
+# the next unrelated PR that happens to touch `.changeset/**`. Before this,
+# neither this YAML nor the script it runs was in the filter at all: measured
+# against the other six path-filtered workflows in this repo, 5 of 7
+# self-include and this was one of the two that did not (the other,
+# `performance-budget.yml`, was closed in #6315).
+#
+# The convention those five follow is "list what the `run:` step below actually
+# executes" — own YAML plus the invoked scripts, both of them — not the
+# transitive import graph. `half-state-patrol.yml` additionally lists
+# `scripts/invoked-as.mjs`,
+# but that is a documented one-off (its own header's divergence #2, tied to
+# objectui#5791's port from objectstack) and NOT the pattern the other three
+# self-including, script-running gates follow: `node-esm-load-gate.yml`,
+# `published-dist-gate.yml` and `spec-range-floors.yml` all import
+# `scripts/invoked-as.mjs` too (same `isEntrypoint` helper) and none of them
+# lists it — it is a widely shared utility (40+ importers under `scripts/`),
+# and a change to it is already caught by `check-entry-guard.mjs` /
+# `entry-guard-wiring.test.ts` in the ordinary vitest suite, not by re-running
+# every gate that happens to import it. So this filter matches the
+# three-of-four majority and does not add it either.
+#
+# Deliberately NOT listed for the same reason: `scripts/check-changeset-presence.mjs`.
+# `check-changeset-overwrite.mjs` imports its base-ref resolver, its `git diff`
+# wrapper and its frontmatter reader rather than growing a THIRD copy of them —
+# the second copy, in `check-i18n-en-drift.mjs`, inherited a real defect from the
+# first draft of that resolver and had to be fixed to match under objectui#3766,
+# which is the drift a third copy would reopen. It is an import, not something a
+# `run:` step executes, and a change to it is already caught by the root vitest
+# suite (`check-changeset-presence.test.ts` and `check-changeset-overwrite.test.ts`
+# both exercise it) on any pull request touching `scripts/**` — the same
+# `~ partial` reasoning applied to `invoked-as.mjs` just above.
+#
+# Also deliberately NOT listed: `scripts/__tests__/check-changeset-no-major.test.ts`
+# and `scripts/__tests__/check-changeset-overwrite.test.ts`.
+# That file matches the `~ partial` pattern `published-dist-gate.yml` and
+# `spec-range-floors.yml` already set for their own gate scripts' `__tests__`
+# files — the test lives under `scripts/**`, which the `Decide whether this
+# change needs a full run` step in `ci.yml`/`lint.yml` does NOT exclude, so any
+# PR that edits it (or the script) already gets a real run of the root vitest
+# suite that executes it. Adding it here would duplicate coverage `pnpm test`
+# already provides on exactly the PRs where it matters, for no PR it would add
+# it on.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '.changeset/**'
+      - '.github/workflows/changeset-guard.yml'
+      - 'scripts/check-changeset-no-major.mjs'
+      - 'scripts/check-changeset-overwrite.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.changeset/**'
+      - '.github/workflows/changeset-guard.yml'
+      - 'scripts/check-changeset-no-major.mjs'
+      - 'scripts/check-changeset-overwrite.mjs'
+
+concurrency:
+  group: changeset-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  no-major:
+    name: Changeset Bump Policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # One `major` in the 39-package `fixed` group publishes all 39 as the next
+      # major, taking objectui off the `@objectstack` major it is pinned to.
+      # See AGENTS.md §版本号策略, and the script's header for the full rationale.
+      - name: Verify no changeset declares a major bump
+        run: node scripts/check-changeset-no-major.mjs
+
+  # A SECOND job rather than a step in `no-major`, for one reason: this gate
+  # reads a diff and therefore needs `fetch-depth: 0`, and `no-major` reads the
+  # tree and wants to stay a depth-1 checkout. Two jobs also run in parallel,
+  # so the workflow is no slower than its slowest half.
+  overwrite:
+    name: Changeset Overwrite Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # The gate compares this change against its MERGE BASE with the target
+          # branch, so it needs history — checkout's default is a depth-1 clone
+          # where `git merge-base` has nothing to find. An unresolvable base is a
+          # hard failure in the script, never a skip, so getting this wrong is a
+          # red build rather than a silent pass; spelled out here so it stays
+          # that way. Same requirement, same reason, as `changeset-presence.yml`.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+
+      # REPORT-ONLY today, and that is a measured choice rather than caution:
+      # all 19 modifications of a pre-existing changeset in this repository's
+      # history were legitimate (bump-level corrections, prose corrections,
+      # authors amending their own unreleased changeset), so a blocking gate
+      # would have failed every one of those pull requests. What it catches is
+      # the overwrite in objectui#6336, whose cost lands on a THIRD PARTY — the
+      # earlier pull request whose release declaration disappears — and is
+      # invisible when it happens: `git status` shows ` M`, not `??`. The step
+      # prints the declaration that was there and what is now gone from it.
+      # `OS_CHANGESET_OVERWRITE_ENFORCE=1` flips it to blocking for whoever
+      # revisits this with a new measurement.
+      - name: Report changesets this change did not add
+        run: node scripts/check-changeset-overwrite.mjs

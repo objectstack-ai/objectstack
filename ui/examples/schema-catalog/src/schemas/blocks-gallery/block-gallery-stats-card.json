@@ -1,0 +1,42 @@
+{
+  "type": "card",
+  "className": "max-w-xs",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 2,
+      "className": "p-4",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "align": "center",
+            "justify": "between",
+            "children": [
+              {
+                "type": "text",
+                "content": "Total Revenue",
+                "className": "text-sm font-medium text-muted-foreground"
+              },
+              {
+                "type": "icon",
+                "icon": "dollar-sign",
+                "className": "h-4 w-4 text-muted-foreground"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "content": "$45,231.89",
+          "className": "text-2xl font-bold"
+        },
+        {
+          "type": "text",
+          "content": "+20.1% from last month",
+          "className": "text-xs text-muted-foreground"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "type": "calendar-view",
+  "view": "week",
+  "currentDate": "2026-05-27T12:00:00.000Z",
+  "data": [
+    {
+      "id": 1,
+      "title": "Standup",
+      "start": "2026-05-28T01:00:00.000Z",
+      "end": "2026-05-28T01:30:00.000Z",
+      "color": "#3b82f6",
+      "allDay": false
+    },
+    {
+      "id": 2,
+      "title": "Sprint Planning",
+      "start": "2026-05-28T06:00:00.000Z",
+      "end": "2026-05-28T07:30:00.000Z",
+      "color": "#8b5cf6",
+      "allDay": false
+    },
+    {
+      "id": 3,
+      "title": "1:1 with Manager",
+      "start": "2026-05-29T03:00:00.000Z",
+      "end": "2026-05-29T03:30:00.000Z",
+      "color": "#10b981",
+      "allDay": false
+    },
+    {
+      "id": 4,
+      "title": "Team Lunch",
+      "start": "2026-05-30T04:00:00.000Z",
+      "end": "2026-05-30T05:00:00.000Z",
+      "color": "#f59e0b",
+      "allDay": false
+    }
+  ],
+  "titleField": "title",
+  "startDateField": "start",
+  "endDateField": "end",
+  "colorField": "color",
+  "allDayField": "allDay",
+  "className": "h-[500px] border rounded-lg"
+}

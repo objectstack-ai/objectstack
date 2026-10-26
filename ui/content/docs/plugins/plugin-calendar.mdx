@@ -1,0 +1,729 @@
+---
+title: "Plugin Calendar"
+---
+
+import { InteractiveDemo } from '@/app/components/InteractiveDemo';
+import { PluginLoader } from '@/app/components/PluginLoader';
+
+Calendar view components for ObjectUI - includes both ObjectQL-integrated and standalone calendar components.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-calendar
+```
+
+<PluginLoader plugins={['calendar']}>
+
+## Overview
+
+The `@object-ui/plugin-calendar` plugin provides two calendar components:
+
+1. **ObjectCalendar** (`object-calendar`): For ObjectQL data sources - displays database records as calendar events
+2. **CalendarView** (`calendar-view`): Standalone calendar component for displaying pre-loaded event data
+
+Both components support month, week, and day views with full event management capabilities.
+
+Every week starts on the first day of the week of the calendar's locale (the `locale` prop, else the user's display locale): Sunday under `en-US`, Monday under `en-GB` or `zh-CN`. The month grid, its weekday heads, the week view's columns, the header's week range and the date popover all start on that day. There is no separate week-start setting.
+
+## Drag-and-Drop Rescheduling
+
+### Month view
+
+- **Move an event** — grab any cell of the event pill and drop it on another day. The calendar days from the grabbed day to the drop day move both `startDateField` and `endDateField`, so dragging a multi-day span from any of its days behaves intuitively. Each value keeps its time of day: a 10:00 event stays at 10:00, even across a DST change.
+- **Resize an event** — grab the small right-edge handle on the last day of a multi-day pill and drop it on a different day to extend or shrink the end date. The end keeps its time of day, and the start date is preserved; drops earlier than the start are ignored.
+
+### Week / Day view (time grid)
+
+Week and day views render a classic Google Calendar-style vertical time
+grid. All gestures use pointer events and snap to `slotMinutes` (default
+30):
+
+- **Move an event** — drag the event body vertically to change its start
+  time (and end, by the same delta). In week view, drag horizontally to
+  also change the day.
+- **Resize start** — drag the top edge of an event to adjust only the
+  start time. Refuses to cross the existing end.
+- **Resize end** — drag the bottom edge to adjust only the end time.
+  Refuses to cross the existing start.
+- **Drag-to-create** — click-drag on an empty area of the time grid to
+  open the quick-create dialog with start/end pre-filled to the dragged
+  time range.
+
+Pass `slotMinutes={15}` to change the snap granularity, or
+`onTimeRangeSelect={(start, end) => …}` to override the drag-to-create
+default.
+
+When `ObjectCalendar` is bound to an object (i.e. it has `objectName` and a `dataSource`), the new dates are persisted automatically via `dataSource.update()` — local state is updated optimistically and rolled back on failure. To intercept (e.g. for a confirm dialog) pass an `onEventDrop` prop; supplying your own handler disables the default persistence.
+
+The default persistence is offered only to a caller who may make the write: events
+are draggable when the `calendarReschedule` row of the affordance-to-grant map
+(`@object-ui/core`) allows it — the object's policy, the effective API operation
+set and the caller's **update** grant. Without it the events stay where they are.
+With no permission provider mounted it reads open.
+
+```jsx
+<ObjectCalendar
+  schema={{ type: 'object-calendar', objectName: 'campaign' }}
+  // optional — omit to get default backend persistence
+  onEventDrop={(record, newStart, newEnd) => {
+    if (confirm(`Move ${record.name}?`)) save({ id: record.id, start_date: newStart, end_date: newEnd });
+  }}
+/>
+```
+
+## Click-to-Create
+
+Clicking the empty area of any day cell (month view) or click-dragging
+in the week/day time grid opens a quick-create dialog pre-filled with
+the selected date/range. Type a title and press <kbd>Enter</kbd> (or
+click **Create**) to persist a new record via
+`dataSource.create(objectName, payload)`. The new record is inserted
+optimistically into the calendar so it appears immediately.
+
+The payload includes the configured `titleField`, `startDateField`,
+optional `endDateField` (set to the clicked day), plus auto-defaults
+for any other required fields not provided by the user (first picklist
+option for `select`/`status`, `false` for booleans, `0` for numerics,
+or the field's declared `defaultValue`). This ensures the create
+succeeds against `NOT NULL` columns without forcing the user through
+the full form.
+
+When the object has a required field outside that set (a required lookup,
+or a required text field other than the title), the dialog's create could
+not succeed, so it is not offered. The same gesture opens the host's full
+create form instead: the calendar calls `onEdit` with a new record (no `id`)
+carrying the date values the dialog would have written, and the host
+pre-fills its create form with them. The console does this already. Without
+an `onEdit`, the gesture offers nothing on such an object. Required fields
+the server fills on insert (`readonly`, `system`, `autonumber`) do not count.
+
+```jsx
+<ObjectCalendar
+  schema={{ type: 'object-calendar', objectName: 'task', calendar: { startDateField: 'due_date' } }}
+  // Called as onEdit({ due_date: '2026-10-20' }) on an object with a required lookup.
+  onEdit={(record) => openCreateForm({ initialValues: record })}
+/>
+```
+
+Quick-create is offered only when the `calendarQuickCreate` row of the
+affordance-to-grant map allows it (the caller's **create** grant, with the
+object's policy and the effective API operation set): without it a day click
+opens nothing and the time grid starts no range drag. With no permission
+provider mounted it reads open.
+
+To override (e.g. open your own multi-field create form), pass
+`onDateClick`:
+
+```jsx
+<ObjectCalendar
+  schema={{ type: 'object-calendar', objectName: 'campaign' }}
+  onDateClick={(day) => navigate(`/campaign/new?start=${day.toISOString()}`)}
+/>
+```
+
+## CalendarView Component
+
+Full-featured standalone calendar with month, week, and day views for displaying events and scheduling.
+
+### Interactive Examples
+
+#### Month View
+
+<SchemaExample id="plugin-calendar/month-view-calendar" />
+
+#### Week View
+
+<SchemaExample id="plugin-calendar/week-view-calendar" />
+
+### CalendarView Usage
+
+```tsx
+import '@object-ui/plugin-calendar'
+import type { CalendarViewSchema } from '@object-ui/types'
+
+const schema: CalendarViewSchema = {
+  type: 'calendar-view',
+  view: 'month',
+  data: [
+    {
+      id: 1,
+      title: 'Team Meeting',
+      start: '2024-01-15T10:00:00',
+      end: '2024-01-15T11:00:00',
+      color: '#3b82f6'
+    }
+  ]
+}
+```
+
+### CalendarView Schema API
+
+```plaintext
+{
+  type: 'calendar-view',
+  view?: 'month' | 'week' | 'day',
+  data?: Array<CalendarEventData>,
+  titleField?: string,
+  startDateField?: string,
+  endDateField?: string,
+  allDayField?: string,
+  colorField?: string,
+  currentDate?: string,
+  allowCreate?: boolean,
+  onEventClick?: (event: any) => void,
+  onDateClick?: (date: Date) => void,
+  onViewChange?: (view: string) => void,
+  onNavigate?: (date: Date) => void,
+  className?: string
+}
+```
+
+### Allowing event creation
+
+`allowCreate: true` adds the header's **New event** button. Clicking it
+dispatches the standard create action — `{ type: 'create', payload: {} }` — on
+the same action channel every other `calendar-view` gesture uses, so the host
+decides what a "create" means (open a form, navigate, call an API).
+
+{/* doc-snippet: fragment — a SHAPE excerpt continuing the "CalendarView Usage" block above, which is where the event array is written inline: `events` is the READER's own data and is not defined in this block (measured: TS2552 x1) */}
+```tsx
+const schema = {
+  type: 'calendar-view',
+  data: events,
+  allowCreate: true,
+}
+```
+
+Only the boolean `true` turns the button on. Omitting the key, `false`, and any
+non-boolean value all render the calendar without the button — the default.
+
+A React host can supply the affordance directly instead, with or without
+`allowCreate`, by passing its own `onAddClick` handler; an explicit handler
+replaces the action dispatch rather than running alongside it.
+
+## ObjectCalendar Component
+
+Calendar component designed for use with ObjectQL data sources.
+
+### Features
+
+- **ObjectQL Integration**: Works seamlessly with object/value data providers
+- **Automatic Field Mapping**: Maps database fields to calendar events
+- **Multiple View Modes**: Month, week, and day calendar views
+- **Visible days for a host**: Reports the days it draws, so a host that fetches its records can fetch only those days (see [Visible days](#visible-days)); on its own it fetches the whole filtered set, up to the platform row ceiling
+- **Event Interaction**: Click handling for events and dates
+- **Color Coding**: Support for event color customization
+
+### ObjectCalendar Usage
+
+#### Basic Usage with ObjectQL
+
+```tsx
+import '@object-ui/plugin-calendar'
+import type { ObjectCalendarSchema } from '@object-ui/types'
+
+const schema: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'events',  // Your ObjectQL object
+  calendar: {
+    startDateField: 'startDate',
+    endDateField: 'endDate',
+    titleField: 'title',
+    colorField: 'category'
+  }
+}
+```
+
+### With Static Data
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types'
+
+const schema: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  staticData: [
+    {
+      id: 1,
+      title: 'Team Meeting',
+      startDate: '2024-01-15T10:00:00',
+      endDate: '2024-01-15T11:00:00',
+      category: 'meeting'
+    },
+    {
+      id: 2,
+      title: 'Project Deadline',
+      startDate: '2024-01-20',
+      category: 'deadline'
+    }
+  ],
+  calendar: {
+    startDateField: 'startDate',
+    endDateField: 'endDate',
+    titleField: 'title',
+    colorField: 'category'
+  }
+}
+```
+
+## Schema API
+
+```plaintext
+{
+  type: 'object-calendar',
+  objectName?: string,              // ObjectQL object name
+  staticData?: Array<any>,          // Static data array
+  data?: Array<unknown>,            // Pre-fetched records, drawn in place of the
+                                    // calendar's own query. An ARRAY — this block's
+                                    // published row refuses the `{ provider, items }`
+                                    // config object (objectui#8348). `@object-ui/types`
+                                    // declares it as that array too since
+                                    // objectui#9239, derived from the protocol's row
+  calendar?: CalendarConfig,        // Calendar-specific configuration
+  filter?: ViewFilterRule[],        // Query filter, lowered to $filter
+  sort?: SortConfig[],              // Query sort, lowered to $orderby
+  navigation?: ViewNavigationConfig, // What an event click opens (see below)
+  onEventClick?: (record: any) => void,
+  onDateClick?: (date: Date) => void,
+  className?: string
+}
+```
+
+`filter` and `sort` are not object-only keys (objectui#9061). They narrow and
+order inline records — `staticData` or `data: { provider: 'value' }` — exactly as
+they narrow and order fetched ones, and the platform row ceiling (2,000 drawn
+records with a footnote naming both numbers) applies to inline records too. The
+ceiling is applied to the **filtered** set, so a large inline array that a
+`filter` cuts below the ceiling draws every matching record and shows no
+footnote. Inline records reach the calendar as the in-memory adapter's own deep
+copy, so they must be JSON-serializable and a record handed to `onEventClick` is
+not `===` the authored object.
+
+`navigation` is what an event click opens — the spec's `NavigationConfig` by
+reference, `ViewNavigationConfig` in `@object-ui/types`, the type
+`ObjectGridSchema.navigation` uses: `mode` (`page`, `drawer`, `modal`, `split`,
+`popover`, `new_window` or `none`) with `size`, `openNewTab` and
+`preventNavigation`. With the key absent a click opens the record in a drawer.
+An overlay mode keeps the click from a parent view's `onRowClick` /
+`onEventClick`; any other mode hands it to them. `page` — and a block written
+without `mode`, which takes the spec's `page` default — opens the record page
+through the record navigator the host publishes on `RelatedRecordActionsContext`
+(objectui#11293); the console publishes one on its custom pages, record pages and
+list views. Under a host that publishes none, such as an embedded renderer,
+there is no record page to open and the click opens nothing.
+
+### CalendarConfig
+
+```plaintext
+{
+  startDateField: string,     // Field containing event start date
+  endDateField?: string,      // Field containing event end date
+  titleField: string,         // Field to use as event title
+  colorField?: string,        // Field for color coding
+  allDayField?: string        // Field carrying the all-day flag
+}
+```
+
+`CalendarConfig` is a re-export of `@objectstack/spec`'s `CalendarConfigSchema`,
+and that schema is **strict**: the five keys above are the whole of *the spec
+type*, and it refuses any other key by name with an `unrecognized_keys`
+diagnostic. That is a statement about the type — not about what this renderer
+reads, and not about what reaches it.
+
+`ObjectCalendar` (`ObjectCalendar.tsx`) reads **five** keys off the `calendar`
+block — the same five; it has honoured `allDayField` since objectui#8026.
+
+`{ startDateField, endDateField, titleField, colorField, allDayField }`
+
+`allDayField` names the record field carrying the all-day flag. objectui read it
+before the spec declared it; the spec declares it since `@objectstack/spec`
+17.5.0. This renderer gives it **no** default field name, so a calendar that
+never declares it draws exactly as before, with the all-day flag inferred from
+the absence of an end date.
+
+On an `object-calendar` node, a sixth key is rejected on the way in. Both
+published faces of `ObjectCalendarSchema` declare the `calendar` container
+(objectui#8651), and since objectui#6152 that container is `@objectstack/spec`'s
+own `object-calendar` slot, taken by reference: strict, with the five keys above
+as its members and `startDateField` required. A key outside the five is refused
+with the spec's `unrecognized_keys` diagnostic, as the spec refuses it there;
+that includes `defaultView`, which the renderer reads from the node itself, not
+from this block. Values are checked too, so `calendar: { startDateField: 42 }` is
+refused. The retired `dateField` / `endField` are refused by name
+(objectui#8355), and the message names the key to write instead. On the list-view
+path the `calendar` block is a different contract with the same verdicts: since
+objectui#6152 (round 11) it is `@objectstack/spec`'s own list-view slot, taken by
+reference, so it is strict, requires `startDateField`, and refuses a sixth key.
+`defaultView` is refused there by name, because the spec declares no such member
+on a list view's calendar block.
+
+## Configuration
+
+### Field Mapping
+
+Map your database fields to calendar properties:
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const fieldMappedCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'tasks',
+  calendar: {
+    titleField: 'taskName',      // Database field for title
+    startDateField: 'dueDate',   // Database field for start
+    endDateField: 'completedAt', // Database field for end
+    colorField: 'priority'       // Database field for color
+  }
+};
+```
+
+### Data Providers
+
+#### Object Provider (Database)
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const objectProviderCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'appointments',
+  calendar: {
+    startDateField: 'scheduledAt',
+    titleField: 'subject'
+  }
+};
+```
+
+#### Value Provider (Static)
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const valueProviderCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  staticData: [
+    { id: 1, title: 'Event 1', date: '2024-01-15' },
+    { id: 2, title: 'Event 2', date: '2024-01-20' }
+  ],
+  calendar: {
+    startDateField: 'date',
+    titleField: 'title'
+  }
+};
+```
+
+#### `data: { provider: … }` — refused on this block
+
+⚠️ Since **objectui#8348** a calendar authored with a record-source *config
+object* under `data` — `{ provider: 'value', items: [...] }`,
+`{ provider: 'object', object: … }` — is not honoured
+here. `object-calendar`'s published `data` row is an **array of pre-fetched
+records**, so the config object is refused by kind: `os validate` and the save
+gate reject it, and as of that card the renderer does too.
+
+Since **objectui#9239** the `@object-ui/types` declaration refuses it as well —
+both the `ObjectCalendarSchema` interface and the zod mirror `safeValidateSchema`
+runs. Until that card this package was the one published face that still
+accepted the config object, so a document validated *here* could pass while every
+other surface rejected it; the annotated examples on this page are checked
+against the narrowed declaration.
+
+That is a behaviour change for stored documents, and a **breaking narrowing** of
+the authoring type. A calendar written that way no longer draws those rows; the
+record-source ladder falls past `data` to `staticData`, then to `objectName`, so
+it queries its object instead — or draws nothing when it names neither. In
+TypeScript the same document is now a compile error at `data` rather than a
+silent pass.
+
+Read from the database with the **Object Provider** above (`objectName`), pass
+events you already hold with the **Value Provider** (`staticData`), or hand the
+block rows it already has as an array under `data`. There is no api-provider
+branch to reach on this block; `endpoint` and `method` have no read point
+anywhere in the package.
+
+## Comparison: CalendarView vs ObjectCalendar
+
+| Feature | CalendarView | ObjectCalendar |
+|---------|-------------|----------------|
+| **Schema Type** | `calendar-view` | `object-calendar` |
+| **Data Source** | Static arrays | ObjectQL (database) |
+| **Use Case** | Pre-loaded event data | Dynamic data from backend |
+| **Field Mapping** | Standard field names | Configurable field names |
+| **Data Loading** | Manual via props | Automatic via ObjectQL |
+| **Best For** | Static schedules | Database-driven apps |
+
+**When to use CalendarView**:
+- You have static or pre-loaded event data
+- You're not using ObjectQL
+- You need a simple, standalone calendar
+
+**When to use ObjectCalendar**:
+- You're using ObjectQL for data management
+- Events come from a database or API
+- You need automatic data fetching and filtering
+
+## Event Handling
+
+A click handler is a function, so it is a prop of the `ObjectCalendar`
+component a React host renders, never a key on the node:
+`ObjectCalendarSchema` declares no `onEventClick` or `onDateClick`, and
+authored JSON can never carry a function anyway.
+
+### Event Click
+
+```tsx
+import { ObjectCalendar } from '@object-ui/plugin-calendar';
+import type { DataSource, ObjectCalendarSchema } from '@object-ui/types';
+
+const eventClickCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'events',
+  calendar: {
+    startDateField: 'start',
+    titleField: 'title'
+  }
+};
+
+export function EventClickCalendar({ dataSource }: { dataSource: DataSource }) {
+  return (
+    <ObjectCalendar
+      schema={eventClickCalendar}
+      dataSource={dataSource}
+      onEventClick={(record) => {
+        console.log('Event clicked:', record);
+        // Open event details, or navigate to the event page
+      }}
+    />
+  );
+}
+```
+
+### Date Click
+
+```tsx
+import { ObjectCalendar } from '@object-ui/plugin-calendar';
+import type { DataSource, ObjectCalendarSchema } from '@object-ui/types';
+
+const dateClickCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'events',
+  calendar: {
+    startDateField: 'start',
+    titleField: 'title'
+  }
+};
+
+export function DateClickCalendar({ dataSource }: { dataSource: DataSource }) {
+  return (
+    <ObjectCalendar
+      schema={dateClickCalendar}
+      dataSource={dataSource}
+      onDateClick={(date) => {
+        console.log('Date clicked:', date);
+        // Create a new event on this date
+      }}
+    />
+  );
+}
+```
+
+### Visible days
+
+A host that fetches the calendar's records for it, and hands them over as
+`data`, can fetch only the days on screen. `onVisibleRangeChange` receives
+`{ start, end }` once on mount and again whenever navigation or a view change
+moves them: `start` is local midnight of the first day drawn and `end` local
+midnight of the day after the last. In the month view the range covers the
+whole six-week grid, including the neighbouring months' leading and trailing
+days, under the locale's first day of the week; in the week view it is the
+week, and in the day view the day. An unchanged range is not reported again.
+A list view's calendar uses it to fetch the days it shows instead of one batch
+of the object (objectui#12081).
+
+## Examples
+
+### Appointment Scheduler
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const appointmentCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'appointments',
+  calendar: {
+    startDateField: 'appointmentDate',
+    endDateField: 'appointmentEnd',
+    titleField: 'patientName',
+    colorField: 'appointmentType'
+  }
+};
+// Show appointment details from the component's `onEventClick` prop (see Event Handling).
+```
+
+### Event Management
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const eventCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'events',
+  calendar: {
+    startDateField: 'eventStart',
+    endDateField: 'eventEnd',
+    titleField: 'eventTitle',
+    colorField: 'eventCategory'
+  }
+};
+// Navigate from `onEventClick` and create from `onDateClick`, both component props (see Event Handling).
+```
+
+### Task Deadlines
+
+```tsx
+import type { ObjectCalendarSchema } from '@object-ui/types';
+
+const taskCalendar: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'tasks',
+  calendar: {
+    startDateField: 'dueDate',
+    titleField: 'taskTitle',
+    colorField: 'priority'
+  }
+};
+// Open task details from the component's `onEventClick` prop (see Event Handling).
+```
+
+## Direct Component Usage
+
+You can also import and use the components directly in React:
+
+```tsx
+import { CalendarView, ObjectCalendar } from '@object-ui/plugin-calendar';
+import type { DataSource, ObjectCalendarSchema } from '@object-ui/types';
+
+// CalendarView - Standalone calendar
+function MyCalendar() {
+  const events = [
+    {
+      id: 1,
+      title: 'Meeting',
+      start: new Date('2024-01-15T10:00:00'),
+      end: new Date('2024-01-15T11:00:00'),
+      color: '#3b82f6'
+    }
+  ];
+
+  return (
+    <CalendarView
+      events={events}
+      view="month"
+      onEventClick={(event) => console.log(event)}
+    />
+  );
+}
+
+// ObjectCalendar - ObjectQL-integrated
+function MyObjectCalendar({ dataSource }: { dataSource: DataSource }) {
+  const schema: ObjectCalendarSchema = {
+    type: 'object-calendar',
+    objectName: 'events',
+    calendar: {
+      startDateField: 'startDate',
+      titleField: 'title'
+    }
+  };
+
+  return (
+    <ObjectCalendar
+      schema={schema}
+      dataSource={dataSource}
+      onEventClick={(record) => console.log(record)}
+    />
+  );
+}
+```
+
+## TypeScript Support
+
+```ts
+import type { 
+  CalendarViewSchema, 
+  ObjectCalendarSchema,
+  CalendarConfig 
+} from '@object-ui/types'
+import type { CalendarViewEvent } from '@object-ui/plugin-calendar'
+
+// CalendarView component events — the RUNTIME shape: `id: string | number`,
+// `start` / `end` are real `Date` objects. `@object-ui/types` exports a
+// separate `CalendarEvent`, the AUTHORING event (`id: string`, ISO strings,
+// `end` required); the two are not interchangeable. Renamed in objectui#5044,
+// which left `CalendarEvent` on this package as a `@deprecated` alias.
+const events: CalendarViewEvent[] = [
+  {
+    id: 1,
+    title: 'Meeting',
+    start: new Date('2024-01-15T10:00:00'),
+    end: new Date('2024-01-15T11:00:00'),
+    color: '#3b82f6'
+  }
+]
+
+const calendarViewSchema: CalendarViewSchema = {
+  type: 'calendar-view',
+  view: 'month',
+  data: events
+}
+
+// ObjectCalendar types
+const calendarConfig: CalendarConfig = {
+  startDateField: 'startDate',
+  endDateField: 'endDate',
+  titleField: 'title',
+  colorField: 'category'
+}
+
+const objectCalendarSchema: ObjectCalendarSchema = {
+  type: 'object-calendar',
+  objectName: 'events',
+  calendar: calendarConfig
+}
+```
+
+## Migration from @object-ui/plugin-calendar-view
+
+The `@object-ui/plugin-calendar-view` package has been merged into this package. If you were using it:
+
+### Before
+
+```bash
+npm install @object-ui/plugin-calendar-view
+```
+
+{/* doc-snippet: fragment — a migration guide's "Before" block, quoting the RETIRED `@object-ui/plugin-calendar-view` package on purpose: it was merged into `@object-ui/plugin-calendar` and no longer exists, so the specifier resolves nowhere and must not compile (measured: TS2882 x1, TS2307 x1). Correct documentation about code that is gone */}
+```tsx
+import '@object-ui/plugin-calendar-view'
+import { CalendarView } from '@object-ui/plugin-calendar-view'
+```
+
+### After
+
+```bash
+npm install @object-ui/plugin-calendar
+```
+
+```tsx
+import '@object-ui/plugin-calendar'
+import { CalendarView } from '@object-ui/plugin-calendar'
+```
+
+All functionality remains the same - just update your imports and package dependencies.
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/guide/plugins)
+- [Package README](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-calendar)
+
+</PluginLoader>

@@ -1,0 +1,54 @@
+---
+title: "Sonner"
+description: "Toast notifications using Sonner library"
+---
+
+import { DemoGrid } from '@/app/components/ComponentDemo';
+
+The Sonner component provides beautiful toast notifications with a rich API.
+
+## Basic Usage
+
+A `sonner` node renders its own trigger button. Clicking the button raises the toast the
+node declares, so the whole demo is one schema node with no handler to wire up.
+`buttonLabel` and `buttonVariant` style that trigger; `message`, `description` and
+`variant` describe the toast it raises.
+
+<SchemaExample id="components-feedback-sonner/basic-sonner-toast" />
+
+## Toast Types
+
+<DemoGrid>
+  <SchemaExample id="components-feedback-sonner/success" />
+  <SchemaExample id="components-feedback-sonner/error" />
+  <SchemaExample id="components-feedback-sonner/warning" />
+  <SchemaExample id="components-feedback-sonner/info" />
+</DemoGrid>
+
+## With Description
+
+`description` adds a secondary line under the message.
+
+<SchemaExample id="components-feedback-sonner/toast-with-action" />
+
+## Schema
+
+```ts
+interface SonnerSchema {
+  type: 'sonner';
+  message?: string;               // Toast message
+  title?: string;                 // Alias for message
+  description?: string;           // Additional description
+  variant?: 'default' | 'success' | 'error' | 'warning' | 'info';
+  
+  // Trigger button
+  buttonLabel?: string;           // Trigger button text (default: 'Show Toast')
+  buttonVariant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link';
+}
+```
+
+## Examples
+
+### Custom Trigger Button
+
+<SchemaExample id="components-feedback-sonner/promise-based-toast" />

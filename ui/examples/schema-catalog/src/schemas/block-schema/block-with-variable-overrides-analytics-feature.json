@@ -1,0 +1,46 @@
+{
+  "type": "card",
+  "className": "max-w-sm",
+  "children": [
+    {
+      "type": "stack",
+      "gap": 3,
+      "align": "center",
+      "className": "text-center p-4",
+      "children": [
+        {
+          "type": "flex",
+          "properties": {
+            "justify": "center",
+            "align": "center",
+            "gap": 0,
+            "children": [
+              {
+                "type": "icon",
+                "icon": "chart-column",
+                "className": "h-6 w-6 text-purple-600"
+              }
+            ]
+          },
+          "className": "w-12 h-12 rounded-lg bg-purple-500/10"
+        },
+        {
+          "type": "text",
+          "content": "Advanced Analytics",
+          "className": "text-lg font-semibold"
+        },
+        {
+          "type": "text",
+          "content": "Real-time dashboards and custom report builder included.",
+          "className": "text-sm text-muted-foreground"
+        },
+        {
+          "type": "button",
+          "label": "View Demo",
+          "variant": "outline",
+          "size": "sm"
+        }
+      ]
+    }
+  ]
+}

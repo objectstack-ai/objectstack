@@ -1,0 +1,50 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This project is now the ONLY one that compiles
+  // `src/utils/__tests__/dataset-result-field-spec-parity.test.ts` and
+  // `src/actions/__tests__/actionDef-closed-surface.test.ts`, whose compile-time
+  // pins are erased at runtime — vitest proves nothing about them and `tsc` is
+  // the only thing that can (objectui#3181). A narrow `tsconfig.typetests.json`
+  // next door used to name those two files while the rest of the tree was in
+  // TEST_DEBT; the package graduated in objectui#4040 and the narrow project was
+  // retired with it, after `--listFiles` showed this project reads both (2 of
+  // 576) and a provably-false `Assert` appended to the parity test turned this
+  // project red.
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; scripts/check-type-check-coverage.mjs enforces the
+  // chaining — a config nothing runs is the objectui#3009 failure itself.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Naming `types` at all switches off automatic `@types/*` inclusion.
+    // `node` is required: several suites read fixtures off disk through
+    // `node:fs` / `node:url` / `__dirname`, and the ActionRunner suites stub
+    // `global.fetch`.
+    "types": ["node"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    "paths": {}
+  },
+  // `*.bench.ts` is here for the same reason the tests are, and it arrived the
+  // same way: `tsconfig.json` now excludes `src/__benchmarks__/` from the BUILD
+  // program so it stops being emitted into the published `dist`
+  // (objectui#4836). Until that exclusion, `src/__benchmarks__/core.bench.ts`
+  // was type-checked only as a side effect of being in the emit program — the
+  // exact "coverage that is right by accident" objectui#4006 recorded. Nothing
+  // would have reported its loss either: scripts/check-type-check-coverage.mjs
+  // enumerates `*.test.ts(x)` only, so a bench that no program reads is
+  // invisible to it. It is named here by choice, not because a gate forced it.
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.bench.ts"]
+}

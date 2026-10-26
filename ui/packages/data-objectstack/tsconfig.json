@@ -1,0 +1,31 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    // The incremental build RECORD, pinned OUTSIDE the published build output.
+    // Left unpinned, TypeScript derives it from `outDir`/`rootDir`: a package with
+    // no `rootDir` gets `dist/tsconfig.tsbuildinfo` -- inside what `files: ["dist",
+    // ...]` publishes -- and `pnpm check:published-dist` then reds on a byte-identical
+    // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
+    // package so the location is a decision, not a side effect of an unrelated option.
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+    "composite": true,
+    "declaration": true,
+    "noEmit": false,
+    // This program type-checks the package's tests too (see
+    // `src/adapterFactoryReturn.types.test.ts`), and
+    // `src/readme-filter-operator-table.test.ts` reads the README and
+    // `@object-ui/core`'s source off disk through `node:fs` / `node:url`.
+    // Measured with TypeScript 6.0.3: without naming `node`, the root
+    // `node_modules/@types/node` is not seen from here (TS2591 on `node:fs`).
+    // Naming `types` switches off automatic `@types/*` inclusion; nothing else
+    // in this program needs an ambient type package (`tsc --types node` on the
+    // otherwise unchanged program reports nothing).
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../types" },
+    { "path": "../core" }
+  ]
+}

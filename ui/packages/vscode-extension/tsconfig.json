@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    // `node16` rather than the deprecated node10 `"node"` resolution, which
+    // stops working in TypeScript 7. This package has no `"type": "module"`,
+    // so node16 resolves it as CommonJS — the format tsup emits — and adds the
+    // `exports`-map awareness node10 lacks.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2020"],
+    // Declared explicitly: this package runs on Node with no DOM lib, so
+    // `console`/`Buffer` come from @types/node rather than the ambient DOM
+    // globals its React-side siblings get for free.
+    "types": ["node", "vscode"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

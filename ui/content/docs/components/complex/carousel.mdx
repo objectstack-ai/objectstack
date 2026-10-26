@@ -1,0 +1,60 @@
+---
+title: "Carousel"
+description: "Slideshow component for cycling through content"
+---
+
+The Carousel component displays content in a slideshow format with navigation controls.
+
+## Basic Usage
+
+<SchemaExample id="components-complex-carousel/simple-carousel" />
+
+## Without Arrows
+
+<SchemaExample id="components-complex-carousel/no-arrows" />
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface CarouselSchema {
+  type: 'carousel';
+  
+  // Configuration
+  orientation?: 'horizontal' | 'vertical';  // Carousel direction (default: 'horizontal')
+  showArrows?: boolean;                     // Show navigation arrows (default: true)
+  
+  // Items
+  items: SchemaNode[][];                    // Array of slides (each slide is an array of components)
+  
+  // Options
+  opts?: {
+    loop?: boolean;                         // Enable infinite loop
+    align?: 'start' | 'center' | 'end';    // Slide alignment
+  };
+  
+  // Styling
+  className?: string;                       // Container CSS classes
+  itemClassName?: string;                   // Individual slide CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### Image Gallery
+
+<SchemaExample id="components-complex-carousel/photo-gallery" />
+
+### Product Showcase
+
+<SchemaExample id="components-complex-carousel/products" />
+
+### Testimonials
+
+<SchemaExample id="components-complex-carousel/customer-reviews" />

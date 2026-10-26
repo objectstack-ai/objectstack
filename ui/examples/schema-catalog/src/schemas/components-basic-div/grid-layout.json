@@ -1,0 +1,23 @@
+{
+  "type": "grid",
+  "columns": 2,
+  "gap": 4,
+  "children": [
+    {
+      "type": "card",
+      "className": "h-20 bg-red-500"
+    },
+    {
+      "type": "card",
+      "className": "h-20 bg-yellow-500"
+    },
+    {
+      "type": "card",
+      "className": "h-20 bg-pink-500"
+    },
+    {
+      "type": "card",
+      "className": "h-20 bg-indigo-500"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "type": "dialog",
+  "trigger": {
+    "type": "button",
+    "label": "Open Dialog"
+  },
+  "title": "Dialog Title",
+  "description": "Dialog description",
+  "content": [
+    {
+      "type": "text",
+      "content": "Dialog content goes here"
+    }
+  ]
+}

@@ -135,9 +135,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `Blocked-by:` 行是机器可 grep 的反向索引,一遍读喂三个职责,⛔ 只做第一件。
 - 三职责:上游关单放回解锁卡;按解锁扇出排序;在合并后的 ref 上重验回队卡文件面。
 - 一个标签存在当且仅当有具名读者;`pm:blocking` 即其推导缓存,读者以词表脚本注为权威。
-- 跨仓解锁判据是消费方可安装,⛔ 不是上游已合并。
+- 跨仓解锁判据是消费方可安装,⛔ 不是上游已合并;探针:装上的包是否接受新键/新行为。
 - 以发布包消费上游的仓,解锁放回前先验修复已进可安装的发行版。
-- 安装面探针:装上的包是否接受新键/新行为。
 - 未发版 ⇒ 转 `pm:on-hold` + `Restart-when:` 加消费方安装面判据,⛔ 不回 `pm:queue`。
 - 该 hold 评论预写唤醒后的派发形状;pin 消费的仓不适用:pin 移动即可安装,走 pin 滞后读数。
 - 状态变更不过夜:标签无评论、assignee 无认领评论、结论只在 chat,都是半状态。
@@ -183,6 +182,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
 - governed 面统一定义:`docs/adr/**`+`.claude/**`(全量)+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
 - governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
+- 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
 - ① 席位记录一条落 PR,两层同欠:Tier H 置顶速读五段,其下 `## 席位核对`;卡只留指针行。

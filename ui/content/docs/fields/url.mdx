@@ -1,0 +1,70 @@
+---
+title: "URL Field"
+description: "URL input with validation and link rendering"
+---
+
+The URL Field component provides a text input with URL validation and clickable link rendering.
+
+## Basic Usage
+
+<SchemaExample id="fields-url/basic-url-field" />
+
+## Required URL
+
+<SchemaExample id="fields-url/required-url" />
+
+## Field Schema
+
+A URL field is authored as `UrlFieldMetadata` (`@object-ui/types`), which is the source
+of truth for the key set: it extends `BaseFieldMetadata` with a single length bound,
+`@objectstack/spec`'s own `FieldSchema.maxLength`, typed by reference.
+
+```ts
+import type { UrlFieldMetadata } from '@object-ui/types';
+
+const website: UrlFieldMetadata = {
+  type: 'url',
+  name: 'website',
+  label: 'Website',
+  placeholder: 'https://example.com',
+  required: false,
+  maxLength: 2048,
+};
+```
+
+The value being edited, and the `className` / `disabled` a host supplies, are **not**
+metadata keys — they are runtime widget props. See [Field Widget Props](/docs/fields/widget-props).
+
+## Validation
+
+The URL field automatically validates:
+- Proper URL protocol (http:// or https://)
+- Valid domain structure
+- No invalid characters
+
+## Cell Renderer
+
+In tables/grids, URLs are clickable external links:
+
+```ts
+import { UrlCellRenderer } from '@object-ui/fields';
+
+// Renders as: <a href="https://example.com" target="_blank">https://example.com</a>
+// Opens in new tab with security attributes
+```
+
+## Use Cases
+
+- **Websites**: Company or personal websites
+- **Social Media**: Social media profile links
+- **Documentation**: External documentation links
+- **Resources**: Reference materials, articles
+- **Portfolios**: Portfolio or project links
+
+## Features
+
+- **Link Preview**: Clickable links in read-only mode
+- **New Tab**: External links open in new tab
+- **Security**: Proper rel="noopener noreferrer" attributes
+- **Validation**: Real-time URL format validation
+- **Accessible**: Proper ARIA labels for screen readers

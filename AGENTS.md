@@ -265,12 +265,12 @@ localStorage / auth gotchas.
     approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
     queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
     `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
-    `CLAUDE.md` — this file is one — and `.github/workflows/**`; a mixed diff is governed whole on one path hit.
-    The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
-    adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
-    paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
-    (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
-    auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
+    `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
+    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, all Tier H. The register is `GOVERNED_SURFACES` in
+    `scripts/pm/check-governed-merges.mjs`, each row carrying its tier; adding a surface is an edit *there*, never here,
+    and `pnpm check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or
+    more. A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
+    queues, arms auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
     **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
@@ -523,14 +523,14 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — five contexts block: `Lint & Repo Gates` (all `check:*` gates),
-   `TypeScript Type Check`, `Test Core`, `Build Core` and `Governed Surface Queue Guard`. A
-   check outside those five is advisory and rides through, and an advisory red that lands rides
+   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
+   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI` and `Build & E2E UI`. A
+   check outside those seven is advisory and rides through, and an advisory red that lands rides
    `main`'s merge ref into every later PR until stanched. A required context is matched by
-   check-run name, so a rename detaches its gate silently — treat those five names as contract.
+   check-run name, so a rename detaches its gate silently — treat those seven names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
-   `Console Pin Gate`, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
+   `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
    any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
    the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 
@@ -1100,8 +1100,8 @@ Both non-handshake shapes, and how to classify and probe your own:
    (`pnpm check:adr-0087-registration` reads the arm and the kind there). ⛔ The categories are NOT copied here —
    the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
-   does not ship.** The full battery's `Console Pin Gate` builds objectui at the pinned `.objectui-sha` against
-   **current** `main`, so such a removal is a main-red the moment it merges; its ruling therefore authorizes the
+   does not ship.** `Type Check UI` compiles the Console under `ui/` against the spec of the PR that makes such a
+   removal, so the removal reds its own PR; its ruling therefore authorizes the
    objectui-side fix and the pin bump (manifest regeneration included — see the Frontend section) in the same
    landing. Before merging, `git grep` what you remove or rename in `../objectui` at the pinned SHA.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*

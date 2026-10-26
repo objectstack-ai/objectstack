@@ -1,0 +1,49 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This package's build is a plain `tsc` with `rootDir: "src"` and
+  // `composite`/`declaration` on, so a test file left in that program would emit
+  // into `dist` — the exclusion is right and stays; this project is the second,
+  // emit-free program that reads what the build must not.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` / `rootDir` from the build config.
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    // Two global augmentations, neither of them an import:
+    //   - `node` for the seven locale-parity / namespace suites, which walk the
+    //     locale packs off disk (`readFileSync`, `__dirname`, `node:path`) to
+    //     prove every pack declares the same keys.
+    //   - `@testing-library/jest-dom` for the `toBeInTheDocument` matchers in
+    //     `LocalizationContext.test.tsx`; it does not live under `@types/`, so
+    //     it is never picked up automatically.
+    // Naming `types` at all switches off automatic `@types/*` inclusion, so
+    // both have to be listed here.
+    "types": ["node", "@testing-library/jest-dom"],
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/core`
+    // resolves through the workspace dependency's built `.d.ts` instead of
+    // pulling `packages/core/src` in as a program input (TS6059) — the leak
+    // this template exists to close. `type-check` dependsOn `^build`
+    // (turbo.json), so that `.d.ts` exists by the time this runs.
+    //
+    // This package DOES depend on a workspace package as of objectui#4576:
+    // `utils/number-display.ts` re-exports `formatDisplayNumber` and friends
+    // from `@object-ui/core`, which is where they now live. Checking the
+    // re-export identity pin against the built declarations — rather than
+    // against core's source — is the point: it is the published contract.
+    "paths": {}
+  },
+  // No `src/**/*.d.ts` entry, unlike plugin-map's project: this package keeps no
+  // ambient declaration files, so there is nothing for such a pattern to name.
+  // Add it here the moment one appears — an ambient declaration is a program
+  // input only when a pattern NAMES it, and the build gets that for free from
+  // its `"include": ["src"]` while this project would not.
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

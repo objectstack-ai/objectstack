@@ -1,0 +1,25 @@
+{
+  // One project, covering BOTH the modules and their own tests — the shape
+  // `packages/fields` uses. This package emits nothing (no `build` script, no
+  // `outDir`, and the root config's `noEmit` is inherited): consumers import
+  // its TypeScript source directly through the `exports` map, because it is
+  // `private: true` and never published, so there is no `dist` for anyone to
+  // resolve and no published surface to keep stable.
+  //
+  // Because there is no build config to exclude tests from, there is also no
+  // second `tsconfig.test.json` to chain: `tsc --noEmit` reads
+  // `src/__tests__/dom-leak-judge.test.tsx` as part of the same program, which
+  // is what `scripts/check-type-check-coverage.mjs` asks of every package with
+  // test files.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    // `defaults-table-scan.ts` reads the workspace from disk (`node:fs`,
+    // `node:path`, `node:module`), so this project needs Node's ambient types.
+    // Naming them here REPLACES the auto-included set, which is why `vitest` is
+    // listed too: `dom-leak-judge.test.tsx` and the other suites in this project
+    // resolve their globals through it.
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src"]
+}

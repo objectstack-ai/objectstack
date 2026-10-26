@@ -1,0 +1,6 @@
+{
+  "type": "alert",
+  "title": "Error",
+  "description": "Something went wrong",
+  "variant": "destructive"
+}

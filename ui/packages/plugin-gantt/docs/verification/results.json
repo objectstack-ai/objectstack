@@ -1,0 +1,115 @@
+{
+  "date": "2026-06-13T09:08:52.046Z",
+  "results": [
+    {
+      "name": "hierarchy rows",
+      "pass": true,
+      "detail": "13/13 treeitems (3 summaries + 8 tasks + 2 milestones)"
+    },
+    {
+      "name": "summary brackets",
+      "pass": true,
+      "detail": "3/3 rendered"
+    },
+    {
+      "name": "milestone diamonds",
+      "pass": true,
+      "detail": "2/2 rendered"
+    },
+    {
+      "name": "dependency links",
+      "pass": true,
+      "detail": "10/10 arrows (fs/ss/ff/sf)"
+    },
+    {
+      "name": "all 4 link types",
+      "pass": true,
+      "detail": "ff,fs,sf,ss"
+    },
+    {
+      "name": "week grid fills the viewport (no right-side gap)",
+      "pass": true,
+      "detail": "content 1309px ≥ viewport 1280px"
+    },
+    {
+      "name": "week grid stays tight (stretch, not pad)",
+      "pass": true,
+      "detail": "13 week columns"
+    },
+    {
+      "name": "month grid has no trailing empty months",
+      "pass": true,
+      "detail": "4 month columns"
+    },
+    {
+      "name": "month grid still fills the viewport",
+      "pass": true,
+      "detail": "content 1393px ≥ viewport 1280px"
+    },
+    {
+      "name": "collapse hides child rows",
+      "pass": true,
+      "detail": "9/9 rows with Build collapsed"
+    },
+    {
+      "name": "collapse hides child links",
+      "pass": true,
+      "detail": "4 links remain"
+    },
+    {
+      "name": "expand restores rows",
+      "pass": true,
+      "detail": "13 rows back"
+    },
+    {
+      "name": "tooltip content (configured fields)",
+      "pass": true,
+      "detail": "\"Backend services · Owner · Priya N. · Status · In Progress · Effort · 15 days\""
+    },
+    {
+      "name": "hover highlights its links",
+      "pass": true,
+      "detail": "2/2 active (t3→t4, t4→t6)"
+    },
+    {
+      "name": "rubber band visible mid-drag",
+      "pass": true,
+      "detail": "dashed draft path rendered"
+    },
+    {
+      "name": "drop creates the dependency",
+      "pass": true,
+      "detail": "new t8→t5 fs arrow rendered"
+    },
+    {
+      "name": "markers render",
+      "pass": true,
+      "detail": "Sprint 2 + Code freeze"
+    },
+    {
+      "name": "initial render of 5000 tasks",
+      "pass": true,
+      "detail": "32ms"
+    },
+    {
+      "name": "row virtualization",
+      "pass": true,
+      "detail": "26 of 5000 rows in the DOM"
+    },
+    {
+      "name": "column virtualization",
+      "pass": true,
+      "detail": "26 week columns in the DOM"
+    },
+    {
+      "name": "mid-list scroll window shift",
+      "pass": true,
+      "detail": "28.4ms to re-render at scrollTop 100000 of 200000"
+    },
+    {
+      "name": "window stays small after scroll",
+      "pass": true,
+      "detail": "32 rows, first: Task 2494"
+    }
+  ]
+}

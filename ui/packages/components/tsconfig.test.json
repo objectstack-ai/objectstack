@@ -1,0 +1,81 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build correctly keeps tests out of `dist`, but nothing else compiled
+  // them, so a test could assert a contract the compiler never checked.
+  //
+  // This project is now the ONLY one that compiles
+  // `src/__tests__/share-filter-sort-spec-parity.test.ts`, whose compile-time
+  // pins are erased at runtime — vitest proves nothing about them and `tsc` is
+  // the only thing that can (objectui#3181). A narrow `tsconfig.typetests.json`
+  // next door used to name that one file while the rest of the tree was in
+  // TEST_DEBT; the package graduated in objectui#4040 and the narrow project was
+  // retired with it, after `--listFiles` showed this project reads the same file
+  // and a provably-false `Assert` appended to it turned this project red.
+  //
+  // Chained from this package's `type-check` script, which is what the CI
+  // `Type Check` job runs; scripts/check-type-check-coverage.mjs enforces the
+  // chaining — a config nothing runs is the objectui#3009 failure itself.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // A checking project, never an emitting one.
+    "noEmit": true,
+    // The package build emits `dist`; this project emits nothing, so it must
+    // not inherit `composite` / `declaration` from the build config.
+    "composite": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    // One notch above the root's ES2020: these suites read the last emitted
+    // call with `calls.at(-1)`, and `Array.prototype.at` is ES2022. The
+    // compiler named the remedy itself. Raised HERE and not in `tsconfig.json`,
+    // so the package SOURCE keeps compiling against the ES2020 baseline it
+    // ships to.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Naming `types` at all switches off automatic `@types/*` inclusion;
+    // `@testing-library/jest-dom` is listed for the matchers the DOM suites use.
+    "types": ["node", "@testing-library/jest-dom"],
+    // `noImplicitAny` is NOT mirrored here any more, and the absence is the
+    // point. This project used to carry `"noImplicitAny": false` copied from
+    // `tsconfig.json`, because a test file imports the package's own sources —
+    // so those sources are program inputs here too, and re-enabling the flag in
+    // THIS project would have made the TEST project the compiler of record for a
+    // SOURCE strictness decision that `tsconfig.json` owns. The 26 renderer
+    // sites that mirror was protecting were filed as objectui#4353 rather than
+    // silently adopted, and #4353 typed them and turned the flag on in
+    // `tsconfig.json`. With the build config no longer relaxing it, a mirror
+    // here would invert the same hazard — this project would be relaxing what
+    // the source config tightened. Both projects now simply inherit
+    // `strict: true` from the root config.
+    // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
+    // `@objectstack/spec` resolve through the workspace dependency's built
+    // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).
+    //
+    // This used to keep one entry — this package's OWN name — because
+    // `snapshot-critical.test.tsx` spelled its import `@object-ui/components`,
+    // and an empty `paths` sends that through the package `exports` to
+    // `dist/index.d.ts`: an artifact `type-check` must not depend on, since
+    // turbo makes it wait on `^build` (the DEPENDENCIES' builds), not on this
+    // package's own. objectui#4801 removed the entry by removing its cause — the
+    // test imports `../index` now, which is the same module by a specifier that
+    // needs no redirection. Keeping the mapping instead would have left the
+    // workaround standing in for the fix, and left the next self-import in this
+    // package silently covered. `scripts/check-package-self-import.mjs` is what
+    // makes that a mechanical rule rather than a note here.
+    "paths": {}
+  },
+  // `src/**/*.d.ts` picks up `src/global.d.ts`, whose ambient declarations the
+  // test files rely on.
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.d.ts"],
+  // ...but NOT `src/browser-process-shim.d.ts`. That file is the browser
+  // `process` shim the package SOURCE needs (its project has no `@types/node`
+  // at all). Globbed in here it does not augment the node global `types: ["node"]`
+  // above provides — it REPLACES it, and `@types/node` spelling its module as
+  // `export = process` means it also becomes what `import process from
+  // 'node:process'` resolves to. Every spelling of `process.cwd()` in this
+  // package's tests then failed `TS2339: Property 'cwd' does not exist on type
+  // '{ env: { NODE_ENV: string; }; }'` while `types: ["node"]` sat right here,
+  // configured and correct — objectui#6809. Excluding the one file is what makes
+  // the shim source-only; `src/__tests__/browser-process-shim-scope.test.ts`
+  // pins both halves.
+  "exclude": ["src/browser-process-shim.d.ts"]
+}

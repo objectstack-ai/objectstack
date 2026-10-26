@@ -1,0 +1,273 @@
+{
+  "type": "container",
+  "maxWidth": "6xl",
+  "padding": 0,
+  "children": [
+    {
+      "type": "box",
+      "className": "text-center mb-12",
+      "children": [
+        {
+          "type": "text",
+          "content": "Loved by thousands",
+          "className": "text-3xl font-bold mb-2"
+        },
+        {
+          "type": "text",
+          "content": "See what our customers have to say",
+          "className": "text-muted-foreground"
+        }
+      ]
+    },
+    {
+      "type": "grid",
+      "columns": {
+        "xs": 1,
+        "md": 3
+      },
+      "gap": 6,
+      "children": [
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 1,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "text",
+                  "content": "\"This product has completely transformed how we build our applications. The time savings alone make it worth every penny.\"",
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 3,
+                    "children": [
+                      {
+                        "type": "avatar",
+                        "fallback": "JD",
+                        "className": "h-10 w-10"
+                      },
+                      {
+                        "type": "stack",
+                        "gap": 2,
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "John Doe",
+                            "className": "text-sm font-semibold"
+                          },
+                          {
+                            "type": "text",
+                            "content": "CEO, Tech Corp",
+                            "className": "text-xs text-muted-foreground"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 1,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "text",
+                  "content": "\"The flexibility and ease of use is unmatched. We migrated our entire platform and couldn't be happier with the results.\"",
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 3,
+                    "children": [
+                      {
+                        "type": "avatar",
+                        "fallback": "JS",
+                        "className": "h-10 w-10"
+                      },
+                      {
+                        "type": "stack",
+                        "gap": 2,
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Jane Smith",
+                            "className": "text-sm font-semibold"
+                          },
+                          {
+                            "type": "text",
+                            "content": "CTO, StartupXYZ",
+                            "className": "text-xs text-muted-foreground"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "stack",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 1,
+                    "children": [
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      },
+                      {
+                        "type": "icon",
+                        "icon": "star",
+                        "className": "h-4 w-4 fill-yellow-500 text-yellow-500"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "text",
+                  "content": "\"Outstanding support and documentation. The team really cares about their users and it shows in every detail.\"",
+                  "className": "text-sm"
+                },
+                {
+                  "type": "flex",
+                  "properties": {
+                    "align": "center",
+                    "gap": 3,
+                    "children": [
+                      {
+                        "type": "avatar",
+                        "fallback": "MJ",
+                        "className": "h-10 w-10"
+                      },
+                      {
+                        "type": "stack",
+                        "gap": 2,
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "Mike Johnson",
+                            "className": "text-sm font-semibold"
+                          },
+                          {
+                            "type": "text",
+                            "content": "Product Lead, BigCo",
+                            "className": "text-xs text-muted-foreground"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

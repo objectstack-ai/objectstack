@@ -2273,6 +2273,73 @@ describe('GroupingFieldSchema', () => {
   });
 
   // ==========================================================================
+  // [#25786] `orderBy` — order a level's groups by another field's value
+  // ==========================================================================
+
+  it('accepts `orderBy` as an authorable key, with no `unrecognized_keys` and no default', () => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: 'period_start', order: 'desc' });
+    expect(result.success).toBe(true);
+    expect(result.data!.orderBy).toBe('period_start');
+    // Absent means "order by the group key" — nothing is defaulted in.
+    expect(GroupingFieldSchema.parse({ field: 'period_label' })).not.toHaveProperty('orderBy');
+    // …and the whole list view accepts it, one level down.
+    const view = ListViewSchema.safeParse({
+      columns: ['name'],
+      grouping: { fields: [{ field: 'period_label', orderBy: 'period_start' }] },
+    });
+    expect(view.success, JSON.stringify(view.error?.issues)).toBe(true);
+  });
+
+  it.each([
+    ['an empty name', '', 'too_small'],
+    ['a sort node list', [{ field: 'period_start', order: 'desc' }], 'invalid_type'],
+    ['a number', 1, 'invalid_type'],
+  ])('refuses %s at `orderBy`', (_label, value, code) => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: value });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', code]]);
+  });
+
+  // The name is compiled into the `min` / `max` node verbatim, as `field` is
+  // into `groupBy`, so a padded spelling is refused the same way (#17360's
+  // ruling), not trimmed: it would name a column no record has.
+  it.each([
+    ['leading', ' period_start', 'Write "period_start".'],
+    ['trailing', 'period_start ', 'Write "period_start".'],
+    ['a tab', '\tperiod_start', 'Write "period_start".'],
+    ['whitespace only', ' ', 'nothing but whitespace'],
+  ])('refuses %s whitespace at `orderBy`, by name', (_label, spelling, remedy) => {
+    const result = GroupingFieldSchema.safeParse({ field: 'period_label', orderBy: spelling });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['orderBy', 'invalid_format']]);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('grouping.fields[].orderBy');
+    expect(message).toContain(JSON.stringify(spelling));
+    expect(message).toContain(remedy);
+  });
+
+  // A native `.regex()`, not a refinement: the published JSON Schema states the
+  // rule, so a validator reading packages/spec/json-schema refuses it too (#18670).
+  it('publishes the padded-name rule on `orderBy` as the JSON Schema `pattern`', () => {
+    const json = z.toJSONSchema(GroupingFieldSchema, { unrepresentable: 'any', io: 'input' }) as {
+      properties: Record<string, { minLength?: number; pattern?: string }>;
+    };
+    expect(json.properties.orderBy).toMatchObject({ minLength: 1, pattern: '^(?:\\S|\\S[\\s\\S]*\\S)?$' });
+    const pattern = new RegExp(json.properties.orderBy!.pattern!);
+    expect([' period_start', 'period_start ', ' '].map((s) => pattern.test(s))).toEqual([false, false, false]);
+    expect(pattern.test('period_start')).toBe(true);
+  });
+
+  it('refuses a padded `orderBy` through ListViewSchema at `grouping.fields[N].orderBy`', () => {
+    const result = ListViewSchema.safeParse({
+      columns: ['name'],
+      grouping: { fields: [{ field: 'status' }, { field: 'period_label', orderBy: 'period_start ' }] },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['grouping.fields.1.orderBy']);
+  });
+
+  // ==========================================================================
   // [#17360] A padded `field` is REFUSED, not trimmed
   // (objectui#7347 ruling C, decision batch #110 item 5 — refuse at the producer)
   // ==========================================================================

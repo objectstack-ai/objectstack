@@ -1,0 +1,13 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "fields": [
+    {
+      "name": "birthdate",
+      "label": "Birth Date",
+      "type": "date",
+      "placeholder": "Select date..."
+    }
+  ]
+}

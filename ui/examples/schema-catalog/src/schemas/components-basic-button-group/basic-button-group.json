@@ -1,0 +1,14 @@
+{
+  "type": "button-group",
+  "buttons": [
+    {
+      "label": "Left"
+    },
+    {
+      "label": "Center"
+    },
+    {
+      "label": "Right"
+    }
+  ]
+}

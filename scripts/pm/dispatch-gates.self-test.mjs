@@ -659,8 +659,10 @@ export function selfTest({ tier = 'full' } = {}) {
   // sources: `pr-automation.yml` (the `--base` gates), `ci.yml` (the shard
   // attestation), `engine-split-metric.yml` (`--days 90`),
   // `required-set-patrol.yml` (a complete argv behind a continuation and a
-  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`). The live half
-  // at the end of the block re-reads them from the workflows themselves.
+  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`; that workflow
+  // left with the objectui pin, objectstack#25711, and its row stays as a
+  // fixture of the shape). The live half at the end of the block re-reads the
+  // others from the workflows themselves.
   const keyWf = [
     'jobs:',
     '  gates:',
@@ -1003,10 +1005,11 @@ export function selfTest({ tier = 'full' } = {}) {
         'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
+    // The card named three; the third, `scripts/check-prerelease-pin-watch.mjs
+    // --verbose`, left with the objectui pin it watched (objectstack#25711).
     t(
-      '⭐ …and the three the card called value-bearing that are really LITERAL render as runnable commands instead',
-      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set',
-        'scripts/check-prerelease-pin-watch.mjs --verbose']
+      '⭐ …and the two the card called value-bearing that are really LITERAL render as runnable commands instead',
+      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set']
         .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
     );
     t(
@@ -2221,7 +2224,7 @@ export function selfTest({ tier = 'full' } = {}) {
 
     const remaining = prose.match(/the remaining (\d+) carry compound names/);
     const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
-    const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
+    const genuineLine = prose.match(/(\d+|[A-Za-z]+) are genuine self-test batteries/);
     const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
     const spellingsLine = prose.match(/over (\d+) distinct spellings/);
 
@@ -2800,18 +2803,21 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
   // on a mask that emptied the file, so the ARRIVAL half names a live shell
-  // script whose hint is spelled in CODE and must survive.
-  const liveBumpSrc = readFileSync(nodePath.join(ROOT, 'scripts/bump-objectui.sh'), 'utf8');
+  // script whose hint is spelled in CODE and must survive. The file the card
+  // measured (`scripts/bump-objectui.sh`) left the tree with the objectui pin
+  // (objectstack#25711); `with-fleet.sh` is the same shape — its header NAMES
+  // the relay's op list in `#` comments, and no line of its code reads it.
+  const liveCommentSrc = readFileSync(nodePath.join(ROOT, 'scripts/pm/with-fleet.sh'), 'utf8');
   t(
-    'LIVE: the file the card measured no longer offers the path its `#` comments merely NAME',
-    !extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh', { tree: hintTree }).includes(
-      'docs/releases-maintenance.md',
+    'LIVE: a shell script no longer offers the path its `#` comments merely NAME',
+    !extractWatchHints(liveCommentSrc, 'scripts/pm/with-fleet.sh', { tree: hintTree }).includes(
+      'scripts/pm/fleet-write/ops.mjs',
     ),
   );
   t(
     '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
-    extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
-      'docs/releases-maintenance.md',
+    extractWatchHints(liveCommentSrc, 'scripts/pm/with-fleet.sh.mjs', { tree: hintTree }).includes(
+      'scripts/pm/fleet-write/ops.mjs',
     ),
   );
   // ⭐ LIVE RECOVERY (#16744): the site the card named, both ends. The `.mjs`
@@ -5754,20 +5760,25 @@ export function selfTest({ tier = 'full' } = {}) {
   //
   // Pinned rather than left to the fixture, because the whole finding was that
   // the FIXTURE-shaped question ("can it follow an indirection?") had a
-  // different answer from the LIVE one. If the console job is renamed or its
-  // filter re-spelled, re-point these cases — do not delete them: they are the
-  // measured statement that a pin bump derives its own gates.
+  // different answer from the LIVE one. If the job is renamed or its filter
+  // re-spelled, re-point these cases — do not delete them: they are the
+  // measured statement that a root file a job filter names derives that job's
+  // own gates. The card's job, `console-pin` (Console Pin Gate) with the pin
+  // file `.objectui-sha`, retired with the objectui pin (objectstack#25697);
+  // they are re-pointed at Build Core, whose `core` filter names root files
+  // outside every package the same way and whose steps run four dist guards.
   const liveCiPops = jobPathPopulations(readFileSync(nodePath.join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
-  const livePinJob = liveCiPops.find((p) => p.checks.includes('check:console-sha'));
-  t('the live console job is found by the gate it runs', Boolean(livePinJob));
-  t('and it is named Console Pin Gate — the name branch protection and the Checks tab use', livePinJob?.name === 'Console Pin Gate');
+  const BUILD_CORE_GUARDS = ['check:dts-closure', 'check:dual-build-cjs-loads', 'check:sourcemap-no-sources-content', 'check:lean-entry-closure'];
+  const liveFilteredJob = liveCiPops.find((p) => p.checks.includes('check:lean-entry-closure'));
+  t('the live Build Core job is found by the gate it runs', Boolean(liveFilteredJob));
+  t('and it is named Build Core — the name branch protection and the Checks tab use', liveFilteredJob?.name === 'Build Core');
   t(
-    'its derived population covers the pin file, which is the whole acceptance criterion',
-    Boolean(livePinJob && triggerListCovers(livePinJob.paths, '.objectui-sha')),
+    'its derived population covers a root file outside every package (tsconfig.json), which is the whole acceptance criterion',
+    Boolean(liveFilteredJob && triggerListCovers(liveFilteredJob.paths, 'tsconfig.json')),
   );
   t(
-    'both console gates are reached, not just the one the card named',
-    Boolean(livePinJob?.checks.includes('check:console-sha') && livePinJob?.checks.includes('check:console-injection')),
+    'all four of its dist guards are reached, not just the one it was found by',
+    Boolean(liveFilteredJob && BUILD_CORE_GUARDS.every((c) => liveFilteredJob.checks.includes(c))),
   );
   // The NEGATIVE control, and it is the half that keeps the widening honest: a
   // path in none of the four filters must derive nothing extra. AGENTS.md is a
@@ -8442,22 +8453,33 @@ export function selfTest({ tier = 'full' } = {}) {
     readEdges.length > 0,
   );
 
-  // The card's own specimen, end to end and by name. ⛔ Not "some family
-  // matches": the miss was THIS family scoring `silent` for THIS path.
-  const digestEntry = liveDiscovery.byCheck.get('check:objectui-changeset');
-  const STAGED_GATE = 'scripts/check-adr-0087-registration.mjs';
+  // The card's own specimen, end to end. The card's family —
+  // `check:objectui-changeset`, whose digest staged a copy of the ADR-0087 gate
+  // — left the tree with the objectui pin (objectstack#25711), so the specimen
+  // is now every live read edge the family's hints do NOT cover: each must
+  // reach its family through the program-text key, named by the reader. ⛔ Not
+  // "some edge exists": the miss was a family scoring `silent` for a path only
+  // this key can supply, so the case reads exactly those paths, and fails when
+  // there are none left to read.
+  const keyOnlyReads = readEdges.filter(([check, r]) => {
+    const entry = liveDiscovery.byCheck.get(check);
+    return (
+      entry.readEdge?.get(r) === 'program-text' &&
+      !(entry.hints ?? []).some((h) => hintCovers(h, r)) &&
+      !(entry.files ?? []).some((f) => hintCovers(f, r))
+    );
+  });
   t(
-    `the staged gate reaches the family that runs a copy of it (${coveringKey(digestEntry, STAGED_GATE)?.via ?? 'no key'})`,
-    coveringKey(digestEntry, STAGED_GATE)?.key === STAGED_GATE &&
-      coveringKey(digestEntry, STAGED_GATE)?.via === 'program text read by scripts/objectui-changeset-digest.mjs',
+    `the live tree has read edges no watch hint covers, which is why the key is needed (${keyOnlyReads.length})`,
+    keyOnlyReads.length > 0,
   );
-  // …and green for the RIGHT reason. `extractWatchHints` masks self-tests, so
-  // the staging literal is not a hint and cannot supply this lead — the case
-  // above would otherwise pass on a key it is not testing.
+  const unkeyed = keyOnlyReads.filter(([check, r, by]) => {
+    const key = coveringKey(liveDiscovery.byCheck.get(check), r);
+    return key?.key !== r || key?.via !== `program text read by ${by}`;
+  });
   t(
-    'and no watch hint of that family covers it, which is why the key was needed',
-    !(digestEntry.hints ?? []).some((h) => hintCovers(h, STAGED_GATE)) &&
-      !(digestEntry.files ?? []).some((f) => hintCovers(f, STAGED_GATE)),
+    `each of them reaches its family through the program-text key, naming the reader (${unkeyed.map(([c, r]) => `${c} <- ${r}`).join(' · ') || 'all keyed'})`,
+    unkeyed.length === 0,
   );
 
   // Reconstruction: `entry.reads` is what the scan says over the family's own

@@ -1,0 +1,17 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "className": "max-w-sm p-4 border rounded-lg",
+  "children": [
+    {
+      "type": "label",
+      "label": "Select a date",
+      "className": "text-sm font-medium"
+    },
+    {
+      "type": "ui:calendar",
+      "mode": "single",
+      "className": "rounded-md border"
+    }
+  ]
+}

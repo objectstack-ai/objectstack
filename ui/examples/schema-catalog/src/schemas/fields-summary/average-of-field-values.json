@@ -1,0 +1,21 @@
+{
+  "type": "form",
+  "showSubmit": false,
+  "showCancel": false,
+  "defaultValues": {
+    "avg_rating": 4.52
+  },
+  "fields": [
+    {
+      "name": "avg_rating",
+      "label": "Average Rating",
+      "type": "summary",
+      "summaryOperations": {
+        "object": "reviews",
+        "field": "rating",
+        "function": "avg"
+      },
+      "readonly": true
+    }
+  ]
+}

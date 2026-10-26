@@ -1,0 +1,83 @@
+{
+  "type": "flex",
+  "properties": {
+    "align": "center",
+    "justify": "between",
+    "children": [
+      {
+        "type": "flex",
+        "properties": {
+          "align": "center",
+          "gap": 3,
+          "children": [
+            {
+              "type": "icon",
+              "icon": "box",
+              "className": "h-6 w-6 text-primary"
+            },
+            {
+              "type": "text",
+              "content": "Acme CRM",
+              "className": "font-semibold text-lg"
+            }
+          ]
+        }
+      },
+      {
+        "type": "flex",
+        "properties": {
+          "align": "center",
+          "gap": 2,
+          "children": [
+            {
+              "type": "button",
+              "label": "Quick Actions",
+              "variant": "outline",
+              "size": "sm",
+              "icon": "zap"
+            },
+            {
+              "type": "button",
+              "label": "Notifications",
+              "variant": "ghost",
+              "size": "sm",
+              "icon": "bell"
+            },
+            {
+              "type": "flex",
+              "properties": {
+                "align": "center",
+                "gap": 2,
+                "children": [
+                  {
+                    "type": "avatar",
+                    "fallback": "JD",
+                    "className": "h-8 w-8"
+                  },
+                  {
+                    "type": "stack",
+                    "gap": 0,
+                    "children": [
+                      {
+                        "type": "text",
+                        "content": "John Doe",
+                        "className": "text-sm font-medium leading-none"
+                      },
+                      {
+                        "type": "text",
+                        "content": "john@acme.com",
+                        "className": "text-xs text-muted-foreground"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "className": "ml-2 pl-2 border-l"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "className": "p-3 border rounded-lg bg-background"
+}

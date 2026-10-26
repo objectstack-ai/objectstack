@@ -1,0 +1,26 @@
+{
+  // Type-checks this package's TESTS, which `tsconfig.json` excludes.
+  // See `packages/types/tsconfig.test.json` for why that exclusion was a hole:
+  // the build config correctly keeps tests out of the emit, but nothing else
+  // compiled them, so a test could assert a contract the compiler never
+  // checked. `scripts/check-type-check-coverage.mjs` is the guard, and it wants
+  // this project CHAINED from `type-check` — the script CI actually runs.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // objectui#8691: test programs only. One notch above the package build's
+    // ES2020, mirroring packages/app-shell. The package SOURCE tsconfig is
+    // untouched, so what this package SHIPS still compiles at the ES2020
+    // baseline; nothing here is emitted.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    // `templates.test.ts` reads the repo-root manifest off disk (readFileSync,
+    // fileURLToPath, isBuiltin) to assert the generated dependency ranges are
+    // quoted from this monorepo rather than invented.
+    "types": ["node"],
+    // Drop the root tsconfig's source-tree `paths`: this package depends on no
+    // workspace package, and inheriting them would pull sibling sources in as
+    // program inputs.
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

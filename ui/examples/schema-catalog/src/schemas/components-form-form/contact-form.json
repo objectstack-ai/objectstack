@@ -1,0 +1,38 @@
+{
+  "type": "form",
+  "columns": 2,
+  "fields": [
+    {
+      "name": "firstName",
+      "label": "First Name",
+      "type": "input",
+      "required": true
+    },
+    {
+      "name": "lastName",
+      "label": "Last Name",
+      "type": "input",
+      "required": true
+    },
+    {
+      "name": "email",
+      "label": "Email",
+      "type": "input",
+      "inputType": "email",
+      "required": true
+    },
+    {
+      "name": "phone",
+      "label": "Phone",
+      "type": "input",
+      "inputType": "tel"
+    },
+    {
+      "name": "address",
+      "label": "Address",
+      "type": "textarea",
+      "colSpan": 2
+    }
+  ],
+  "submitLabel": "Submit"
+}

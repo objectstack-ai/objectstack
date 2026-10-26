@@ -1,0 +1,72 @@
+{
+  "type": "object-gantt",
+  "properties": {
+    "staticData": [
+      {
+        "id": 1,
+        "taskName": "Sprint Planning",
+        "startDate": "2024-01-01",
+        "endDate": "2024-01-03",
+        "completion": 100
+      },
+      {
+        "id": 2,
+        "taskName": "User Authentication",
+        "startDate": "2024-01-04",
+        "endDate": "2024-01-10",
+        "completion": 100,
+        "dependencies": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "taskName": "Dashboard UI",
+        "startDate": "2024-01-04",
+        "endDate": "2024-01-12",
+        "completion": 85,
+        "dependencies": [
+          1
+        ]
+      },
+      {
+        "id": 4,
+        "taskName": "API Integration",
+        "startDate": "2024-01-11",
+        "endDate": "2024-01-18",
+        "completion": 40,
+        "dependencies": [
+          2
+        ]
+      },
+      {
+        "id": 5,
+        "taskName": "Testing & QA",
+        "startDate": "2024-01-19",
+        "endDate": "2024-01-25",
+        "completion": 0,
+        "dependencies": [
+          3,
+          4
+        ]
+      },
+      {
+        "id": 6,
+        "taskName": "Deployment",
+        "startDate": "2024-01-26",
+        "endDate": "2024-01-28",
+        "completion": 0,
+        "dependencies": [
+          5
+        ]
+      }
+    ],
+    "gantt": {
+      "startDateField": "startDate",
+      "endDateField": "endDate",
+      "titleField": "taskName",
+      "progressField": "completion",
+      "dependenciesField": "dependencies"
+    }
+  }
+}

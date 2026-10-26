@@ -1,0 +1,90 @@
+{
+  "type": "stack",
+  "gap": 4,
+  "className": "p-6 border rounded-lg max-w-3xl",
+  "children": [
+    {
+      "type": "text",
+      "content": "Advanced Search",
+      "className": "text-xl font-bold"
+    },
+    {
+      "type": "text",
+      "content": "Build complex queries with multiple conditions",
+      "className": "text-sm text-muted-foreground mb-4"
+    },
+    {
+      "type": "filter-builder",
+      "name": "advancedFilters",
+      "fields": [
+        {
+          "value": "title",
+          "label": "Title",
+          "type": "text"
+        },
+        {
+          "value": "author",
+          "label": "Author",
+          "type": "text"
+        },
+        {
+          "value": "publishDate",
+          "label": "Publish Date",
+          "type": "date"
+        },
+        {
+          "value": "views",
+          "label": "Views",
+          "type": "number"
+        },
+        {
+          "value": "likes",
+          "label": "Likes",
+          "type": "number"
+        },
+        {
+          "value": "published",
+          "label": "Published",
+          "type": "boolean"
+        }
+      ],
+      "value": {
+        "id": "root",
+        "logic": "and",
+        "conditions": [
+          {
+            "id": "1",
+            "field": "published",
+            "operator": "equals",
+            "value": "true"
+          },
+          {
+            "id": "2",
+            "field": "views",
+            "operator": "greater_than",
+            "value": "1000"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "children": [
+          {
+            "type": "button",
+            "label": "Apply Filters",
+            "variant": "default"
+          },
+          {
+            "type": "button",
+            "label": "Clear",
+            "variant": "outline"
+          }
+        ]
+      },
+      "className": "mt-4"
+    }
+  ]
+}
