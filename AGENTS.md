@@ -523,11 +523,11 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — five contexts block: `Lint & Repo Gates` (all `check:*` gates),
-   `TypeScript Type Check`, `Test Core`, `Build Core` and `Governed Surface Queue Guard`. A
-   check outside those five is advisory and rides through, and an advisory red that lands rides
+   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
+   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI` and `Build & E2E UI`. A
+   check outside those seven is advisory and rides through, and an advisory red that lands rides
    `main`'s merge ref into every later PR until stanched. A required context is matched by
-   check-run name, so a rename detaches its gate silently — treat those five names as contract.
+   check-run name, so a rename detaches its gate silently — treat those seven names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
    `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
