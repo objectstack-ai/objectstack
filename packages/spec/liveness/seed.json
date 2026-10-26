@@ -20,6 +20,22 @@
       "evidence": "packages/metadata-protocol/src/seed-loader.ts#loadDataset (`const mode = dataset.mode || config.defaultMode`); packages/metadata-protocol/src/seed-loader.ts#decideWriteAction (insert/update/upsert/replace/ignore, decided against the existing row)",
       "note": "insert/update/upsert/replace/ignore — drives decideWriteAction/writeRecord. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:245` had rotted onto `export class SeedLoaderService`, the class declaration rather than any read of the key. Re-closed by hand against 8cb96ec41."
     },
+    "columns": {
+      "status": "live",
+      "verifiedAt": "2026-10-25",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts#createOnlySeedColumns (`Object.entries(dataset.columns ?? {})` — the one read of the map, once per dataset in `loadDataset`); packages/metadata-protocol/src/seed-loader.ts#warnOnUndeclaredSeedColumns (a key naming no column of the object is reported once per dataset)",
+      "note": "Seeded 2026-10-25 (#25761, ruled on hotclm#41 letter A). The per-column write policy, keyed by the target object's field names: the keys are the object's columns (the `records` walk boundary's rule), so the ledger drills only the policy's own keys. `defineSeed` holds the keys to the object's field set when it runs.",
+      "children": {
+        "applyOn": {
+          "status": "live",
+          "verifiedAt": "2026-10-25",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/metadata-protocol/src/seed-loader.ts#createOnlySeedColumns (`policy?.applyOn === 'create'` — the create-only set, minus the externalId's fields); packages/metadata-protocol/src/seed-loader.ts#loadDataset (`matchesExistingRow` — on a matched row the set's references are neither resolved nor deferred, and its columns leave the record before the no-op check and the update)",
+          "note": "`create` leaves the column out of every write to a row an `upsert` / `update` dataset matched; `always` (the default) writes it as before. Same vocabulary as the import door's `FieldMappingEntry.applyOn` (`ColumnApplyOnSchema`)."
+        }
+      }
+    },
     "env": {
       "status": "live",
       "verifiedAt": "2026-08-28",

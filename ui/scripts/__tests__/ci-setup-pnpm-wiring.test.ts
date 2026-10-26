@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { jobBlock, rootCi, UI_JOBS, withoutComments } from './helpers/root-ci';
+
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
-const WORKFLOW_DIR = path.join(ROOT, '.github', 'workflows');
 const SETUP = 'scripts/ci-setup-pnpm.sh';
 
 /**
@@ -62,15 +63,6 @@ const SETUP = 'scripts/ci-setup-pnpm.sh';
  * which is the failure mode this repository has recorded more than once.
  */
 
-/** Every workflow file, as `{ file, yaml }`. */
-function workflows(): { file: string; yaml: string }[] {
-  return fs
-    .readdirSync(WORKFLOW_DIR)
-    .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
-    .sort()
-    .map((file) => ({ file, yaml: fs.readFileSync(path.join(WORKFLOW_DIR, file), 'utf8') }));
-}
-
 /**
  * Every `run:` step body in a piece of workflow YAML — single-line and block
  * scalar alike, and nothing else.
@@ -119,89 +111,38 @@ describe('the shared CI pnpm setup is wired everywhere pnpm is used', () => {
     expect(run.stdout).toContain('self-test OK');
   });
 
-  it('no workflow runs corepack outside the shared script', () => {
-    const files = workflows();
-    expect(files.length, 'no workflow files found — this whole file would be vacuous').toBeGreaterThan(0);
+  // `no workflow runs corepack outside the shared script`, `every workflow that
+  // invokes pnpm also runs the shared setup` and `every job that calls the
+  // setup script checks the repository out first` retired with
+  // objectstack#25712. They swept objectui's workflows under
+  // `ui/.github/workflows/` for calls to this script, and those run nowhere
+  // under the monorepo: GitHub runs the root `.github/workflows/` alone. What
+  // objectui's CI became is the four root `* UI` jobs (objectstack#25697),
+  // which set pnpm up through the root composite action
+  // `./.github/actions/setup-pnpm`, objectstack's answer to the same Corepack
+  // fetch. The describe below asks the same three questions of those jobs, by
+  // path. This script and its self-test stay; no root job calls it.
+});
 
-    const offenders = files
-      .filter(({ yaml }) => runSteps(yaml).some((s) => /\bcorepack\b/.test(s)))
-      .map(({ file }) => file);
+describe('the root ui jobs set pnpm up through the root shared setup', () => {
+  const SHARED = 'uses: ./.github/actions/setup-pnpm';
+  const jobs = Object.values(UI_JOBS).map((key) => ({ key, block: withoutComments(jobBlock(rootCi(), key)) }));
 
-    expect(
-      offenders,
-      'these workflows invoke corepack directly instead of `bash ' +
-        SETUP +
-        '`. The download it performs is a registry read that has reddened a REQUIRED check ' +
-        'before any gate logic ran (objectui#8099); route it through the shared script so the ' +
-        'retry and the self-describing step name apply here too.',
-    ).toEqual([]);
-
-    // Anti-vacuity for the reader above: the comment-only mentions must still be
-    // THERE, or this assertion is passing because the corpus emptied out.
-    const commentOnly = files.filter(
-      ({ yaml }) => /\bcorepack\b/.test(yaml) && !runSteps(yaml).some((s) => /\bcorepack\b/.test(s)),
-    );
-    expect(
-      commentOnly.map((w) => w.file),
-      'the two comment-only corepack mentions must stay visible to this scan and stay unjudged — ' +
-        'if they are gone, re-derive whether this rule still reads what it claims to read',
-    ).toEqual(['changelog.yml', 'dependabot-auto-merge.yml']);
+  it.each(jobs)('$key runs no corepack outside the shared setup', ({ block }) => {
+    expect(runSteps(block).filter((s) => /\bcorepack\b/.test(s))).toEqual([]);
   });
 
-  it('every workflow that invokes pnpm also runs the shared setup', () => {
-    const files = workflows();
+  it.each(jobs)('$key checks the repository out, then sets pnpm up, before its first pnpm', ({ block }) => {
+    const checkoutAt = block.search(/uses:\s*actions\/checkout@/);
+    const setupAt = block.indexOf(SHARED);
+    expect(checkoutAt, 'the job checks nothing out').toBeGreaterThan(-1);
+    expect(setupAt, `the job has no \`${SHARED}\` step after its checkout`).toBeGreaterThan(checkoutAt);
 
-    const usesPnpm = files.filter(({ yaml }) => runSteps(yaml).some((s) => /\bpnpm\b/.test(s)));
+    const firstPnpm = runSteps(block).find((s) => /\bpnpm\b/.test(s));
+    expect(firstPnpm, 'the job runs no pnpm at all, so this reading has drifted').toBeDefined();
     expect(
-      usesPnpm.length,
-      'no workflow appears to invoke pnpm, which cannot be true — the step reader has drifted',
-    ).toBeGreaterThan(0);
-
-    const missing = usesPnpm
-      .filter(({ yaml }) => !runSteps(yaml).some((s) => s.includes(SETUP)))
-      .map(({ file }) => file);
-
-    expect(
-      missing,
-      `these workflows run pnpm without calling \`bash ${SETUP}\` first. pnpm is not on the runner: ` +
-        'the first invocation downloads it from registry.npmjs.org, and unrouted that download lands ' +
-        "inside whichever step happens to touch pnpm first — including `actions/setup-node`'s own " +
-        'cache probe, where a red is hardest to attribute (objectui#8099).',
-    ).toEqual([]);
-  });
-
-  it('every job that calls the setup script checks the repository out first', () => {
-    const files = workflows().filter(({ yaml }) => yaml.includes(SETUP));
-    expect(files.length, `no workflow references ${SETUP} — the sweep was undone`).toBeGreaterThan(0);
-
-    const bad: string[] = [];
-    for (const { file, yaml } of files) {
-      const lines = yaml.split('\n');
-      // Job blocks: two-space keys inside the `jobs:` mapping.
-      const jobsAt = lines.findIndex((l) => /^jobs:[ \t]*$/.test(l));
-      expect(jobsAt, `${file} must have a top-level \`jobs:\` mapping`).toBeGreaterThan(-1);
-
-      const starts: number[] = [];
-      for (let i = jobsAt + 1; i < lines.length; i++) {
-        if (/^ {2}[a-z0-9][a-z0-9-]*:[ \t]*$/.test(lines[i])) starts.push(i);
-      }
-      starts.push(lines.length);
-
-      for (let s = 0; s + 1 < starts.length; s++) {
-        const block = lines.slice(starts[s], starts[s + 1]);
-        const setupAt = block.findIndex((l) => l.includes(SETUP));
-        if (setupAt === -1) continue;
-        const checkoutAt = block.findIndex((l) => /uses:\s*actions\/checkout@/.test(l));
-        if (checkoutAt === -1 || checkoutAt > setupAt) {
-          bad.push(`${file} :: ${block[0].trim()}`);
-        }
-      }
-    }
-
-    expect(
-      bad,
-      `${SETUP} is a file in this repository, so a job that runs it before \`actions/checkout\` ` +
-        'dies with "No such file or directory" — a failure that reads nothing like a toolchain problem.',
-    ).toEqual([]);
+      block.indexOf(firstPnpm!.split('\n')[0]),
+      'the job runs pnpm before the shared setup has put it on the runner',
+    ).toBeGreaterThan(setupAt);
   });
 });

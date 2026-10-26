@@ -231,6 +231,10 @@ export * from './driver.zod';
 export * from './driver-sql.zod';
 export * from './driver-nosql.zod';
 
+// [#25761] The one `create` / `always` vocabulary of a column's apply-on
+// policy, shared by the seed dataset column (`seed.zod`) and the import
+// mapping entry (`api/export.zod`), so neither door spells it twice.
+export * from './column-apply-on.zod';
 export * from './seed.zod';
 
 // Form Layouts

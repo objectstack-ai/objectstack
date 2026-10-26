@@ -361,91 +361,26 @@ describe('the real corpus', () => {
   });
 });
 
-describe('wiring — the gate is reachable and a markdown-only PR starts it', () => {
+describe('wiring — the gate is reachable by name, classified and documented', () => {
   const SCRIPT = 'scripts/check-skill-eval-tokens.mjs';
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowPath = path.join(workflowDir, 'repo-gates.yml');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
 
-  /**
-   * A workflow's YAML with whole-line comments removed. Every workflow in this
-   * repository discusses `paths`, `paths-ignore` and its neighbours' scripts in
-   * prose; a scan that counted comments would report filters and duplicate homes
-   * that no file has.
-   */
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs the self-test too — a probe nobody runs is a probe
+  // that passes`, `installs nothing — the criterion is text in the checkout`,
+  // `runs it in NO path-filtered workflow — the scan surface is entirely
+  // markdown and JSON`, `has exactly one home`, and `does not run a NEIGHBOUR
+  // gate from this workflow`. Each read objectui's `repo-gates.yml`, this
+  // gate's only home, and that file runs nowhere under the monorepo: GitHub
+  // runs the root `.github/workflows/` alone, and no workflow there runs this
+  // gate. objectstack#25880 ports the `repo-gates.yml` gates (row 24 of the
+  // objectstack#25697 workflow roster) into the root `Lint UI` job and brings
+  // these pins back against that job, by path. The classification case keeps
+  // its `dependabot-merge-gate.mjs` half and drops the step name it read from
+  // the workflow, for the same reason.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:skill-eval-tokens']).toBe(`node ${SCRIPT}`);
-  });
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(fs.existsSync(workflowPath), 'a check nothing runs is not a gate').toBe(true);
-    const yaml = yamlOf('repo-gates.yml');
-    expect(yaml).toMatch(new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}\\s*$`, 'm'));
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-    expect(yaml).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs the self-test too — a probe nobody runs is a probe that passes', () => {
-    expect(yamlOf('repo-gates.yml')).toMatch(
-      new RegExp(`run:\\s*node\\s+${SCRIPT.replace(/[.]/g, '\\.')}\\s+--self-test`),
-    );
-  });
-
-  it('installs nothing — the criterion is text in the checkout', () => {
-    // The property `check-pre-install-import-graph.mjs` then enforces on the
-    // script: with no `pnpm install` step in the job, every step is a
-    // pre-install step, so the whole static import graph must stay free of
-    // `node_modules`. Folding this gate into `check-skill-examples.mjs` would
-    // have lost exactly this, since that one exits 2 on an unbuilt tree.
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf('repo-gates.yml');
-    const gateAt = yaml.indexOf(`run: node ${SCRIPT} --self-test`);
-    expect(gateAt).toBeGreaterThan(-1);
-    for (const marker of ['pnpm install', 'turbo run build']) {
-      const at = yaml.indexOf(marker);
-      expect(at === -1 || gateAt < at, `the gate step moved below \`${marker}\``).toBe(true);
-    }
-    expect(yaml).not.toMatch(/pnpm build/);
-  });
-
-  it('runs it in NO path-filtered workflow — the scan surface is entirely markdown and JSON', () => {
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(SCRIPT)) continue;
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths-ignore — a guide-only change would not start it`).not.toMatch(
-        /paths-ignore:/,
-      );
-      expect(yaml, `${file} runs ${SCRIPT} behind a paths filter — see objectui#3448`).not.toMatch(/^\s+paths:/m);
-    }
-  });
-
-  it('has exactly one home', () => {
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT))).toEqual(['repo-gates.yml']);
-  });
-
-  it('does not run a NEIGHBOUR gate from this workflow', () => {
-    // `check-skill-examples.test.ts` pins that its own script lives in exactly
-    // one workflow. Invoking it from this YAML would break that pin and give
-    // one gate two homes.
-    // Since objectui#12214 every gate shares `repo-gates.yml`, so "this
-    // workflow" is now this gate's OWN steps: the ones named after its check.
-    const own = yamlOf('repo-gates.yml')
-      .split(/^(?= {6}- name: )/m)
-      .filter((step) => step.startsWith('      - name: Skill Eval Token Check'));
-    expect(own.length).toBeGreaterThan(0);
-    for (const step of own) expect(step).not.toContain('scripts/check-skill-examples.mjs');
   });
 
   it('is classified as a blocking context rather than defaulting into silence', () => {
@@ -453,7 +388,6 @@ describe('wiring — the gate is reachable and a markdown-only PR starts it', ()
     // context, which is the name the classification and the floor read.
     const gate = fs.readFileSync(path.join(repoRoot, 'scripts/dependabot-merge-gate.mjs'), 'utf8');
     expect(gate).toContain("'Repo Gates'");
-    expect(yamlOf('repo-gates.yml')).toContain('name: Skill Eval Token Check');
   });
 
   it('has a section on the CI page, named by heading', () => {

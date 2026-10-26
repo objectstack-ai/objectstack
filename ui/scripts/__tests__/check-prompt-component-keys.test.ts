@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,12 +40,15 @@ import {
   partitionRegistry,
   placeholderSites,
   promptFiles,
+  promptsRoot,
   scanPromptKeys,
   scanPromptSections,
 } from '../check-prompt-component-keys.mjs';
 import { INDIRECT_REGISTRATIONS, deriveRegistryKeys } from '../check-doc-component-types.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/** The repository root, whose `.github/prompts/` the live prompts sit in (objectstack#25712). */
+const livePrompts = promptsRoot(repoRoot);
 const SCRIPT = 'scripts/check-prompt-component-keys.mjs';
 
 interface Finding {
@@ -270,27 +274,45 @@ describe('the repository this gate guards', () => {
   });
 
   it('has a prompt surface with Keys bullets in it', () => {
-    expect(promptFiles(repoRoot).length).toBeGreaterThan(0);
-    expect(scanPromptKeys(repoRoot).bullets).toBeGreaterThan(0);
+    expect(promptFiles(livePrompts).length).toBeGreaterThan(0);
+    expect(scanPromptKeys(livePrompts).bullets).toBeGreaterThan(0);
+  });
+
+  it('reads the prompts at the repository root, and no copy is left under the objectui root', () => {
+    // objectstack#25712 moved them from `ui/.github/prompts/` to the root
+    // `.github/prompts/`, where VS Code reads prompt files. A second copy left
+    // behind would be the stale twin the next edit lands in.
+    expect(livePrompts).toBe(path.resolve(repoRoot, '..'));
+    expect(fs.existsSync(path.join(livePrompts, PROMPT_DIR))).toBe(true);
+    expect(promptFiles(repoRoot), 'a prompt file is still under the objectui root').toEqual([]);
   });
 
   it('passes — every key the prompts teach is answered by a real renderer', () => {
-    expect((analyze(repoRoot) as { findings: Finding[] }).findings).toEqual([]);
+    expect((analyze(repoRoot, { promptsRoot: livePrompts }) as { findings: Finding[] }).findings).toEqual([]);
+  });
+
+  it('passes as CI runs it — the bare command reads the repository root prompts', () => {
+    // The root `Lint UI` job runs `pnpm --dir ui run check:prompt-keys` with no
+    // arguments, so the CLI's own default is the code path that gates.
+    const out = execFileSync('node', [SCRIPT], { cwd: repoRoot, encoding: 'utf8' });
+    expect(out).toMatch(/^Scanned [1-9]\d* prompt file\(s\) under \.github\/prompts/);
+    expect(out).toContain('OK  Every key taught as available');
   });
 });
 
 // ── 4. wiring: a check nothing runs is not a gate ────────────────────────────
 
 describe('wiring', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const yamlOf = (file: string) =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-  const homes = workflowFiles.filter((f) => yamlOf(f).includes(SCRIPT));
+  // Retired with objectstack#25712: `has exactly one home, and that workflow
+  // gates pull requests`, `runs unfiltered — the change that breaks it is a
+  // markdown-only change`, and the install ORDER half of `needs no install, so
+  // it can afford to run unfiltered`. Each read objectui's `repo-gates.yml`,
+  // this gate's only home, and that file runs nowhere under the monorepo:
+  // GitHub runs the root `.github/workflows/` alone, and no workflow there runs
+  // this gate. objectstack#25880 ports the `repo-gates.yml` gates (row 24 of
+  // the objectstack#25697 workflow roster) into the root `Lint UI` job and
+  // brings these pins back against that job, by path. That case's import-graph
+  // walk reads no workflow and stays below.
 
   it('is exposed as a root package script', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -299,33 +321,7 @@ describe('wiring', () => {
     expect(pkg.scripts['check:prompt-keys']).toBe(`node ${SCRIPT}`);
   });
 
-  it('has exactly one home, and that workflow gates pull requests', () => {
-    expect(homes.length, 'one gate, one home').toBe(1);
-    const yaml = yamlOf(homes[0]);
-    expect(yaml).toMatch(/^\s*pull_request:/m);
-    expect(yaml).toMatch(/^\s*push:/m);
-    expect(yaml).toMatch(/^\s*merge_group:/m);
-  });
-
-  it('runs unfiltered — the change that breaks it is a markdown-only change', () => {
-    // `ci.yml`'s type-check job decides whether to run with a diff that excludes
-    // `'**/*.md'`, and `.github/prompts/**` is nothing but `.md`. Behind a paths
-    // filter this gate would be blind to the only PR shape that can break it.
-    const yaml = yamlOf(homes[0]);
-    expect(yaml, `${homes[0]} runs ${SCRIPT} behind a paths-ignore`).not.toMatch(/paths-ignore:/);
-    expect(yaml, `${homes[0]} runs ${SCRIPT} behind a paths filter`).not.toMatch(/^\s+paths:/m);
-  });
-
-  it('needs no install, so it can afford to run unfiltered', () => {
-    // Since objectui#12214 the home is `repo-gates.yml`, ONE job that installs
-    // after its install-free gates: the property is now an ORDER -- this gate's
-    // step sits before the job's `pnpm install` -- and no longer an absence.
-    const yaml = yamlOf(homes[0]);
-    const gateAt = yaml.indexOf('scripts/check-prompt-component-keys.mjs');
-    const installAt = yaml.indexOf('pnpm install');
-    expect(gateAt).toBeGreaterThan(-1);
-    expect(installAt === -1 || gateAt < installAt, 'the gate step moved below the install step').toBe(true);
-
+  it('needs no install: its import graph reaches no package', () => {
     // Walk the WHOLE static import graph, not just this gate's first line: it
     // imports a sibling gate, and "needs no node_modules" has to stay true of
     // everything it reaches, not of its own header.
@@ -551,7 +547,7 @@ describe('`Protocol Placeholders:` is judged the other way round', () => {
 // ── 7. the live tree, under the widened model ────────────────────────────────
 
 describe('the prompt surface this gate now reads', () => {
-  const scan = () => scanPromptKeys(repoRoot) as {
+  const scan = () => scanPromptKeys(livePrompts) as {
     sites: { key: string; label: string; expect: string; scope: string }[];
     bullets: number;
     blocks: number;
@@ -597,7 +593,7 @@ describe('the prompt surface this gate now reads', () => {
     for (const tombstone of ['user:profile', 'ai:chat_window', 'view:kanban', 'view:gantt', 'view:map']) {
       expect(taught.has(tombstone), `${tombstone} must stay in prose, never in a judged list`).toBe(false);
     }
-    const prompt = fs.readFileSync(path.join(repoRoot, PROMPT_DIR, 'component.prompt.md'), 'utf8');
+    const prompt = fs.readFileSync(path.join(livePrompts, PROMPT_DIR, 'component.prompt.md'), 'utf8');
     for (const tombstone of ['user:profile', 'ai:chat_window', 'view:kanban']) {
       expect(prompt, `${tombstone} tombstone must still be written down`).toContain(`\`${tombstone}\``);
     }
@@ -707,7 +703,7 @@ describe('a `## N.` section\'s `### X.` headings must run A, B, C, … without a
 // ── 9. the live tree, under the letter-run pin ───────────────────────────────
 
 describe('the letter runs on the live prompt surface', () => {
-  const sections = () => scanPromptSections(repoRoot) as {
+  const sections = () => scanPromptSections(livePrompts) as {
     file: string;
     section: string;
     entries: { letter: string; line: number; text: string }[];

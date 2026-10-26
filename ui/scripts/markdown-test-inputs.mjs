@@ -722,14 +722,6 @@ export const ADJUDICATED = new Map([
   // opened were recorded, which is also how the three tests that ENUMERATE a
   // markdown population without opening it were caught.
   // ---------------------------------------------------------------------------
-  // Reads no markdown: the document literal is an ARGUMENT to a path-matcher assertion, never opened.
-  [
-    'scripts/__tests__/check-action-forward-parity.test.ts',
-    {
-      reads: [],
-      notRead: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
   // objectui#9727 -- the rebuilt polarity census. It walks TWO markdown trees:
   // the real pending corpus (through the script, for the controls and the
   // corpus-boundary pin) and its own fixture corpus (for every instrument pin).
@@ -786,7 +778,6 @@ export const ADJUDICATED = new Map([
       // ONE package README, `packages/plugin-dashboard/README.md`, whose shard
       // reported success in ten seconds having run nothing.
       reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
@@ -794,7 +785,6 @@ export const ADJUDICATED = new Map([
     {
       reads: ['content/docs/**'],
       notRead: ['examples/README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
@@ -807,7 +797,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-doc-example-types.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
@@ -842,7 +831,6 @@ export const ADJUDICATED = new Map([
       // two bundle pages the scanner resolves by name (`SKILL.md`, the anchor)
       // are fixture keys of the leg's order and anchor pins, inside the tree.
       reads: ['README.md', 'content/docs/**', 'packages/**', 'skills/objectui/**'],
-      walker: 'markdown-tree',
     },
   ],
   // `./*` rather than the eight root documents it used to list, and the
@@ -886,28 +874,12 @@ export const ADJUDICATED = new Map([
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
     },
   ],
-  // Reads no markdown: opens no markdown; the `.md` literal is a message string.
-  [
-    'scripts/__tests__/check-i18n-dead-keys.test.ts',
-    {
-      reads: [],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
-    },
-  ],
   [
     'scripts/__tests__/check-links-workflow.test.ts',
     {
       reads: ['content/docs/**', 'docs/**'],
       notRead: ['README.md'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: fixture trees only, and the suite asserts markdown is OUT of the ESLint walk.
-  [
-    'scripts/__tests__/check-lint-rule-coverage.test.ts',
-    {
-      reads: [],
-      walker: 'not-markdown: the files ESLint walks — the suite asserts `.md` is OUT of that walk',
     },
   ],
   [
@@ -938,27 +910,18 @@ export const ADJUDICATED = new Map([
       walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
-  [
-    'scripts/__tests__/check-prompt-component-keys.test.ts',
-    {
-      reads: ['.github/prompts/component.prompt.md', '.github/prompts/engine.prompt.md', '.github/prompts/ui-library.prompt.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
-    },
-  ],
   // Reads no markdown: the `README.md` literals are packed-file names inside a manifest fixture.
   [
     'scripts/__tests__/check-published-dist-tooling.test.ts',
     {
       reads: [],
       notRead: ['README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
     'scripts/__tests__/check-readme-exports.test.ts',
     {
       reads: ['packages/**'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   // objectui#9502 widened this suite to read prose: the repaired carriers must
@@ -975,14 +938,12 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-shell-escape-residue.test.ts',
     {
       reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', 'content/docs/**', 'skills/objectui/**'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
     'scripts/__tests__/check-skill-eval-tokens.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md', 'skills/objectui/**'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
@@ -990,20 +951,18 @@ export const ADJUDICATED = new Map([
     {
       reads: ['.claude/skills/**', 'content/docs/guide/ci-cd-pipeline.md', 'skills/objectui/**'],
       notRead: ['README.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
     'scripts/__tests__/check-skills-paths.test.ts',
     {
       reads: ['.claude/skills/**', 'skills/objectui/**'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [
     'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
     {
-      reads: ['.github/prompts/component.prompt.md', '.github/prompts/engine.prompt.md', '.github/prompts/ui-library.prompt.md', 'CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
+      reads: ['CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
       walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
@@ -1038,15 +997,6 @@ export const ADJUDICATED = new Map([
       walker: 'markdown-tree',
     },
   ],
-  // Reads no markdown: reads workspace manifests and turbo inputs; the `README.md` literal is a declared-input fixture.
-  [
-    'scripts/__tests__/docs-build-trigger.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-      walker: 'not-markdown: workspace `package.json` manifests and turbo input globs',
-    },
-  ],
   // `./*` for the same reason as `check-doc-links.test.ts` above, reached by a
   // different route: this one takes its population from `trackedFiles()` in
   // `dollar-dialect-alias-census.mjs`, which is `git ls-files -z` -- EVERY
@@ -1054,7 +1004,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', '.github/prompts/component.prompt.md', '.github/prompts/engine.prompt.md', '.github/prompts/ui-library.prompt.md', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', 'content/docs/**', 'docs/ARCHITECTURE.md', 'docs/CONSOLE-STREAMLINING-SUMMARY.md', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
     },
   ],
   [
@@ -1062,15 +1012,6 @@ export const ADJUDICATED = new Map([
     {
       reads: ['content/docs/**'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: the `README.md` literal names a repo-wide labeler rule, not a file it opens.
-  [
-    'scripts/__tests__/labeler-package-coverage.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-      walker: 'not-markdown: package directories under `packages/`',
     },
   ],
   [
@@ -1112,7 +1053,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/merge-queue-reporting.test.ts',
     {
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [

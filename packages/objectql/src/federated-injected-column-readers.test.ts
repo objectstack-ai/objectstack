@@ -260,7 +260,7 @@ const READERS: Record<string, Row> = {
     disposition: 'target-by-id',
     why: "resolves which object a related record's title is read from",
   },
-  'engine.ts#eventOrganizationId :: resolveTenantFieldName()': {
+  'engine-realtime-publish.ts#eventOrganizationId :: resolveTenantFieldName()': {
     disposition: 'row-value',
     why: 'reads the tenant column off the written row; a federated row has none, so the event omits it',
   },

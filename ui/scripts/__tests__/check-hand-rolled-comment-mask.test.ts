@@ -23,6 +23,7 @@ import {
   spansAComment,
   sweep,
 } from '../check-hand-rolled-comment-mask.mjs';
+import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
 
 const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(scriptsDir, '..');
@@ -249,12 +250,10 @@ describe('wiring -- a gate nobody runs is indistinguishable from a gate that pas
     expect(config).toContain("'scripts/**/*.test.ts'");
   });
 
-  it('needs no workflow of its own: nothing under .github names this gate', async () => {
-    const { readFileSync, readdirSync } = await import('node:fs');
-    const dir = path.join(REPO_ROOT, '.github', 'workflows');
-    const naming = readdirSync(dir).filter((f) =>
-      readFileSync(path.join(dir, f), 'utf8').includes('check-hand-rolled-comment-mask'),
-    );
+  it('needs no workflow of its own: nothing GitHub runs names this gate', () => {
+    // Asked of the root `.github/workflows/`, the only workflows GitHub runs under
+    // the monorepo (objectstack#25712); `ui/.github/` runs nowhere.
+    const naming = rootWorkflowFiles().filter((f) => rootWorkflow(f).includes('check-hand-rolled-comment-mask'));
     expect(
       naming,
       'this gate is deliberately wired through the existing test job and adds no CI context; ' +

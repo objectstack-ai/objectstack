@@ -13,7 +13,7 @@
   ],
   "source": "built-tree",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
-  "generatedAt": "2026-10-25",
+  "generatedAt": "2026-10-26",
   "sha256": "1f6e1ccb925a678eaa393f9091dfc7d0285e4e3626e0a5c61a5474687debabb7",
   "components": 106,
   "inTree": {
@@ -49,6 +49,6 @@
       "ui/packages/types"
     ],
     "registrySources": 922,
-    "registrySourcesSha256": "35ef1abd88b0011a06bfc895b3091d1f8ecf319c3f78d2bfb0d9feb4e53f3bbe"
+    "registrySourcesSha256": "ad9e0875b83f339e03c528fc3be774592615dfdc5ee5fe9becc4376ddb5f0d52"
   }
 }

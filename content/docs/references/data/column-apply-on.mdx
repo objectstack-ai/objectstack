@@ -1,0 +1,36 @@
+---
+title: Column Apply On — Data Protocol reference
+navTitle: Column Apply On
+description: "Column Apply On schemas of the ObjectStack Data Protocol: ColumnApplyOn — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/column-apply-on.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ColumnApplyOnSchema } from '@objectstack/spec/data';
+import type { ColumnApplyOn } from '@objectstack/spec/data';
+
+// Validate data
+const result = ColumnApplyOnSchema.parse(data);
+```
+
+---
+
+## ColumnApplyOn
+
+When a matched-row write door writes a column: `always` on create and update, `create` on create only
+
+### Allowed Values
+
+* `create`
+* `always`
+
+
+---
+

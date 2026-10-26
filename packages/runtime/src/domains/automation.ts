@@ -1357,6 +1357,81 @@ async function refuseUnrelatedResume(
 }
 
 /**
+ * [#25820] Whether the run `runId` names belongs to a flow OTHER than the one
+ * the path names — the scope check of every `/:name/runs/:runId/*` door.
+ *
+ * Every one of those doors reads the run by id alone, so until this card the
+ * `:name` segment was accepted and ignored: `POST /OTHER/runs/RUNID/resume`
+ * completed another flow's paused run, `GET /OTHER/runs/RUNID` served it, and
+ * the cancel and restore verbs acted on it. The ruling (triage 6399818476): a
+ * flow that exists but does not own the run is answered exactly as an unknown
+ * name — and an unknown name owns no run, so both reach this one predicate.
+ * Each door answers a `true` with ITS OWN not-found answer for a run nobody
+ * holds, so "another flow's run" and "no such run" cannot be told apart.
+ *
+ * The owner is what the service records: the run's `ExecutionLog.flowName`
+ * (`getRun`), else the suspended-run list (`listSuspendedRuns`), which still
+ * names a parked run when `getRun` answers `null` — the degraded durable read
+ * and the evicted in-memory ring `refuseUnrelatedResume` documents.
+ *
+ * ⚠️ Answers `false` when neither probe names an owner (a service without
+ * either optional member, or a run neither can see). That is "cannot prove a
+ * mismatch", not "matches": the door then answers what it answered before this
+ * card, and the engine's own not-found answer still holds for an unknown run.
+ * ⛔ Not an authorization gate — who may act stays where it was decided; this
+ * runs after those gates and before the verb, so a mismatch consumes nothing.
+ */
+async function runIsOutsideFlow(
+    automationService: Partial<IAutomationService>,
+    flowName: string,
+    runId: string,
+): Promise<boolean> {
+    let owner: string | undefined;
+    if (typeof automationService.getRun === 'function') {
+        const run = await automationService.getRun(runId).catch(() => undefined);
+        if (typeof run?.flowName === 'string' && run.flowName) owner = run.flowName;
+    }
+    if (owner === undefined && typeof automationService.listSuspendedRuns === 'function') {
+        let parked: ReturnType<NonNullable<IAutomationService['listSuspendedRuns']>> | undefined;
+        try {
+            parked = automationService.listSuspendedRuns();
+        } catch {
+            parked = undefined;
+        }
+        const entry = Array.isArray(parked) ? parked.find((r) => r?.runId === runId) : undefined;
+        if (typeof entry?.flowName === 'string' && entry.flowName) owner = entry.flowName;
+    }
+    return owner !== undefined && owner !== flowName;
+}
+
+/**
+ * [#25820] The code the resume and run-read doors answer a run nobody holds
+ * under the path's flow with — the engine's own resume refusal code, which
+ * the run-read door now shares so the two doors onto one run agree that it is
+ * not there (ADR-0112 ledger: `@objectstack/runtime`).
+ */
+const RUN_NOT_FOUND_CODE = 'RUN_NOT_FOUND';
+
+/**
+ * [#25820] The engine's answer to `resume()` of a run it holds no suspension
+ * for, spelled as the engine spells it (`service-automation` `run-resume.ts`),
+ * so the resume door's mismatch answer is the unknown-run answer byte for byte.
+ * Pinned against each other in `automation-run-flow-scope.test.ts`.
+ */
+function unknownSuspendedRun(runId: string): AutomationResult {
+    return { success: false, code: RUN_NOT_FOUND_CODE, error: `No suspended run '${runId}'` };
+}
+
+/**
+ * [#25820] The engine's answer to `restoreConsumedSuspension()` of a run it
+ * knows nothing about, spelled as the engine spells it (`service-automation`
+ * `consumed-suspension-restore.ts`), for the same reason.
+ */
+function unknownRestoreTarget(runId: string): { restored: false; runId: string; refusal: string; reason: string } {
+    return { restored: false, runId, refusal: 'RUN_NOT_FOUND', reason: `No run '${runId}' is known` };
+}
+
+/**
  * [#20552] The metadata type a flow definition is redacted as — the key of the
  * `flow` entry the automation plugin registers in the per-type redactor
  * registry (`@objectstack/spec/kernel`).
@@ -3362,6 +3437,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // caller the suspended node itself names: `refuseUnrelatedResume`.
                 const unrelated = await refuseUnrelatedResume(deps, context, automationService, parts[2]);
                 if (unrelated) return unrelated;
+                // [#25820] The path's flow must own the run. Checked here — after
+                // the gates, immediately before the engine — so a mismatch is
+                // answered as the engine answers a run it holds no suspension
+                // for, through the same table, and the run stays parked.
+                if (await runIsOutsideFlow(automationService, name, parts[2])) {
+                    const notFound = await classifyResumeResult(deps, automationService, parts[2], unknownSuspendedRun(parts[2]));
+                    return { handled: true, response: deps.error(notFound!.message, notFound!.status, notFound!.details) };
+                }
                 const result = await automationService.resume(parts[2], signal);
                 // [#15705] The engine's answer is classified by
                 // `classifyResumeResult`, the one table this door shares with
@@ -3435,7 +3518,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             const bodyRefusal = refuseInvalidRunLifecycleBody(deps, body, 'cancel');
             if (bodyRefusal) return bodyRefusal;
             const reason = (body as { reason?: string } | undefined | null)?.reason;
-            const cancelled = await automationService.cancelRun(parts[2], reason);
+            // [#25820] Another flow's run is answered as no suspended run under
+            // this id — the `false` this verb's contract returns for one — and
+            // the verb is never called, so it stays parked.
+            const cancelled = await runIsOutsideFlow(automationService, name, parts[2])
+                ? false
+                : await automationService.cancelRun(parts[2], reason);
             return {
                 handled: true,
                 response: deps.success({
@@ -3491,10 +3579,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             if (bodyRefusal) return bodyRefusal;
             const reason = (body as { reason?: string } | undefined | null)?.reason;
             const requestedBy = (context as any)?.executionContext?.userId;
-            const result = await automationService.restoreConsumedSuspension(parts[2], {
-                ...(typeof requestedBy === 'string' && requestedBy ? { requestedBy } : {}),
-                ...(reason !== undefined ? { reason } : {}),
-            });
+            // [#25820] Another flow's run is answered as a run the engine does
+            // not know, and the verb is never called, so nothing is re-armed.
+            const result = await runIsOutsideFlow(automationService, name, parts[2])
+                ? unknownRestoreTarget(parts[2])
+                : await automationService.restoreConsumedSuspension(parts[2], {
+                    ...(typeof requestedBy === 'string' && requestedBy ? { requestedBy } : {}),
+                    ...(reason !== undefined ? { reason } : {}),
+                });
             if (result?.restored === true) {
                 // The runId answered is the one this door was ASKED about (the
                 // path's `:runId`), for the reason `resumeFailureDetails`
@@ -3550,7 +3642,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // Deliberately AHEAD of the gate: no screen ⇒ nothing to
                 // disclose ⇒ every not-found answer stays exactly what it was,
                 // for every caller. See the gate's "order of operations".
-                if (!screen) return { handled: true, response: deps.error('No pending screen for run', 404) };
+                // [#25820] Another flow's run has nothing to disclose here
+                // either: the same 404, for every caller, ahead of the gate.
+                if (!screen || await runIsOutsideFlow(automationService, name, parts[2])) {
+                    return { handled: true, response: deps.error('No pending screen for run', 404) };
+                }
                 const refusal = await refuseUnrelatedScreenRead(deps, context, automationService, parts[2]);
                 if (refusal) return refusal;
                 return { handled: true, response: deps.success({ runId: parts[2], screen }) };
@@ -3562,7 +3658,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (parts[1] === 'runs' && parts[2] && !parts[3] && m === 'GET') {
             if (typeof automationService.getRun === 'function') {
                 const run = await automationService.getRun(parts[2]);
-                if (!run) return { handled: true, response: deps.error('Execution not found', 404) };
+                // [#25820] A run of another flow is not found under this one —
+                // the same owner rule as `runIsOutsideFlow`, read off the run
+                // already in hand: a run naming no flow proves no mismatch.
+                const owner = typeof run?.flowName === 'string' && run.flowName ? run.flowName : undefined;
+                if (!run || (owner !== undefined && owner !== name)) {
+                    return { handled: true, response: deps.error('Execution not found', 404, { code: RUN_NOT_FOUND_CODE }) };
+                }
                 return { handled: true, response: deps.success(run) };
             }
         }

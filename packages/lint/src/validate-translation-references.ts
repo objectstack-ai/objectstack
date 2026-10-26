@@ -155,6 +155,13 @@
  * environment, so a key naming one resolves and is never an orphan. Leaf keys
  * below the name are the schema's (`label` / `description`, strict).
  *
+ * ── Reports ──────────────────────────────────────────────────────────────
+ *
+ * `reports.<name>` resolves against `Report.name`, the name `translateReport`
+ * looks a served report up by, with the same verdict: a name no package of
+ * this stack declares is an orphan, `translation-target-unknown` (`error`).
+ * Leaf keys below the name are the schema's (`label` / `description`, strict).
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -199,8 +206,8 @@
  * is the one reader of that carrier, and every collection it may be asked for
  * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
  * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
- * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349), and
- * `positions` and `permissions`.
+ * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349),
+ * `positions` and `permissions`, and `reports`.
  *
  * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
  * answer different questions — what a sibling DECLARES, and what this package
@@ -507,6 +514,8 @@ interface Universe {
   positions: Set<string>;
   /** Permission-set names (`PermissionSet.name`) a `permissions.<name>` key may name. */
   permissionSets: Set<string>;
+  /** Report names (`Report.name`) a `reports.<name>` key may name. */
+  reports: Set<string>;
   /**
    * Page name (`Page.name`) → every component id the page ADDRESSES
    * (`pages.<page>.components.<id>`), with that component's type and, for a
@@ -1680,6 +1689,8 @@ function buildUniverse(stack: AnyRec): Universe {
   const positions = namesOf('positions');
   for (const anchor of AUDIENCE_ANCHOR_POSITIONS) positions.add(anchor);
   const permissionSets = namesOf('permissions');
+  // `reports` carries disposition `concat` too, so a sibling's reports resolve.
+  const reports = namesOf('reports');
 
   return {
     objects,
@@ -1694,6 +1705,7 @@ function buildUniverse(stack: AnyRec): Universe {
     extendedPicklists,
     positions,
     permissionSets,
+    reports,
     pages,
   };
 }
@@ -2146,12 +2158,13 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         });
       }
 
-      // ── positions.<name> / permissions.<name> ─────────────────────────
-      const securityCatalog = [
+      // ── positions.<name> / permissions.<name> / reports.<name> ────────
+      const namedItemGroups = [
         { group: 'positions', noun: 'position', known: universe.positions, hint: "Match the key to a position's `name`, or drop it." },
         { group: 'permissions', noun: 'permission set', known: universe.permissionSets, hint: "Match the key to a permission set's `name`, or drop it." },
+        { group: 'reports', noun: 'report', known: universe.reports, hint: "Match the key to a report's `name`, or drop it." },
       ] as const;
-      for (const { group, noun, known, hint } of securityCatalog) {
+      for (const { group, noun, known, hint } of namedItemGroups) {
         for (const name of Object.keys(asRecord(rawData[group]))) {
           if (known.has(name)) continue;
           orphan(

@@ -14,6 +14,20 @@
  * shorter than the host literal a stub would need, so moving it would make
  * `sql-driver.ts` longer, not shorter.
  *
+ * [#25521 cut 5] `introspectIndexes`, the per-table index read schema sync
+ * and index drift detection are built on, moved here too: it is the fifth
+ * catalog read of the same shape, with the same `onFailure` contract as the
+ * foreign-key and primary-key reads above. `resolveHashShadowKeys`, the MySQL
+ * hash-shadow enrichment it calls, stayed in the class with the rest of the
+ * hash-shadow family; the body reaches it through a closure that calls it on
+ * the driver at call time, so a subclass override or a test spy on the
+ * instance is still the one it reaches. `TursoDriver` overrides
+ * `introspectIndexes` and calls `super` on its local arm, which reaches the
+ * class method, which hands this body its host. `parseIndexDdl`,
+ * `applyIndexKeyParts` and the type `PhysicalIndex` are imported from
+ * `schema-drift.ts`, where they live; `sql-driver.ts` no longer reads the two
+ * functions and dropped them from its import.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same catalog statements, the same dialect arms, the same
@@ -67,6 +81,7 @@ import type {
   UniqueConstraintMember,
 } from './sql-driver.js';
 import { postgresTableNameCollisionError, singleColumnUniqueColumns } from './sql-driver.js';
+import { applyIndexKeyParts, parseIndexDdl, type PhysicalIndex } from './schema-drift.js';
 
 /**
  * The `SqlDriver` members the functions below read — every one of them, and
@@ -87,6 +102,7 @@ export interface IntrospectionHost {
   readonly isPostgres: SqlDriver['isPostgres'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
+  resolveHashShadowKeys: SqlDriver['resolveHashShadowKeys'];
 }
 
 /** The body of `SqlDriver#introspectColumnOrder`; the method's docblock there is its contract. */
@@ -797,4 +813,115 @@ export async function introspectSchema(this: Pick<IntrospectionHost, 'dialectNam
   // while leaving every per-dialect type alias unreachable — the omission
   // this repairs, wearing a fix's clothes.
   return { tables, dialect: this.dialectName, introspectedAt };
+}
+
+/** The body of `SqlDriver#introspectIndexes`; the method's docblock there is its contract. */
+export async function introspectIndexes(
+  this: Pick<IntrospectionHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex' | 'resolveHashShadowKeys'>,
+  tableName: string,
+  opts: {
+    /**
+     * What a failed read means to THIS caller (#7332). `'throw'` (the
+     * default) surfaces it; `'partial'` returns whatever was read before the
+     * failure — correct only where a short read is self-correcting.
+     */
+    onFailure?: 'throw' | 'partial';
+  } = {},
+): Promise<PhysicalIndex[]> {
+  const byName = new Map<string, PhysicalIndex>();
+  const upsert = (name: string, unique: boolean, primary: boolean): PhysicalIndex => {
+    let e = byName.get(name);
+    if (!e) byName.set(name, (e = { name, columns: [], unique, primary }));
+    return e;
+  };
+  try {
+    if (this.isSqlite) {
+      const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      // `sqlite_master.sql` is the only place an expression key or a WHERE
+      // predicate survives; it is NULL for the indexes SQLite auto-creates
+      // for a UNIQUE/PK constraint, which are plain by construction.
+      const ddlByName = new Map<string, string>();
+      const master: any = await this.knex.raw(
+        `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`,
+        [tableName],
+      );
+      for (const r of Array.isArray(master) ? master : (master?.rows ?? [])) {
+        if (typeof r?.sql === 'string' && r.sql) ddlByName.set(r.name, r.sql);
+      }
+      const list: any = await this.knex.raw(`PRAGMA index_list(${safe})`);
+      for (const r of list) {
+        const entry = upsert(r.name, r.unique === 1 || r.unique === true, r.origin === 'pk');
+        const parsed = parseIndexDdl(ddlByName.get(r.name) ?? '');
+        if (parsed) {
+          applyIndexKeyParts(entry, parsed.keyParts);
+          if (parsed.partial) entry.partial = true;
+        } else {
+          const info: any = await this.knex.raw(`PRAGMA index_info(${JSON.stringify(r.name)})`);
+          for (const c of info) if (c.name != null) entry.columns.push(c.name);
+        }
+        // `PRAGMA index_list` reports partiality directly (SQLite ≥ 3.8.9);
+        // belt-and-braces with the parsed predicate above.
+        if (r.partial === 1 || r.partial === true) entry.partial = true;
+      }
+    } else if (this.isPostgres) {
+      // `to_regclass` resolves the name the way every other statement in the
+      // session does — first match along `search_path` — instead of pinning
+      // one schema literally. The literal was `n.nspname = 'public'`, which is
+      // the same answer for a default deployment (`current_schema()` IS
+      // `public` there) and NO answer at all for a session pointed anywhere
+      // else: measured on a live Postgres 16 under a non-public search_path,
+      // this returned `[]` for a table carrying a primary key AND a declared
+      // unique index. Empty here does not read as "I could not see"; it reads
+      // as "there are no indexes", which is what `assertConflictTargetHonoured`
+      // turns into a refusal — a silent fail-open on the identity check.
+      // Resolving by OID also removes the ambiguity a schema list would add:
+      // two schemas on the path can hold the same table name, and only one of
+      // them is the one a query would hit.
+      const res: any = await this.knex.raw(
+        `SELECT i.relname AS index_name, ix.indisunique AS is_unique, ix.indisprimary AS is_primary,
+                  (ix.indpred IS NOT NULL) AS is_partial,
+                  pg_get_indexdef(ix.indexrelid) AS indexdef
+             FROM pg_index ix
+             JOIN pg_class i ON i.oid = ix.indexrelid
+            WHERE ix.indrelid = to_regclass(?)
+            ORDER BY i.relname`,
+        [tableName],
+      );
+      for (const r of res.rows) {
+        const entry = upsert(r.index_name, r.is_unique === true, r.is_primary === true);
+        if (r.is_partial === true) entry.partial = true;
+        const parsed = parseIndexDdl(r.indexdef);
+        if (parsed) applyIndexKeyParts(entry, parsed.keyParts);
+      }
+    } else if (this.isMysql) {
+      // `EXPRESSION` only exists from MySQL 8.0.13 (functional indexes); on an
+      // older server or MariaDB the column is unknown and the query errors, so
+      // fall back rather than lose index introspection wholesale.
+      const columns = 'INDEX_NAME, NON_UNIQUE, COLUMN_NAME, EXPRESSION';
+      const statisticsQuery = (select: string) =>
+        this.knex.raw(
+          `SELECT ${select}
+               FROM information_schema.STATISTICS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+              ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+          [tableName],
+        );
+      let res: any;
+      try {
+        res = await statisticsQuery(columns);
+      } catch {
+        res = await statisticsQuery('INDEX_NAME, NON_UNIQUE, COLUMN_NAME');
+      }
+      for (const r of res[0]) {
+        const entry = upsert(r.INDEX_NAME, Number(r.NON_UNIQUE) === 0, r.INDEX_NAME === 'PRIMARY');
+        if (r.COLUMN_NAME != null) entry.columns.push(r.COLUMN_NAME);
+        else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
+      }
+      await this.resolveHashShadowKeys(tableName, [...byName.values()]);
+    }
+  } catch (e) {
+    // Only a caller that can CORRECT a short read may ask for one (#7332).
+    if (opts.onFailure !== 'partial') throw e;
+  }
+  return [...byName.values()];
 }

@@ -125,6 +125,7 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   tiers: 'deployment',
   devHint: 'deployment',
   devLogins: 'deployment',
+  demoStaff: 'deployment',
 };
 
 /**

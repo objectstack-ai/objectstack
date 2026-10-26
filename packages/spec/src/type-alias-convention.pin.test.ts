@@ -276,9 +276,11 @@ import type * as M189 from './system/fate-supplement.zod.js';
 import type * as M190 from './kernel/execution-context.zod.js';
 // An api flow's hook secret named by reference (`config.secretRef`) -- new module, next free index.
 import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
+// [#25761] The one column apply-on vocabulary both write doors read -- new module, next free index.
+import type * as M192 from './data/column-apply-on.zod.js';
 
 // ---------------------------------------------------------------------------
-// 786 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -779,6 +781,9 @@ export type Iso_data_analytics__DimensionSchema = Assert<Eq< z.input< typeof M55
 export type Iso_data_analytics__DimensionType = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
 export type Iso_data_analytics__MetricSchema = Assert<Eq< z.input< typeof M55.MetricSchema >, z.infer< typeof M55.MetricSchema > >>;
 export type Iso_data_analytics__TimeUpdateInterval = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
+
+// data/column-apply-on.zod.ts
+export type Iso_data_columnApplyOn__ColumnApplyOnSchema = Assert<Eq< z.input< typeof M192.ColumnApplyOnSchema >, z.infer< typeof M192.ColumnApplyOnSchema > >>;
 
 // data/context-tokens.zod.ts
 export type Iso_data_contextTokens__ContextTokenPlaceholderSchema = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
@@ -1701,7 +1706,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 786 isomorphic pins', () => {
+  it('still declares all 787 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2577,7 +2582,14 @@ describe('ADR-0122 type-alias convention', () => {
     // module, its `M92` import with them (the slot stays empty; the numbering
     // is a label, not a count). The module's other defs each carried an
     // `XParsed` alias and were never on this list. -4 removed.
-    expect(pins).toHaveLength(786);
+    //
+    // 786 -> 787 is #25761: `ColumnApplyOnSchema` (`data/column-apply-on.zod.ts`),
+    // the one `'create' | 'always'` vocabulary an import mapping entry and a seed
+    // dataset column both read — a plain string enum extracted from
+    // `FieldMappingEntrySchema.applyOn`, so it is pinned here
+    // (Iso_data_columnApplyOn__ColumnApplyOnSchema) rather than given a
+    // `…Parsed` synonym. +1 added.
+    expect(pins).toHaveLength(787);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

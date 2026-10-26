@@ -23,6 +23,12 @@
  *    `granted_by`; a plain member's is refused by the gate, not by the refusal.
  *  - Reads of the four objects, and writes to every other object, under the
  *    flow's system context are unchanged.
+ *  - [#25653] `isSystem` + the app-automation elevation mark (a hook's
+ *    `runAs: 'system'`, an action body): refused like the flow, each with its
+ *    own subject and prescription; a context carrying a run and a mark is
+ *    answered as the flow. The mark without `isSystem` is not judged. The
+ *    paths that set the mark are driven end to end in runtime
+ *    (`app-automation-identity-write-refusal.integration.test.ts`).
  *
  * The first block judges the predicate directly, over every verb the D12 gate
  * governs (`transfer`, `restore` and `purge` have no engine verb to drive). The
@@ -31,6 +37,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { markAppAutomationElevation } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -216,6 +223,11 @@ function expectFlowSystemRefusal(err: any, object: string, operation: string): v
 
 const OBJECTS = [...FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS];
 
+/** A `runAs: 'system'` hook's api context, fired by a user's write. */
+const HOOK_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN }, 'hook');
+/** An action body's context, invoked by a user. */
+const ACTION_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN }, 'action');
+
 describe('the predicate: isSystem AND flowRunId, the D12 gate\'s verbs, the four objects', () => {
   it('names exactly the four identity-assignment objects', () => {
     expect(OBJECTS.sort()).toEqual(['sys_invitation', 'sys_member', 'sys_user_permission_set', 'sys_user_position']);
@@ -337,4 +349,68 @@ describe("a runAs:'user' run's context is judged by the D12 gate as the user it 
       expect(await stored(engine, object, 'granted')).toBe(null);
     });
   }
+});
+
+describe('[#25653] the predicate also reads the app-automation elevation mark', () => {
+  const ASSIGNMENT = new Set(['sys_user_position', 'sys_user_permission_set']);
+
+  for (const [source, context, subject, prescription] of [
+    ['hook', HOOK_SYSTEM, /a hook that runs as system \(runAs: 'system'\)/, /Set the hook's runAs to 'user'/],
+    ['action', ACTION_SYSTEM, /an action body \(an action body runs as system\)/, /a flow whose runAs is 'user'/],
+  ] as const) {
+    for (const object of OBJECTS) {
+      for (const operation of GOVERNED_OPERATIONS) {
+        it(`refuses '${operation}' on ${object} from an ${source} elevation`, () => {
+          let err: any = null;
+          try {
+            assertFlowSystemIdentityWriteAllowed({ object, operation, context });
+          } catch (e) {
+            err = e;
+          }
+          expect(err, `${operation} on ${object} was not refused`).not.toBe(null);
+          expect(err.code).toBe('PERMISSION_DENIED');
+          expect(err.statusCode ?? err.status).toBe(403);
+          expect(err.details).toMatchObject({ object, operation });
+          expect(err.message).toMatch(subject);
+          expect(err.message).toMatch(ASSIGNMENT.has(object) ? prescription : /organization endpoints/);
+        });
+      }
+    }
+  }
+
+  it('answers a context carrying both a run and a mark as the flow', () => {
+    const both = markAppAutomationElevation({ ...FLOW_SYSTEM }, 'hook');
+    for (const object of OBJECTS) {
+      let err: any = null;
+      try {
+        assertFlowSystemIdentityWriteAllowed({ object, operation: 'insert', context: both });
+      } catch (e) {
+        err = e;
+      }
+      expectFlowSystemRefusal(err, object, 'insert');
+    }
+  });
+
+  it('passes the mark without isSystem, reads under the mark, and other objects', () => {
+    for (const source of ['hook', 'action'] as const) {
+      const deElevated = markAppAutomationElevation({ isSystem: false, userId: ADMIN, permissions: ['qa_tenant_admin'] }, source);
+      const elevated = source === 'hook' ? HOOK_SYSTEM : ACTION_SYSTEM;
+      for (const object of OBJECTS) {
+        for (const operation of GOVERNED_OPERATIONS) {
+          expect(() => assertFlowSystemIdentityWriteAllowed({ object, operation, context: deElevated })).not.toThrow();
+        }
+        for (const operation of ['find', 'findOne', 'count', 'aggregate']) {
+          expect(() => assertFlowSystemIdentityWriteAllowed({ object, operation, context: elevated })).not.toThrow();
+        }
+      }
+      for (const object of ['sys_user', 'sys_business_unit', 'sys_organization', 'qa_note']) {
+        expect(() => assertFlowSystemIdentityWriteAllowed({ object, operation: 'insert', context: elevated })).not.toThrow();
+      }
+    }
+  });
+
+  it('reads a mark value other than the two sources as no mark', () => {
+    const forged = { isSystem: true, [Symbol.for('objectstack.core.appAutomationElevation')]: 'platform' };
+    expect(() => assertFlowSystemIdentityWriteAllowed({ object: 'sys_member', operation: 'insert', context: forged as never })).not.toThrow();
+  });
 });

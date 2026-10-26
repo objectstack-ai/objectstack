@@ -147,3 +147,49 @@ describe('defineSeed accepts every key that names a column of the target object'
       .toHaveLength(1);
   });
 });
+
+describe('defineSeed holds a `columns` key to the same column set (#25761)', () => {
+  it('a declared field and an injected system column pass tsc and the call', () => {
+    const seed = defineSeed(Lead, {
+      externalId: 'first_name',
+      columns: { lead_source: { applyOn: 'create' }, owner_id: { applyOn: 'create' } },
+      records: [{ first_name: 'Alice', lead_source: 'web' }],
+    });
+    expect(seed.columns).toEqual({ lead_source: { applyOn: 'create' }, owner_id: { applyOn: 'create' } });
+  });
+
+  it('a misspelt column fails tsc, and is refused when it runs, with a near miss', () => {
+    const error = refusalOf(() =>
+      defineSeed(Lead, {
+        externalId: 'first_name',
+        // @ts-expect-error `lead_sorce` is not a field of crm_lead
+        columns: { lead_sorce: { applyOn: 'create' } },
+        records: [{ first_name: 'Alice', lead_source: 'web' }],
+      }),
+    );
+    expect(error.message.split('\n')[0]).toContain("defineSeed('crm_lead'): unknown field(s) in columns");
+    expect(error.message).toContain('columns: `lead_sorce` is not a field of `crm_lead`');
+    expect(error.message).toContain("Did you mean 'lead_source'?");
+  });
+
+  it('a record key and a column key are refused together, both surfaces named', () => {
+    const error = refusalOf(() =>
+      defineSeed(Lead, {
+        externalId: 'first_name',
+        // @ts-expect-error `stage` is not a field of crm_lead
+        columns: { stage: { applyOn: 'create' } },
+        // @ts-expect-error `source` is not a field of crm_lead
+        records: [{ first_name: 'Alice', source: 'web' }],
+      }),
+    );
+    expect(error.message.split('\n')[0]).toContain('in records and columns');
+    expect(error.message).toContain('records[0]: `source`');
+    expect(error.message).toContain('columns: `stage`');
+  });
+
+  it('a column the object cannot type-check is still judged when the call runs', () => {
+    const columns: Record<string, { applyOn: 'create' }> = { stauts: { applyOn: 'create' } };
+    const error = refusalOf(() => defineSeed(Lead, { externalId: 'first_name', columns, records: [] }));
+    expect(error.message).toContain('columns: `stauts` is not a field of `crm_lead`');
+  });
+});

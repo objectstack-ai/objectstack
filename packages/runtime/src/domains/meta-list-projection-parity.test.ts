@@ -175,6 +175,8 @@ const STORE: Record<string, any[]> = {
     // [#25652] Translated by `translatePermissionSet`, as a position is by
     // `translatePosition` — both are cells of the translatable-type axis.
     permission: [{ name: 'crm_sales_user', label: 'Sales user', objects: {} }],
+    // [#25788] Translated by `translateReport` — a cell of the translatable-type axis.
+    report: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }],
 };
 
 /**
@@ -223,6 +225,7 @@ const BUNDLE: Record<string, any> = {
         pages: { home: { label: '首页' } },
         positions: { sales_rep: { label: '销售代表' } },
         permissions: { crm_sales_user: { label: '销售用户' } },
+        reports: { opps_by_stage: { label: '各阶段商机' } },
     },
 };
 
@@ -517,7 +520,7 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
-    'position', 'positions', 'permission', 'permissions',
+    'position', 'positions', 'permission', 'permissions', 'report', 'reports',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -682,6 +685,9 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect(zhPositions.items?.find((p: any) => p.name === 'sales_rep')?.label).toBe('销售代表');
         const zhSets = await read('/meta/permission', {}, { 'accept-language': 'zh-CN' });
         expect(zhSets.items?.find((p: any) => p.name === 'crm_sales_user')?.label).toBe('销售用户');
+        // [#25788] So is a report — the list the console's report index reads.
+        const zhReports = await read('/meta/reports', {}, { 'accept-language': 'zh-CN' });
+        expect(zhReports.items?.find((r: any) => r.name === 'opps_by_stage')?.label).toBe('各阶段商机');
     });
 });
 
@@ -852,7 +858,7 @@ const ITEM_CELLS: readonly string[] = [
     '/meta/object/invoice', '/meta/objects/invoice',
     '/meta/dashboard/ops', '/meta/dashboards/ops',
     '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/picklist/industry', '/meta/flow/on_lead', '/meta/api/crm_served',
-    '/meta/position/sales_rep', '/meta/permission/crm_sales_user',
+    '/meta/position/sales_rep', '/meta/permission/crm_sales_user', '/meta/report/opps_by_stage',
 ];
 const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
 const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];
@@ -998,6 +1004,7 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
         expect((await read('/meta/app/crm', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('客户管理');
         expect((await read('/meta/position/sales_rep', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售代表');
         expect((await read('/meta/permission/crm_sales_user', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售用户');
+        expect((await read('/meta/report/opps_by_stage', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('各阶段商机');
         const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
         expect(zhDoc.item?.label).toBe('入门');
         expect(text(zhDoc)).not.toContain('"translations"');

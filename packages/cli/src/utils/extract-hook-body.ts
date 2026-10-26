@@ -474,21 +474,13 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string; face?: LoweringFac
   // are measured against the HOOK context; the action face's lowering is
   // unchanged.
   //
-  // `provenance` is the silent half, like `submitted`: a guard on
-  // `ctx.provenance?.flowRunId` reads `undefined` once lowered and evaluates as
-  // if the write had no origin. ⛔ Marshalling it into the VM instead is a body
-  // contract decision (the body face is declared key by key), not a fix to make
-  // here — the same posture `dispatch.scope` records above.
-  {
-    rx: hookContextMemberRx('provenance'),
-    face: 'hook',
-    reason:
-      '`ctx.provenance` is not reachable from a sandboxed body — the VM\'s `ctx` is assembled key by key '
-      + 'and does not carry the write\'s provenance, so it reads `undefined` there: a guard written on '
-      + '`ctx.provenance.flowRunId` or `ctx.provenance.attributedUserId` evaluates as if the write had no '
-      + 'origin, and reaching into it is a TypeError at run time. A body has no equivalent today; leave '
-      + 'this handler bundled so it runs in-process, where `ctx.provenance` carries the server-stamped marks',
-  },
+  // `provenance` WAS the silent half of this family, like `submitted`, and is
+  // no longer a member of it: since #25905 `buildSandboxContext` carries the
+  // declared `HookContextSchema.provenance` across the sandbox boundary (its
+  // three members, each a string or absent, frozen in the VM), so a body reads
+  // `ctx.provenance?.flowRunId` exactly as an in-process handler does and a
+  // handler reading it lowers. The enumeration pin
+  // (test/lowered-body-face-enumeration.test.ts) holds that classification.
   // `ql` and `transaction` are live host objects — the engine, a driver
   // transaction handle — that a copy into the VM heap cannot carry, the
   // `.sudo(` shape one level up: real in-process, absent from the body.

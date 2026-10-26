@@ -279,6 +279,9 @@ describe('the lowered body face, against the in-process HookContext (#22837)', (
     expect(inProcess.get('dispatch')).toEqual(new Set(['mode', 'index', 'scope']));
     expect(body.get('dispatch')).toEqual(new Set(['mode', 'index']));
     expect(body.get('session')).toBe('passthrough');
+    // [#25905] Carried member by member, so a member the spec adds to it later is seen as absent.
+    expect(inProcess.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId']));
+    expect(body.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId']));
     // A tombstone is no member: `session.roles` is `retiredKey(…)`.
     expect(inProcess.get('session')).not.toContain('roles');
     expect(absent.length).toBeGreaterThan(0);
@@ -306,16 +309,11 @@ describe('the lowered body face, against the in-process HookContext (#22837)', (
     }
   });
 
-  // The measured state on the base of #22837, so a reader sees the classification
-  // without running the derivation — and so a member moving class is a visible diff.
-  it('classifies today: one exception, five refusals', () => {
-    expect(absent).toEqual(['dispatch.scope', 'id', 'provenance', 'ql', 'submitted', 'transaction']);
-    expect(absent.filter((p) => refusalOf(p) !== null)).toEqual([
-      'dispatch.scope',
-      'provenance',
-      'ql',
-      'submitted',
-      'transaction',
-    ]);
+  // The measured state, so a reader sees the classification without running the
+  // derivation — and so a member moving class is a visible diff. `provenance`
+  // left the absent set at #25905, when the body face started carrying it.
+  it('classifies today: one exception, four refusals', () => {
+    expect(absent).toEqual(['dispatch.scope', 'id', 'ql', 'submitted', 'transaction']);
+    expect(absent.filter((p) => refusalOf(p) !== null)).toEqual(['dispatch.scope', 'ql', 'submitted', 'transaction']);
   });
 });

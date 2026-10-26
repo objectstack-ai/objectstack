@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { rootWorkflowsDir } from './helpers/root-ci';
+
 /**
  * objectui#3697: nothing in this repository looks at a version literal written
  * into documentation prose.
@@ -1652,7 +1654,11 @@ const skeletonChecks: SkeletonCheck[] = KNOWN_CLAIMS.flatMap((entry) => {
 
 /**
  * The directory that IS this repository's CI, and the anchor source for every
- * `workflowVersionKey` entry above (objectui#6400).
+ * `workflowVersionKey` entry above (objectui#6400): the root `.github/workflows/`, the only
+ * workflows GitHub runs under the monorepo. Until objectstack#25712 this read objectui's
+ * own, under `ui/.github/workflows/`, which runs nowhere; the spellings the notes in this
+ * file count (`'22.x'` in most lanes, `'22'` in `half-state-patrol.yml`) are that
+ * directory's. objectstack#25712 measured every root declaration at `'22'`.
  *
  * Not a scan root and never one: no claim is ever recorded FROM these files. They are read
  * only as the truth a doc claim is measured against, exactly as `pluginDeclaredRanges`
@@ -1660,7 +1666,7 @@ const skeletonChecks: SkeletonCheck[] = KNOWN_CLAIMS.flatMap((entry) => {
  * this tree already states machine-readably, so a reviewer should not be the thing that
  * re-reads it.
  */
-const WORKFLOWS_DIR = '.github/workflows';
+const WORKFLOWS_DIR = path.relative(repoRoot, rootWorkflowsDir);
 
 /** One `<key>: <value>` declaration found in one workflow file. */
 interface WorkflowDeclaration {
@@ -1761,6 +1767,10 @@ function workflowVersionDeclarations(
  * the census cross-check. Should `parseWorkflowVersionLine` ever stop recognising a
  * spelling that is in the tree, these two lists stop being the same list and the assertion
  * says so, rather than the anchor quietly shrinking by one lane.
+ *
+ * It skips whole-line YAML comments, which declare nothing: the root workflows quote a
+ * commented setup example in `half-state-patrol.yml`'s usage block, and counting that
+ * would read the parser's correct silence on it as a lost lane (objectstack#25712).
  */
 function workflowKeyMentions(
   key: string,
@@ -1772,6 +1782,7 @@ function workflowKeyMentions(
   for (const name of workflowFiles(dir)) {
     const lines = fs.readFileSync(path.join(dir, name), 'utf8').split('\n');
     for (let i = 0; i < lines.length; i++) {
+      if (/^\s*#/.test(lines[i])) continue;
       if (re.test(lines[i])) found.push({ file: name, line: i + 1 });
     }
   }

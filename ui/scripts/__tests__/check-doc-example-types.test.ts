@@ -531,70 +531,20 @@ describe('the sibling harness is imported, not forked', () => {
  * the YAML as text with whole-line comments removed — the headers in this
  * repository name other workflows and other scripts in prose.
  */
-describe('wiring — the gate runs in CI, and in a workflow a docs-only pull request can start', () => {
+describe('wiring — the gate is reachable by name, and documented by command', () => {
   const GATE = 'scripts/check-doc-example-types.mjs';
-  const SIBLING = 'scripts/check-doc-snippet-types.mjs';
-  const HOME = 'repo-gates.yml';
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
 
-  const yamlOf = (file: string): string =>
-    fs
-      .readFileSync(path.join(workflowDir, file), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*#/.test(line))
-      .join('\n');
-
-  it('has a workflow that gates pull requests, not just pushes', () => {
-    expect(workflowFiles, 'the workflow directory scan returned implausibly few files').toContain(HOME);
-    const yaml = yamlOf(HOME);
-    expect(yaml, 'a check nothing runs is not a gate — objectui#8757').toContain(GATE);
-    expect(yaml).toContain('pull_request:');
-  });
-
-  it('runs it in NO path-filtered workflow — an `@example` moves with the source it documents', () => {
-    expect(workflowFiles.length, 'the workflow directory scan returned implausibly few files').toBeGreaterThan(5);
-    for (const file of workflowFiles) {
-      const yaml = yamlOf(file);
-      if (!yaml.includes(GATE)) continue;
-      expect(yaml, `${file} filters paths and would miss a change this gate exists to judge`).not.toMatch(
-        /^\s*paths(-ignore)?:/m,
-      );
-    }
-  });
-
-  it('lives in exactly one workflow — one gate, one home', () => {
-    expect(workflowFiles.filter((f) => yamlOf(f).includes(GATE))).toEqual([HOME]);
-  });
-
-  /**
-   * The gate's exit `2` means THE GATE COULD NOT RUN — the packages are unbuilt
-   * — and is neither green nor red. Invoked before its own build it would
-   * return exactly that on every run, which is the counterfeit shape: a step
-   * that runs, prints a page of text and judged nothing.
-   */
-  it('is invoked AFTER the build, so a precondition exit is not a state CI can reach', () => {
-    const yaml = yamlOf(HOME);
-    const build = yaml.indexOf('turbo run build');
-    const invoke = yaml.search(new RegExp(`run: node ${GATE.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
-    expect(build, 'the workflow must build the packages the covered examples import').toBeGreaterThan(-1);
-    expect(invoke, 'the workflow must invoke the gate itself').toBeGreaterThan(-1);
-    expect(build, 'invoked before its own build, the gate would exit 2 on every run').toBeLessThan(invoke);
-  });
-
-  /**
-   * Both gates block, so whichever is second is skipped when the first is red.
-   * Ordering the newly wired gate FIRST would let it mask an established one —
-   * the worse of the two directions, and the one this asserts against.
-   */
-  it('is invoked AFTER the sibling blocking gate, so a new gate cannot mask an established one', () => {
-    const yaml = yamlOf(HOME);
-    const sibling = yaml.search(new RegExp(`run: node ${SIBLING.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
-    const invoke = yaml.search(new RegExp(`run: node ${GATE.replace(/[.\\/]/g, '\\$&')}\\s*$`, 'm'));
-    expect(sibling, 'the sibling blocking gate must still be invoked').toBeGreaterThan(-1);
-    expect(invoke).toBeGreaterThan(-1);
-    expect(invoke).toBeGreaterThan(sibling);
-  });
+  // Retired with objectstack#25712: `has a workflow that gates pull requests,
+  // not just pushes`, `runs it in NO path-filtered workflow`, `lives in exactly
+  // one workflow — one gate, one home`, `is invoked AFTER the build`, and `is
+  // invoked AFTER the sibling blocking gate`. Each read objectui's
+  // `repo-gates.yml`, this gate's only home, and that file runs nowhere under
+  // the monorepo: GitHub runs the root `.github/workflows/` alone, and no
+  // workflow there runs this gate. objectstack#25880 ports the `repo-gates.yml`
+  // gates (row 24 of the objectstack#25697 workflow roster) into the root `Lint
+  // UI` job and brings these pins back against that job, by path. The alias
+  // case at the bottom keeps its `package.json` half and drops the workflow
+  // half for the same reason.
 
   /**
    * objectui#3653's discipline, applied by hand here: the page that inventories
@@ -622,11 +572,10 @@ describe('wiring — the gate runs in CI, and in a workflow a docs-only pull req
     expect(row[0]).toContain(GATE);
   });
 
-  it('the root package.json alias and the workflow invoke the same script', () => {
+  it('the root package.json alias invokes the gate', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts['check:doc-examples']).toBe(`node ${GATE}`);
-    expect(yamlOf(HOME)).toContain(`run: node ${GATE}`);
   });
 });

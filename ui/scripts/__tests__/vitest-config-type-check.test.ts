@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
+
 /**
  * objectui#7328 — the repo-root `vitest.config.mts` had no RUNNABLE gate.
  *
@@ -42,7 +44,6 @@ import ts from 'typescript';
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const configPath = path.join(repoRoot, 'apps/console/tsconfig.node.json');
-const ciWorkflowPath = path.join(repoRoot, '.github/workflows/ci.yml');
 
 /** The root script CI invokes, and the one a contributor can run locally. */
 const SCRIPT_NAME = 'type-check:vitest-config';
@@ -184,15 +185,14 @@ describe('the gate is actually wired up (objectui#7328)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts?: Record<string, string>;
   };
-  const ciWorkflow = fs.readFileSync(ciWorkflowPath, 'utf8');
 
-  /** The `type-check:` job body, from its key up to the next job at the same indent. */
+  /**
+   * The `type-check-ui:` job body of objectstack's root ci.yml, which is
+   * objectui's `Type Check` (objectstack#25697). The ci.yml under `ui/.github/`
+   * runs nowhere (objectstack#25712).
+   */
   function typeCheckJob(): string {
-    const start = ciWorkflow.search(/^ {2}type-check:[ \t]*$/m);
-    expect(start, 'ci.yml must still have a `type-check:` job').toBeGreaterThan(-1);
-    const rest = ciWorkflow.slice(start + 1);
-    const next = rest.search(/^ {2}[a-z0-9][a-z0-9-]*:[ \t]*$/m);
-    return next === -1 ? rest : rest.slice(0, next);
+    return jobBlock(rootCi(), UI_JOBS.typeCheck);
   }
 
   it('is runnable locally, not CI-only', () => {
@@ -219,22 +219,23 @@ describe('the gate is actually wired up (objectui#7328)', () => {
   it('runs in ci.yml’s type-check job', () => {
     expect(
       typeCheckJob(),
-      `ci.yml’s type-check job must run \`pnpm ${SCRIPT_NAME}\`. Without it the script is a ` +
+      `ci.yml’s \`type-check-ui\` job must run \`pnpm --dir ui run ${SCRIPT_NAME}\`. Without it the script is a ` +
         'command nobody runs, and the root Vitest config is back to being covered only when the ' +
         'console’s own type-check happens to run.',
-    ).toContain(`pnpm ${SCRIPT_NAME}`);
+    ).toContain(uiRun(SCRIPT_NAME));
   });
 
   it('runs after the install and BEFORE the build, in the cheap half of the job', () => {
     const job = typeCheckJob();
     const install = job.indexOf('pnpm install --frozen-lockfile');
-    const check = job.indexOf(`pnpm ${SCRIPT_NAME}`);
-    // A line that IS the bare command, as `run:`'s value or inside a `run: |`
-    // block -- objectui#12222 put the two speeds' branches in that step.
-    const build = job.search(/^\s+(?:run: )?pnpm type-check$/m);
+    const check = job.indexOf(uiRun(SCRIPT_NAME));
+    // The root job's `Run type-check over the ui packages` step: turbo's
+    // `type-check` task, whose `^build` is the workspace build. Both of its
+    // speeds' branches start a line with the command.
+    const build = job.search(/^\s+pnpm exec turbo run type-check\b/m);
 
     expect(install, 'the type-check job must still install dependencies').toBeGreaterThan(-1);
-    expect(build, 'the type-check job must still run `pnpm type-check`').toBeGreaterThan(-1);
+    expect(build, 'the `type-check-ui` job must still run turbo’s `type-check` task').toBeGreaterThan(-1);
     expect(check, `the type-check job must run \`pnpm ${SCRIPT_NAME}\``).toBeGreaterThan(-1);
 
     expect(check, `\`pnpm ${SCRIPT_NAME}\` needs tsc and the vite types from node_modules`).toBeGreaterThan(

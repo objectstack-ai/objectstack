@@ -210,6 +210,15 @@ const ALLOW = new Map([
     'this gate. Do not fold that invariant in here by widening this gate\'s remit without ' +
     'saying so in the header.',
   ],
+  [
+    'packages/plugins/plugin-auth/src/demo-staff.ts',
+    'Development-boot provisioning of the demo accounts a stack declares (#25777), NOT a ' +
+    'resolver: it reads each grant table only to ask whether the ONE literal row it is about ' +
+    'to insert (one user, one declared position or permission set, the Default Organization, ' +
+    'limit 1) is already there, so a second boot adds nothing. It aggregates no grants, builds ' +
+    'no context and feeds no verdict; a demo account\'s grants resolve through ' +
+    'resolveAuthzContext like any other account\'s.',
+  ],
 ]);
 
 // Entry points that MUST delegate to the shared resolver (never re-inline it), each

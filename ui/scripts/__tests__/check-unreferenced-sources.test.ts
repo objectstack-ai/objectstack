@@ -14,6 +14,7 @@ import {
   evaluatePath,
   readBuildConfig,
 } from '../check-unreferenced-sources.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#7515 — a source file nothing reaches must not sit in a published
@@ -368,25 +369,25 @@ describe('the gate is wired where the sibling gates are', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
   };
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  // The workflow GitHub runs: objectstack's root ci.yml, whose `type-check-ui`
+  // job is objectui's `Type Check` (objectstack#25697). objectui's own ci.yml
+  // under `ui/.github/` runs nowhere (objectstack#25712).
+  const job = jobBlock(rootCi(), UI_JOBS.typeCheck);
 
   it('package.json exposes it as a named script', () => {
     expect(pkg.scripts['check:unreferenced-sources']).toBe(`node ${GATE}`);
   });
 
   it('ci.yml runs it after the install it needs (it parses with typescript)', () => {
-    const install = ci.indexOf('pnpm install --frozen-lockfile');
-    const step = ci.indexOf('run: pnpm check:unreferenced-sources');
-    expect(step, 'ci.yml does not run `pnpm check:unreferenced-sources`').toBeGreaterThan(-1);
+    const install = job.indexOf('pnpm install --frozen-lockfile');
+    const step = job.indexOf(`run: ${uiRun('check:unreferenced-sources')}`);
+    expect(step, '`type-check-ui` does not run `pnpm --dir ui run check:unreferenced-sources`').toBeGreaterThan(-1);
+    expect(install, '`type-check-ui` no longer installs dependencies').toBeGreaterThan(-1);
     expect(step, 'the check runs before dependencies are installed').toBeGreaterThan(install);
   });
 
-  it('runs in the `type-check` job, where the other parse-based gates run', () => {
-    const jobs = ci.slice(ci.search(/^jobs:[ \t]*$/m));
-    const typeCheck = jobs.slice(jobs.search(/^ {2}type-check:[ \t]*$/m));
-    const nextJob = typeCheck.slice(1).search(/^ {2}\S/m);
-    const block = nextJob === -1 ? typeCheck : typeCheck.slice(0, nextJob + 1);
-    expect(block).toContain('run: pnpm check:unreferenced-sources');
+  it('runs in the `type-check-ui` job, where the other parse-based gates run', () => {
+    expect(job).toContain(`run: ${uiRun('check:unreferenced-sources')}`);
   });
 
   it("shares the sibling gate's parser rather than growing a second one", () => {

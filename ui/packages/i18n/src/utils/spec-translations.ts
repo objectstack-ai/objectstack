@@ -94,6 +94,9 @@ const SPEC_TRANSLATION_GROUPS = [
   // commit (objectui#13478), copied through onto `app` the same way.
   'positions',
   'permissions',
+  // objectstack #25788 serves `reports` (a report's label and description are
+  // translatable), copied through onto `app` the same way.
+  'reports',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

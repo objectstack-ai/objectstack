@@ -496,6 +496,12 @@ export const ERROR_CODE_LEDGER = {
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',
+    // [#25820] The `/automation/:name/runs/:runId` resume and run-read doors
+    // answer a run that another flow owns as an unknown one, before the engine
+    // is asked (`runIsOutsideFlow`, `domains/automation.ts`), so the door
+    // stamps the code itself; the engine's own resume refusal is the
+    // `@objectstack/service-automation` row.
+    'RUN_NOT_FOUND',
     'SIGN_IN_REQUIRED',
     'UNSUPPORTED',
     'VALIDATION_FAILED',

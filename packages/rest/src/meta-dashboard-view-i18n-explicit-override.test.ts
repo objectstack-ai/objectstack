@@ -28,6 +28,10 @@
  * `zh-CN`; the unedited widget / view stays translated; a reset (no overlay
  * row) restores the shipped body, translated; a dashboard whose catalog
  * carries no widget titles (the showcase control) serves the edit unchanged.
+ *
+ * #25788 — a REPORT joined the table when it became translatable: it is
+ * overlay-editable too (ADR-0126 Regime O), so `translateReport` landed with
+ * its base (`getPackagedReportBase`) and §4 pins the same three facts for it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -55,6 +59,21 @@ const SHIPPED_TITLE = 'Total Users';
 const EDITED_TITLE = 'Total Users (edited-20730)';
 const SHIPPED_LABEL = 'In Progress';
 const EDITED_LABEL = 'In Progress (edited-20730)';
+
+const REPORT = 'opps_by_stage';
+const SHIPPED_REPORT_LABEL = 'Opportunities by Stage';
+const EDITED_REPORT_LABEL = 'Opportunities by Stage (edited-25788)';
+
+/** The report as the code package ships it. */
+const packagedReport = () => ({
+    name: REPORT,
+    label: SHIPPED_REPORT_LABEL,
+    description: 'Summary of opportunities grouped by stage',
+    type: 'summary',
+    dataset: 'pipeline',
+    rows: ['stage'],
+    values: ['amount'],
+});
 
 /** The dashboard as the code package ships it. */
 const packagedDashboard = () => ({
@@ -117,6 +136,7 @@ const BUNDLE: Record<string, any> = {
             [CONTROL_DASH]: { label: 'Showcase Overview' },
         },
         objects: { [OBJ]: { _views: { in_progress: { label: SHIPPED_LABEL }, urgent: { label: 'Urgent' } } } },
+        reports: { [REPORT]: { label: SHIPPED_REPORT_LABEL, description: 'Summary of opportunities grouped by stage' } },
     },
     'zh-CN': {
         dashboards: {
@@ -129,6 +149,7 @@ const BUNDLE: Record<string, any> = {
             [CONTROL_DASH]: { label: '展示概览' },
         },
         objects: { [OBJ]: { _views: { in_progress: { label: '进行中' }, urgent: { label: '紧急' } } } },
+        reports: { [REPORT]: { label: '各阶段商机', description: '按阶段汇总的商机' } },
     },
 };
 
@@ -151,7 +172,7 @@ const LOCALES = ['en', 'zh-CN'] as const;
 // The host: REAL registry, REAL protocol, the REST routes
 // ---------------------------------------------------------------------------
 
-type OverlayRow = { type: 'dashboard' | 'view'; name: string; body: Record<string, unknown> };
+type OverlayRow = { type: 'dashboard' | 'view' | 'report'; name: string; body: Record<string, unknown> };
 
 /** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
 const whereValueMatches = (actual: unknown, want: unknown): boolean =>
@@ -181,6 +202,7 @@ function makeHost(overlays: OverlayRow[], who: Who) {
     registry.registerItem('dashboard', packagedControlDashboard(), 'name', SHOWCASE_PKG);
     registry.registerItem('view', { name: OBJ, ...taskContainer() }, 'name', SHOWCASE_PKG);
     for (const item of expandViewContainer(OBJ, taskContainer())) registry.registerItem('view', item, 'name', SHOWCASE_PKG);
+    registry.registerItem('report', packagedReport(), 'name', SHOWCASE_PKG);
 
     const rows = overlays.map((o, i) => ({
         id: `r_${i}`,
@@ -257,6 +279,7 @@ const titleOf = (doc: any, id: string) => (doc?.widgets as any[] | undefined)?.f
 
 const EDITED_DASHBOARD: OverlayRow = { type: 'dashboard', name: DASH, body: withWidgetTitle(packagedDashboard(), 'widget_total_users', EDITED_TITLE) };
 const EDITED_VIEW: OverlayRow = { type: 'view', name: VIEW, body: { ...packagedViewItem(VIEW), label: EDITED_LABEL } };
+const EDITED_REPORT: OverlayRow = { type: 'report', name: REPORT, body: { ...packagedReport(), label: EDITED_REPORT_LABEL } };
 
 const READS = ['item', 'listed'] as const;
 const cells = () => (Object.keys(CALLERS) as Who[]).flatMap((who) =>
@@ -271,6 +294,7 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         getPackagedObjectBase: vi.fn((name: string) => ({ kind: 'object', name })),
         getPackagedDashboardBase: vi.fn((name: string) => ({ kind: 'dashboard', name })),
         getPackagedViewBase: vi.fn((name: string) => ({ kind: 'view', name })),
+        getPackagedReportBase: vi.fn((name: string) => ({ kind: 'report', name })),
     });
 
     it('asks each type its own accessor, handing the served name through unchanged', () => {
@@ -279,19 +303,23 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         expect(packagedObjectBaseOf(p, 'dashboard', DASH)).toEqual({ kind: 'dashboard', name: DASH });
         // The qualified registry name — never the bare `in_progress` the catalog uses.
         expect(packagedObjectBaseOf(p, 'view', VIEW)).toEqual({ kind: 'view', name: VIEW });
+        // [#25788] A report is overlay-editable too (ADR-0126 Regime O).
+        expect(packagedObjectBaseOf(p, 'report', REPORT)).toEqual({ kind: 'report', name: REPORT });
         expect(p.getPackagedObjectBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedDashboardBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedViewBase).toHaveBeenCalledTimes(1);
+        expect(p.getPackagedReportBase).toHaveBeenCalledTimes(1);
     });
 
     it('asks nothing for a type with no packaged base', () => {
         const p = protocol();
-        for (const type of ['action', 'app', 'dataset', 'page', 'report', 'toString', 'constructor']) {
+        for (const type of ['action', 'app', 'dataset', 'page', 'toString', 'constructor']) {
             expect(packagedObjectBaseOf(p, type, 'x'), type).toBeUndefined();
         }
         expect(p.getPackagedObjectBase).not.toHaveBeenCalled();
         expect(p.getPackagedDashboardBase).not.toHaveBeenCalled();
         expect(p.getPackagedViewBase).not.toHaveBeenCalled();
+        expect(p.getPackagedReportBase).not.toHaveBeenCalled();
     });
 
     it('answers undefined for an empty name, a protocol without the accessor, and an accessor that throws', () => {
@@ -364,5 +392,27 @@ describe('#20730 §3 view — a published overlay on a packaged view is what bot
     it.each(cells())('$read read, $who, $locale: after a reset the shipped label is served, translated', async ({ who, locale, read }) => {
         const host = makeHost([], who);
         expect((await host[read]('view', VIEW, locale))?.label).toBe(locale === 'zh-CN' ? '进行中' : SHIPPED_LABEL);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §4 — a published report overlay beats the packaged catalog (#25788)
+// ---------------------------------------------------------------------------
+
+describe('#25788 §4 report — a published overlay on a packaged report is what both /meta reads serve', () => {
+    it.each(cells())('$read read, $who, $locale: the edited label serves the edit', async ({ who, locale, read }) => {
+        const host = makeHost([EDITED_REPORT], who);
+        expect((await host[read]('report', REPORT, locale))?.label).toBe(EDITED_REPORT_LABEL);
+    });
+
+    it.each(cells())('$read read, $who, $locale: the unedited description stays translated', async ({ who, locale, read }) => {
+        const host = makeHost([EDITED_REPORT], who);
+        const expected = locale === 'zh-CN' ? '按阶段汇总的商机' : 'Summary of opportunities grouped by stage';
+        expect((await host[read]('report', REPORT, locale))?.description).toBe(expected);
+    });
+
+    it.each(cells())('$read read, $who, $locale: after a reset the shipped label is served, translated', async ({ who, locale, read }) => {
+        const host = makeHost([], who);
+        expect((await host[read]('report', REPORT, locale))?.label).toBe(locale === 'zh-CN' ? '各阶段商机' : SHIPPED_REPORT_LABEL);
     });
 });

@@ -25,6 +25,7 @@
     "seed",
     "seed-loader",
     "---More---",
+    "column-apply-on",
     "context-tokens",
     "driver-common",
     "driver-memory",

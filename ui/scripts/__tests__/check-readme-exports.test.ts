@@ -1403,52 +1403,27 @@ describe('`--list` REFUSES on an unbuilt tree instead of dying in it (objectui#9
   });
 });
 
-describe('wiring — the gate is reachable and every pull-request shape starts it', () => {
-  const workflowDir = path.join(repoRoot, '.github/workflows');
-  const workflowFiles = fs.readdirSync(workflowDir).filter((f) => f.endsWith('.yml'));
-  const workflow = fs.readFileSync(path.join(workflowDir, 'repo-gates.yml'), 'utf8');
-  const uncommented = workflow
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
+describe('wiring — the gate is reachable by name, and classified', () => {
+  // Retired with objectstack#25712: `is run by EXACTLY ONE workflow — two homes
+  // is two answers`, `carries NO trigger-level path filter — a README-only PR
+  // must start it`, `subscribes pull_request, push, merge_group and
+  // workflow_dispatch`, and `builds before it judges`. Each read objectui's
+  // `repo-gates.yml`, this gate's only home, and that file runs nowhere under
+  // the monorepo: GitHub runs the root `.github/workflows/` alone, and no
+  // workflow there runs this gate. objectstack#25880 ports the `repo-gates.yml`
+  // gates (row 24 of the objectstack#25697 workflow roster) into the root `Lint
+  // UI` job and brings these pins back against that job, by path. The
+  // classification case keeps its `REQUIRED_CONTEXTS` half and drops the two
+  // step names it read from the workflow, for the same reason.
 
   it('is runnable by name', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:readme-exports']).toBe('node scripts/check-readme-exports.mjs');
   });
 
-  it('is run by EXACTLY ONE workflow — two homes is two answers', () => {
-    const runners = workflowFiles.filter((file) =>
-      fs.readFileSync(path.join(workflowDir, file), 'utf8').includes('check:readme-exports'),
-    );
-    expect(runners).toEqual(['repo-gates.yml']);
-  });
-
-  it('carries NO trigger-level path filter — a README-only PR must start it', () => {
-    // This is the shape `ci.yml` structurally cannot see, which is the whole
-    // reason this gate has its own workflow.
-    expect(uncommented).not.toMatch(/^\s*paths(-ignore)?:/m);
-  });
-
-  it('subscribes pull_request, push, merge_group and workflow_dispatch', () => {
-    for (const trigger of ['pull_request:', 'push:', 'merge_group:', 'workflow_dispatch:']) {
-      expect(uncommented).toContain(trigger);
-    }
-  });
-
   it('is classified as a required context, so a Dependabot merge waits for it', () => {
     // Since objectui#12214 the check reports as a step of the ONE `Repo Gates`
     // context, which is the name the classification and the floor read.
     expect(REQUIRED_CONTEXTS).toContain('Repo Gates');
-    expect(uncommented).toContain('name: Repo Gates');
-    expect(uncommented).toContain('name: README Export Check');
-  });
-
-  it('builds before it judges — without `dist/` the gate can only report `unbuilt`', () => {
-    const buildAt = uncommented.indexOf('turbo run build');
-    const checkAt = uncommented.indexOf('pnpm check:readme-exports');
-    expect(buildAt).toBeGreaterThan(-1);
-    expect(checkAt).toBeGreaterThan(buildAt);
-    expect(uncommented).toContain('pnpm install --frozen-lockfile');
   });
 });

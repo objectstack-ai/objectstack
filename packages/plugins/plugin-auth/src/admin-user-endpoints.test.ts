@@ -835,6 +835,108 @@ describe('Setup dialogs: one password rule (sys_user create_user / set_user_pass
   }
 });
 
+// ── One length range for every admin door (#25824) ────────────────────────
+//
+// better-auth's own `createUser` checks only the maximum length, so
+// create-user saved a 1-character password (and the user signed in with it)
+// while set-user-password and the user's own change-password refuse it. Both
+// admin doors now hold the deployment's `minPasswordLength` /
+// `maxPasswordLength` in the one place they resolve a password, with the same
+// refusal, before anything is written — and a generated password is sized to
+// the range instead of falling outside it.
+describe('admin doors: one password length range (create-user / set-user-password)', () => {
+  const DOORS = [
+    {
+      door: 'create-user',
+      explicitKey: 'password',
+      base: { email: 'x@example.com', name: 's', mustChangePassword: false },
+      run: (m: ReturnType<typeof makeDeps>, body: Record<string, unknown>) =>
+        runAdminCreateUser(m.deps, makeRequest(body), ACTOR),
+      appliedPassword: (m: ReturnType<typeof makeDeps>) =>
+        callsOf(m.createUser).map((c) => (c[0] as unknown as { body: { password: string } }).body.password),
+    },
+    {
+      door: 'set-user-password',
+      explicitKey: 'newPassword',
+      base: { userId: 'user-9', mustChangePassword: false },
+      run: (m: ReturnType<typeof makeDeps>, body: Record<string, unknown>) =>
+        runAdminSetUserPassword(m.deps, makeRequest(body), ACTOR),
+      appliedPassword: (m: ReturnType<typeof makeDeps>) =>
+        callsOf(m.authCtx.password.hash).map((c) => c[0]),
+    },
+  ] as const;
+
+  for (const d of DOORS) {
+    for (const [shape, password, message] of [
+      ['a 1-character password (the reported repro)', 'a', 'Password must be at least 8 characters'],
+      ['a password one short of the minimum', 'Abcde1!', 'Password must be at least 8 characters'],
+      ['a password one past the maximum', `Ab1!${'x'.repeat(125)}`, 'Password must be at most 128 characters'],
+    ] as const) {
+      it(`${d.door}: refuses ${shape} with INVALID_REQUEST, and writes nothing`, async () => {
+        const m = makeDeps();
+        const res = await d.run(m, { ...d.base, [d.explicitKey]: password });
+        expect(res.status).toBe(400);
+        expect(res.body.error?.code).toBe('INVALID_REQUEST');
+        expect(res.body.error?.message).toBe(message);
+        expect(m.createUser).not.toHaveBeenCalled();
+        expect(m.authCtx.password.hash).not.toHaveBeenCalled();
+        expect(m.authCtx.internalAdapter.updatePassword).not.toHaveBeenCalled();
+        expect(m.authCtx.internalAdapter.createAccount).not.toHaveBeenCalled();
+        expect(m.engineUpdate).not.toHaveBeenCalled();
+        expect(m.engineCreate).not.toHaveBeenCalled();
+      });
+    }
+
+    for (const [shape, password] of [
+      ['exactly the minimum', 'Abcdef1!'],
+      ['exactly the maximum', `Ab1!${'x'.repeat(124)}`],
+    ] as const) {
+      it(`${d.door}: applies a password of ${shape}`, async () => {
+        const m = makeDeps();
+        const res = await d.run(m, { ...d.base, [d.explicitKey]: password });
+        expect(res.status).toBe(200);
+        expect(d.appliedPassword(m)).toEqual([password]);
+      });
+    }
+
+    it(`${d.door}: reads the deployment's range, not a built-in 8`, async () => {
+      const m = makeDeps();
+      m.authCtx.password.config = { minPasswordLength: 12, maxPasswordLength: 128 };
+      const res = await d.run(m, { ...d.base, [d.explicitKey]: 'Explicit1!' });
+      expect(res.status).toBe(400);
+      expect(res.body.error?.message).toBe('Password must be at least 12 characters');
+      expect(d.appliedPassword(m)).toEqual([]);
+    });
+
+    for (const [shape, config, length] of [
+      ['raised to a minimum above 16', { minPasswordLength: 24, maxPasswordLength: 128 }, 24],
+      ['capped at a maximum below 16', { minPasswordLength: 8, maxPasswordLength: 14 }, 14],
+    ] as const) {
+      it(`${d.door}: a generated password is sized to the range (${shape})`, async () => {
+        const m = makeDeps();
+        m.authCtx.password.config = { ...config };
+        const res = await d.run(m, { ...d.base, generatePassword: true });
+        expect(res.status).toBe(200);
+        const temp = (res.body.data as any).temporaryPassword as string;
+        expect(temp).toHaveLength(length);
+        expect(d.appliedPassword(m)).toEqual([temp]);
+      });
+    }
+  }
+
+  it('create-user: a range that cannot be read refuses, and no account is created', async () => {
+    const m = makeDeps({
+      getAuthContext: vi.fn(async () => {
+        throw new Error('auth context unavailable');
+      }),
+    });
+    const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'x@example.com', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(500);
+    expect(res.body.error?.code).toBe('INTERNAL_ERROR');
+    expect(m.createUser).not.toHaveBeenCalled();
+  });
+});
+
 // ── The ledger row records the admin's decisions, never a field value ──────
 //
 // `sys_audit_log.metadata` is free text. The ledger's read side narrows the

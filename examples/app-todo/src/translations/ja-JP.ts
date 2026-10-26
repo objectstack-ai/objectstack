@@ -91,6 +91,15 @@ export const jaJP: TranslationData = {
       description: '個人タスク管理アプリケーション',
     },
   },
+  // The app's reports, as its report index lists them and each report page is
+  // headed (`reports.<name>.label` / `.description`).
+  reports: {
+    tasks_by_status: { label: 'ステータス別タスク', description: 'ステータス別に集計したタスク' },
+    tasks_by_priority: { label: '優先度別タスク', description: '優先度レベル別に集計したタスク' },
+    tasks_by_owner: { label: '担当者別タスク', description: '担当者別のタスク集計' },
+    completed_tasks: { label: '完了済みタスク', description: '作業時間の記録付きの完了済みタスク' },
+    time_tracking: { label: '作業時間レポート', description: '見積時間と実績時間の分析' },
+  },
   // The quick-add wizard: the flow's name in the runner header and completion
   // toast, each screen's heading and each field label.
   flows: {

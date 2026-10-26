@@ -5,10 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { parse as parseYaml } from 'yaml';
 
 import {
-  FIXED_ROOT_FILES,
   globToRegExp,
   main,
   rootChanges,
@@ -107,16 +105,8 @@ describe('select-type-check-scope — the root rule (objectui#12222)', () => {
     expect(rootChanges(['packages/plugin-kanban/src/x.ts', 'docs/x.md'], rule)).toHaveLength(2);
   });
 
-  it('names the fixed half of the rule in the workflow, next to the filter', () => {
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    const at = ci.indexOf('- name: Decide which packages to type-check');
-    expect(at, 'ci.yml’s type-check job no longer has the scope decision step').toBeGreaterThan(-1);
-    const comment = ci.slice(ci.lastIndexOf('THE ROOT RULE', at), at);
-    for (const glob of FIXED_ROOT_FILES) {
-      const spelled = glob.replace(/\/\*\*$/, '/');
-      expect(comment, `the root rule stated in ci.yml no longer names ${glob}`).toContain(spelled);
-    }
-  });
+  // `names the fixed half of the rule in the workflow, next to the filter`
+  // retired with objectstack#25712; see the end of this file.
 
   it('refuses glob syntax it does not implement rather than guessing a match', () => {
     expect(() => globToRegExp('scripts/{a,b}.mjs')).toThrow(/does not implement/);
@@ -248,59 +238,15 @@ describe('select-type-check-scope — the verdict', () => {
   });
 });
 
-describe('ci.yml — the two speeds are wired the way the selector assumes', () => {
-  const workflow = parseYaml(fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')) as {
-    jobs: Record<string, { steps: Array<{ name?: string; id?: string; if?: string; run?: string; env?: Record<string, string> }> }>;
-  };
-  const steps = workflow.jobs['type-check'].steps;
-  const decide = steps.find((s) => s.id === 'tc-scope');
-  const runStep = steps.find((s) => s.name === 'Run type-check');
-
-  it('runs the full battery, forced, on every event that is not a pull request or a queue build', () => {
-    expect(decide?.run, 'the scope decision step is gone').toBeDefined();
-    expect(decide?.run).toMatch(/pull_request\) base="\$PR_BASE"/);
-    expect(decide?.run).toMatch(/merge_group\) base="\$QUEUE_BASE"/);
-    expect(decide?.run).toMatch(/\*\)\s+echo 'scope=full'/);
-    expect(runStep?.env?.TURBO_FORCE).toBe("${{ steps.tc-scope.outputs.scope == 'full' }}");
-  });
-
-  it('fails OPEN: no verdict, no base sha, or an unknown answer type-checks the whole workspace', () => {
-    expect(decide?.run).toContain('node scripts/select-type-check-scope.mjs --base "$base"');
-    // The catch-all branch of the verdict `case` is the whole workspace.
-    expect(decide?.run).toMatch(/\*\)\s+echo "::warning::the type-check scope selector reached no verdict[^\n]*\n\s+echo 'scope=workspace'/);
-    expect(decide?.run).toMatch(/if \[ -z "\$base" \]; then[\s\S]*?status=2/);
-  });
-
-  it('filters only on the affected verdict, with turbo’s own dependents filter', () => {
-    expect(runStep?.run).toContain('if [ "$SCOPE" = \'affected\' ]; then');
-    expect(runStep?.run).toContain('pnpm type-check "--filter=...[$BASE]"');
-  });
-
-  /**
-   * objectui#12272: on the affected speed nothing else builds the packages the
-   * root setup program resolves, so this step must exist, run on that speed
-   * only, and sit between the turbo run and the root program.
-   */
-  it('builds the root programs’ packages on the affected speed, after the turbo run and before the root program', () => {
-    const names = steps.map((s) => s.name);
-    const at = names.indexOf('Build the packages the repo-root programs import');
-    expect(at, 'the type-check job no longer builds the root programs’ packages on the affected speed').toBeGreaterThan(-1);
-    expect(at).toBeGreaterThan(names.indexOf('Run type-check'));
-    expect(at).toBeLessThan(names.indexOf('Type-check repo-root vitest setup files'));
-
-    const build = steps[at];
-    expect(build.if).toContain("steps.relevant.outputs.should_run == 'true'");
-    expect(build.if, 'the full battery is unchanged: this step runs on the affected speed only').toContain(
-      "steps.tc-scope.outputs.scope == 'affected'",
-    );
-    expect(build.run).toContain('node scripts/select-type-check-scope.mjs --root-builds');
-    // `turbo run build`, never `type-check` with the names added: that task
-    // waits on `^build` and builds no named package's own declarations.
-    expect(build.run).toContain('pnpm exec turbo run build "${filters[@]}"');
-    expect(build.run, 'a failed build piped into `tee` must still fail the step').toContain('set -o pipefail');
-    // `Report what the turbo cache replayed` reads the NEWEST run summary; this
-    // run must not write one, or it would replace `Run type-check`'s.
-    expect(build.env?.TURBO_RUN_SUMMARY).toBeUndefined();
-    expect(build.run).not.toContain('TURBO_RUN_SUMMARY');
-  });
-});
+// `ci.yml — the two speeds are wired the way the selector assumes` retired with
+// objectstack#25712, and so did `names the fixed half of the rule in the
+// workflow, next to the filter` above. Both read objectui ci.yml's `type-check`
+// job: its `Decide which packages to type-check` step (`tc-scope`), the
+// `Run type-check` step's `TURBO_FORCE` and affected filter, and the
+// root-programs build between them. That file runs nowhere under the monorepo.
+// The root `type-check-ui` job that replaced it does not run this selector: it
+// takes the affected scope from turbo's own `...[<base>]` filter and builds the
+// root programs' packages in a step of its own, as row 7 `Type Check` of the
+// objectstack#25697 workflow roster records ("affected scope via turbo
+// `...[base]`"). Wiring the selector there brings these pins back against
+// `type-check-ui` (`helpers/root-ci.ts`).

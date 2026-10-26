@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1539 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1542 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -23,7 +23,7 @@ counts are sums of the rows they head. Regenerate with
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 32 | 438 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 14 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
-| [Data Protocol](/docs/references/data) | 29 | 178 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 30 | 180 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 12 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 29 | 151 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 34 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 36 | 285 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 37 | 286 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 169 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **197** | **1539** | 14 protocol modules |
+| **Total** | **199** | **1542** | 14 protocol modules |
 
 ---
 
@@ -131,13 +131,14 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 178 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **30 pages, 180 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
 | File | Schemas |
 | :--- | :--- |
 | [`analytics.zod.ts`](/docs/references/data/analytics) | `AggregationMetricType`, `AnalyticsDateRange`, `AnalyticsDateRangePreset`, `AnalyticsQuery`, `Cube`, `CubeJoin`, `Dimension`, `DimensionType`, `Metric`, `TimeUpdateInterval` |
+| [`column-apply-on.zod.ts`](/docs/references/data/column-apply-on) | `ColumnApplyOn` |
 | [`context-tokens.zod.ts`](/docs/references/data/context-tokens) | `ContextToken`, `ContextTokenPlaceholder` |
 | [`data-engine.zod.ts`](/docs/references/data/data-engine) | `BaseEngineOptions`, `DataEngineAggregateOptions`, `DataEngineAggregateRequest`, `DataEngineCountOptions`, `DataEngineCountRequest`, `DataEngineDeleteOptions`, `DataEngineDeleteRequest`, `DataEngineExecuteRequest`, `DataEngineFilter`, `DataEngineFindOneRequest`, `DataEngineFindRequest`, `DataEngineInsertOptions`, `DataEngineInsertRequest`, `DataEngineQueryOptions`, `DataEngineRequest`, `DataEngineSort`, `DataEngineUpdateOptions`, `DataEngineUpdateRequest`, `DataEngineVectorFindRequest`, `DroppedFieldsEvent`, `EngineAggregateOptions`, `EngineCountOptions`, `EngineDeleteOptions`, `EngineQueryOptions`, `EngineUpdateOptions`, `QueryPageWindow`, `QueryPageWindowParam`, `QueryTransportParams`, `QueryWithTransport`, `ValidationAdvisoryEvent` |
 | [`datasource.zod.ts`](/docs/references/data/datasource) | `Datasource`, `DriverDefinition`, `DriverType`, `ExternalDatasourceSettings`, `SchemaMode` |
@@ -163,7 +164,7 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`object.zod.ts`](/docs/references/data/object) | `ApiMethod`, `ApiOperation`, `Index`, `Lifecycle`, `LifecycleClass`, `Object`, `ObjectAccessConfig`, `ObjectCapabilities`, `ObjectExtension`, `ObjectExternalBinding`, `ObjectFieldGroup`, `ObjectOwnershipEnum`, `ObjectRequiredPermissions`, `PerOperationRequiredPermissions`, `RowCrudActionOverride`, `TenancyConfig` |
 | [`picklist.zod.ts`](/docs/references/data/picklist) | `Picklist`, `PicklistExtension`, `PicklistServedField` |
 | [`query.zod.ts`](/docs/references/data/query) | `AggregationFunction`, `AggregationNode`, `DateGranularity`, `FieldNode`, `FullTextSearch`, `GroupByNode`, `Query`, `SortNode` |
-| [`seed.zod.ts`](/docs/references/data/seed) | `Seed`, `SeedMode` |
+| [`seed.zod.ts`](/docs/references/data/seed) | `Seed`, `SeedColumn`, `SeedMode` |
 | [`seed-loader.zod.ts`](/docs/references/data/seed-loader) | `ObjectDependencyGraph`, `ObjectDependencyNode`, `ReferenceResolution`, `ReferenceResolutionError`, `SeedIdentity`, `SeedLoadResult`, `SeedLoaderConfig`, `SeedLoaderRequest`, `SeedLoaderResult` |
 | [`validation.zod.ts`](/docs/references/data/validation) | `ConditionalValidation`, `CrossFieldValidation`, `FormatValidation`, `JSONValidation`, `ScriptValidation`, `StateMachineValidation`, `ValidationRule` |
 
@@ -317,7 +318,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 285 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 286 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -329,6 +330,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
 | [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |
 | [`core-services.zod.ts`](/docs/references/system/core-services) | `CoreServiceName`, `KernelServiceMap`, `KernelServiceStatus`, `ServiceConfig`, `ServiceCriticality` |
+| [`demo-staff.zod.ts`](/docs/references/system/demo-staff) | `DemoStaff` |
 | [`deploy-bundle.zod.ts`](/docs/references/system/deploy-bundle) | `DeployBundle`, `DeployDiff`, `DeployManifest`, `DeployStatusEnum`, `DeployValidationIssue`, `DeployValidationResult`, `MigrationPlan`, `MigrationStatement`, `SchemaChange` |
 | [`dev-login.zod.ts`](/docs/references/system/dev-login) | `DevLogin` |
 | [`disaster-recovery.zod.ts`](/docs/references/system/disaster-recovery) | `BackupConfig`, `BackupRetention`, `BackupStrategy`, `DisasterRecoveryPlan`, `FailoverConfig`, `FailoverMode`, `RPO`, `RTO` |

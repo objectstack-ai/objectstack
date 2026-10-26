@@ -24,7 +24,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { lockfilePath } from '../workspace-root.mjs';
 
-import { readWorkflows, repoRoot } from './workflow-checks';
+import { repoRoot } from './workflow-checks';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import {
   compareLockfiles,
@@ -190,19 +190,14 @@ describe('cause 2 — a declared dependency forks with no version moving (object
   });
 });
 
-describe('the gate is wired, and wired the way the dispatch reserved', () => {
-  const workflow = readWorkflows().find((w) => w.file === 'lockfile-integrity.yml');
-
-  it('exists and runs the gate', () => {
-    expect(workflow, '.github/workflows/lockfile-integrity.yml is missing').toBeTruthy();
-    expect(workflow?.text).toContain('node scripts/check-lockfile-integrity.mjs');
-  });
-
-  it('checks out deep enough to have a merge base', () => {
-    // A shallow checkout has no merge base and the script exits 2 rather than
-    // guessing — which would be a check that reports nothing and looks fine.
-    expect(workflow?.text).toContain('fetch-depth: 0');
-  });
+describe('the gate is classified the way the dispatch reserved', () => {
+  // `exists and runs the gate` and `checks out deep enough to have a merge
+  // base` retired with objectstack#25712. They read objectui's
+  // `lockfile-integrity.yml`, which runs nowhere under the monorepo: GitHub
+  // runs the root `.github/workflows/` alone. That workflow is row 19 of the
+  // objectstack#25697 workflow roster, "kept, follow-up port", re-aimed at the
+  // one root `pnpm-lock.yaml`; the port brings both pins back against the root
+  // job that runs the gate.
 
   it('⛔ is classified as NOT a blocking context (the maintainer floor)', () => {
     expect(Object.keys(NOT_A_GATE)).toContain(CHECK_NAME);

@@ -1,44 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
-const ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
-const CI = path.join(ROOT, '.github/workflows/ci.yml');
+import { rootCiPath, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#6577 — cache bookkeeping voided a verdict the gate had already
- * recorded.
+ * recorded; objectstack#25869 — the root ui jobs that objectui's CI became.
  *
- * On 2026-08-26 the merge-group build of #6571 was ejected from the queue with
- * `CI_FAILURE` while every substantive check passed. All 21 real steps of the
- * `Type Check` job succeeded — `Run type-check` reported success at 13:31:31Z —
- * and then `Post Turbo Cache`, the save phase of `actions/cache@v6`, spent
- * 13m09s (789s) inside the upload and was still there when the job's
- * `timeout-minutes: 20` fired at 20m02s. The job went `cancelled`, the merge
+ * On 2026-08-26 the merge-group build of objectui#6571 was ejected from the
+ * queue with `CI_FAILURE` while every substantive check passed. All 21 real
+ * steps of objectui's `Type Check` job succeeded, and then `Post Turbo Cache`,
+ * the save phase of `actions/cache@v6`, spent 13m09s inside the upload and was
+ * still there when the job's ceiling fired. The job went `cancelled`, the merge
  * queue cannot tell `cancelled` from `failure`, and a pull request that had
- * passed was dequeued. It was transient, not structural: the same job on the
- * same PR head thirteen minutes earlier went green in 5m53s with a cache save
- * of ONE SECOND.
+ * passed was dequeued. The same job on the same head thirteen minutes earlier
+ * saved its cache in ONE SECOND: a transient, not a property of the workflow.
  *
- * The ordering is the whole point, and it is what this file exists to keep
- * true: the verdict is recorded by the job's command steps; everything after
- * them is bookkeeping. Bookkeeping must be bounded, and its failure must not
- * be able to speak for the code.
+ * The ordering is the whole point: a job's verdict is recorded by its command
+ * steps, and everything after them is bookkeeping, which must be bounded and
+ * must not be able to speak for the code. objectui pinned that on its own
+ * `type-check` job. The port to the objectstack monorepo's root `ci.yml`
+ * (objectstack#25697) carried the jobs over on combined `actions/cache` steps
+ * and unbounded saves, and objectstack#25879 retired this file with the nested
+ * workflow it read; objectstack#25869 bounded the root jobs' saves and
+ * restores it here, by path, over every ui job and `ui-deps`, the job that
+ * builds the seven @objectstack packages once per run for the other four.
  *
- * Why this needs a pin at all — the fix is invisible when reverted. Folding
- * the split back into one `actions/cache` step, or dropping either key from
- * the save, restores the defect with nothing going red: the cache still works,
- * every run still passes, and the next transient upload stall ejects the next
- * green pull request. That is this repository's recurring "looks like
- * enforcement, isn't" class (objectui#3009, #3181, #3494), and it is why the
- * sibling #5304 apt fix shipped with `ensure-chromium-ready.test.ts` beside it.
+ * Why this needs a pin at all — the fix is invisible when reverted. Folding a
+ * split back into one `actions/cache` step, or dropping either key from a
+ * save, restores the defect with nothing going red: the cache still works,
+ * every run still passes, and the next transient upload stall cancels the next
+ * green check (objectui#3009, #3181, #3494: "looks like enforcement, isn't").
  *
- * Deliberately NOT asserted: that the restore half is bounded. A restore stall
- * fails BEFORE any verdict exists — a gate that did not run, which is honest —
- * rather than a recorded verdict discarded, and bounding it would force a cold
- * check under the same job ceiling. That is a different card if it ever fires.
+ * Deliberately NOT asserted: that a restore is bounded. A restore stall fails
+ * BEFORE any verdict exists — a gate that did not run, which is honest.
  */
 
 interface Step {
@@ -52,163 +48,219 @@ interface Step {
   with?: Record<string, string>;
 }
 interface Job {
+  name?: string;
+  needs?: string | string[];
+  if?: string;
   'timeout-minutes'?: number;
   steps: Step[];
 }
 
-const workflow = parseYaml(fs.readFileSync(CI, 'utf8')) as { jobs: Record<string, Job> };
+const workflow = parseYaml(fs.readFileSync(rootCiPath, 'utf8')) as { jobs: Record<string, Job> };
 
-function typeCheckJob(): Job {
-  const job = workflow.jobs['type-check'];
-  expect(job, 'ci.yml must still define a `type-check:` job').toBeDefined();
-  // Non-vacuity: every assertion below scans this step list, so a parse that
-  // collapsed it to nothing would make all of them pass while reading nothing.
-  expect(
-    job.steps.length,
-    'the `type-check` job parsed to implausibly few steps — the scan below would be vacuous',
-  ).toBeGreaterThan(10);
-  return job;
-}
+/** The job that builds the seven packages once and hands them to the four. */
+const DEPS_JOB = 'ui-deps';
+const CACHE_JOBS = [DEPS_JOB, ...Object.values(UI_JOBS)];
 
-const saveStep = (job: Job): Step => {
-  // By PATH: the job also saves the pinned @objectstack build (objectui#12957),
-  // a second cache this file is not about.
-  const found = job.steps.filter(
-    (s) => (s.uses ?? '').startsWith('actions/cache/save@') && s.with?.path === '.turbo/cache',
-  );
-  expect(
-    found.length,
-    'the `type-check` job must save `.turbo/cache` through exactly one `actions/cache/save` ' +
-      'step. That step is where the bound lives; without it there is nothing to bound.',
-  ).toBe(1);
-  return found[0];
+/**
+ * Each job's ceiling as derived beside it in ci.yml. A pin, not a restatement
+ * of a derivation: moving one is a decision that re-derives it there and moves
+ * it here in the same commit.
+ *   - type-check-ui: the value it was ported with; objectui's own rule here
+ *     was "does not rise" (#6577's ruled-out non-fix).
+ *   - lint-ui, build-e2e-ui: #25869 row F13, the ceiling comment above lint-ui.
+ *   - ui-deps: the derivation on that job.
+ */
+const CEILINGS: Record<string, number> = {
+  [DEPS_JOB]: 25,
+  [UI_JOBS.typeCheck]: 40,
+  [UI_JOBS.lint]: 30,
+  [UI_JOBS.buildE2e]: 25,
 };
 
-describe('ci.yml — the type-check cache save is bounded and non-fatal (objectui#6577)', () => {
-  it('saves through a MAIN-phase step, never the combined action', () => {
-    // Combined `actions/cache` declares `main: dist/restore/index.js` and
-    // `post: dist/save/index.js`. Its save is therefore a step the RUNNER
-    // generates at job end (`Post Turbo Cache`, step #40 in the incident), and
-    // no workflow syntax attaches `timeout-minutes` or `continue-on-error` to a
-    // generated post step. Splitting is not a style preference — it is the only
-    // way the two keys below can exist at all. `actions/cache`'s own
-    // `save-always` deprecation text points at this same split.
-    const combined = typeCheckJob()
+function job(key: string): Job {
+  const found = workflow.jobs[key];
+  expect(found, `ci.yml must still define a \`${key}:\` job`).toBeDefined();
+  // Non-vacuity: every assertion below scans this step list, so a parse that
+  // collapsed it to nothing would make all of them pass while reading nothing.
+  expect(found.steps.length, `the \`${key}\` job parsed to implausibly few steps`).toBeGreaterThan(5);
+  return found;
+}
+
+const isSave = (s: Step) => (s.uses ?? '').startsWith('actions/cache/save@');
+const isRestore = (s: Step) => (s.uses ?? '').startsWith('actions/cache/restore@');
+const BUILD_STEP = 'Build the @objectstack packages objectui consumes';
+const DOWNLOAD_STEP = 'Download the @objectstack packages objectui consumes';
+
+describe('root ci.yml — the ui jobs\' cache saves are bounded and non-fatal (objectui#6577)', () => {
+  it('reads the saves it is about', () => {
+    // Non-vacuity for the per-save cases below: ui-deps saves the turbo seed
+    // and the pnpm store; type-check-ui and lint-ui save their turbo seeds.
+    const saves = CACHE_JOBS.flatMap((key) => job(key).steps.filter(isSave));
+    expect(saves.length, 'the five ui jobs declare implausibly few cache saves').toBeGreaterThanOrEqual(4);
+    expect(
+      job(UI_JOBS.typeCheck).steps.filter((s) => isSave(s) && s.with?.path === '.turbo/cache').length,
+      'the `type-check-ui` job must save `.turbo/cache` through exactly one `actions/cache/save` step',
+    ).toBe(1);
+  });
+
+  it.each(CACHE_JOBS)('%s saves through MAIN-phase steps, never the combined action', (key) => {
+    // Combined `actions/cache` declares `post: dist/save/index.js`: its save is
+    // a step the RUNNER generates at job end, and no workflow syntax attaches
+    // `timeout-minutes` or `continue-on-error` to a generated post step.
+    // Splitting is the only way the keys below can exist at all.
+    const combined = job(key)
       .steps.filter((s) => /^actions\/cache@/.test(s.uses ?? ''))
       .map((s) => s.name ?? '(unnamed)');
-
     expect(
       combined,
-      'the `type-check` job is back on the combined `actions/cache` action:\n' +
+      `the \`${key}\` job is back on the combined \`actions/cache\` action:\n` +
         combined.map((n) => `  - ${n}`).join('\n') +
-        '\n\nIts save runs as a runner-generated POST step, which cannot carry ' +
-        '`timeout-minutes` or `continue-on-error` — so an upload stall runs the job into its ' +
-        'ceiling and cancels a gate that had already passed (objectui#6577). Use ' +
-        '`actions/cache/restore` plus a bounded `actions/cache/save`.',
+        '\n\nIts save runs as a runner-generated POST step, which cannot carry `timeout-minutes` or ' +
+        '`continue-on-error`, so an upload stall runs the job into its ceiling and cancels a check ' +
+        'that had already passed (objectui#6577). Use `actions/cache/restore` plus a bounded ' +
+        '`actions/cache/save`.',
     ).toEqual([]);
   });
 
-  it('bounds the save, and does not let a failed save speak for the code', () => {
-    const save = saveStep(typeCheckJob());
-
-    expect(
-      typeof save['timeout-minutes'],
-      'the cache save step must declare `timeout-minutes`. It is the only thing standing ' +
-        'between a stalled upload and the job ceiling, and the job ceiling reports `cancelled` — ' +
-        'a gate that says nothing at all (objectui#6577).',
-    ).toBe('number');
-
-    expect(
-      save['continue-on-error'],
-      'the cache save step must declare `continue-on-error: true`. Without it the bound only ' +
-        'trades a `cancelled` gate for a red one: a cache that failed to upload costs the next ' +
-        'run some time and says nothing about the code under test.',
-    ).toBe(true);
+  it.each(CACHE_JOBS)('%s bounds every save, and no failed save speaks for the code', (key) => {
+    for (const save of job(key).steps.filter(isSave)) {
+      expect(
+        typeof save['timeout-minutes'],
+        `\`${key}\` › "${save.name}" must declare \`timeout-minutes\`: it is the only thing between a ` +
+          'stalled upload and the job ceiling, and the ceiling reports `cancelled` (objectui#6577).',
+      ).toBe('number');
+      expect(
+        save['continue-on-error'],
+        `\`${key}\` › "${save.name}" must declare \`continue-on-error: true\`. Without it the bound only ` +
+          'trades a `cancelled` check for a red one, and a cache that failed to upload says nothing ' +
+          'about the code under test.',
+      ).toBe(true);
+    }
   });
 
-  it('leaves the verdict path at least as much ceiling as bookkeeping can consume', () => {
-    // Derived rather than hard-coded: whatever the two numbers become, the
-    // bookkeeping half must not be able to crowd out the half that produces the
-    // answer. At the values this landed with (5 of 20) the save cannot reach
-    // the ceiling from any verdict path yet observed — the slowest on record
-    // finished 6m53s in.
-    const job = typeCheckJob();
-    const ceiling = job['timeout-minutes'];
-    const bound = saveStep(job)['timeout-minutes'];
-
-    expect(typeof ceiling, 'the `type-check` job must still declare `timeout-minutes`').toBe('number');
-    expect(
-      (bound as number) * 2,
-      `the cache save may run for ${bound} of the job's ${ceiling} minutes. A bound that large ` +
-        'can still starve the checking steps of the ceiling and cancel the job — which is the ' +
-        'defect, not the fix.',
-    ).toBeLessThanOrEqual(ceiling as number);
+  it.each(CACHE_JOBS)('%s leaves the verdict at least as much ceiling as bookkeeping can take', (key) => {
+    const j = job(key);
+    const ceiling = j['timeout-minutes'];
+    expect(typeof ceiling, `the \`${key}\` job must declare \`timeout-minutes\``).toBe('number');
+    for (const save of j.steps.filter(isSave)) {
+      expect(
+        (save['timeout-minutes'] as number) * 2,
+        `\`${key}\` › "${save.name}" may run for ${save['timeout-minutes']} of the job's ${ceiling} ` +
+          'minutes; a bound that large can still starve the checking steps and cancel the job.',
+      ).toBeLessThanOrEqual(ceiling as number);
+    }
   });
 
-  it('runs the save AFTER every command step — bookkeeping follows the verdict', () => {
-    // The card's central sentence, made mechanical. A save hoisted above a
-    // checking step is bookkeeping that can still delay, and be blamed for, an
-    // answer that has not been produced yet.
-    const job = typeCheckJob();
-    const lastCommand = job.steps.map((s) => s.run !== undefined).lastIndexOf(true);
-    const saveAt = job.steps.indexOf(saveStep(job));
-
-    expect(lastCommand, 'the `type-check` job must still run commands').toBeGreaterThan(-1);
-    expect(
-      saveAt,
-      "the cache save must come after the job's last command step. The verdict is recorded by " +
-        `\`${job.steps[lastCommand].name}\`; everything after it is bookkeeping, and that ordering ` +
-        'is what makes the save safe to bound and safe to lose (objectui#6577).',
-    ).toBeGreaterThan(lastCommand);
+  it.each(CACHE_JOBS)('%s saves AFTER every command step — bookkeeping follows the verdict', (key) => {
+    const steps = job(key).steps;
+    // The prune before a seed save is bookkeeping too, and a `run:` step; the
+    // verdict is the last command that is neither.
+    const lastCommand = steps
+      .map((s) => s.run !== undefined && !/prune-turbo-cache\.mjs/.test(s.run))
+      .lastIndexOf(true);
+    expect(lastCommand, `the \`${key}\` job must still run commands`).toBeGreaterThan(-1);
+    for (const save of steps.filter(isSave)) {
+      expect(
+        steps.indexOf(save),
+        `\`${key}\` › "${save.name}" must come after the job's last command step, ` +
+          `"${steps[lastCommand].name}": everything after it is bookkeeping, and that ordering is ` +
+          'what makes the save safe to bound and safe to lose (objectui#6577).',
+      ).toBeGreaterThan(lastCommand);
+    }
   });
 
-  it('still caches the same thing the combined step did', () => {
-    // The split must not quietly stop caching. Same path, same key, and the
-    // save guarded on the restore's `cache-hit` — which is how the combined
-    // action itself decided to skip a save after an exact primary-key hit.
-    const job = typeCheckJob();
-    const save = saveStep(job);
-    const restores = job.steps.filter(
-      (s) => (s.uses ?? '').startsWith('actions/cache/restore@') && s.with?.path === '.turbo/cache',
+  it.each(CACHE_JOBS)('%s still caches what the combined step did', (key) => {
+    // Same path, same key, and the save skipped on an exact hit of the
+    // restore's primary key — which is how the combined action decided.
+    const steps = job(key).steps;
+    for (const save of steps.filter(isSave)) {
+      const restores = steps.filter((s) => isRestore(s) && s.with?.path === save.with?.path);
+      expect(restores.length, `\`${key}\` › "${save.name}" saves a path no step restores`).toBe(1);
+      const [restore] = restores;
+      expect(
+        save.with?.key,
+        `\`${key}\` › "${save.name}" must write the key "${restore.name}" asks for, or every run misses`,
+      ).toBe(restore.with?.key);
+      expect(restore.id, `\`${key}\` › "${restore.name}" needs an \`id\` for the save's guard`).toBeTruthy();
+      expect(
+        save.if ?? '',
+        `\`${key}\` › "${save.name}" must skip on an exact hit of the primary key — ` +
+          `\`steps.${restore.id}.outputs.cache-hit != 'true'\`; without it every re-run re-uploads a ` +
+          'cache that already exists.',
+      ).toContain(`steps.${restore.id}.outputs.cache-hit != 'true'`);
+    }
+  });
+
+  it.each(Object.entries(CEILINGS))('%s keeps its derived ceiling of %i minutes', (key, ceiling) => {
+    // Raising a ceiling does not fix a hung save: the hang runs longer and the
+    // check still reports `cancelled` (objectui#6577, objectui#7048). Moving
+    // one is a deliberate act: re-derive it beside the job, move it here.
+    expect(job(key)['timeout-minutes'], `the \`${key}\` job ceiling moved`).toBe(ceiling);
+  });
+});
+
+describe('root ci.yml — ui-deps builds the seven packages once for the ui jobs (objectstack#25869)', () => {
+  const deps = () => job(DEPS_JOB);
+  const step = (key: string, name: string) => {
+    const found = job(key).steps.filter((s) => s.name === name);
+    expect(found.length, `the \`${key}\` job must carry exactly one "${name}" step`).toBe(1);
+    return found[0];
+  };
+  /** The build command with the carrier-only flags taken off. */
+  const buildCommand = (run: string) =>
+    run
+      .replace(/\s*\\?\n?\s*--summarize --log-file=\S+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const upload = () => {
+    const found = deps().steps.filter((s) => (s.uses ?? '').startsWith('actions/upload-artifact@'));
+    expect(found.length, '`ui-deps` must upload exactly one artifact').toBe(1);
+    return found[0];
+  };
+
+  it('runs whenever any ui job runs', () => {
+    // The union of the four conditions is Type Check UI's (and Build & E2E
+    // UI's): Test UI and Lint UI run on a subset of it.
+    expect(deps().if).toBe(job(UI_JOBS.typeCheck).if);
+    expect(job(UI_JOBS.buildE2e).if).toBe(job(UI_JOBS.typeCheck).if);
+  });
+
+  it('hands over the pruned turbo cache, only when the prune found the build', () => {
+    const up = upload();
+    expect(up.with?.path?.replace(/\/$/, '')).toBe('.turbo/cache');
+    expect(up.if ?? '').toContain("steps.prune-turbo-cache.outputs.save == 'true'");
+    const steps = deps().steps;
+    expect(steps.indexOf(up), 'the upload must follow the build').toBeGreaterThan(
+      steps.indexOf(step(DEPS_JOB, BUILD_STEP)),
     );
-
-    expect(restores.length, 'the `type-check` job must restore `.turbo/cache`').toBe(1);
-    const restore = restores[0];
-
-    expect(restore.with?.path, 'the restore step must still name `.turbo/cache`').toBe('.turbo/cache');
-    expect(
-      save.with?.path,
-      'the save step must write back the same path the restore step read, or the split has ' +
-        'silently stopped caching',
-    ).toBe(restore.with?.path);
-    expect(
-      save.with?.key,
-      'the save step must write the same key the restore step asked for, or every run misses',
-    ).toBe(restore.with?.key);
-
-    expect(
-      restore.id,
-      'the restore step needs an `id` so the save step can read its `cache-hit` output',
-    ).toBeTruthy();
-    expect(
-      save.if ?? '',
-      `the save step must skip on an exact hit of the primary key — ` +
-        `\`steps.${restore.id}.outputs.cache-hit != 'true'\`. The combined action did this ` +
-        `internally; after the split it is the workflow's job, and without it every re-run ` +
-        `re-uploads a cache that already exists.`,
-    ).toContain(`steps.${restore.id}.outputs.cache-hit != 'true'`);
   });
 
-  it('does not raise the job ceiling, which is the ruled-out non-fix', () => {
-    // Ruled out on the card itself: a larger ceiling buys a longer hang and
-    // still ends in `cancelled`, and lifting a gate's ceiling weakens the gate.
-    // Raising this for some UNRELATED reason is a decision someone may well
-    // need to make — make it deliberately, and move this pin in the same
-    // commit, rather than discovering later that #6577's fix was undone by it.
+  it.each(Object.values(UI_JOBS))('%s waits for ui-deps without letting its result skip the job', (key) => {
+    const j = job(key);
+    const needs = Array.isArray(j.needs) ? j.needs : [j.needs];
+    expect(needs).toContain(DEPS_JOB);
+    // A job whose `if:` names no status function is SKIPPED when a job it
+    // needs did not succeed. `!cancelled()` is what keeps a red or skipped
+    // ui-deps from silently skipping a required ui check.
+    expect(j.if ?? '', `the \`${key}\` job's \`if:\` must start with \`!cancelled()\``).toMatch(/^\$\{\{ !cancelled\(\) && /);
+  });
+
+  it.each(Object.values(UI_JOBS))('%s downloads the build fail-open, before the step that replays it', (key) => {
+    const download = step(key, DOWNLOAD_STEP);
+    expect(download.uses ?? '').toMatch(/^actions\/download-artifact@/);
+    expect(download.with?.name, 'the download must name the artifact ui-deps uploads').toBe(upload().with?.name);
+    expect(download.with?.path).toBe('.turbo/cache');
     expect(
-      typeCheckJob()['timeout-minutes'],
-      'the `type-check` job ceiling moved. Raising it does not fix a hung cache save — the hang ' +
-        'just runs longer and the gate still reports `cancelled` (objectui#6577).',
-    ).toBeLessThanOrEqual(20);
+      download['continue-on-error'],
+      'no artifact must mean "build cold", never a red or skipped ui check',
+    ).toBe(true);
+    const steps = job(key).steps;
+    expect(steps.indexOf(download)).toBeLessThan(steps.indexOf(step(key, BUILD_STEP)));
+  });
+
+  it.each(Object.values(UI_JOBS))('%s builds the closure ui-deps built, so every task replays', (key) => {
+    // Filters do not enter a task hash, but a filter one side lacks is a task
+    // the other never built: it would build cold in every ui job again.
+    expect(buildCommand(step(key, BUILD_STEP).run ?? '')).toBe(buildCommand(step(DEPS_JOB, BUILD_STEP).run ?? ''));
   });
 });

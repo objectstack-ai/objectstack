@@ -1,7 +1,7 @@
 ---
 title: Seed schema — Data Protocol property reference
 navTitle: Seed
-description: "Seed schemas of the ObjectStack Data Protocol: Seed, SeedMode — each property with its type, default and a TypeScript example."
+description: "Seed schemas of the ObjectStack Data Protocol: Seed, SeedColumn, SeedMode — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Seed schemas of the ObjectStack Data Protocol: Seed, SeedMode — 
 ## TypeScript Usage
 
 ```typescript
-import { SeedSchema, SeedMode } from '@objectstack/spec/data';
-import type { Seed } from '@objectstack/spec/data';
+import { SeedSchema, SeedColumnSchema, SeedMode } from '@objectstack/spec/data';
+import type { Seed, SeedColumn } from '@objectstack/spec/data';
 
 // Validate data
 const result = SeedSchema.parse(data);
@@ -31,6 +31,7 @@ const result = SeedSchema.parse(data);
 | **object** | `string` | ✅ | Target Object Name |
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
+| **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
@@ -41,6 +42,23 @@ const result = SeedSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Seed.columns[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When a seed load writes this column. `always` (default) writes it on every row the load creates or updates. `create` writes it only when the load creates the row: an `upsert` replay that matches an existing row leaves the row's value as it is, and an `update` dataset never writes it, so replaying the seed refreshes the `always` columns without reverting state the app wrote since the first load. A column of the dataset's `externalId` is still matched on and stays in the matched row's update. The same values and meaning as an import mapping entry's `applyOn`. |
+
+
+---
+
+## SeedColumn
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When a seed load writes this column. `always` (default) writes it on every row the load creates or updates. `create` writes it only when the load creates the row: an `upsert` replay that matches an existing row leaves the row's value as it is, and an `update` dataset never writes it, so replaying the seed refreshes the `always` columns without reverting state the app wrote since the first load. A column of the dataset's `externalId` is still matched on and stays in the matched row's update. The same values and meaning as an import mapping entry's `applyOn`. |
 
 
 ---

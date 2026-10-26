@@ -20,6 +20,7 @@ import {
   RESERVED_OPTION_NAMES,
   unresolvableSpellings,
 } from '../check-i18n-call-site-keys.mjs';
+import { jobBlock, rootCi, uiRun, UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#3530 — the behaviour test for `scripts/check-i18n-call-site-keys.mjs`.
@@ -2129,10 +2130,14 @@ describe('the gate is wired to run', () => {
   });
 
   it('ci.yml runs it after the install it needs (it imports typescript)', () => {
-    const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-    const install = ci.indexOf('pnpm install --frozen-lockfile');
-    const step = ci.indexOf('pnpm check:i18n-keys');
-    expect(step, 'ci.yml does not run `pnpm check:i18n-keys`').toBeGreaterThan(-1);
+    // The workflow GitHub runs: objectstack's root ci.yml, whose `type-check-ui`
+    // job is objectui's `Type Check` (objectstack#25697). objectui's own ci.yml
+    // under `ui/.github/` runs nowhere (objectstack#25712).
+    const job = jobBlock(rootCi(), UI_JOBS.typeCheck);
+    const install = job.indexOf('pnpm install --frozen-lockfile');
+    const step = job.indexOf(`run: ${uiRun('check:i18n-keys')}`);
+    expect(step, '`type-check-ui` does not run `pnpm --dir ui run check:i18n-keys`').toBeGreaterThan(-1);
+    expect(install, '`type-check-ui` no longer installs dependencies').toBeGreaterThan(-1);
     expect(step, 'the check runs before dependencies are installed').toBeGreaterThan(install);
   });
 });

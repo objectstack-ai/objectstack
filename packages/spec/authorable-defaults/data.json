@@ -100,6 +100,7 @@
     "data/Seed:env = [\"prod\",\"dev\",\"test\"]",
     "data/Seed:externalId = \"name\"",
     "data/Seed:mode = \"upsert\"",
+    "data/SeedColumn:applyOn = \"always\"",
     "data/SeedLoadResult:errors = []",
     "data/SeedLoadResult:landedIds = []",
     "data/SeedLoadResult:referencesDropped = 0",

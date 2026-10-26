@@ -13,12 +13,6 @@ import {
   renderVerdict,
   waitForGate,
 } from '../dependabot-merge-gate.mjs';
-import {
-  type Workflow,
-  producedCheckNames,
-  pullRequestTrigger,
-  readWorkflows,
-} from './workflow-checks.js';
 
 /**
  * objectui#4973 — `dependabot-auto-merge.yml` merged a pull request 8m20s before
@@ -66,11 +60,16 @@ import {
  * request and can therefore be waited for), and every optional context must come
  * from one that has such a filter (which is the entire reason it cannot be
  * required). Move a filter and the bucket, not just the comment, goes red.
+ *
+ * ⚠️ Both halves retired with objectstack#25712. They read objectui's
+ * `pull_request` workflows under `ui/.github/workflows/`, which run nowhere
+ * under the monorepo, and this gate's one caller, `dependabot-auto-merge.yml`,
+ * is one of them. The note above the bucket describe at the end of this file
+ * says who brings them back.
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
-const workflowDir = path.join(repoRoot, '.github', 'workflows');
 
 // ── The incident, as GitHub recorded it ──────────────────────────────────────
 // PR #4959, head SHA 31745d8b6805dc829c05660a9592e92ca537bc3b, merged by
@@ -153,9 +152,10 @@ function allGreenSnapshot() {
  * produces (the partition assertion below). So the reconciliation is this one
  * dated list, read by exactly one assertion.
  *
- * ⛔ It is not an escape hatch. The control beneath that assertion re-derives
- * the produced set and fails if any name here IS still produced, so a live
- * unclassified context cannot be parked in it.
+ * ⛔ It is not an escape hatch. Its control, which re-derived the produced set
+ * and failed if any name here was still produced, retired with the partition
+ * in objectstack#25712 (the note above the bucket describe at the end of this
+ * file), so nothing checks an addition here until that control is back.
  */
 const RENAMED_SINCE_4959 = [
   'Test (shard 1/4)',
@@ -299,20 +299,10 @@ describe('the #4959 counterfactual: this gate stops the merge that happened', ()
       ...Object.keys(NOT_A_GATE),
     ]);
 
-    const produced = producedCheckNames();
-
-    // The control for the exemption: a name may only sit in
-    // `RENAMED_SINCE_4959` while the repository really has stopped producing
-    // it. Without this, parking a live unclassified context in that list would
-    // silently shrink the gate — the failure mode this whole file is about.
-    for (const name of RENAMED_SINCE_4959) {
-      expect(
-        produced.has(name),
-        `${name} is exempted as renamed-since-#4959, but a pull_request workflow still produces ` +
-          `it — classify it in one of the three buckets instead of exempting it`,
-      ).toBe(false);
-    }
-
+    // The control for the exemption retired with objectstack#25712. It derived
+    // the produced set from objectui's `pull_request` workflows, which run
+    // nowhere under the monorepo; the note above the bucket describe at the end
+    // of this file says who brings it back.
     for (const run of INCIDENT_4959) {
       if (RENAMED_SINCE_4959.includes(run.name)) continue;
       expect(classified).toContain(run.name);
@@ -522,75 +512,25 @@ describe('the refusal is legible', () => {
   });
 });
 
-// ── The buckets versus the workflows that actually produce the checks ────────
+// ── The buckets' boundary and their reasons ──────────────────────────────────
 //
-// The parser these assertions run on now lives in `./workflow-checks.ts`, so
-// that `merge-queue-reporting.test.ts` can derive its `merge_group` floor from
-// the same answer instead of parsing the workflows a second time (objectui#6160).
+// `found the workflows and the shard matrix (the parser still parses)`,
+// `classifies every produced check exactly once`, `requires only contexts whose
+// workflow carries NO path filter` and `marks optional exactly those blocking
+// contexts whose workflow IS path-filtered` retired with objectstack#25712,
+// together with the exemption control in the counterfactual describe. They
+// partitioned the three buckets against the check names objectui's
+// `pull_request` workflows produce, read through `./workflow-checks.ts` from
+// `ui/.github/workflows/`. That directory runs nowhere under the monorepo:
+// GitHub runs the root `.github/workflows/` alone, and those produce other
+// names (`Lint UI`, `Test UI (n/16)`). The buckets still hold objectui's names
+// because the gate's one caller, `dependabot-auto-merge.yml`, runs nowhere
+// either: it is row 9 of the objectstack#25697 workflow roster (→ sub-issue 4),
+// and no root workflow merges Dependabot pull requests. Sub-issue 4 decides the
+// monorepo's Dependabot merge. A port re-derives the buckets from the root
+// workflows and brings these pins back against them, by path.
 
-describe('the declared buckets partition what a pull request actually produces', () => {
-  const workflows = readWorkflows().filter((workflow) => pullRequestTrigger(workflow).subscribes);
-  const produced = producedCheckNames();
-
-  it('found the workflows and the shard matrix (the parser still parses)', () => {
-    expect(workflows.map((w) => w.file)).toContain('ci.yml');
-    expect([...produced.keys()]).toEqual(
-      expect.arrayContaining(['Test (shard 1/16)', 'Test (shard 16/16)', 'Test', 'Lint', 'dependabot', 'label']),
-    );
-    // No unexpanded template survived the matrix expansion.
-    for (const name of produced.keys()) expect(name).not.toContain('${{');
-  });
-
-  it('classifies every produced check exactly once', () => {
-    const buckets = [
-      ...REQUIRED_CONTEXTS.map((name) => [name, 'required'] as const),
-      ...Object.keys(OPTIONAL_CONTEXTS).map((name) => [name, 'optional'] as const),
-      ...Object.keys(NOT_A_GATE).map((name) => [name, 'not-a-gate'] as const),
-    ];
-
-    const seen = new Map<string, string>();
-    const duplicated: string[] = [];
-    for (const [name, bucket] of buckets) {
-      if (seen.has(name)) duplicated.push(`${name} (${seen.get(name)} + ${bucket})`);
-      seen.set(name, bucket);
-    }
-    expect(duplicated).toEqual([]);
-
-    const unclassified = [...produced.keys()].filter((name) => !seen.has(name));
-    expect(
-      unclassified,
-      `these checks run on every pull request but the gate does not classify them: ${unclassified.join(', ')}`,
-    ).toEqual([]);
-
-    const unproduced = [...seen.keys()].filter((name) => !produced.has(name));
-    expect(
-      unproduced,
-      `the gate names checks that no pull-request workflow produces (renamed or deleted?): ${unproduced.join(', ')}`,
-    ).toEqual([]);
-  });
-
-  it('requires only contexts whose workflow carries NO path filter', () => {
-    const filtered = new Map(
-      readWorkflows().map((workflow) => [workflow.file, pullRequestTrigger(workflow).filtered]),
-    );
-
-    for (const name of REQUIRED_CONTEXTS) {
-      const file = produced.get(name);
-      expect(file, `${name} is required but nothing produces it`).toBeTruthy();
-      expect(
-        filtered.get(file as string),
-        `${name} is required, but ${file} filters its pull_request trigger by path — it cannot be waited for on every PR (#3523)`,
-      ).toBe(false);
-    }
-  });
-
-  it('marks optional exactly those blocking contexts whose workflow IS path-filtered', () => {
-    for (const name of Object.keys(OPTIONAL_CONTEXTS)) {
-      const file = produced.get(name);
-      expect(pullRequestTrigger(readWorkflows().find((w) => w.file === file) as Workflow).filtered).toBe(true);
-    }
-  });
-
+describe('the declared buckets state their boundary and their reasons', () => {
   it('writes down the check-runs-only boundary, so the scope is not inferred from the endpoint', () => {
     // A third-party commit STATUS (this repository has one: `Vercel`) is not a
     // check run and is not read by the gate. That boundary has to be stated
@@ -608,51 +548,11 @@ describe('the declared buckets partition what a pull request actually produces',
   });
 });
 
-describe('the workflow cannot merge without consulting the gate', () => {
-  const workflow = fs.readFileSync(path.join(workflowDir, 'dependabot-auto-merge.yml'), 'utf8');
-  const steps = workflow.split(/^ {6}- name: /m).slice(1);
-
-  it('has no `gh pr merge` that is not behind a green gate', () => {
-    const merging = steps.filter((step) => /gh pr merge/.test(step));
-
-    expect(merging.length).toBeGreaterThan(0);
-    for (const step of merging) {
-      expect(step, 'a `gh pr merge` step must be conditioned on the gate verdict').toMatch(
-        /if:\s*steps\.gate\.outputs\.gate == 'green'/,
-      );
-    }
-  });
-
-  it('does not approve before the gate is green either', () => {
-    for (const step of steps.filter((step) => /gh pr review --approve/.test(step))) {
-      expect(step).toMatch(/if:\s*steps\.gate\.outputs\.gate == 'green'/);
-    }
-  });
-
-  it('runs the gate script and tells it which SHA to judge', () => {
-    expect(workflow).toContain('node scripts/dependabot-merge-gate.mjs');
-    expect(workflow).toMatch(/HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha }}/);
-    // Pins the merge to the judged SHA: a push that lands during the wait must
-    // not be enqueued on the strength of the previous commit's checks.
-    expect(workflow).toContain('--match-head-commit');
-  });
-
-  it('grants `checks: read`, without which the gate 403s', () => {
-    expect(workflow).toMatch(/^\s*checks: read$/m);
-  });
-
-  it('fails the job when the gate refuses, so the PR carries a red check', () => {
-    expect(workflow).toMatch(/steps\.gate\.outputs\.gate != 'green'/);
-  });
-
-  it('keeps the semver policy the issue did not ask to change', () => {
-    expect(workflow).toContain('version-update:semver-patch');
-    expect(workflow).toContain('version-update:semver-minor');
-    expect(workflow).toMatch(/steps\.metadata\.outputs\.update-type == 'version-update:semver-major'/);
-  });
-
-  // No merge-driver assertion here any more (objectui#6369). It existed to hold
-  // this workflow to the row `ci-cd-pipeline.md` pinned for it; that row is gone,
-  // because the only merge this workflow performs is server-side `gh pr merge`
-  // and a local driver cannot participate in one.
-});
+// `the workflow cannot merge without consulting the gate` retired with
+// objectstack#25712. Its six cases read objectui's `dependabot-auto-merge.yml`:
+// the merge and approve steps behind a green gate, `HEAD_SHA` and
+// `--match-head-commit`, `checks: read`, the red job on a refusal, and the
+// semver policy. That workflow runs nowhere under the monorepo, and no root
+// workflow merges Dependabot pull requests. It is row 9 of the
+// objectstack#25697 workflow roster (→ sub-issue 4); a port brings these pins
+// back against the root workflow that runs this gate, by path.

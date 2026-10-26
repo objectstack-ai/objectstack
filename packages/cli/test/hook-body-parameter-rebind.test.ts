@@ -296,9 +296,6 @@ describe('capability inference follows the rebound names', () => {
 
 describe('the hook-context members the enumeration found unrefused (#22837)', () => {
   it.each([
-    ['provenance', async (ctx: any) => { if (ctx.provenance?.flowRunId) ctx.input.note = 'flow'; }],
-    ['provenance', async (ctx: any) => { const { provenance } = ctx; ctx.input.note = String(provenance); }],
-    ['provenance', async ({ input, provenance }: any) => { input.note = String(provenance?.attributedUserId); }],
     ['ql', async (ctx: any) => { await ctx.ql.find('t', {}); }],
     ['ql', async (ctx: any) => { const c = ctx; await c['ql'].find('t', {}); }],
     ['transaction', async (ctx: any) => { ctx.input.note = ctx.transaction ? 'tx' : 'none'; }],
@@ -307,6 +304,17 @@ describe('the hook-context members the enumeration found unrefused (#22837)', ()
     const err = refusal(fn);
     expect(err.kind).toBe('forbidden-token');
     expect(err.message).toContain(`\`ctx.${member}\``);
+  });
+
+  // [#25905] `provenance` left this family: the body face now carries it, so
+  // every spelling that used to be refused lowers — the parameter-destructured
+  // one through the rebind prologue, like any other carried member.
+  it.each([
+    async (ctx: any) => { if (ctx.provenance?.flowRunId) ctx.input.note = 'flow'; },
+    async (ctx: any) => { const { provenance } = ctx; ctx.input.note = String(provenance); },
+    async ({ input, provenance }: any) => { input.note = String(provenance?.attributedUserId); },
+  ])('lowers a `ctx.provenance` read (%#), which the body face carries', (fn) => {
+    expect(() => lower(fn)).not.toThrow();
   });
 
   it('does NOT refuse the body face\'s own transaction route, or a field of the same name', () => {

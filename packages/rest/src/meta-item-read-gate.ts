@@ -148,6 +148,10 @@ export interface MetaReadGateListSource {
      * this transport's protocol has no list read at all. A THROW is a fault,
      * ⛔ never an empty list: an empty book list is "no gated book anywhere" and
      * an empty doc corpus is "every doc unclaimed, so `org`" — both GRANT.
+     * [#25783] For `object` a transport hands in the protocol's execution face
+     * (`getMetaItemsForExecution`) where it has one: every reader of that list
+     * ({@link loadObjectItems}) reads an `enable` and serves nothing, so the
+     * served face's per-object diagnostic is pure cost there.
      */
     listMetaItems(type: 'book' | 'doc' | 'object'): Promise<unknown> | undefined;
     /**
@@ -2800,11 +2804,12 @@ export function metaTranslateOptions(
  *
  *  - `object` — a code `objectExtensions` scalar or a tenant rename folds onto
  *    the owner's declaration (`getPackagedObjectBase`, pre-fold);
- *  - `dashboard` and `view` — ADR-0126 Regime O: a packaged item is
- *    overlay-editable, and a published org overlay is what every read serves
- *    (`getPackagedDashboardBase`, `getPackagedViewBase`). A view is looked up
- *    by the served item's registry name, the qualified `<object>.<viewKey>` —
- *    never the bare key the catalog addresses it by under its object.
+ *  - `dashboard`, `view` and `report` — ADR-0126 Regime O: a packaged item
+ *    is overlay-editable, and a published org overlay is what every read
+ *    serves (`getPackagedDashboardBase`, `getPackagedViewBase`,
+ *    `getPackagedReportBase`). A view is looked up by the served item's
+ *    registry name, the qualified `<object>.<viewKey>` — never the bare key
+ *    the catalog addresses it by under its object.
  *
  * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
  * ADR-0126 tier B — a write against its packaged item answers
@@ -2818,14 +2823,16 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['object', 'getPackagedObjectBase'],
     ['dashboard', 'getPackagedDashboardBase'],
     ['view', 'getPackagedViewBase'],
+    ['report', 'getPackagedReportBase'],
 ]);
 
 /**
  * [#8284 · #20730] The packaged (code-layer) base declaration of one served
  * metadata document, for `translateMetadataDocument`'s `packagedBase` — the
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
- * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`
- * and a `view` `getPackagedViewBase(name)`.
+ * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
+ * a `view` `getPackagedViewBase(name)` and a `report`
+ * `getPackagedReportBase(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -2852,8 +2859,8 @@ export interface MetaListTranslationSources {
     /** This request's i18n service, or `undefined` when the deployment has none. */
     resolveI18nService(): Promise<unknown>;
     /**
-     * This request's protocol, for the packaged base of an object, dashboard
-     * or view ({@link packagedObjectBaseOf}); `undefined` when unreachable.
+     * This request's protocol, for the packaged base of an object, dashboard,
+     * view or report ({@link packagedObjectBaseOf}); `undefined` when unreachable.
      */
     resolveProtocol(): Promise<unknown>;
     /**
@@ -2899,9 +2906,9 @@ export async function translateMetaList(
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
     // [#8284 · #20730] One protocol resolution for the whole page, for every
-    // type with a packaged base (object, dashboard, view); the lookup itself is
-    // a synchronous in-memory registry read per element, by that element's own
-    // registry name — a view's qualified `<object>.<viewKey>`.
+    // type with a packaged base (object, dashboard, view, report); the lookup
+    // itself is a synchronous in-memory registry read per element, by that
+    // element's own registry name — a view's qualified `<object>.<viewKey>`.
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
@@ -2926,7 +2933,7 @@ export async function translateMetaList(
  * labels live on the document. A missing bundle is not a bail-out (the
  * built-in fallbacks still apply); no locale is. The i18n service is resolved
  * only for a translatable type, and the protocol only for a type with a
- * packaged base — an object, a dashboard or a view (#8284, #20730:
+ * packaged base — an object, a dashboard, a view or a report (#8284, #20730, #25788:
  * {@link packagedObjectBaseOf}).
  *
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
