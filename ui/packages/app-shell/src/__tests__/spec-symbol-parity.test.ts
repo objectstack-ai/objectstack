@@ -413,9 +413,12 @@ describe('DecisionOutputDef is the spec type, with no local divergence left', ()
     type _IsExactlyTheSpecType = Assert<Equal<DecisionOutputDef, SpecDecisionOutputDef>>;
 
     // Deriving NARROWED `type` from the bare `string` this file used to declare
-    // to the spec's closed enum — that narrowing is the point, so pin it.
-    type _TypeIsClosed = Assert<
-      Equal<DecisionOutputDef['type'], 'user' | 'department' | 'position' | 'team' | 'text' | undefined>
+    // to the spec's closed enum — that narrowing is the point, so pin it: not
+    // `string`, and the five kinds still in it. Nothing in ui switches over
+    // every kind, so a kind the spec adds is the spec's to add, not a red here.
+    type _TypeIsClosed = Assert<Equal<string extends DecisionOutputDef['type'] ? true : false, false>>;
+    type _TypeKeepsTheFiveKinds = Assert<
+      Equal<Exclude<'user' | 'department' | 'position' | 'team' | 'text', DecisionOutputDef['type']>, never>
     >;
 
     expect(true).toBe(true);
@@ -447,8 +450,10 @@ describe('flow node geometry IS the spec `FlowNode.position` (#3172)', () => {
     type _InputEqualsParsed = Assert<
       Equal<NonNullable<SpecFlowNode['position']>, NonNullable<SpecFlowNodeParsed['position']>>
     >;
-    // Both coordinates required: a half-position is not representable.
-    type _BothRequired = Assert<Equal<FlowNodePosition, { x: number; y: number }>>;
+    // Both coordinates required: a half-position is not representable. Pinned
+    // on the two coordinates the canvas reads, so a key the spec adds to
+    // `position` is not a red here.
+    type _BothRequired = Assert<Equal<Pick<FlowNodePosition, 'x' | 'y'>, { x: number; y: number }>>;
     type _HalfIsNotAPosition = Assert<Equal<Extends<{ x: number }, FlowNodePosition>, false>>;
 
     // …and the designer's node carries exactly that key, optional exactly as the
@@ -488,20 +493,14 @@ describe('ObjectFieldGroup derives from the spec schema INPUT side', () => {
     // unrepresentable. If this flips, someone swapped z.input for z.infer.
     type _CollapseOptional = Assert<Extends<{ key: string; label: string }, ObjectFieldGroup>>;
 
-    // Still the real spec vocabulary, not a hand copy that merely agrees.
+    // Still the real spec vocabulary, not a hand copy that merely agrees. The
+    // type is `z.input` of the spec schema itself, so the keys it carries are
+    // the spec's by construction: this names the ones the designer reads, and a
+    // key the spec adds is not a red here.
     type _HasSpecKeys = Assert<
       Extends<
         'key' | 'label' | 'icon' | 'description' | 'visibleWhen' | 'collapse' | 'collapsible' | 'collapsed' | 'defaultExpanded',
         keyof ObjectFieldGroup
-      >
-    >;
-    type _NoInventedKeys = Assert<
-      Equal<
-        Exclude<
-          keyof ObjectFieldGroup,
-          'key' | 'label' | 'icon' | 'description' | 'visibleWhen' | 'collapse' | 'collapsible' | 'collapsed' | 'defaultExpanded'
-        >,
-        never
       >
     >;
 
