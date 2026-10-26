@@ -73,6 +73,8 @@ function makeDeps(opts: {
   });
   const deps: IdentityImportDeps = {
     getAuthApi: async () => ({ createUser, requestPasswordReset }),
+    // better-auth's default range (8–128): temporary passwords stay 16 characters.
+    getAuthContext: async () => ({ password: { config: { minPasswordLength: 8, maxPasswordLength: 128 } } }),
     getDataEngine: () => ({ find, update, insert }),
     phoneNumberEnabled: () => opts.phoneEnabled ?? false,
     emailServiceAvailable: () => opts.emailAvailable ?? true,
@@ -168,6 +170,25 @@ describe('runAdminImportUsers — request validation', () => {
     );
     expect(res.status).toBe(413);
     expect(m.createUser).not.toHaveBeenCalled();
+  });
+
+  it('[#25932] refuses before any write when the length range cannot be read', async () => {
+    const m = makeDeps();
+    const deps: IdentityImportDeps = {
+      ...m.deps,
+      getAuthContext: async () => {
+        throw new Error('auth context unavailable');
+      },
+    };
+    const res = await runAdminImportUsers(
+      deps,
+      makeRequest({ passwordPolicy: 'temporary', format: 'json', rows: [{ email: 'a@b.co' }] }),
+      ACTOR,
+    );
+    expect(res.status).toBe(500);
+    expect(res.body.error?.code).toBe('INTERNAL_ERROR');
+    expect(m.createUser).not.toHaveBeenCalled();
+    expect(m.update).not.toHaveBeenCalled();
   });
 });
 

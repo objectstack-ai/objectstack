@@ -106,7 +106,7 @@ describe('the population the rule walks is the one the run emitted', () => {
     // The refuted option A would have put 'apps' in both lists at once.
     expect([...GENERATED_SECTIONS]).toEqual(['objects', 'metadataForms']);
     expect([...GENERATED_SECTIONS]).not.toContain('apps');
-    expect([...HAND_AUTHORED_SECTIONS]).toEqual(['apps', 'dashboards', 'pages']);
+    expect([...HAND_AUTHORED_SECTIONS]).toEqual(['apps', 'dashboards', 'datasets', 'pages']);
   });
 
   it('substitutes the current source once the leaf drifts, instead of serving the draft', () => {

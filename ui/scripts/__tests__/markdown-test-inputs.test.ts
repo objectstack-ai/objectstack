@@ -43,13 +43,30 @@
  * moves the inert leg to what the exclusion list still buys: a NON-markdown
  * change under `apps/site/**`, which is the shape of the one commit in the
  * measured 513-merge window that still skips and should.
+ *
+ * ## ⚠️ objectstack#25712: the step is gone, and its legs with it
+ *
+ * The decision step lived in objectui's `ci.yml`, which runs nowhere under the
+ * monorepo: GitHub runs the repository root's `.github/workflows/` alone. The
+ * root `ci.yml` ported objectui's `Test` job as `test-ui` (row 7 of the
+ * objectstack#25697 workflow roster) without the step, so every leg that ran it
+ * retired: the four cases of `the decision step, as \`ci.yml\` writes it`, the
+ * five of `the objectui#8857 pull request shape`, objectui#9142's `FIRES: the
+ * planted root document runs the shards` and the real-step half of its depth-1
+ * case. The property the step carried, that a markdown-only pull request runs
+ * the tests that read the markdown, is the root's in two halves now: the
+ * `filter` job's `ui` globs start `Test UI` on any change under `ui/` (pinned
+ * below, by path), and `select-affected-tests.mjs` picks the tests, a package's
+ * own for a file it owns and every `scripts/**` test always
+ * (`select-affected-tests.test.ts`). Neither reads this ledger, which keeps its
+ * audit and its derivation here.
  */
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { globMatches, jobBlock, repoPath, rootCi, uiFilterGlobs, UI_JOBS } from './helpers/root-ci';
 
 import {
   ADJUDICATED,
@@ -63,239 +80,25 @@ import {
 } from '../markdown-test-inputs.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const CI_YML = path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
 
 /** The document objectui#8857 changed, and the test that reads it. */
 const INSTANCE_DOCUMENT = 'packages/plugin-dashboard/README.md';
 const INSTANCE_READER =
   'packages/plugin-dashboard/src/__tests__/readme-dashboard-examples-spec-valid.test.ts';
 
-/* ── extracting the real step ────────────────────────────────────────────── */
+/* ── the root job that runs the readers ───────────────────────────────────── */
 
-const STEP_HEADER =
-  '      - name: Decide whether this change needs a full run\n        id: relevant\n        run: |\n';
-
-/**
- * The `run:` bodies of every copy of the decision step, in file order.
- *
- * Textual rather than YAML-parsed for the same reason `workflow-checks.ts` gives:
- * what is under test is the bytes CI runs, and a parser that normalised them
- * would be testing its own normalisation.
- */
-function decisionSteps(yaml: string): string[] {
-  const out: string[] = [];
-  let from = 0;
-  for (;;) {
-    const at = yaml.indexOf(STEP_HEADER, from);
-    if (at === -1) break;
-    const start = at + STEP_HEADER.length;
-    const body: string[] = [];
-    for (const line of yaml.slice(start).split('\n')) {
-      if (line.trim() === '') {
-        body.push(line);
-        continue;
-      }
-      if (!line.startsWith('          ')) break;
-      body.push(line);
-    }
-    out.push(`${body.join('\n').trimEnd()}\n`);
-    from = start;
-  }
-  return out;
-}
-
-const YAML = readFileSync(CI_YML, 'utf8');
-const STEPS = decisionSteps(YAML);
-/** `ci.yml` declares the gated jobs in this order. */
-const [TYPE_CHECK_STEP, TEST_STEP, DIST_PINS_STEP, E2E_STEP] = STEPS;
-
-/* ── a real repository, a real bash run ──────────────────────────────────── */
-
-type Outcome = { shouldRun: string; log: string };
-
-let scratch: string;
-
-function git(cwd: string, ...args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' });
-}
-
-/**
- * Build a repository whose pull request changes exactly `files`, and run one
- * copy of the step against it.
- *
- * The scripts the step calls are copied in AFTER both commits, so they are
- * untracked and cannot appear in the diff the step reads — the pull request
- * under test really does change nothing but `files`.
- */
-function runStep(step: string, files: Record<string, string>): Outcome {
-  const repo = mkdtempSync(path.join(scratch, 'pr-'));
-  git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.email', 'ci@example.invalid');
-  git(repo, 'config', 'user.name', 'CI');
-  writeFileSync(path.join(repo, 'seed.txt'), 'base\n');
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-q', '-m', 'base');
-  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
-
-  for (const [rel, body] of Object.entries(files)) {
-    mkdirSync(path.join(repo, path.dirname(rel)), { recursive: true });
-    writeFileSync(path.join(repo, rel), body);
-  }
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-q', '-m', 'pull request');
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
-
-  mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-  for (const name of ['markdown-test-inputs.mjs', 'invoked-as.mjs', 'js-comment-mask.mjs']) {
-    copyFileSync(path.join(REPO_ROOT, 'scripts', name), path.join(repo, 'scripts', name));
-  }
-
-  const script = step
-    .split('${{ github.event_name }}')
-    .join('pull_request')
-    .split('${{ github.event.pull_request.base.sha }}')
-    .join(base)
-    .split('${{ github.event.pull_request.head.sha }}')
-    .join(head);
-  const scriptPath = path.join(repo, 'step.sh');
-  writeFileSync(scriptPath, script);
-  const outputPath = path.join(repo, 'github-output');
-  writeFileSync(outputPath, '');
-
-  // `bash -e {0}` is the shell GitHub runs a `run:` block with on Linux.
-  const log = execFileSync('bash', ['-e', scriptPath], {
-    cwd: repo,
-    encoding: 'utf8',
-    env: { ...process.env, GITHUB_OUTPUT: outputPath },
-  });
-  const written = readFileSync(outputPath, 'utf8').trim();
-  return { shouldRun: written.replace(/^should_run=/, ''), log };
-}
-
-beforeAll(() => {
-  scratch = mkdtempSync(path.join(tmpdir(), 'markdown-test-inputs-'));
-});
-afterAll(() => {
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
-});
-
-/* ── the step this file is about ─────────────────────────────────────────── */
-
-describe('the decision step, as `ci.yml` writes it', () => {
-  it('carries four copies, and only the two test jobs ask about markdown inputs', () => {
-    expect(STEPS).toHaveLength(4);
-    expect(TEST_STEP).toContain('scripts/markdown-test-inputs.mjs');
-    expect(DIST_PINS_STEP).toContain('scripts/markdown-test-inputs.mjs');
-    expect(TYPE_CHECK_STEP).not.toContain('markdown-test-inputs');
-    expect(E2E_STEP).not.toContain('markdown-test-inputs');
+describe('the root Test UI job starts on a markdown-only pull request', () => {
+  it('the `ui` filter matches the documents the objectui#8857, #9096 and #9142 shapes changed', () => {
+    const globs = uiFilterGlobs(rootCi());
+    const missed = [INSTANCE_DOCUMENT, 'AGENTS.md', 'SECURITY.md']
+      .map(repoPath)
+      .filter((file) => !globs.some((glob) => globMatches(glob, file)));
+    expect(missed, 'a markdown-only change under ui/ would skip Test UI').toEqual([]);
   });
 
-  it('gives the dist-pin job the `test` job\'s gate VERBATIM (objectui#9499)', () => {
-    // The built-artifact pin lane ran as a step of `test` shard 1 until
-    // objectui#9499 gave it a job. Inside that job it inherited the widened
-    // gate; a narrower one here would silently stop running the pins on exactly
-    // the markdown-only pull requests objectui#9096 brought back into scope,
-    // and a green suite that stopped measuring something is what this whole
-    // file is about. Equality of the CODE rather than "also contains the
-    // script": the second stage is only an improvement while it asks the same
-    // question, and "contains" is satisfied by a copy that asks it differently.
-    //
-    // Shell comments are stripped from both sides first, and only they: the
-    // `test` job's copy carries ~70 lines of them recording objectui#8857,
-    // #9096 and #9241, which are the reasoning for the stage and not the stage.
-    // Every executable line, including the exclusion pathspecs and every
-    // fail-open branch, is compared verbatim.
-    const code = (step: string) =>
-      step
-        .split('\n')
-        .filter((line) => !/^\s*#/.test(line))
-        .join('\n')
-        .trim();
-
-    expect(code(DIST_PINS_STEP)).toEqual(code(TEST_STEP));
-    // The control: stripping comments must not have emptied either side.
-    expect(code(TEST_STEP)).toContain('markdown-test-inputs.mjs');
-    expect(code(TEST_STEP).split('\n').length).toBeGreaterThan(20);
-  });
-
-  it('asks the markdown question only AFTER the unwidened diff came back empty', () => {
-    // Order is the optimisation. If the markdown stage ran first, or ran
-    // unconditionally, every pull request would pay for it.
-    const exclusions = TEST_STEP.indexOf(":(exclude,glob)**/*.md'");
-    const markdown = TEST_STEP.indexOf('markdown-test-inputs.mjs');
-    expect(exclusions).toBeGreaterThan(-1);
-    expect(markdown).toBeGreaterThan(exclusions);
-  });
-
-  it('fails toward the full run, in both of the new failure branches', () => {
-    // The posture this step already had (objectstack#4928): a question that
-    // cannot be answered means RUN. Every `if !` capture in the widened step
-    // must reach a `should_run=true`, never a skip.
-    const failures = TEST_STEP.split('\n').filter((line) => /^\s*if ! /.test(line));
-    expect(failures.length).toBeGreaterThanOrEqual(3);
-    for (const failure of failures) {
-      const at = TEST_STEP.indexOf(failure);
-      const branch = TEST_STEP.slice(at, TEST_STEP.indexOf('fi', at));
-      expect(branch, `${failure.trim()} must run everything when it fails`).toContain(
-        "echo 'should_run=true'",
-      );
-    }
-  });
-});
-
-/* ── the firing control, all three directions ────────────────────────────── */
-
-describe('the objectui#8857 pull request shape', () => {
-  const FILES = { [INSTANCE_DOCUMENT]: '# Dashboard\n\nA fence a test evaluates.\n' };
-
-  it('FIRES: the widened `test` step runs everything, and says which document', () => {
-    const outcome = runStep(TEST_STEP, FILES);
-    expect(outcome.shouldRun).toBe('true');
-    expect(outcome.log).toContain(INSTANCE_DOCUMENT);
-  });
-
-  it('BEFORE: the same input through the unwidened copy of the step still skips', () => {
-    // Not a reconstruction of the old step — the `type-check` job's copy IS the
-    // shape the `test` job's copy had, and this change left it alone.
-    const outcome = runStep(TYPE_CHECK_STEP, FILES);
-    expect(outcome.shouldRun).toBe('false');
-  });
-
-  it('INERT: an excluded NON-markdown change still skips, through the WIDENED step', () => {
-    // objectui#9096 took markdown off this leg — see the header. What is left
-    // is the half of the exclusion list that still pays: `apps/site/**` and the
-    // non-markdown files under `content/**` and `docs/**`. Without this leg a
-    // step that answered `true` unconditionally would pass everything above.
-    //
-    // This is not a hypothetical shape: `8011852dc` ("fix(site): drop the
-    // count-based claims from the homepage") is exactly it, and it is the one
-    // commit of the 36 that reached this stage in the measured window which
-    // still skips after the widening.
-    const outcome = runStep(TEST_STEP, {
-      'apps/site/src/app/page.tsx': 'export default function Page() { return null; }\n',
-      'docs/diagrams/architecture.svg': '<svg/>\n',
-    });
-    expect(outcome.shouldRun).toBe('false');
-  });
-
-  it('FIRES on the objectui#9096 shape: a root document only `scripts/__tests__` reads', () => {
-    // The card's own named instance, re-run as a fixture: the commit whose
-    // subject begins `docs(agents): narrow the package-level test claim`
-    // changed only `AGENTS.md`, three tests under `scripts/__tests__` read it,
-    // and the shards skipped. `AGENTS.md` is in no product test's class, so
-    // this leg fires ONLY because `scripts` is a scan root.
-    const files = { 'AGENTS.md': '# AGENTS\n\nA sentence a gate test reads.\n' };
-    expect(runStep(TEST_STEP, files).shouldRun).toBe('true');
-    // …and the unwidened copy of the same step, untouched by this change, is
-    // the "before" reading for it.
-    expect(runStep(TYPE_CHECK_STEP, files).shouldRun).toBe('false');
-  });
-
-  it('CONTROL: the widened step still runs everything for an ordinary source change', () => {
-    // The harness has to be able to say `true` for the boring reason, or the
-    // `false` legs above prove nothing about the harness.
-    const outcome = runStep(TEST_STEP, { 'packages/plugin-grid/src/index.ts': 'export {};\n' });
-    expect(outcome.shouldRun).toBe('true');
+  it('and the job reads that filter', () => {
+    expect(jobBlock(rootCi(), UI_JOBS.test)).toMatch(/^ {4}if: .*needs\.filter\.outputs\.ui != 'false'/m);
   });
 });
 
@@ -419,22 +222,8 @@ describe('objectui#9142 — a root-level markdown file a pull request ADDS', () 
     expect(tracked).not.toContain(PLANTED_ROOT_DOCUMENT);
   });
 
-  it('FIRES: the planted root document runs the shards, and the step says so', () => {
-    // The lit control, through the REAL step out of `ci.yml` — not through the
-    // class derivation, which cannot tell a correct class from a step that
-    // never asks it. Before the `./*` spelling this read `should_run=false`
-    // with no matched line at all, which is the whole defect: the pull request
-    // page went green having run nothing, and `check-doc-links.test.ts` — the
-    // test whose stated job is to fail on a root document with no `SCAN_ROOTS`
-    // row — is the one that did not run.
-    const files = { [PLANTED_ROOT_DOCUMENT]: '# Security\n\nA root document nobody declared.\n' };
-    const outcome = runStep(TEST_STEP, files);
-    expect(outcome.shouldRun).toBe('true');
-    expect(outcome.log).toContain(PLANTED_ROOT_DOCUMENT);
-    // …and the unwidened copy of the same step, untouched by this change, is
-    // the "before" reading taken from the file rather than from history.
-    expect(runStep(TYPE_CHECK_STEP, files).shouldRun).toBe('false');
-  });
+  // `FIRES: the planted root document runs the shards, and the step says so`
+  // retired with objectstack#25712, with the step it ran (see the header).
 
   it('names the reader that is waiting on it — the invariant that replaces the list', () => {
     const hits = markdownTestInputsAmong([PLANTED_ROOT_DOCUMENT]);
@@ -463,13 +252,6 @@ describe('objectui#9142 — a root-level markdown file a pull request ADDS', () 
     for (const notMarkdown of ['SECURITY.txt', 'pnpm-lock.yaml', 'turbo.json']) {
       expect(matchesEntry(notMarkdown, './*')).toBe(false);
     }
-    // And through the real step: a root file that is not markdown never reaches
-    // the markdown stage at all — it is not on the exclusion list, so the first
-    // diff already runs everything. Both copies agree, which is what makes this
-    // a statement about the exclusions rather than about the markdown class.
-    const notMarkdown = { 'SECURITY.txt': 'not markdown\n' };
-    expect(runStep(TEST_STEP, notMarkdown).shouldRun).toBe('true');
-    expect(runStep(TYPE_CHECK_STEP, notMarkdown).shouldRun).toBe('true');
   });
 
   it('the declared population is unchanged — every tracked root document is still an input', () => {

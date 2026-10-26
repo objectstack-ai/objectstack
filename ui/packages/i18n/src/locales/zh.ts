@@ -3262,6 +3262,8 @@ const zh = {
       detailLoadFailed: '无法加载变更详情：',
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       detailChangedKeys: '其他变更：',
+      detailNewKeys: '包含：',
+      generatedGroup: '平台生成（{{n}}）',
       confirmNote: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
       confirmNote_one: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
       confirmNote_other: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
