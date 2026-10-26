@@ -450,6 +450,10 @@ const pt = {
     selected_other: "{{count}} selecionados",
     edit: "Editar",
     delete: "Excluir",
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: "Abrir registro",
+    cancelChanges: "Descartar alterações",
+    saveRow: "Salvar linha",
   },
   grid: {
     bulkSelected: "{{count}} selecionados",
@@ -2468,6 +2472,8 @@ const pt = {
         stepInput: 'Entrada',
         stepOutput: 'Saída',
         stepError: 'Erro',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: "{{method}} não está disponível neste cliente",
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4842,6 +4848,14 @@ const pt = {
       unknownType: "Tipo de visualização de metadados desconhecido. Esperado {{a}}, {{b}} ou {{c}}.",
       unknownTypeNamed: "Tipo de visualização de metadados desconhecido “{{type}}”. Esperado {{a}}, {{b}} ou {{c}}.",
     },
+  },
+  reactPage: {
+    disabledTitle: "As páginas React estão desativadas nesta implantação",
+    disabledBody: "As páginas {{kind}} executam o JavaScript do autor diretamente no aplicativo, por isso ficam desativadas, a menos que a implantação as ative. Um operador que confia nos autores das suas páginas define {{flag}} no servidor (um host que incorpora o renderizador chama {{call}}).",
+    loadFailed: "Não foi possível carregar o runtime do React",
+    sourceRequired: "Uma página {{kind}} requer um {{source}} não vazio.",
+    loading: "Carregando o runtime do React…",
+    error: "Erro na página React",
   },
 };
 

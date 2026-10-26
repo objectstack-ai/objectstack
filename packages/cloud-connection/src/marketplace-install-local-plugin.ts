@@ -182,6 +182,11 @@ import {
 import {
     assertProtocolCompat,
     checkProtocolCompat,
+    // [ADR-0141 D2] The pre-install dependency check: the one predicate and
+    // the one answer every package-install door gives its refusal.
+    checkDeclaredDependencies,
+    DependencyMissingError,
+    dependencyMissingAnswer,
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
     ProtocolIncompatibleError,
@@ -1534,6 +1539,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 success: false,
                 error: { code: refusal.code, message: refusal.message, details: refusal.details },
             }, refusal.status);
+        }
+
+        // 1c'. [ADR-0141 D2] ⭐ THE PRE-INSTALL DEPENDENCY CHECK, beside the
+        //     handshake and as early — before the manifest service sees the
+        //     artifact, so a refused install registers, writes and syncs
+        //     nothing. Every package this act delivers is judged on its OWN
+        //     `manifest.dependencies`: the entries of `packages[]` for a
+        //     multi-package artifact, the manifest itself otherwise. A
+        //     dependency the same artifact delivers (an entry, or the
+        //     artifact's own identity) is judged for presence only; any other
+        //     must be installed in this runtime's registry at a version inside
+        //     its range. The refusal is the other install doors' answer, from
+        //     the one shared helper, 422 on both branches: a dependency this
+        //     environment lacks is the environment's state against a body as
+        //     delivered, never an upstream fault.
+        //
+        //     ⛔ Not at the `kernel:ready` rehydrate, which re-registers what an
+        //     install already admitted while the boot is still filling the
+        //     registry (AGENTS.md, *Startup registry reads*).
+        {
+            const entries = Array.isArray(manifest.packages)
+                ? manifest.packages
+                    .map((entry: unknown) => (isPlainObject(entry) && isPlainObject(entry.manifest) ? entry.manifest : undefined))
+                    .filter((m: unknown): m is Record<string, any> => m !== undefined)
+                : [manifest];
+            let registry: { getPackage?(id: string): any } | undefined;
+            try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing installed */ }
+            const unmet = checkDeclaredDependencies({
+                delivered: entries,
+                deliveredIds: [manifestId],
+                getInstalled: (id) => registry?.getPackage?.(id),
+            });
+            if (unmet.length > 0) {
+                const refusal = dependencyMissingAnswer(new DependencyMissingError(unmet));
+                return c.json({
+                    success: false,
+                    error: { code: refusal.code, message: refusal.message, details: refusal.details },
+                }, refusal.status);
+            }
         }
 
         // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id, D3

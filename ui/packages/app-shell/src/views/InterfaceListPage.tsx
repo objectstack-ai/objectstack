@@ -35,6 +35,7 @@ import { isSystemManagedField } from '@object-ui/types';
 import { leadWithNameField } from '@object-ui/core';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { metadataText } from '../hooks/useNavTargetLabel.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -270,7 +271,7 @@ export function defaultMapFromObject(objectDef: any): { locationField: string } 
 }
 
 export function InterfaceListPage({ page, className, onConfigChange, reserveEditAffordance }: InterfaceListPageProps) {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   // objectui#12980 — the source object, read by name, not the whole registry:
   // reading `objects` would load every object to find one. Inside an app that
   // names a package it rides the app's scope, as `nav:menu`'s capability gate
@@ -640,15 +641,21 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
   // declare is refused here.
   const buttonBar: ActionBarSchema = { type: 'action:bar', location: 'list_toolbar', actions: buttonActions, size: 'sm', variant: 'outline' };
 
+  // The page's `label` and `description` are `I18nLabel`s — a string or an
+  // inline locale map — resolved in the viewer's language (#25901). Only a page
+  // whose label resolves to no text falls back to its machine name.
+  const pageLabel = metadataText(page.label, language);
+  const pageDescription = metadataText(page.description, language);
+
   return (
     <div className={className ?? 'h-full flex flex-col'} data-testid="interface-list-page">
       <div className={`pl-4 pt-4 pb-2 shrink-0 flex items-start justify-between gap-3 ${reserveEditAffordance ? 'pr-12' : 'pr-4'}`}>
         <div className="min-w-0">
           <h1 className="text-lg font-semibold leading-tight">
-            {typeof page.label === 'string' ? page.label : page.name}
+            {pageLabel ?? page.name}
           </h1>
-          {typeof page.description === 'string' && page.description && (
-            <p className="text-sm text-muted-foreground mt-0.5">{page.description}</p>
+          {pageDescription && (
+            <p className="text-sm text-muted-foreground mt-0.5">{pageDescription}</p>
           )}
         </div>
         {buttonActions.length > 0 && (
@@ -672,7 +679,7 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
         <NavigationOverlay
           {...navOverlay}
           setIsOpen={(o: boolean) => { if (!o) closeRecordDrawer(); }}
-          title={typeof page.label === 'string' ? page.label : (cfg.source || 'Record')}
+          title={pageLabel ?? (cfg.source || 'Record')}
         >
           {(record: any) => (
             <RecordDetailView

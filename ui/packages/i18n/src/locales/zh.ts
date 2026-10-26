@@ -453,6 +453,10 @@ const zh = {
     selected_other: '已选择 {{count}} 项',
     edit: '编辑',
     delete: '删除',
+    // The inline-edit row buttons and the hover open affordance (#25916).
+    openRecord: '打开记录',
+    cancelChanges: '取消更改',
+    saveRow: '保存行',
   },
   grid: {
     actions: '操作',
@@ -2512,6 +2516,8 @@ const zh = {
         stepInput: '输入',
         stepOutput: '输出',
         stepError: '错误',
+        // A client that lacks the method a panel calls (#25916).
+        clientMethodUnavailable: '此客户端不支持 {{method}}',
       },
       // objectui#13460 — the Integrations page's "Connect an AI agent" card (`AgentConnectSection`).
       agentConnect: {
@@ -4788,6 +4794,14 @@ const zh = {
       unknownType: '未知的元数据视图类型。应为 {{a}}、{{b}} 或 {{c}}。',
       unknownTypeNamed: '未知的元数据视图类型“{{type}}”。应为 {{a}}、{{b}} 或 {{c}}。',
     },
+  },
+  reactPage: {
+    disabledTitle: 'React 页面在此部署中已禁用',
+    disabledBody: '{{kind}} 页面会在应用中直接执行作者编写的 JavaScript，因此除非部署将其开启，否则处于关闭状态。信任其页面作者的运维人员可在服务器上设置 {{flag}}（嵌入渲染器的宿主则调用 {{call}}）。',
+    loadFailed: '无法加载 React 运行时',
+    sourceRequired: '{{kind}} 页面需要非空的 {{source}}。',
+    loading: '正在加载 React 运行时…',
+    error: 'React 页面错误',
   },
 } as const;
 

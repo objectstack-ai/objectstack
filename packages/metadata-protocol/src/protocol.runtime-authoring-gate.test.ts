@@ -4391,14 +4391,16 @@ describe('runtime authoring gate on VIEW writes — a bulk confirmText template 
 // registered action) is an ADR-0032 `template` slot over the roots the
 // console's runner binds (#24814). #24814 shipped its findings as advisories;
 // this card refuses them at the runtime save door, as `os build` refuses them,
-// all but one: a `${…}` token the runner still fills in a sentence with no
-// `{{ }}` hole stays an advisory. Pinned through the REAL `saveMetaItem`:
+// and #25709 refuses the last one too: a `${…}` token in a sentence with no
+// `{{ }}` hole, which the runner now shows as written. Pinned through the REAL
+// `saveMetaItem`:
 //
 //  (a) an active page save carrying a refused sentence is refused — 422
 //      `INVALID_METADATA` — naming the slot, and nothing lands; an action
 //      write is refused the same way; the draft promotion is refused too;
 //  (b) the door's finding IS the build's;
-//  (c) control: the transitional `${…}` sentence saves with one advisory;
+//  (c) the holeless `${record.*}` sentence is refused the same way, with no
+//      advisory left for it;
 //  (d) the parse is not narrowed: a stored page carrying a blank or an
 //      unbound sentence keeps loading, and its next save is judged.
 //
@@ -4491,14 +4493,18 @@ describe('runtime authoring gate on PAGE and ACTION writes — an action\'s copy
         }
     });
 
-    it('(c) CONTROL — the transitional `${record.*}` sentence saves with one advisory, and the row lands', async () => {
+    it('(c) REFUSES the holeless `${record.*}` sentence the runner shows as written — 422, prescribing its hole; nothing stored', async () => {
         const { protocol, rows } = makeProtocol();
 
-        const res = await savePage(protocol, page('Delete ${record.name}?'));
+        const err = await savePage(protocol, page('Delete ${record.name}?')).catch((e: any) => e);
 
-        expect(res).toMatchObject({ success: true });
-        expect(copyIssues(res.advisories)).toHaveLength(1);
-        expect(activePageRows(rows)).toHaveLength(1);
+        expect(err, 'the save resolved — the door still admits the holeless `${…}` sentence').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = copyIssues(err.issues);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error' });
+        expect(issues[0].message).toContain('as `Delete {{ record.name }}?`');
+        expect(activePageRows(rows)).toEqual([]);
     });
 
     for (const [label, text] of [['an unbound hole', UNBOUND], ['a blank sentence', '']] as const) {
