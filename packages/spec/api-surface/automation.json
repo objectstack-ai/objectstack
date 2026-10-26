@@ -46,6 +46,7 @@
     "AssignmentExpressionValueSchema (const)",
     "AssignmentRule (type)",
     "AssignmentRuleEntry (type)",
+    "AssignmentRuleEntryParsed (type)",
     "AssignmentRuleEntrySchema (const)",
     "AssignmentRuleParsed (type)",
     "AssignmentRuleSchema (const)",

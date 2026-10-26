@@ -44,6 +44,7 @@
     "AssignmentExpressionValueSchema": "src/automation/builtin-node-config.zod.ts#AssignmentExpressionValueSchema (const)",
     "AssignmentRule": "src/automation/assignment-rule.zod.ts#AssignmentRule (type)",
     "AssignmentRuleEntry": "src/automation/assignment-rule.zod.ts#AssignmentRuleEntry (type)",
+    "AssignmentRuleEntryParsed": "src/automation/assignment-rule.zod.ts#AssignmentRuleEntryParsed (type)",
     "AssignmentRuleEntrySchema": "src/automation/assignment-rule.zod.ts#AssignmentRuleEntrySchema (const)",
     "AssignmentRuleParsed": "src/automation/assignment-rule.zod.ts#AssignmentRuleParsed (type)",
     "AssignmentRuleSchema": "src/automation/assignment-rule.zod.ts#AssignmentRuleSchema (const)",
