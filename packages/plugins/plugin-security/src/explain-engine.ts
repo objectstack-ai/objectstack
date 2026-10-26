@@ -739,6 +739,7 @@ export async function buildContextForUser(
     userId,
     positions: grants.positions,
     permissions: grants.permissions,
+    directPermissions: grants.directPermissions,
     systemPermissions: grants.systemPermissions,
     org_user_ids: grants.org_user_ids,
     accessible_org_ids: grants.accessible_org_ids,
@@ -2483,13 +2484,21 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // name, a channel the resolver no longer has. Both definition-bound and
   // directly assigned sets arrive as `context.permissions`, so which one a set
   // is gets read from the held positions' definitions.
+  //
+  // [#25799] A set can arrive through both channels: the user's own grant row
+  // AND a held position's definition. The resolver's own split of the two
+  // (`directPermissions`, `resolveUserAuthzGrants` §6) says which, so such a
+  // set names both, and revoking the position is not read as removing it. A
+  // context the resolver did not build carries no split, and a set a held
+  // definition names is then attributed to that position alone.
   const boundBy = await positionBindingsOf(deps, positions);
+  const direct: readonly string[] = Array.isArray(context?.directPermissions) ? context.directPermissions : [];
   const viaOf = (name: string): string => {
     if (baselineNames.includes(name)) {
       return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
     }
     const position = boundBy?.get(name);
-    if (position !== undefined) return `position:${position}`;
+    if (position !== undefined) return direct.includes(name) ? `direct grant + position:${position}` : `position:${position}`;
     if ((context?.permissions ?? []).includes(name)) {
       return boundBy ? 'direct grant' : 'direct grant or position definition (the position definitions could not be read)';
     }

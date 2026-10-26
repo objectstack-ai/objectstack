@@ -12,6 +12,10 @@
  * happened to share a held position's name `position:NAME`. #24757 retired the
  * fold; this pins the attribution that replaces it, and what it says when the
  * definitions cannot be read.
+ *
+ * [#25799] A set held through BOTH channels names both, read from the
+ * resolver's own split (`directPermissions`), so the direct row is not hidden
+ * behind the position.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -54,8 +58,8 @@ const CONTEXT = {
   permissions: ['crm_sales_user', 'forecasting', 'sales_manager'],
 };
 
-async function attributions(ql: unknown): Promise<Record<string, string | undefined>> {
-  const d = await explainAccess(deps(ql), { object: 'leave_request', operation: 'read', context: CONTEXT });
+async function attributions(ql: unknown, context: Record<string, unknown> = CONTEXT): Promise<Record<string, string | undefined>> {
+  const d = await explainAccess(deps(ql), { object: 'leave_request', operation: 'read', context });
   const principal = d.layers.find((l) => l.layer === 'principal');
   return Object.fromEntries(
     (principal?.contributors ?? []).filter((c) => c.kind === 'permission_set').map((c) => [c.name, c.via]),
@@ -81,6 +85,19 @@ describe('[ADR-0131 D3/D4; #24757] explain attributes a set to a position only t
 
   it('a direct grant sharing a held position\'s name is a direct grant, not that position\'s', async () => {
     expect((await attributions(withCatalog())).sales_manager).toBe('direct grant');
+  });
+
+  it('a set held both through the user\'s own grant row and through a held position\'s definition names both channels (#25799)', async () => {
+    // `crm_sales_user` is bound by `sales_rep` AND assigned directly, as the
+    // resolver's own split says (`directPermissions`): revoking the position
+    // would not remove the access, so the attribution must not read as the
+    // position's alone.
+    const dual = { ...CONTEXT, directPermissions: ['crm_sales_user', 'forecasting', 'sales_manager'] };
+    const out = await attributions(withCatalog(), dual);
+    expect(out.crm_sales_user).toBe('direct grant + position:sales_rep');
+    // The other two are direct only, through either reading.
+    expect(out.forecasting).toBe('direct grant');
+    expect(out.sales_manager).toBe('direct grant');
   });
 
   it('with the definitions unreadable it says it cannot tell the two apart, rather than guessing either', async () => {
