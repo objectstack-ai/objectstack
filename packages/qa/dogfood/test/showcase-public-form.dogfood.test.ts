@@ -29,7 +29,6 @@ const SYS = { context: { isSystem: true } } as const;
 
 describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
 
   beforeAll(async () => {

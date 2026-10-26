@@ -71,7 +71,6 @@ async function posture(stack: VerifyStack): Promise<TenancyShape> {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowsOf(r: any): any[] {
   return Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : [];
 }
@@ -79,7 +78,6 @@ function rowsOf(r: any): any[] {
 /** The org id the admin's SESSION carries — the one wire field a real login sets. */
 async function sessionOrgId(stack: VerifyStack): Promise<string | null> {
   await stack.signIn();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ql = await stack.kernel.getServiceAsync<any>('objectql');
   const users = rowsOf(
     await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
@@ -139,7 +137,6 @@ describe('bootStack orgContext (#7762)', () => {
     async () => {
       const stack = await bootStack(app, { orgContext: true });
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ql = await stack.kernel.getServiceAsync<any>('objectql');
         const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
         expect(orgs.length, 'the default-org bootstrap minted an organization').toBeGreaterThan(0);
@@ -167,7 +164,6 @@ describe('bootStack orgContext (#7762)', () => {
       // no org-less `single` boot left to keep a fixture on (ADR-0131 D11).
       const stack = await bootStack(app, {});
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ql = await stack.kernel.getServiceAsync<any>('objectql');
         const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
         expect(orgs.map((o) => o.slug)).toEqual(['default']);

@@ -70,7 +70,6 @@ interface RuleRow {
 
 describe('#7676 — package-seeded (org-less) sharing rules stay visible to an ORG-BOUND admin', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let admin: string;
 
