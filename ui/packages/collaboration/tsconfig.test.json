@@ -19,7 +19,6 @@
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
     "declaration": false,
-    "jsx": "react-jsx",
     // Drop the root tsconfig's source-tree `paths` so `@object-ui/*` and
     // `@objectstack/spec` resolve through the workspace dependency's built
     // `.d.ts` instead of pulling sibling sources in as program inputs (TS6059).

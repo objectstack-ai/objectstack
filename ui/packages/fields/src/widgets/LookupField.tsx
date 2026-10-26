@@ -19,7 +19,7 @@ import { PeoplePicker } from './PeoplePicker.js';
 import { useRecordQuery } from './useRecordQuery.js';
 import { objectResolvesSearch } from './searchOffer.js';
 import { deriveLookupColumns } from './deriveLookupColumns.js';
-import { buildExpandFields, getRecordDisplayName, mergeFilterNodes, resolveAffordance, toPredicateRecord, withoutDeniedFields } from '@object-ui/core';
+import { buildExpandFields, declaredNameField, getRecordDisplayName, mergeFilterNodes, resolveAffordance, resolveNameField, toPredicateRecord, withoutDeniedFields } from '@object-ui/core';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { getPersonInitials } from './personDisplay.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
@@ -581,10 +581,25 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    * still leads (the author picked that column to be the subtitle), followed by
    * every non-display picker column. Both halves render through
    * `renderLookupColumnValue`, the picker's own renderer.
+   *
+   * "Non-display" means not the field the option's TITLE reads. A declared
+   * `displayField` is that field. Without one, `displayField` is only the
+   * `'name'` guess, and the title comes from `getRecordDisplayName`'s object
+   * ladder (`recordToOption`): the declared name field, else a `titleFormat`
+   * template, else the derived title field. So the referenced object's
+   * resolved name field is skipped too, unless a template rather than a field
+   * titles the record. Without this an object whose name field is not
+   * literally `name` (`title`, `customer_name`, every AI-built object) spent
+   * the subtitle's first slot repeating the title.
    */
   const previewColumns = useMemo<LookupColumnDef[]>(() => {
     const cols: LookupColumnDef[] = [];
     const seen = new Set<string>([displayField]);
+    if (!declaredDisplayField && refObjectSchema) {
+      const titledByTemplate = !!refObjectSchema.titleFormat && !declaredNameField(refObjectSchema);
+      const nameField = titledByTemplate ? undefined : resolveNameField(refObjectSchema);
+      if (nameField) seen.add(nameField);
+    }
     if (descriptionField) {
       cols.push({ field: descriptionField });
       seen.add(descriptionField);
@@ -596,7 +611,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       cols.push(col);
     }
     return cols;
-  }, [descriptionField, pickerColumns, displayField]);
+  }, [descriptionField, pickerColumns, displayField, declaredDisplayField, refObjectSchema]);
 
   /**
    * Field descriptors for the previewed columns — the SAME builder the picker

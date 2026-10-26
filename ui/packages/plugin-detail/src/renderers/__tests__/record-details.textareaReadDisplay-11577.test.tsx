@@ -38,15 +38,16 @@
  * Controls, per the ruling's pins:
  *  - a single-line value reads back as the same single line (green on both
  *    sides of the fix: its text is what the pin holds unchanged);
- *  - other plain-text types (`text`, `email`) still render their own cell
- *    renderer's markup, unchanged, even when handed a multi-line value.
+ *  - other plain-text types (`text`, `email`) never borrow the textarea's
+ *    display: `email` keeps its own cell, and `text` reads through
+ *    `TextField`'s read display since objectstack#25897.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, act, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
-import { TextAreaField, TextCellRenderer, EmailCellRenderer } from '@object-ui/fields';
+import { TextAreaField, TextField, EmailCellRenderer } from '@object-ui/fields';
 import { RecordDetailsRenderer } from '../record-details';
 
 /** A blank line inside and a trailing newline: the bytes a one-line cell drops. */
@@ -194,11 +195,17 @@ for (const layout of ['desktop', 'mobile'] as const) {
 describe('objectui#11577 — CONTROL: other plain-text types render their own cell, unchanged', () => {
   beforeEach(pinViewport(DESKTOP_WIDTH));
 
-  it('`text` keeps TextCellRenderer, even for a multi-line value', async () => {
+  // `text` left the grid's one-line cell in objectstack#25897 (its own pin is
+  // `record-details.textReadWraps-25897`); it reads through `TextField`'s read
+  // display, which wraps but does NOT keep line breaks. So the control here is
+  // that a `text` row never borrows the textarea's display.
+  it('`text` reads the TextField display, not the TextAreaField one, even for a multi-line value', async () => {
     await renderBody({ summary: MULTI_LINE });
-    expect(valueCellOf('Summary', 'desktop').innerHTML).toBe(
-      markupOf(<TextCellRenderer value={MULTI_LINE} field={{ name: 'summary', type: 'text' } as never} />),
+    const cell = valueCellOf('Summary', 'desktop');
+    expect(cell.innerHTML).toBe(
+      markupOf(<TextField field={{ name: 'summary', type: 'text', label: 'Summary' } as never} value={MULTI_LINE} onChange={() => {}} readonly />),
     );
+    expect(cell.innerHTML).not.toBe(textareaReadDisplay(MULTI_LINE));
   });
 
   it('`email` keeps EmailCellRenderer', async () => {

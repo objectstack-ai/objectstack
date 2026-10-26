@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — whole-package import: the in-process cases import the @objectstack/lint/runtime entry cold, which reaches the whole gate graph, and the built-dist probes each spawn node once to cold-load it; slowest CI reading 13.05 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 //
 // The kernel boot-path contract for `@objectstack/lint/runtime` (#4463).
 //

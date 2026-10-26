@@ -49,6 +49,10 @@ const DATA = {
   role: 'admin',
   inviter: { name: 'Grace <Hopper>', email: 'grace@example.test' },
   organization: { name: 'Analytical & Engines' },
+  // [#25802] The invitation's expiry instant, rendered by a date formatter in
+  // the timezone the render names (UTC below) so the bytes never follow the
+  // machine's zone.
+  expiresAt: '2031-03-04T05:06:07.000Z',
 };
 
 /**
@@ -120,25 +124,28 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   // bodies gained the role clause their HTML bodies carry (each recomputed
   // from its expected string by hand, not copied from a run); the subject and
   // HTML pins are the row path's, unchanged.
+  // [#25802] The four invitation rows gained the expiry sentence; their bodies
+  // are re-pinned from the registry render in that commit, with the formatted
+  // instant cut to EXPIRY_HOLE (every other row's bytes were unchanged by it).
   'auth.invitation@en-US': {
     subject: 'Grace <Hopper> invited you to Analytical & Engines',
-    html: '58aa661450e6d836a02267bede0e644f2f6cfcce2f125e63e4a4cc661d424069',
-    text: '80f58fec58593820cc25e500532d7749044829ff81313430087a8ee534c2c3d9',
+    html: '3e211033743dc60b2cdefc3ebc75496f92521e6928d39aa5a8b7f4ae939b6522',
+    text: '9ad810e17f17ec421a549070c88d8c41c99eb2018c0f3211ec5142c3a85a6120',
   },
   'auth.invitation@zh-CN': {
     subject: 'Grace <Hopper> 邀请您加入 Analytical & Engines',
-    html: '6789d8a1f8fe77ae9dac42694c4512df93be52edac56bfe91bbfad0a453e63fe',
-    text: '6590d3d0c00efdddbdfd9e6883a8f8955f22c0dbd88c8c315c3bf66be2d19841',
+    html: '0481419a8f4983cec604f915466ae22f263705945a93c1f389d591591f047044',
+    text: '847c2c5dca77944ec27125d8f24ce2c89a75fd0629edecd0193a72947f4b84fb',
   },
   'auth.invitation@ja-JP': {
     subject: 'Grace <Hopper> さんが Analytical & Engines に招待しています',
-    html: '6f5123d67393d721038b50292106bf83676d946f1950bf45869f16c2e977ef0f',
-    text: 'c8856c71f961085c3953f58886896d06506c453c7bddcec94460bfe12a13010e',
+    html: 'faee1bc20d4b0e4d42bbf4ed0b3838e3c49c6d63f540a33d12f1d427aa3d0954',
+    text: '79fd55bb6aad81c1e6f59d8c4bd4d387827c4d6b988a4f2887f996da9aba9dd3',
   },
   'auth.invitation@es-ES': {
     subject: 'Grace <Hopper> te ha invitado a Analytical & Engines',
-    html: '9f49cf12933faf499b1000b8895d29c4dbfba9b051e695bd845e885b22e7db02',
-    text: '53e0aa5ea929c9d1da42c129d5289f51557790a3a88ddc22c68bf47cdebd6b10',
+    html: '58f4b3f845eb870fc6cc494e8e4b95e102d988ba7e97cbc384267275fddc70ae',
+    text: 'fb576ed4a00198bd02ac3e54aa1d27239b2f1025562fa5be7a8da15ff3d78388',
   },
   // [#23343] Declared after the row path was deleted, so these four never had
   // a seeded row: they are pinned against their first registry render, in the
@@ -228,6 +235,9 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   },
 };
 
+/** What the expiry instant is replaced with before a face is digested. */
+const EXPIRY_HOLE = '{{EXPIRES_AT_LONG}}';
+
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
 /** Boot the plugin over a real ObjectQL and hand back the `email` service it installs. */
@@ -259,8 +269,29 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
     const svc = await bootEmailService();
     const rendered: Record<string, { subject: string; html: string; text: string }> = {};
     for (const tpl of BUILTIN_AUTH_TEMPLATES) {
-      const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA });
-      rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
+      const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA, timezone: 'UTC' });
+      // [#25802] The one hole whose bytes are ICU locale data, not template
+      // text: the long-formatted expiry. Its wording moves between ICU
+      // releases (es-ES `2031, 5:06:07` on ICU 77, `2031 a las 5:06:07` on
+      // ICU 78), so it is cut out at its exact position and the digest pins
+      // every other byte; that the template renders exactly that instant is
+      // asserted here, against this Node's own `Intl`.
+      const instant = new Intl.DateTimeFormat(tpl.locale, {
+        dateStyle: 'long',
+        timeStyle: 'long',
+        timeZone: 'UTC',
+      }).format(new Date(DATA.expiresAt));
+      const cut = (face: string) => face.split(instant);
+      const html = cut(r.html);
+      const text = cut(r.text);
+      const expected = tpl.name === 'auth.invitation' ? 2 : 1;
+      expect(html, `${tpl.name}@${tpl.locale} HTML expiry holes`).toHaveLength(expected);
+      expect(text, `${tpl.name}@${tpl.locale} text expiry holes`).toHaveLength(expected);
+      rendered[`${tpl.name}@${tpl.locale}`] = {
+        subject: r.subject,
+        html: sha256(html.join(EXPIRY_HOLE)),
+        text: sha256(text.join(EXPIRY_HOLE)),
+      };
     }
 
     expect(Object.keys(rendered)).toHaveLength(32);

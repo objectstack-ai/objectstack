@@ -213,7 +213,12 @@ describe('DatasetWidget — a comparison overlay carries no merged mark (objectu
         fields,
       })),
     };
-    await renderWidget(comboWidget({ compareTo: { kind: 'previousYear' }, chartConfig: retiredComboChartConfig }), src);
+    await renderWidget(comboWidget({
+      // A comparison is asked only over a dated window (objectstack#25970).
+      filter: { due_date: { $gte: '2026-01-01', $lte: '2026-12-31' } },
+      compareTo: { kind: 'previousYear' },
+      chartConfig: retiredComboChartConfig,
+    }), src);
 
     const series = lastChartSchema.series;
     expect(series.map((s: any) => [s.dataKey, s.variant])).toEqual([

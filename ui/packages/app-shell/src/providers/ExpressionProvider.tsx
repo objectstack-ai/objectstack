@@ -429,6 +429,22 @@ export function useExpressionContext(): ExpressionContextValue {
 }
 
 /**
+ * Is an `ExpressionProvider` mounted above this component? (objectstack#25892)
+ *
+ * {@link useExpressionContext} answers either way, with an empty `current_user`
+ * and no permissions bound when nothing is mounted, so its value cannot tell a
+ * frame that built the signed-in user's scope from one that built none. A
+ * navigation gate needs that distinction: evaluated against the empty default,
+ * every predicate that names `current_user` faults, which reads as an
+ * authoring error the author did not make.
+ *
+ * Internal to the package: not re-exported by the package entry.
+ */
+export function useHasExpressionScope(): boolean {
+  return useContext(ExprCtx) !== null;
+}
+
+/**
  * The `type` slot of the shared visibility-fault reporter, for THIS surface
  * (objectui#6443).
  *
@@ -612,6 +628,21 @@ export function evaluateVisibility(
  * evaluator's own fail-closed seam (`throwOnError`), and only a throw there
  * withholds. A predicate that evaluates never pays that second call.
  *
+ * ## A frame with no predicate scope (objectstack#25892)
+ *
+ * `scopeBound: false` is a frame that mounts no `ExpressionProvider` (the
+ * Studio is the measured one), where the header bell's activity roster still
+ * walks every app's navigation. There `current_user` is
+ * the empty default and no permissions are bound, so a predicate naming either
+ * faults whatever the author wrote: the fault says nothing about the
+ * predicate. The verdict is the same (the entry is withheld), but the fault is
+ * not reported: such a frame does not render the app's navigation, it only
+ * lists from it, and the app's own shell, which does bind the scope, still
+ * reports a real fault. No once-per-load note replaces the warnings either: a
+ * package prints only `warn` / `error` (the `no-console` rule), and a warning
+ * on every Studio load would be the same noise this removes. A blank gate is
+ * reported on either frame, since it is blank whatever the scope.
+ *
  * ⛔ This is UI gating, not a security boundary: the server enforces what a
  * member may read whatever the shell draws.
  *
@@ -620,10 +651,16 @@ export function evaluateVisibility(
 export function evaluateNavigationVisibility(
   expression: string | boolean | { dialect?: string; source?: string } | undefined,
   evaluator: ExpressionEvaluator,
+  scopeBound: boolean = true,
 ): boolean {
   if (expression === undefined || expression === null) return true;
   if (expression === true || expression === 'true') return true;
   if (expression === false || expression === 'false') return false;
+
+  const withhold = (r: unknown): false => {
+    if (scopeBound) reportAppShellVisibleFault('visible', expression, r, 'withholding');
+    return false;
+  };
 
   let reason: unknown;
   let faulted = false;
@@ -637,8 +674,7 @@ export function evaluateNavigationVisibility(
     if (!faulted) return verdict;
   } catch (err) {
     // The evaluator itself threw: no answer at all, so the entry is withheld.
-    reportAppShellVisibleFault('visible', expression, err, 'withholding');
-    return false;
+    return withhold(err);
   }
 
   try {
@@ -648,8 +684,7 @@ export function evaluateNavigationVisibility(
     reportAppShellVisibleFault('visible', expression, reason, 'visibility');
     return verdict;
   } catch {
-    reportAppShellVisibleFault('visible', expression, reason, 'withholding');
-    return false;
+    return withhold(reason);
   }
 }
 

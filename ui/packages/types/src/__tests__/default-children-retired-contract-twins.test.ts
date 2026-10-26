@@ -71,19 +71,22 @@ const RETIRED = 'defaultChildren';
 const SURVIVOR = 'defaultProps';
 
 describe('ComponentMetaSchema — the runtime twin no longer carries the retired key', () => {
-  it('drops an authored `defaultChildren` from the parse output, while carrying its surviving twin through the same parse', () => {
+  it('no longer DECLARES an authored `defaultChildren`, while carrying its surviving twin through the same parse', () => {
     const result = ComponentMetaSchema.safeParse({
       label: 'Inline Container',
       defaultProps: { className: 'px-1.5' },
       defaultChildren: [{ type: 'text', content: 'Inline text' }],
     });
 
-    // Not a refusal: the schema strips, so an author who still declares the key
-    // keeps a VALID meta. The retirement is that the key stops travelling.
+    // Not a refusal: an author who still declares the key keeps a VALID meta.
+    // While the schema was strip mode the retirement was that the key stopped
+    // travelling; since objectstack#25923 the schema is `.passthrough()`, so the
+    // key rides through UNDECLARED — the retirement is that the shape no longer
+    // names it (and the strict authoring face refuses it).
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.data).not.toHaveProperty(RETIRED);
+    expect(Object.keys(ComponentMetaSchema.shape)).not.toContain(RETIRED);
 
     // Positive control, same parse, same call: the schema is still capable of
     // carrying a key through. Without this, a schema that dropped every key

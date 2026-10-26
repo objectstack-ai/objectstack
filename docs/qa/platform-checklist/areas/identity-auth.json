@@ -156,7 +156,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -208,7 +208,7 @@
         {
           "clause": "phone OTP without a deliverable SMS service fails LOUDLY (400 SMS_SERVICE_REQUIRED) — the capability degrades to a named error, never a silent success, a hang or a bare 500",
           "oracle": "api",
-          "verify": "on a NODE_ENV=production boot, the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
+          "verify": "on a NODE_ENV=production boot, the send-otp response is 400 with a JSON body whose code is SMS_SERVICE_REQUIRED (pinned at unit layer only by packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts, which drives AuthManager, not the NODE_ENV=production boot's send-otp door — it scores this clause partial, so the live call on that boot is still driven); features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
           "evidence": "the rejection + the /auth/config read"
         },
         {
@@ -244,7 +244,7 @@
         {
           "clause": "POST /auth/change-email succeeds for the signed-in user and answers 401 to the anonymous forge; POST /auth/delete-user is deliberately unwired (ledger disposition 'disabled') and is never 2xx: the signed-in caller gets 404 (the capability switch — user.deleteUser is unconfigured) and the anonymous forge gets 401 UNAUTHORIZED (the route is mounted and session-guarded, so the session check answers first).",
           "oracle": "api",
-          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback half answers 404 NOT_FOUND to a signed-in caller. The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
+          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed) and the anonymous forge answers 401; delete-user answers 404 to the signed-in caller (an empty body — better-auth's disabled branch carries no code) and 401 to the anonymous forge, and the account survives; its GET /delete-user/callback half answers 404 NOT_FOUND to a signed-in caller. The anonymous 401 beside the authed 404 is what tells the capability switch apart from an unmounted route. Pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (the '#7735 — POST /delete-user stays unwired, and the ledger says so' block: anonymous 401, authed 404, callback 404, nothing deleted) — cite the pin per rule 6, at its layer: it drives AuthManager at unit layer, not a booted server's door, so it scores the delete-user half partial and the live calls are still driven. The ledger books the route 'disabled' because user.deleteUser is deliberately unconfigured. A 2xx from delete-user, for anyone, is the FAIL",
           "evidence": "the change-email responses (authed + anonymous) + the delete-user responses (authed 404, anonymous 401) + the callback 404, or the cited pin output"
         }
       ],
@@ -266,7 +266,7 @@
         "magic link (off on a stock boot — the routes answer 404 unless plugins.magicLink is enabled; no login UI and no advertised flag since #7481 — blocked, objectui#4179)",
         "passkeys (plugin flag accepted but nothing wired; no advertised flag since #7481 — blocked, objectui#4179)"
       ],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts" },
+      "automated": { "kind": "dogfood", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts + packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts + packages/plugins/plugin-auth/src/phone-otp-no-sms-service-refusal.test.ts + packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts (these pin 4 of the 10 clauses, at two layers: the two dogfood files drive a booted server — acceptance[7]'s OIDC round trip and acceptance[6]'s cookie-lane completion; the two plugin-auth files drive AuthManager at unit layer — acceptance[3]'s refusal and acceptance[9]'s change-email / delete-user wiring — so those two score partial and their live legs are driven. acceptance[0]–[2], [4], [5] and [8] have no pin and are driven live)" },
       "traps": ["hydration-race", "dispatcher-vs-hono-route", "wrong-persona"],
       "source": [
         "packages/spec/src/system/auth-config.zod.ts#AuthPluginConfigSchema (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
@@ -284,7 +284,8 @@
         { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" },
         { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 20). A1's SSO / device variants were blocked (no switch on the dev → serve path) and N3 was blocked(dependency, objectui#4179). Disposition: recorded knownGap. Verified: serve.ts injects AuthPlugin with four env-mapped plugins and no deviceAuthorization or oidcProviders; SSO has the OS_SSO_ENABLED boot switch but needs a registered provider behind a reachable IdP. A knownGap names that environment, and that CI and the QA container lack it. objectui#4179 closed not_planned on 2026-09-24, so the magic-link / passkey knownGap and negative 3 now say so", "ref": "#22017" },
         { "revision": 7, "date": "2026-10-13", "change": "clause 10, acceptance[9] (the delete-user half) and step 9 re-worded (assertion defect, #23104 A9). Revision 4 said delete-user answers 404 to every caller, authed or not. The route is mounted and session-guarded, so the anonymous forge answers 401 UNAUTHORIZED and only a signed-in caller reaches the capability switch's 404. No caller gets 2xx, and the disposition 'disabled' is unchanged. The oracle is packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts, whose '#7735' delete-user block pins anonymous 401, authed 404 and the callback 404, and says the 401-beside-404 pair is how the switch is told apart from an unmounted route. The change-email half is unchanged", "ref": "#23121" },
-        { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" }
+        { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" },
+        { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" }
       ]
     },
     {
@@ -292,7 +293,7 @@
       "title": "Invitation issuance honors role-scope gates: delegated_admin can invite members but cannot mint admins; a plain member cannot invite at all",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["delegated_admin org member", "plain member", "tenant admin (setup only)"],
@@ -359,7 +360,7 @@
       ],
       "negative": [
         "an admin-role invitation that returns success, or that leaves ANY row behind, is a FAIL of privilege-escalation severity — file immediately, P0-verify per RUNNER rule 7",
-        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0124 D1)",
+        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0124 D1). The two halves are scored apart: the server-side denial of the forged request is pinned (the dogfood test's 'a plain member still cannot invite at all' case, acceptance[3]); the affordance-hidden half is browser-lane work, acceptance[4], scored only from its screenshots",
         "my-delegable-scope OVER-reporting is a FAIL — a position, permission set or BU subtree the caller cannot actually delegate, or (were the shape ever to grow one) a role the caller cannot mint: a client that trusts the scope would offer what the endpoint then refuses. UNDER-reporting is NOT a FAIL and must not be filed as one: the endpoint answering an empty scope while the delegate can still mint a member invitation is the safe direction and the expected state on stock fixtures (run #7663 — DelegableScope has no invitation-role field at all)"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (its first case asserts the invitation row and its role, not `status: 'pending'` — acceptance[0]'s pending half is scored live)" },
@@ -381,6 +382,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[0]–[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24538, identity-auth.invitation-scope-gates; wave anchor #24579 §3). The item required a multi-org boot; every clause runs on the stock single-tenancy showcase's Default Organization, which is what its own pin boots (delegated-admin-invite.dogfood.test.ts: bootShowcase({}), reading the slug-default organization rather than minting one). automated.ref now says the pin's first case asserts the row and its role but not status pending, which the run proved live. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.invitation-scope-gates a0 and n1; wave anchor #25807; card #25843). a0: automated.ref already says its pending half is scored live — consistent, no edit. n1: the server-side denial of the forged request is pinned, while the UI-hidden half is acceptance[4]'s browser work; negative[1] now names which half each scores. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -389,7 +396,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -397,7 +404,8 @@
         "app": "showcase",
         "requires": [
           "the better-auth admin plugin enabled (plugins.admin: true) — it exposes /admin/ban-user, /admin/unban-user, /admin/set-user-password, /admin/impersonate-user, /admin/stop-impersonating, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-session(s) under the auth route and augments sys_user with role/banned/ban_reason/ban_expires and sys_session with impersonated_by",
-          "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on)"
+          "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on)",
+          "for acceptance[10]–[12] only: a walled boot (OS_TENANCY_POSTURE=isolated or group) provisioned per RUNNER.md's entry 'A walled boot is a fixture of its own', with the admin plugin on. Declare its membership policy as OS_AUTH_MEMBERSHIP_POLICY=invite-only, so one boot serves all three clauses. On a walled boot the admin starts with no active organization: create one (POST /api/v1/auth/organization/create) and set it active (POST /api/v1/auth/organization/set-active) before Create User, or create-user answers 400 NO_ACTIVE_ORGANIZATION. On the stock single-org showcase Create User binds the Default Organization instead, so these three clauses are blocked(fixture) without the walled boot"
         ],
         "knownGaps": [
         "SUPERSEDED 2026-08-24 (#9482) — the note below is kept because a runner may still meet it on an OLD build, but it no longer describes current main. The 2026-08-18 measurement said EVERY better-auth-native /admin/ endpoint refuses an ObjectStack platform admin. Since then #9970 re-mounted ban-user/unban-user with the ADR-0068 gate and #10352 re-authorized impersonate-user as a better-auth PLUGIN endpoint (consolidated onto hasPlatformAdminStanding by #11686). Re-measured on main 2026-08-24: the platform admin gets 200 from ban-user, unban-user, create-user, set-user-password, unlock-user, import-users, oauth2/toggle-disabled and impersonate-user. EIGHT routes still answer the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_*, and that is now a RULED OUTCOME rather than a gap: remove-user, revoke-user-session, revoke-user-sessions, list-user-sessions, update-user, list-users and get-user (#9969, closed not_planned — no ObjectStack consumer, re-implement on demand), plus set-role (#9968, ruled B — the sys_user action was RETIRED by PR #11530 and the vendor route deliberately left vendor-gated, because its only effect is writing the legacy scalar ADR-0068 D2 retired). A runner who meets a 403 on any of those EIGHT is seeing the intended design, not a fixture mistake and not a bug to file.",
@@ -417,13 +425,15 @@
         "impersonate the target from the admin surface — Impersonate is offered only in the Setup → Users LIST's row menu (the target's ⋯), not on the user's record page; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
         "RULED (#9969, closed not_planned): as platform admin, POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS. Then confirm the user and the owned row are both still there. The engine cascade exemption the old step drove (#3023/#3048) has no public door left, so acceptance[5] scores it from its pin",
         "as a NON-admin, fire each of /admin/ban-user, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-sessions directly and capture every refusal",
-        "run the audit-trail pin and capture its output for the attribution clause"
+        "run the audit-trail pin and capture its output for the attribution clause",
+        "walled Create User (clauses 10–12, on fixtures.requires[2]'s boot): as the platform admin, with its own organization active, POST /api/v1/auth/admin/create-user for a new user whose body names a DIFFERENT organization's id as organizationId; read data.organizationId and data.membershipCreated from the response, then the new user's sys_member rows. This boot's invite-only policy makes the same create clause 12's evidence",
+        "on the same boot, set the admin's active organization to null (POST /api/v1/auth/organization/set-active { organizationId: null }), create another user, capture the refusal, and read sys_user for that email"
       ],
       "acceptance": [
         {
           "clause": "ban persists, enforces, and is reversible: after ban, sys_user shows banned + ban_reason and the banned user's sign-in is refused with a named error; after unban, the same credentials sign in again — the gate is reversible, not a tombstone",
           "oracle": "api",
-          "verify": "the sys_user read + refused sign-in after the ban, then the successful sign-in after the unban",
+          "verify": "the sys_user read + refused sign-in after the ban, then the successful sign-in after the unban. Drive the two sign-ins by hand: admin-platform-admin-standing.dogfood.test.ts's clause-0 case asserts sys_user.banned / ban_reason and the unban, and attempts no sign-in by the banned user, so the enforcement half (and negative[1]) is unpinned",
           "evidence": "row read + the refused sign-in + the post-unban sign-in"
         },
         {
@@ -447,7 +457,7 @@
         {
           "clause": "revoke-user-sessions is RULED, not built, for the platform admin (#9969, closed not_planned: no ObjectStack consumer, re-implemented on demand). At head it answers the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS, and the target's live session keeps answering a PROTECTED request. The contract a re-mount must meet is unchanged: revoke-user-sessions kills the target's LIVE session mid-flight, so a PROTECTED authed request that succeeded a moment earlier is refused immediately after the revoke, not at token expiry. admin-platform-admin-standing.dogfood.test.ts fails until that route moves to its admitted list",
           "oracle": "api",
-          "verify": "At head: the step-8 refusal, status AND code, and the target's next PROTECTED request still 2xx (pinned by packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts). On a re-mount: ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause, in either case. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: the contract is about a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's protected reads. If get-session is captured at all it is corroboration only. Read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user",
+          "verify": "At head: the step-8 refusal, status AND code, and the target's next PROTECTED request still 2xx. packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts pins the refusal's status and code only and sends no protected request as the target, so that live-session half is driven by hand. On a re-mount: ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause, in either case. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: the contract is about a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's protected reads. If get-session is captured at all it is corroboration only. Read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user",
           "evidence": "the refusal + the post-refusal protected request, or the pin output"
         },
         {
@@ -479,6 +489,24 @@
           "oracle": "api",
           "verify": "each forged call returns non-2xx and the target's sys_user row (and session, and roster) is unchanged",
           "evidence": "the six refusals + the unchanged-state reads"
+        },
+        {
+          "clause": "walled Create User joins the administrator's CURRENT organization (ADR-0093 D3 amendment): on a multi-org posture POST /admin/create-user adds the new user to the caller's active organization as `member`, exactly one membership, and an organizationId in the body chooses nothing",
+          "oracle": "api",
+          "verify": "with the admin's active organization set (POST /api/v1/auth/organization/set-active), create a user whose body names ANOTHER organization's id as organizationId: the response's data.organizationId is the admin's active organization and data.membershipCreated is true, and GET /api/v1/data/sys_member?user_id=NEW_USER_ID reads exactly one row, that organization with role member. Pinned at HTTP on a real isolated posture by create-user-organization-join.dogfood.test.ts (J1)",
+          "evidence": "the create response + the sys_member read"
+        },
+        {
+          "clause": "no current organization, no user: on a multi-org posture an administrator with no active organization is refused 400 NO_ACTIVE_ORGANIZATION and no account is created — never a member-less user",
+          "oracle": "api",
+          "verify": "set-active to null, then create-user: status + error.code, and GET /api/v1/data/sys_user?email=THE_EMAIL reads no row. Pinned at HTTP by create-user-organization-join.dogfood.test.ts (J2)",
+          "evidence": "the refusal + the empty sys_user read"
+        },
+        {
+          "clause": "the invite-only membership policy still joins: the join is the administrator's explicit act, which invite-only admits (ADR-0093 D1), so on an invite-only walled boot the created user is still a member of the current organization",
+          "oracle": "api",
+          "verify": "on the walled boot declaring OS_AUTH_MEMBERSHIP_POLICY=invite-only (fixtures.requires[2]), acceptance[10]'s create answers data.membershipCreated true and sys_member reads the one member row. Pinned at plugin unit only (packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts, 'under invite-only: still joined — creating a user in your organization is an explicit act'), so the pin scores this clause partial and the live leg is driven",
+          "evidence": "the create response + the sys_member read on the invite-only boot"
         }
       ],
       "negative": [
@@ -489,7 +517,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts (clause 8 — the sys_audit_log shapes create-user / set-user-password / import-users leave) + packages/qa/dogfood/test/admin-credential-lifecycle.dogfood.test.ts (clauses 1 and 2, both sides: an explicit password supplied ALONGSIDE generatePassword:true is the one that signs in and no generated password comes back, with a generatePassword-only create as the contrast so the clause cannot be satisfied by generatePassword being inert; the created account carries its credential sys_account row; set-user-password rotates — the original password is proven to work BEFORE the rotation, the new one after, and the old one is refused 401 INVALID_EMAIL_OR_PASSWORD; a member's forged create-user and set-user-password are each 403 PERMISSION_DENIED and an anonymous call 401 UNAUTHENTICATED, each with the state read back) + packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts (clause 9, REFUSAL half, over a population DERIVED from the running stack rather than listed: honoApp.routes for the ObjectStack raw mounts registered ahead of better-auth's catch-all, UNION auth.api for the endpoints the catch-all publishes — 31 routes at this configuration. The derived set and that suite's classification table are checked for exact agreement in BOTH directions. Universal invariant over all 31: neither an anonymous caller nor a plain member ever receives a 2xx, the single classified exception being has-permission, whose 200 body is asserted to be the negative answer. Every route is fired with a payload valid enough to REACH the authorization check) + packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts (NEW 2026-08-24 — clause 0, clause 6 and the ALLOWED half of clause 9: what the PLATFORM ADMIN gets, which was previously asserted NOWHERE. ADMIN-IDENTITY CONTROL runs first and every later assertion refuses to run until it passes: the subject carries platform_admin in positions[] and isPlatformAdmin true, and sys_user.role is NOT 'admin' — so a 403 measured there can never mean 'the fixture was never an admin'. It deliberately does NOT copy remove-user-atomicity.test.ts's in-process role='admin' write, which is exactly why no earlier test observed this defect family. CLAUSE 0 + clause 9's allowed half: ban-user persists banned + ban_reason and unban-user reverses it; unlock-user, import-users and oauth2/toggle-disabled each answer 200 — every one re-read from STORAGE rather than believed from the response body. CLAUSE 6: impersonate-user answers 200 and sys_session.impersonated_by records the admin. REFUSED-BY-DESIGN: the EIGHT consumer-less routes are pinned at exactly 403 plus their exact vendor code (status AND code, ADR-0112 — a status-only pin stays green when only the code moves), each entry naming the card that ruled it, with a no-effect control proving the refused remove-user / update-user / set-role moved nothing. SWEEP over the same derived population: no route may refuse the platform admin unless it is a recorded by-design refusal, and every derived route must be classified — the classification check is the one a newly mounted route trips, and it runs first for that reason. The admitted and refused sides use SEPARATE expectation instruments, so a bug in one cannot pass the other.) + packages/plugins/plugin-security/src/security-plugin.test.ts ('[#3023] an engine referential FK clear (__referentialFieldClear) is exempt — owner_id:null cascade is allowed for a plain member', at the plugin-security unit: negative[3]'s #3023 half — its #3031 half is admin-credential-lifecycle.dogfood.test.ts's explicit-password case — so negative[3] is pinned whole; and clause 5's exemption half, which has no public door left and which clause 5 scores from this pin. Clause 5's refusal half is pinned without its owned-row read: admin-platform-admin-standing.dogfood.test.ts asserts the 403 and re-reads the target sys_user, but never the rows that user owns, so that read is driven by hand.) NOTE this item's clause-9 prose names SIX routes; the measured surface is 31 — do not tick 31 routes off a 6-route reading. STILL MANUAL: clause 7 (the console's impersonation indicator) — its oracle is a screenshot, which no dogfood test can drive. ⛔ CLAUSES 3, 4 AND 5 ARE RULED, NOT UNPINNED COVERAGE DEBT: clause 3 (set-role flips gate outcomes), clause 4 (revoke-user-sessions kills a live session mid-flight) and clause 5 (remove-user's owner_id FK clear) each require the platform admin to COMPLETE the operation, and all three routes are among the eight that refuse him BY DESIGN — #9969 closed not_planned for the seven consumer-less routes, #9968 ruled B and retired the set_user_role action instead of re-implementing the route. What is pinned is the refusal, pinned as intended behaviour. Scoring these as missing automation would be scoring the absence of a route the maintainer declined to build. If one of them later acquires a real ObjectStack consumer and is re-mounted, admin-platform-admin-standing.dogfood.test.ts fails until its entry moves from the by-design list to the admitted list. See #9482, #9652, #9968, #9969."
+        "ref": "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts (clause 8 — the sys_audit_log shapes create-user / set-user-password / import-users leave) + packages/qa/dogfood/test/admin-credential-lifecycle.dogfood.test.ts (clauses 1 and 2, both sides: an explicit password supplied ALONGSIDE generatePassword:true is the one that signs in and no generated password comes back, with a generatePassword-only create as the contrast so the clause cannot be satisfied by generatePassword being inert; the created account carries its credential sys_account row; set-user-password rotates — the original password is proven to work BEFORE the rotation, the new one after, and the old one is refused 401 INVALID_EMAIL_OR_PASSWORD; a member's forged create-user and set-user-password are each 403 PERMISSION_DENIED and an anonymous call 401 UNAUTHENTICATED, each with the state read back) + packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts (clause 9, REFUSAL half, over a population DERIVED from the running stack rather than listed: honoApp.routes for the ObjectStack raw mounts registered ahead of better-auth's catch-all, UNION auth.api for the endpoints the catch-all publishes — 31 routes at this configuration. The derived set and that suite's classification table are checked for exact agreement in BOTH directions. Universal invariant over all 31: neither an anonymous caller nor a plain member ever receives a 2xx, the single classified exception being has-permission, whose 200 body is asserted to be the negative answer. Every route is fired with a payload valid enough to REACH the authorization check. It reads no state back: clause 9's unchanged-state read is pinned only for create-user and set-user-password, by admin-credential-lifecycle.dogfood.test.ts, so the read-back after every other forged call is driven by hand) + packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts (NEW 2026-08-24 — clause 0, clause 6 and the ALLOWED half of clause 9: what the PLATFORM ADMIN gets, which was previously asserted NOWHERE. ADMIN-IDENTITY CONTROL runs first and every later assertion refuses to run until it passes: the subject carries platform_admin in positions[] and isPlatformAdmin true, and sys_user.role is NOT 'admin' — so a 403 measured there can never mean 'the fixture was never an admin'. It deliberately does NOT copy the in-process role='admin' write that plugin-auth's remove-user atomicity unit test makes (named here as a contrast, not as a pin of this item), which is exactly why no earlier test observed this defect family. CLAUSE 0 + clause 9's allowed half: ban-user persists banned + ban_reason and unban-user reverses it (the STORED half only: no sign-in by the banned user is attempted, so clause 0's enforcement half and negative[1] are driven by hand); unlock-user, import-users and oauth2/toggle-disabled each answer 200 — every one re-read from STORAGE rather than believed from the response body. CLAUSE 6: impersonate-user answers 200 and sys_session.impersonated_by records the admin (stop-impersonating is not driven, so clause 6's stop half is driven by hand). REFUSED-BY-DESIGN: the EIGHT consumer-less routes are pinned at exactly 403 plus their exact vendor code (status AND code, ADR-0112 — a status-only pin stays green when only the code moves), each entry naming the card that ruled it, with a no-effect control proving the refused remove-user / update-user / set-role moved nothing. SWEEP over the same derived population: no route may refuse the platform admin unless it is a recorded by-design refusal, and every derived route must be classified — the classification check is the one a newly mounted route trips, and it runs first for that reason. The admitted and refused sides use SEPARATE expectation instruments, so a bug in one cannot pass the other.) + packages/plugins/plugin-security/src/security-plugin.test.ts ('[#3023] an engine referential FK clear (__referentialFieldClear) is exempt — owner_id:null cascade is allowed for a plain member', at the plugin-security unit: negative[3]'s #3023 half — its #3031 half is admin-credential-lifecycle.dogfood.test.ts's explicit-password case — so negative[3] is pinned whole; and clause 5's exemption half, which has no public door left and which clause 5 scores from this pin. Clause 5's refusal half is pinned without its owned-row read: admin-platform-admin-standing.dogfood.test.ts asserts the 403 and re-reads the target sys_user, but never the rows that user owns, so that read is driven by hand.) NOTE this item's clause-9 prose names SIX routes; the measured surface is 31 — do not tick 31 routes off a 6-route reading. STILL MANUAL: clause 7 (the console's impersonation indicator) — its oracle is a screenshot, which no dogfood test can drive — and the unpinned halves named above: clause 0's two sign-ins, clause 4's live-session half, clause 6's stop half, and clause 9's state read-back beyond create-user and set-user-password. ⛔ CLAUSES 3, 4 AND 5 ARE RULED, NOT UNPINNED COVERAGE DEBT: clause 3 (set-role flips gate outcomes), clause 4 (revoke-user-sessions kills a live session mid-flight) and clause 5 (remove-user's owner_id FK clear) each require the platform admin to COMPLETE the operation, and all three routes are among the eight that refuse him BY DESIGN — #9969 closed not_planned for the seven consumer-less routes, #9968 ruled B and retired the set_user_role action instead of re-implementing the route. What is pinned is the refusal, pinned as intended behaviour; clause 4's at-head live-session half (the target's protected request still 2xx after the refused revoke) is not, because the pin sends no request as the target. Scoring these as missing automation would be scoring the absence of a route the maintainer declined to build. If one of them later acquires a real ObjectStack consumer and is re-mounted, admin-platform-admin-standing.dogfood.test.ts fails until its entry moves from the by-design list to the admitted list. See #9482, #9652, #9968, #9969. + packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts (clauses 10 and 11, at HTTP on a real isolated posture: J1, the administrator's current organization is joined as member and a body organizationId chooses nothing; J2, no current organization answers 400 NO_ACTIVE_ORGANIZATION and no sys_user row exists) + packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts ('under invite-only: still joined — creating a user in your organization is an explicit act': clause 12 at plugin unit only, so it scores partial and the live leg is driven)"
       },
       "traps": ["wrong-persona", "shared-browser-tab"],
       "source": [
@@ -535,6 +563,12 @@
           "date": "2026-10-20",
           "change": "automated.ref adds security-plugin.test.ts's [#3023] case — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: acceptance[5] and negative[3] cite a pin not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the case asserts at the plugin-security unit that an owner_id:null write carrying __referentialFieldClear passes the owner-anchor guard. That is negative[3]'s #3023 half (its #3031 half is already pinned), and acceptance[5]'s exemption half, which the clause scores from this pin because no public door is left. The ref also says that acceptance[5]'s refusal half is pinned without its owned-row read. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep, and a coverage gap (QA run #25815, identity-auth.admin-lifecycle-operations a4, a0/n1 and ref-parse; addendum #25823 at 17f8217b, after #25626; wave anchor #25807; card #25843). acceptance[4].verify said the target's next protected request is pinned by admin-platform-admin-standing.dogfood.test.ts, which asserts the 403 and its code only; it now says that half is driven by hand. The clause-0 case asserts banned / ban_reason and the unban but attempts no sign-in by the banned user; acceptance[0].verify now says so. automated.ref named remove-user-atomicity.test.ts as a contrast, which a ref parser reads as a pin that scores no clause; it now names that test without its path. automated.ref overclaimed: clause 0's sign-ins, clause 4's live-session half, clause 6's stop half and clause 9's state read-back beyond create-user and set-user-password are unpinned, and it now lists them as manual. Coverage gap: no clause asserted #25626's walled Create User join. acceptance[10]–[12] are new (the new user joins the caller's active organization as member and a body organizationId chooses nothing; 400 NO_ACTIVE_ORGANIZATION with no row; invite-only still joins), with fixtures.requires[2] (a walled boot declaring invite-only), two steps, and automated.ref's create-user-organization-join.dogfood.test.ts (J1, J2) and admin-user-endpoints.test.ts's invite-only case. Clauses 0–9 are unchanged",
+          "ref": "#25843"
         }
       ]
     },
@@ -1536,7 +1570,7 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1545,7 +1579,7 @@
         "requires": [
           "2FA armed BEFORE boot + a VERIFIED enrollment — this item's challenge lane only exists after identity-auth.two-factor-verify-to-activate's walk completes; run the three enrollment items as one sequence on one boot",
           "the backup codes captured from the enable response (they are never legitimately retrievable later — that unretrievability is itself under test)",
-          "in-process system reads for the storage-shape observation (sys_two_factor REST is get-by-id only)"
+          "an out-of-band DB read for the storage-shape observation: sys_two_factor.backup_codes is declared internal: true, so REST never returns the column (and sys_two_factor REST is get-by-id only). Read the row straight from the boot's DB file with a SQLite client while the server runs — on a --fresh boot, FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path its 'Fresh OS_HOME' line prints"
         ],
         "knownGaps": [
           "browser lane: the reveal is DECLARED on the navigable surface — sys_user.generate_backup_codes carries a one-shot resultDialog {path:'backupCodes', format:'code-list'} + acknowledge (sys-user.object.ts), alongside the still-unmounted sys_two_factor.regenerate_backup_codes variant; the pixels are objectui's ActionResultDialog, so a browser-lane clause is scored only from what that dialog draws on the sys_user record page, never from the declaration"
@@ -1559,7 +1593,7 @@
         "as the signed-in user, POST /two-factor/generate-backup-codes { password }; capture the NEW set from the response",
         "begin a fresh challenge and attempt an UNSPENT code from the OLD set; capture the refusal — regeneration invalidated the prior set wholesale",
         "spend one NEW code to prove the new set is live",
-        "storage-shape observation: read sys_two_factor.backup_codes via the system-context read and record what the column actually carries (the declaration says JSON-serialized — sys-two-factor.object.ts; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
+        "storage-shape observation: read sys_two_factor.backup_codes out of band, from the DB file (REST never returns the internal column), and record what the column actually carries (the declaration says encrypted at rest, a single opaque ciphertext — sys-two-factor.object.ts; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
         "read the navigable surface's declaration: sys_user.generate_backup_codes (sys-user.object.ts) declares a resultDialog — backupCodes as code-list + acknowledge, no successMessage — so on the surface a user can reach, regenerating kills the old set AND reveals the new one once; resolve its backupCodes path against the steps[4] regenerate response (the sys_two_factor.regenerate_backup_codes variant carries the same reveal and is mounted nowhere)",
         "negative: generate-backup-codes with a wrong password refused (old set must survive the refused attempt); anonymous call 401"
       ],
@@ -1589,9 +1623,9 @@
           "evidence": "the regenerate response shape + the two spend traces"
         },
         {
-          "clause": "OBSERVE-AND-RECORD — the storage shape: what sys_two_factor.backup_codes actually holds (declared 'JSON-serialized backup recovery codes'). Plaintext codes at rest would be an authentication finding (publishable only under RUNNER rule 2's carve-out); an encrypted/hashed blob is the healthy reading. The clause is satisfied by the accurate record",
+          "clause": "OBSERVE-AND-RECORD — the storage shape: what sys_two_factor.backup_codes actually holds (declared 'Backup recovery codes, encrypted at rest (a single opaque ciphertext, not readable JSON)'). Plaintext codes at rest would be an authentication finding (publishable only under RUNNER rule 2's carve-out); an encrypted/hashed blob is the healthy reading. The clause is satisfied by the accurate record",
           "oracle": "api",
-          "verify": "the system-context row read; describe the stored form (length/shape), never the value",
+          "verify": "an out-of-band read of the row from the DB file (fixtures.requires[2]) — REST never returns the column, which is internal: true, so no API read can score this clause; describe the stored form (length/shape), never the value",
           "evidence": "the described (not quoted) column content"
         },
         {
@@ -1633,6 +1667,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].clause cited line 120 of sys-two-factor.object.ts in the comma-range spelling (authored in 8d74a57487 as the list 113 and 120). At that commit 120 was the resultDialog description of the regenerate_backup_codes action, the quoted copy; at this base it has moved. The clause now anchors that action by its name, sys-two-factor.object.ts#regenerate_backup_codes. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25817, identity-auth.two-factor-backup-codes A4; wave anchor #25807; card #25843). A4's at-rest check needs an out-of-band DB read, because REST never returns sys_two_factor.backup_codes (declared internal: true). fixtures.requires[2], steps[7] and acceptance[4].verify now say to read the row from the DB file, not through a system-context read. The same three places quoted the column's old 'JSON-serialized' description; sys-two-factor.object.ts now declares it encrypted at rest, a single opaque ciphertext, and the text quotes that. No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2023,10 +2063,10 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). It does not provision the second org: the member creates that itself (fixtures.requires[1])"],
+      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). On a walled boot Create User joins the administrator's CURRENT organization (ADR-0093 D3 amendment) and the admin starts with none, so first create an organization (POST /api/v1/auth/organization/create) and make it active (POST /api/v1/auth/organization/set-active); without it create-user answers 400 NO_ACTIVE_ORGANIZATION and mints nobody. The member lands as `member` of that organization, its one membership. The admin does not provision the second org: the member creates that itself (fixtures.requires[1])"],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -2112,6 +2152,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[0]–[1] and personas[2] re-pointed — QA run #24783 (finding F8), round 11 of wave anchor #24579. requires[0]'s 'REFUSES TO BOOT … measured by QA run #23166' predates 18.x step 4 (#24580); the provisioning now points at RUNNER.md's walled-boot entry, keeping only the seeded-admin owner-email hint. requires[1] and personas[2]: the user gets its second membership by creating a second organization itself (QA run #24783, both postures), so the platform-admin add-member is not needed and the admin only mints the member. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (addendum #25823 at 17f8217b, identity-auth.workspace-org-switch rev 5 personas[2]; wave anchor #25807; card #25843). After #25626 a walled Create User joins the administrator's current organization and refuses 400 NO_ACTIVE_ORGANIZATION without one, so the recipe now needs the operator to create and set-active an organization before minting the member (admin-user-endpoints.ts runAdminCreateUser; create-user-organization-join.dogfood.test.ts). personas[2] now says so, and that the member's one membership is that organization. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2120,7 +2166,7 @@
       "title": "Implicit account linking on external sign-in: no implicit link to an unverified local user; after an unlink, implicit sign-in does not re-link; an explicit, signed-in link still works and lifts the refusal; the platform identity provider's exception holds only on its OAuth path",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2151,7 +2197,7 @@
         "as U, signed in: unlink the provider (POST /api/v1/auth/unlink-account { accountId: the sys_account row id }) and confirm the row is gone. Sign out, then repeat the implicit sign-in from a fresh context",
         "as U, signed in: link the provider EXPLICITLY (POST /api/v1/auth/link-social { provider, callbackURL } with U's session, then navigate to the returned URL). Confirm the sys_account row is back. Sign out and repeat the implicit sign-in once more",
         "explicit link for an unverified user: sign up a second unverified local user W, give the fixture provider an identity for W's email, sign in as W and link the provider explicitly through link-social; then re-read W's emailVerified. The local fixture IdP derives its `sub` from the email, so W's identity is a DISTINCT provider account: W's explicit link writes W's own sys_account row and does not re-point or touch U's (QA run #23166)",
-        "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run src/implicit-account-linking.test.ts"
+        "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=1 src/implicit-account-linking.test.ts — it scores acceptance[4] only; its end-to-end cases run over a fake data engine, so acceptance[0]–[3] are scored by steps[0]–[6] against the booted server"
       ],
       "acceptance": [
         {
@@ -2200,7 +2246,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts (the decision table under 'implicit link decision', the vendor configuration pins, and the end-to-end cases under 'implicit link on external sign-in, end to end': unverified refused with no link and no verification flip, verified links, platform exception, operator opt-out, unlink then explicit link, id-token path, generic OIDC by discovery, unlink record durability)"
+        "ref": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts (the decision table under 'implicit link decision', the vendor configuration pins, and the end-to-end cases under 'implicit link on external sign-in, end to end': unverified refused with no link and no verification flip, verified links, platform exception, operator opt-out, unlink then explicit link, id-token path, generic OIDC by discovery, unlink record durability). Those 'end to end' cases drive the real better-auth handler (AuthManager.handleRequest) over a hand-rolled in-memory data engine and read sys_account off that fake, not through an admin read against a booted server, so they assert acceptance[0]–[3]'s facts at unit layer only: those four clauses are scored by the live steps, and the pin scores acceptance[4]"
       },
       "source": [
         "packages/plugins/plugin-auth/src/implicit-account-linking.ts#decideImplicitLink (rule 1: the local row must be verified; rule 2: the platform IdP exception, bound to the provider id AND the oauth sign-in method; rule 3: an unlink is honoured for every provider; the operator override)",
@@ -2230,6 +2276,12 @@
           "date": "2026-10-17",
           "change": "fixtures.requires[2] names where the verification mail is read (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)): the dev log transport logs no body or link, so the link comes from the mail's sys_email row. Wording only: no step, request or oracle changed",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.implicit-account-linking-ownership a0–a3; wave anchor #25807; card #25843). The ref's 'end to end' cases drive the real better-auth handler (AuthManager.handleRequest) but over a hand-rolled in-memory data engine, with sys_account read off that fake rather than by an admin read through a booted server, so they assert each clause's facts at unit layer only. automated.ref and steps[7] now say so and that acceptance[0]–[3] are scored live; steps[7] also carries --maxWorkers=1, RUNNER.md's memory fact. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2238,7 +2290,7 @@
       "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2261,27 +2313,27 @@
       ],
       "acceptance": [
         {
-          "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins prove this at mixed layers, and this clause scores only that: the storage, settings, share-link and cloud-connection pins call the registered handlers with a fake IHttpRequest / IHttpResponse; the vendor-admin-doors pin arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus auth.noteMustChangePasswordIssued(), simulating the forced-reset route rather than driving it; the two API-key posture pins drive RestServer.enforceAuth with a hand-built req/res and a fake auth, and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. A pass here does not score acceptance[1], acceptance[2] or acceptance[3], which are driven live",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
           "clause": "every raw-host family answers the held session 403 with the gate's OWN code (PASSWORD_EXPIRED / PASSWORD_RESET_REQUIRED / MFA_REQUIRED) — never 200, never a route-specific 404/400 that ran logic first",
           "oracle": "api",
-          "verify": "status + error.code per family from the held session; an unheld session gets the normal answer on the same call",
+          "verify": "status + error.code per family from the held session over HTTP against the booted server; an unheld session gets the normal answer on the same call. The pins call some families' handlers with fake requests (acceptance[0]), so every family is scored here from a real request",
           "evidence": "one status+code line per family for both sessions"
         },
         {
           "clause": "an admin-forced change answers PASSWORD_RESET_REQUIRED (not PASSWORD_EXPIRED)",
           "oracle": "api",
-          "verify": "error.code on the first held call after the admin forced the reset",
+          "verify": "drive the admin's forced-reset door itself: as admin POST /api/v1/auth/admin/set-user-password with the member's userId and a new password (mustChangePassword defaults to true). It revokes the member's sessions and API keys by default, so sign the member in again with the new password and read error.code on that session's first held call (pass revokeSessionsAndKeys: false to keep steps[3]'s key alive). The vendor-admin-doors pin arms this code by a system write, not through this door, so the door is scored only here",
           "evidence": "the refusal body"
         },
         {
           "clause": "an API key whose owner holds MFA_REQUIRED is refused 403 MFA_REQUIRED; a credential-scope posture (PASSWORD_EXPIRED) does NOT hold the key",
           "oracle": "api",
-          "verify": "the two x-api-key calls",
+          "verify": "the two x-api-key calls, made over HTTP against the booted server: the two posture pins drive RestServer.enforceAuth and HttpDispatcher with hand-built requests and fakes, so no pin answers an HTTP x-api-key call",
           "evidence": "both status lines"
         }
       ],
@@ -2316,6 +2368,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.auth-gate-held-session-raw-host-families; wave anchor #24579 §3): the MFA hold appeared ~70 s after require_mfa was switched on, because plugin-auth reads organization MFA through a 60 s-TTL cache refreshed in the background (auth-manager.ts refreshOrgMfaCacheIfStale). A runner probing at once sees 200 and could score a false FAIL; the fixture now says to poll. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-gate-held-session-raw-host-families a1, a2 and a3; wave anchor #25807; card #25843). The raw-host families are proven at mixed layers (the storage, settings, share-link and cloud-connection pins call handlers with fake IHttpRequest / IHttpResponse); held-session-vendor-admin-doors arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus noteMustChangePasswordIssued(), not by driving the forced-reset door; and the two API-key posture pins drive RestServer.enforceAuth and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. acceptance[0] now says what each pin layer proves and that it does not score acceptance[1]–[3]; acceptance[1].verify and acceptance[3].verify say to drive them over HTTP; acceptance[2].verify names the forced-reset door, POST /api/v1/auth/admin/set-user-password, and its default session and key revocation (admin-user-endpoints.ts runAdminSetUserPassword). acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2324,7 +2382,7 @@
       "title": "API-key lifecycle policy: a mint with no expiry gets the default (90 days) echoed back, an expiry past the ceiling is refused 400 API_KEY_EXPIRY_TOO_LONG, and an expired / inactive / revoked key is refused with its own 403 code",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2345,9 +2403,9 @@
       ],
       "acceptance": [
         {
-          "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins are layered, and this clause scores only what they assert: the dogfood file drives the 90-day default and the ceiling refusal's status + code through a booted server; 'nothing is stored' on a refused mint and the revoked / expired / inactive 403 codes are pinned at unit layer only (the runtime pin over a fake objectql and a fake kernel, the rest pin over an HTTP stub and a fake ql), so a pass here does not score acceptance[2]'s no-key half or acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2359,13 +2417,13 @@
         {
           "clause": "an expires_at beyond the ceiling (365 days by default) is refused 400 API_KEY_EXPIRY_TOO_LONG and no key is minted",
           "oracle": "api",
-          "verify": "status + error.code; GET /api/v1/keys count unchanged",
+          "verify": "status + error.code; GET /api/v1/keys before and after the refused mint, and the count is unchanged. Drive the count live: the dogfood case asserts only the 400 and its code, and the no-key half is pinned only over a fake objectql (packages/runtime/src/api-key-lifecycle.pin.test.ts)",
           "evidence": "refusal body + the two key counts"
         },
         {
           "clause": "a revoked key answers 403 API_KEY_REVOKED and an expired one 403 API_KEY_EXPIRED — distinct codes, not one generic 401",
           "oracle": "api",
-          "verify": "status + error.code per key",
+          "verify": "status + error.code per key, driven live with a key revoked through the admin key action and a key past its expires_at: the dogfood file drives no revoked or expired key, and the three 403 codes are pinned at unit layer only (packages/rest/src/rest-api-key-lifecycle.pin.test.ts, packages/runtime/src/api-key-lifecycle.pin.test.ts)",
           "evidence": "both refusal bodies"
         }
       ],
@@ -2387,6 +2445,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; identity-auth.api-key-ui-lifecycle covers mint/revoke/restore only, not expiry, ceiling or inactivity",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.api-key-expiry-lifecycle a2 and a3; wave anchor #25807; card #25843). The dogfood case asserts 400 API_KEY_EXPIRY_TOO_LONG but never that the key count is unchanged, and it drives no revoked or expired key; 'nothing is stored' and the three 403 codes are pinned only at unit layer over fakes. acceptance[0] now says which layer pins what and that it does not score those halves, and acceptance[2].verify / acceptance[3].verify say to drive them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2395,7 +2459,7 @@
       "title": "A cookie session past its updateAge is renewed ONLY by GET /auth/get-session: in-process reads (data, meta, me/permissions, SSO admin) leave sys_session.expires_at unchanged and set no cookie, while bearer-only calls still renew",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2415,15 +2479,15 @@
       ],
       "acceptance": [
         {
-          "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The runtime pin's doors are GET /data/:object, GET /auth/me/permissions and GET /i18n/locales; none is a meta read, so a pass here does not score acceptance[1]'s meta leg",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
           "clause": "cookie-carrying data/meta reads leave expires_at unchanged and return no Set-Cookie",
           "oracle": "api",
-          "verify": "expires_at before/after + the response headers",
+          "verify": "expires_at before/after + the response headers, for the data read AND the meta read (GET /api/v1/meta/object/showcase_task) of steps[1] separately: the meta leg has no door in the runtime pin, so this live read is its only score",
           "evidence": "the two expires_at values and the header dump"
         },
         {
@@ -2453,6 +2517,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.cookie-session-renewal-in-process a1; wave anchor #25807; card #25843). The runtime pin's DOORS are GET /data/:object, /auth/me/permissions and /i18n/locales, so acceptance[1]'s 'meta reads' leg has no door in it. acceptance[0] now names the doors and says it does not score the meta leg, and acceptance[1].verify scores the meta read on its own. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2461,7 +2531,7 @@
       "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2471,20 +2541,21 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+          "a fresh boot of the showcase at info log level: `pnpm dev -- --fresh -p PORT --seed-admin --log-level info` (the seeded admin is printed). acceptance[1] reads the [default-org] lines, which are info-level, so a boot at `os dev`'s default warn level prints nothing for it to read",
+          "a DB file the runner can read: --fresh puts the SQLite file at FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path the boot prints on its 'Fresh OS_HOME' line. Read it with a SQLite client while the server runs (it is deleted on exit): acceptance[1]'s created_at ordering of the slug-default sys_organization row against the first sys_user row is read there"
         ]
       },
       "steps": [
         "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) — at --log-level info only: the [default-org] lines a healthy boot prints are info-level (packages/plugins/plugin-auth/src/ensure-default-organization.ts), and `os dev`'s default warn level prints no Default-Organization line at all — or compare the created_at of the slug-default sys_organization row with the first sys_user row's, or boot WITHOUT --seed-admin and read the scratch DB",
         "let --seed-admin create the first user, then create a second with POST /api/v1/auth/admin/create-user (self-registration is closed on the stock showcase); GET /api/v1/auth/get-session for each",
-        "as admin GET /api/v1/data/sys_member?filter organization = default",
+        "as admin GET /api/v1/data/sys_member?organization_id=DEFAULT_ORG_ID, where DEFAULT_ORG_ID is the id of the slug-default sys_organization row read in step 1 — the column is organization_id and holds the organization's id, not its slug",
         "as admin GET /api/v1/data/sys_business_unit and read organization_id on the seeded rows"
       ],
       "acceptance": [
         {
           "clause": "ensureDefaultOrganization runs at boot and the identity objects stamp the org — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2535,6 +2606,12 @@
           "date": "2026-10-19",
           "change": "steps[0] and acceptance[1].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.default-organization-boot-invariant; wave anchor #24579 §3): at os dev's default log level the boot prints no Default-Organization line, so 'read the boot log ordering' had nothing to read — ensure-default-organization.ts logs its success lines at info. The step now names --log-level info and the created_at ordering the run used instead. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25812, identity-auth.default-organization-boot-invariant; wave anchor #25807; card #25843). steps[2] filtered `organization = default`, but sys_member's column is organization_id and it holds the organization's id, so the step now filters organization_id by the slug-default row's id. fixtures.requires booted with --fresh alone, but acceptance[1] needs the info-level [default-org] lines and a DB it can read: the boot now carries --log-level info, and a second requires entry names the --fresh SQLite file. acceptance[0].verify prescribed --maxWorkers=2, against RUNNER.md's memory fact (--maxWorkers=1); it now says 1. No clause changed",
+          "ref": "#25843"
         }
       ]
     },
@@ -2543,7 +2620,7 @@
       "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2565,9 +2642,9 @@
       ],
       "acceptance": [
         {
-          "clause": "import sends auth.account_invitation with a working link; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "import sends auth.account_invitation with a working link, while a self-requested reset still sends auth.password_reset; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). admin-import-users-invite-link.test.ts asserts the invitation template on the import only; the password_reset half is admin-import-users-account-invitation.test.ts cases ① and ②. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono but over createMemoryEngine, a hand-rolled engine fake, so it scores the domain doors at unit layer only and a pass here does not score acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2585,13 +2662,13 @@
         {
           "clause": "unknown providerId: 404 RESOURCE_NOT_FOUND with the flag on, 400 DOMAIN_VERIFICATION_DISABLED with it off",
           "oracle": "api",
-          "verify": "status + error.code per boot",
+          "verify": "status + error.code per boot, over HTTP against each booted server: the pin drives these doors over a fake engine (acceptance[0]), so the live answer is this clause's only score",
           "evidence": "both refusal bodies"
         }
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-auth/src/sso-domain-verification-unknown-provider.pin.test.ts + packages/plugins/plugin-auth/src/admin-import-users-invite-link.test.ts + packages/plugins/plugin-email/src/auth-account-invitation-template.test.ts"
+        "ref": "packages/plugins/plugin-auth/src/sso-domain-verification-unknown-provider.pin.test.ts + packages/plugins/plugin-auth/src/admin-import-users-invite-link.test.ts + packages/plugins/plugin-auth/src/admin-import-users-account-invitation.test.ts + packages/plugins/plugin-email/src/auth-account-invitation-template.test.ts"
       },
       "source": [
         "packages/plugins/plugin-email/src/templates/auth-templates.ts#AUTH_ACCOUNT_INVITATION_TEMPLATE",
@@ -2605,6 +2682,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-26",
+          "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.import-invitation-and-sso-domain-answers a1 and a3; wave anchor #25807; card #25843). admin-import-users-invite-link.test.ts asserts the auth.account_invitation template on the import but never that a self-requested reset still uses password_reset; admin-import-users-account-invitation.test.ts (cases ① and ②) asserts both and was not in automated.ref, so it joins the ref and acceptance[0] names both halves. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono over createMemoryEngine, a hand-rolled engine fake, so acceptance[0] now says it scores the doors at unit layer only and acceptance[3].verify drives them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
+          "ref": "#25843"
         }
       ]
     }

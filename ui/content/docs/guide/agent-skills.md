@@ -7,7 +7,7 @@ description: "Install the ObjectUI Agent Skill into Claude Code, Cursor, Codex, 
 
 ObjectUI ships an official **Agent Skill** — a structured bundle of rules, guides, and evals that teaches AI coding agents how to build pages, plugins, and integrations the *right* way (schema-first, no-touch zones respected, English-only, expression-aware).
 
-The skill is published on [skills.sh](https://skills.sh/objectstack-ai/objectui) and lives in [`skills/objectui/`](https://github.com/objectstack-ai/objectui/tree/main/skills/objectui) inside this repository.
+The skill is published on [skills.sh](https://skills.sh/objectstack-ai/objectui) and lives in [`skills/objectui/`](https://github.com/objectstack-ai/objectstack/tree/main/skills/objectui) inside this repository.
 
 [![skills.sh](https://skills.sh/b/objectstack-ai/objectui)](https://skills.sh/objectstack-ai/objectui)
 
@@ -103,4 +103,4 @@ The CLI is idempotent — running it again refreshes the local copy in place.
 
 ## Contributing
 
-The skill source lives in [`skills/objectui/`](https://github.com/objectstack-ai/objectui/tree/main/skills/objectui). PRs are welcome — see [`skills/objectui/README.md`](https://github.com/objectstack-ai/objectui/blob/main/skills/objectui/README.md) for the maintenance rules (guide ↔ eval naming, English-only, eval assertion format).
+The skill source lives in [`skills/objectui/`](https://github.com/objectstack-ai/objectstack/tree/main/skills/objectui). PRs are welcome — see [`skills/objectui/README.md`](https://github.com/objectstack-ai/objectstack/blob/main/skills/objectui/README.md) for the maintenance rules (guide ↔ eval naming, English-only, eval assertion format).

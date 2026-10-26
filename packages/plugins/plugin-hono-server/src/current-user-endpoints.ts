@@ -740,7 +740,7 @@ async function resolveCurrentUserLocalization(
     })();
     const [stored, deployment] = await Promise.all([
         storedSignedInUserLocale(ql, userId, ctx.logger),
-        resolveLocalizationContext({ ql, settings, tenantId, userId }),
+        resolveLocalizationContext({ ql, settings, organizationId: tenantId, userId }),
     ]);
     return {
         currency: deployment.currency,
