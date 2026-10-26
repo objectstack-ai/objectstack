@@ -1595,7 +1595,14 @@ describe('unknown keys are rejected, not stripped', () => {
     // without a build.
     it('the retired gates are gone from the TYPE, not only from the parse (compiler API)', () => {
       const entry = resolve(dirname(fileURLToPath(import.meta.url)), 'app.zod.ts');
+      // The program reads what the type needs and nothing else: the ES2022 lib
+      // rather than the ES5 default's DOM declarations, and no ambient `@types`
+      // packages. Neither is an input of `app.zod.ts`, and guard #2 below still
+      // reads the full member list off the resolved type.
       const program = ts.createProgram([entry], {
+        target: ts.ScriptTarget.ES2022,
+        lib: ['lib.es2022.d.ts'],
+        types: [],
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler,
         strict: true,
