@@ -5106,6 +5106,16 @@ jobs:
         continue-on-error: true
         run: pnpm check:type-check-coverage
 
+      # The workspace ROOT's own program (`tsconfig.json`: `scripts/` and the
+      # top-level configs) is outside every package's `typecheck`, so the turbo
+      # typecheck never reads it. This step does (#26236), and the coverage gate
+      # above requires it once `typecheck:root` exists. The program imports no
+      # built `dist/`, so it needs no build. Sub-second to a few seconds.
+      - name: Type-check the workspace root program
+        id: type-check-the-workspace-root-program
+        continue-on-error: true
+        run: pnpm typecheck:root
+
       # Conformance meta-gate (#4363): `spec/src/data/*-conformance.ts` holds the
       # shared case-sets that exist so the independent drivers answer ONE
       # standard, and three separate changesets claimed a future driver "is held
