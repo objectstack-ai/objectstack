@@ -25,8 +25,10 @@ on:
   # queue builds or the queue stalls. This workflow has no PR-only steps, so
   # the trigger alone is enough.
   merge_group:
-  # ── THE HOURLY FULL RUN (#16467), the half this file owns ────────────────
-  # The card's ruling is that the hourly run covers BOTH required-context
+  # ── THE SCHEDULED FULL RUN (#16467), the half this file owns ─────────────
+  # Every 4 hours since #25771 (maintainer ruling Q6 = C), the same cadence as
+  # ci.yml's half and for the reason stated there; no step changed.
+  # The card's ruling is that the scheduled run covers BOTH required-context
   # files, not just ci.yml, and the reason is measured rather than symmetric:
   # the push-on-`main` run of THIS workflow is the only post-merge full-battery
   # run of the families `scripts/ci/select-gate-families.sh` scopes away on
@@ -44,7 +46,7 @@ on:
   #
   # ⛔ A NEW TRIGGER KEY, not a widening of `push:`; see ci.yml's `on:` block.
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 # ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
@@ -95,7 +97,7 @@ on:
 #
 # ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
 # states in full (#16467): `schedule` and `workflow_dispatch` both fall through
-# to `refs/heads/main`, so without it an on-demand run cancels the hourly one.
+# to `refs/heads/main`, so without it an on-demand run cancels the scheduled one.
 # `scripts/ci/scheduled-full-run.mjs --check-concurrency` evaluates THIS
 # expression too and reds if two pushes, or a push and a schedule run, share a
 # group, or if two schedule, dispatch or same-PR runs stop sharing one.
@@ -3514,8 +3516,8 @@ jobs:
         run: pnpm check:select-shard-packages
 
       # Rationale: `scripts/ci/scheduled-full-run.mjs` header (#16467).
-      - name: Hourly full run self-test and concurrency gate
-        id: hourly-full-run-self-test-and-concurrency
+      - name: Scheduled full run self-test and concurrency gate
+        id: scheduled-full-run-self-test-and-concurrency
         continue-on-error: true
         run: |
           node scripts/ci/scheduled-full-run.mjs --self-test
@@ -4426,7 +4428,7 @@ jobs:
       # only a name that DISAPPEARS can turn a live declaration dead, which is
       # a structural change the selector already runs everything for. A group
       # confined to product source, tests, docs or changesets skips it here and
-      # pays for it on `push` to main and on the hourly run.
+      # pays for it on `push` to main and on the 4-hourly run.
       - name: A declared gate population reaches the tree
         id: a-declared-gate-population-reaches-the-tree
         continue-on-error: true
@@ -4542,7 +4544,7 @@ jobs:
       # ROOT_DIR_WATCH_HINTS declaration, held against the root it really walks
       # by its own self-test — so a group that changes no file under scripts/
       # (and no root configuration) skips it. The selection step at the top of
-      # this job decides that, `push` on main and the hourly run keep it
+      # this job decides that, `push` on main and the 4-hourly run keep it
       # unconditional, and the ruling that authorizes moving a tooling
       # self-test off the PR path is quoted in the selector's header.
       - name: scripts/ entry guards go through one predicate
@@ -4693,7 +4695,7 @@ jobs:
       # anyway, and the trade is explicit rather than reasoned away: it imports
       # the same derivation as the dispatch-gates and watch-hint literal steps, so its inputs are the
       # workflow tree and the gate sources, and on a group touching neither the
-      # gap does move — to `push` on main and the hourly full run, which keep
+      # gap does move — to `push` on main and the 4-hourly full run, which keep
       # the whole battery. Gate weakening is a maintainer floor; the sentence
       # that authorizes this one is quoted in the selector's header.
       - name: PM bare-root worklist self-test
@@ -4747,7 +4749,7 @@ jobs:
       # `scripts/**/*.mjs`, `scripts/**/*.mts` and `scripts/**/*.sh`, and the
       # rest of its read-set is the workflow tree and `.github/actions` it
       # discovers the runnable self-tests from — so a group touching none of
-      # those skips it here and runs it on `push` to main and on the hourly
+      # those skips it here and runs it on `push` to main and on the 4-hourly
       # full run.
       - name: Self-test workflow-command gate
         id: self-test-workflow-command-gate
@@ -4913,13 +4915,13 @@ jobs:
       # three-file `packages/spec` diff, and ruling #208 on #19491 (R4) took
       # those whole-tree reads off the PR path on the maintainer's sentence,
       # quoted in the selector's header. ⛔ A defect in that wider set can now
-      # first appear on `main`; the push-on-main and hourly full runs are what
+      # first appear on `main`; the push-on-main and 4-hourly full runs are what
       # bound it, and widening the skip further is again a maintainer call.
       #
       # ⚠️ Since #22991 the battery is TIERED by event, inside the gate rather
       # than here: on `pull_request` and `merge_group` `pnpm check:pm-dispatch-gates`
       # runs the fast tier; on `schedule`, `push` and any other event it runs
-      # both. Every case still runs at least hourly on the full run, and a
+      # both. Every case still runs at least every 4 hours on the full run, and a
       # slow-tier red is a red on `main`. The step below is unchanged; the
       # decision and its argument live in `scripts/pm/check-dispatch-gates.mjs`.
       #
