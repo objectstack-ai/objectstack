@@ -55,7 +55,6 @@
     "census:changeset-polarity": "node scripts/changeset-polarity-census.mjs",
     "check:new-line-citations": "node scripts/check-new-cross-file-line-citations.mjs",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
-    "check:action-ref-convention": "node scripts/check-action-ref-convention.mjs",
     "check:published-dist": "node scripts/check-published-dist-tooling.mjs",
     "check:published-tsconfig-exclude": "node scripts/check-published-tsconfig-tooling-exclude.mjs",
     "check:i18n-keys": "node scripts/check-i18n-call-site-keys.mjs",
