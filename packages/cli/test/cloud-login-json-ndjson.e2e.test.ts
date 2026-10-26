@@ -395,7 +395,7 @@ describe('os cloud login --json — the declared NDJSON stream (#6730)', () => {
       // this subsumes "nothing else was written" rather than listing banners a
       // future edit could add to.
       expect(lines(ok.stdout)).toHaveLength(2);
-      expect(ok.stdout).not.toContain('ObjectStack Cloud Login');
+      expect(ok.stdout).not.toContain('ObjectOS Cloud Login');
       expect(ok.stdout).not.toContain('To authorize this CLI');
       expect(ok.stdout).not.toContain('Waiting for browser approval');
       expect(ok.stdout).not.toContain('Credentials stored in');

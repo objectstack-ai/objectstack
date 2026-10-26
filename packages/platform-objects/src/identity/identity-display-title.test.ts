@@ -32,7 +32,14 @@
  * `ExpressionEngine.evaluate(expression, { now, …, record })` on the row the
  * driver returned, and writes `null` when the result is not `ok`. That is the
  * call below. A formula runs on the STORED row, before `$expand`, so a
- * `titleFormat` placeholder naming a lookup renders the stored id in both.
+ * `titleFormat` placeholder naming a lookup renders the stored id in both —
+ * except where the formula reads ONE hop through the lookup
+ * (`record.user_id.name`, ADR-0079 addendum 2026-10-18). There the read path
+ * evaluates it over a copy of the row whose lookup carries the related row,
+ * and the console renders the `titleFormat` placeholder by that related row's
+ * display name; the case's `row` is that copy (`sys_business_unit_member`).
+ * The engine-level proof of the hop is
+ * `plugin-security/src/business-unit-member-title.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -57,12 +64,20 @@ type Schema = { name: string; nameField?: string; displayNameField?: string; tit
  * each `{field}` placeholder substituted with the row's value. It is the
  * reference the formula has to reproduce, not a second title resolver. The
  * parsed schema carries `titleFormat` as a `{ dialect: 'template', source }`
- * envelope.
+ * envelope. A placeholder whose value is a related row (an expanded lookup) is
+ * drawn by that row's `name`, else its `email`, as the console draws one.
  */
 function renderTitleFormat(titleFormat: unknown, row: Row): string {
   const source = typeof titleFormat === 'string' ? titleFormat : (titleFormat as { source?: unknown })?.source;
   if (typeof source !== 'string') throw new Error(`titleFormat carries no template source: ${JSON.stringify(titleFormat)}`);
-  return source.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key: string) => String(row[key] ?? ''));
+  const shown = (value: unknown): string => {
+    if (value && typeof value === 'object') {
+      const related = value as { name?: unknown; email?: unknown };
+      return String(typeof related.name === 'string' && related.name.trim() ? related.name : related.email ?? '');
+    }
+    return String(value ?? '');
+  };
+  return source.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key: string) => shown(row[key]));
 }
 
 /** `display_title` evaluated as the read path evaluates a formula field. */
@@ -81,7 +96,11 @@ function servedPointers(schema: Schema): { nameField?: string; displayNameField?
 
 interface Case {
   schema: Schema;
-  /** A stored row as the driver returns it: every column present, ids as stored. */
+  /**
+   * A stored row as the driver returns it: every column present, ids as
+   * stored; where the formula reads a hop, the copy the read path evaluates it
+   * over, the lookup carrying the related row.
+   */
   row: Row;
   /** The title the `titleFormat` renders for `row`. */
   title: string;
@@ -95,8 +114,14 @@ const FORMULA_CASES: Case[] = [
   },
   {
     schema: SysBusinessUnitMember as unknown as Schema,
-    row: { id: 'bum_9Kz1', user_id: 'usr_Ab12', business_unit_id: 'bu_emea' },
-    title: 'usr_Ab12 in bu_emea',
+    // The formula reads one hop through both lookups, so the row it is
+    // evaluated against carries the related rows the read path preloads.
+    row: {
+      id: 'bum_9Kz1',
+      user_id: { id: 'usr_Ab12', name: 'Ada Lovelace', email: 'ada@example.com' },
+      business_unit_id: { id: 'bu_emea', name: 'EMEA Sales' },
+    },
+    title: 'Ada Lovelace in EMEA Sales',
   },
   {
     schema: SysInvitation as unknown as Schema,

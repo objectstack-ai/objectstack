@@ -254,7 +254,7 @@ os explain        # Explain protocol concepts on the command line
 ```
 
 Cloud, package registry, secrets, and environment subcommands (`os package …`,
-`os environments …`, `os login`, `os cloud …`) target an ObjectStack Cloud
+`os environments …`, `os login`, `os cloud …`) target an ObjectOS Cloud
 control plane.
 
 ### Package directory

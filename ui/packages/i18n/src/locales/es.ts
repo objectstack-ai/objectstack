@@ -2727,6 +2727,7 @@ const es = {
     },
     shell: {
       tenantHostHint: "Está iniciando sesión en este sistema",
+      poweredBy: "Desarrollado por ObjectStack",
     },
     layout: {
       headline: "Cree aplicaciones empresariales potentes, más rápido.",
@@ -3871,7 +3872,7 @@ const es = {
       cancel: "Cancelar",
     },
     bound: {
-      title: "Conectado a ObjectStack Cloud",
+      title: "Conectado a ObjectOS Cloud",
       runtime: "Runtime",
       organization: "Organización",
       approvedBy: "Aprobado por",
@@ -3992,13 +3993,13 @@ const es = {
     install: {
       dialogTitle: "Instalar {{name}}",
       dialogDescCurrent: "Instalar en este entorno ({{host}}).",
-      dialogDescPicker: "Elija un entorno donde instalar esta aplicación. Debe haber iniciado sesión en ObjectStack Cloud.",
+      dialogDescPicker: "Elija un entorno donde instalar esta aplicación. Debe haber iniciado sesión en ObjectOS Cloud.",
       environment: "Entorno",
       environmentPlaceholder: "Seleccionar entorno",
       includeSampleData: "Incluir datos de muestra",
       noEnvs: "No se encontraron entornos en su organización activa.",
       noPermission: "No tiene permiso para instalar aplicaciones en un entorno. Solo los propietarios y administradores de la organización pueden instalar; pida ayuda al administrador de su organización.",
-      signInFirst: "Primero debe iniciar sesión en ObjectStack Cloud.",
+      signInFirst: "Primero debe iniciar sesión en ObjectOS Cloud.",
       success: "Instalado correctamente. Abra el entorno para ver la nueva aplicación.",
       localSuccess: "v{{version}} instalado en este runtime. \"{{name}}\" debería aparecer en el selector de aplicaciones ahora.",
       localLoadsAtRestart: "v{{version}} instalado en este runtime. \"{{name}}\" se cargará en el próximo reinicio del runtime y no aparecerá en el selector de aplicaciones hasta entonces.",
@@ -4040,7 +4041,7 @@ const es = {
     update: {
       dialogTitle: "Actualizar {{name}}",
       dialogDescCurrent: "Actualizar la copia instalada en este entorno ({{host}}).",
-      dialogDescPicker: "Elija el entorno cuya copia instalada desea actualizar. Debe haber iniciado sesión en ObjectStack Cloud.",
+      dialogDescPicker: "Elija el entorno cuya copia instalada desea actualizar. Debe haber iniciado sesión en ObjectOS Cloud.",
       majorNotice: "Esta es una actualización de versión principal (v{{fromMajor}} → v{{toMajor}}), que puede incluir cambios incompatibles.",
       releaseNotes: "Leer las notas de la versión v{{version}}",
       success: "Actualizado a la v{{version}}.",

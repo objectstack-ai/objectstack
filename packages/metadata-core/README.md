@@ -38,3 +38,8 @@ import {
 ```
 
 See ADR-0008 §2 for the full architectural rationale.
+
+`@objectstack/metadata-core/testing` (the repository contract suites) is
+**ESM-only**: it imports `vitest`, whose own `require()` entry throws, so
+the subpath declares only an `import` condition. Load it with `import`;
+`require()` is refused with `ERR_PACKAGE_PATH_NOT_EXPORTED`.

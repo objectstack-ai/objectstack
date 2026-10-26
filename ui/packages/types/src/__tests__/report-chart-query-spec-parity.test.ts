@@ -939,6 +939,9 @@ const _blockDescriptionRefusesTheLegacyObjectArm = true satisfies (
         : false
 );
 // 5. UNCHANGED: `name` and `type` mean what the hand-written interface said.
+//    `type` is held to the three block types and its optionality, not closed:
+//    a block type the spec adds is not a red here (nothing in ui is total over
+//    this member; `resolveReportPresentation` falls back to `tabular`).
 const _blockNameIsUnchanged = true satisfies (
   [BlockMember<PublishedJoinedReportBlock, 'name'>] extends [never]
     ? false
@@ -947,7 +950,11 @@ const _blockNameIsUnchanged = true satisfies (
 const _blockTypeIsUnchanged = true satisfies (
   [BlockMember<PublishedJoinedReportBlock, 'type'>] extends [never]
     ? false
-    : SameType<BlockMember<PublishedJoinedReportBlock, 'type'>, 'tabular' | 'summary' | 'matrix' | undefined>
+    : ['tabular' | 'summary' | 'matrix' | undefined] extends [BlockMember<PublishedJoinedReportBlock, 'type'>]
+      ? [string] extends [BlockMember<PublishedJoinedReportBlock, 'type'>]
+        ? false
+        : true
+      : false
 );
 void _specJoinedReportBlockTyping;
 void _specJoinedReportBlockIsNotEvenAny;

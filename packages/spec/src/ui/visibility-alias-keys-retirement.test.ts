@@ -253,6 +253,10 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     // [#25767] The view union's prescription pin authors `visibleOn` on a form
     // overlay to assert the branch-typed refusal names the alias prescription.
     'packages/spec/src/ui/view-union-retirement-prescription.test.ts',
+    // The SDUI parser tier's base-prop list (`SDUI_BASE_PROPS`) still accepts the
+    // deprecated `visibleOn` on every node; this pin gives each member a
+    // well-typed value (moved in from the renderer's copy by #25712).
+    'packages/sdui-parser/src/__tests__/base-props-one-list-11044.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversions' fixtures and the stored-row replay pins author the pre-18 shapes on purpose.

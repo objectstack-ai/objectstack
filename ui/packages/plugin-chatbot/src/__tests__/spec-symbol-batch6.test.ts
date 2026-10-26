@@ -246,9 +246,12 @@ describe('the pending-action row and status ARE the spec contract', () => {
     type _NoCreatedAt = Assert<Equal<'created_at' extends keyof PendingActionRow ? true : false, false>>;
     type _NoUpdatedAt = Assert<Equal<'updated_at' extends keyof PendingActionRow ? true : false, false>>;
 
-    // The vocabulary the inbox's tabs and badges are built on.
+    // The vocabulary the inbox's tabs and badges are built on: each status they
+    // name is still the spec's. No inbox structure is total over the union, so
+    // a status the spec adds is not a red here; `_StatusIsNotString` above
+    // still refuses a widening.
     type _Vocabulary = Assert<
-      Equal<PendingActionStatus, 'pending' | 'approved' | 'executed' | 'failed' | 'rejected'>
+      Equal<Exclude<'pending' | 'approved' | 'executed' | 'failed' | 'rejected', PendingActionStatus>, never>
     >;
 
     expect(true).toBe(true);
@@ -291,8 +294,10 @@ describe('the decision outcomes ARE the spec wire responses', () => {
     type _RejectStatusNotString = Assert<
       Equal<string extends RejectOutcome['status'] ? true : false, false>
     >;
-    type _ApproveVocabulary = Assert<Equal<ApproveOutcome['status'], 'executed' | 'failed'>>;
-    type _RejectVocabulary = Assert<Equal<RejectOutcome['status'], 'rejected'>>;
+    // The statuses the inbox compares against are still on each response; a
+    // status the spec adds to either is not a red here.
+    type _ApproveVocabulary = Assert<Equal<Exclude<'executed' | 'failed', ApproveOutcome['status']>, never>>;
+    type _RejectVocabulary = Assert<Equal<Exclude<'rejected', RejectOutcome['status']>, never>>;
 
     // Drift 3 — `[k: string]: unknown` on the approve copy. objectstack#4075:
     // with it, this whole describe block would have been green on the copies.

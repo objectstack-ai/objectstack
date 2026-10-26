@@ -159,22 +159,53 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     expect(row.granted_by, 'granted_by audit stamp applied').toBeTruthy();
   });
 
-  it('the same delegate is refused OUTSIDE their subtree (no lateral reach)', async () => {
+  // [#26189] A refusal that describes the delegate's OWN scope answers
+  // `403 DELEGATION_SCOPE_VIOLATION` with the gate's reason, so the console can
+  // show it; any other refusal stays an opaque `PERMISSION_DENIED`. Pinned on
+  // the REST door's envelope, because a `[Security] Access denied` message
+  // would be re-flattened there.
+  const refusalEnvelope = async (r: Response) => {
+    const json: any = await r.json().catch(() => undefined);
+    const err = json?.error;
+    return {
+      status: r.status,
+      code: json?.code ?? err?.code,
+      message: String((err && typeof err === 'object' ? err.message : err) ?? json?.message ?? ''),
+    };
+  };
+
+  it('the same delegate is refused OUTSIDE their subtree (no lateral reach), on the scope-violation code', async () => {
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
       user_id: targetId,
       position: 'contributor',
       business_unit_id: 'bu_hq_finance',
     });
-    expect(r.status, 'HQ Finance is outside the Field Operations subtree').not.toBeLessThan(300);
+    const a = await refusalEnvelope(r);
+    expect([a.status, a.code], `HQ Finance is outside the Field Operations subtree: ${a.message}`)
+      .toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+    expect(a.message).toMatch(/business unit 'bu_hq_finance' is outside the delegated subtree/);
   });
 
-  it('the delegate cannot hand out a set OFF the allowlist (no self-escalation)', async () => {
+  it('the delegate cannot hand out a set OFF the allowlist (no self-escalation), on the scope-violation code', async () => {
     // showcase_auditor is not in assignablePermissionSets — direct grant refused.
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_permission_set', {
       user_id: delegateId,
       permission_set: 'showcase_auditor',
     });
-    expect(r.status, 'granting an un-allowlisted set (to ANYONE, incl. self) is refused').not.toBeLessThan(300);
+    const a = await refusalEnvelope(r);
+    expect([a.status, a.code], `granting an un-allowlisted set (to ANYONE, incl. self) is refused: ${a.message}`)
+      .toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+    expect(a.message).toMatch(/permission set 'showcase_auditor' is not in the scope's allowlist/);
+  });
+
+  it('CONTROL: the same delegate\'s refusal that is NOT about their scope stays an opaque PERMISSION_DENIED', async () => {
+    // An unanchored assignment: no `business_unit_id` to judge against any scope.
+    const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
+      user_id: targetId,
+      position: 'contributor',
+    });
+    const a = await refusalEnvelope(r);
+    expect([a.status, a.code], a.message).toEqual([403, 'PERMISSION_DENIED']);
   });
 
   // [C3 stage 8] The junction-write gates this file pinned here — a delegate

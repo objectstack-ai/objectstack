@@ -49,7 +49,7 @@ import {
   EmptyDescription,
   NavigationOverlay,
 } from '@object-ui/components';
-import { Plus, Upload, Table as TableIcon, Lock, MoreHorizontal, RotateCcw } from 'lucide-react';
+import { Plus, Upload, Lock, MoreHorizontal, RotateCcw } from 'lucide-react';
 import { FavoriteMenuItem, useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
@@ -89,7 +89,6 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useRealtimeSubscription, useConflictResolution } from '@object-ui/collaboration';
 import { ActionProvider, useNavigationOverlay, SchemaRenderer, useActionTextLocalizer, useRowPredicate, RelatedRecordActionsProvider, notifyDataChanged, useCapabilityGate, usePredicateScope, useMetadata } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
@@ -125,6 +124,8 @@ import {
     isSameOptionsValue,
     dispatchViewPatches,
 } from './objectViewOptions.js';
+import { ObjectNotFoundState, useViewTabsFit, keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { useObjectViewLiveData } from './objectViewLiveData.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -155,6 +156,10 @@ export {
     dispatchViewPatches,
 } from './objectViewOptions.js';
 
+// objectstack#25992 slice 3: `ObjectNotFoundState` moved to `./objectViewChrome.tsx`
+// and stays exported from here (`AppContent` imports it by this path).
+export { ObjectNotFoundState } from './objectViewChrome.js';
+
 /**
  * Props of the Console `ObjectView`, the route-level object surface
  * `@object-ui/app-shell` exports (objectui#7483).
@@ -184,94 +189,6 @@ export interface ConsoleObjectViewProps {
      * view (for example a record saved in a form the host owns).
      */
     externalRefreshKey?: number;
-}
-
-/**
- * The "object not found" state the route draws for an object it has no
- * definition of. objectui#13052 — `packageDisabled`: the server answered that
- * the object exists and its package is disabled (`OBJECT_PACKAGE_DISABLED`),
- * so the description says that instead. The console route draws it for that
- * answer (`AppContent`); this module's `ObjectView` draws it for an absence.
- * Not part of the package entry.
- */
-export function ObjectNotFoundState({ objectName, packageDisabled = false }: { objectName: string | undefined; packageDisabled?: boolean }) {
-    const { t } = useObjectTranslation();
-    return (
-        <div className="h-full p-4 flex items-center justify-center">
-          <Empty data-testid={packageDisabled ? 'object-package-disabled' : 'object-not-found'}>
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <TableIcon className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <EmptyTitle>{t('console.objectView.objectNotFound')}</EmptyTitle>
-            <EmptyDescription>
-              {packageDisabled
-                ? t('console.objectView.objectPackageDisabled', { objectName })
-                : t('console.objectView.objectNotFoundDescription', { objectName })}
-              {' '}
-              {t('console.objectView.objectNotFoundHint')}
-            </EmptyDescription>
-          </Empty>
-        </div>
-    );
-}
-
-/**
- * The list toolbar's inline-edit toggle, as this page wires it: it writes
- * nothing (objectui#5144, triage's ruling E).
- *
- * The view's `inlineEdit` and `userActions.editInline` are the AUTHOR's
- * permission keys, and `normalizeListViewSchema` folds the first into the
- * second. `editInline` is on by default since the v18 ruling (objectstack#22605,
- * objectui#12086), so a view that declares neither key offers the toggle, and
- * `editInline: false` withdraws it. This toggle used to persist a USER's edit
- * mode into `inlineEdit` through `persistViewPatch`. After the fold, switching
- * it off stored `inlineEdit: false`, which reads as "not offered", so the
- * toggle was gone from the next load and nothing in the console could bring it
- * back.
- *
- * The edit mode is now session state. `ListView` keeps it, and seeds it from
- * the view's `inlineEdit` on each load. The callback stays wired because
- * `ListView` offers the wide toolbar toggle only to a host that wires one.
- *
- * Recorded costs: the edit mode is not remembered across loads, and an overlay
- * that already stores `inlineEdit: false` still reads off. That is existing
- * data, and the maintainer's ruling rejects migrating it. Declaring
- * `userActions.editInline: true` on such a view brings the toggle back.
- */
-/**
- * Tailwind's `sm` breakpoint (px): from here up the list page draws its
- * saved-view tabs in the list toolbar; below it the app bar's mobile view
- * switcher is the page's only view control (objectui#12440).
- */
-const VIEW_TABS_MIN_WIDTH = 640;
-
-/**
- * Is the viewport at least {@link VIEW_TABS_MIN_WIDTH} wide? The matchMedia
- * idiom of `useIsMobile` / `useIsWideViewport`, except the first answer is
- * read synchronously: the tab strip is the first thing on the page's list row,
- * and resolving it in an effect would draw the row once without it and then
- * jump. objectui#12440 — this decides whether the strip is HANDED to the list
- * at all, so below `sm` nothing is passed and nothing is drawn (the CSS
- * `hidden sm:block` it replaces only hid it).
- */
-function viewTabsFitNow(): boolean {
-    return typeof window !== 'undefined' && window.innerWidth >= VIEW_TABS_MIN_WIDTH;
-}
-
-function useViewTabsFit(): boolean {
-    const [fits, setFits] = useState<boolean>(viewTabsFitNow);
-    useEffect(() => {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-        const mql = window.matchMedia(`(min-width: ${VIEW_TABS_MIN_WIDTH}px)`);
-        const onChange = () => setFits(viewTabsFitNow());
-        mql.addEventListener('change', onChange);
-        return () => mql.removeEventListener('change', onChange);
-    }, []);
-    return fits;
-}
-
-function keepInlineEditModeForTheSession(): void {
-    // Deliberately empty: see the docblock.
 }
 
 export function ObjectView({ dataSource, objects, onEdit, externalRefreshKey }: ConsoleObjectViewProps) {
@@ -1532,57 +1449,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
     });
 
-    // Real-time: auto-refresh when server reports data changes
-    const { lastMessage: realtimeMessage } = useRealtimeSubscription({
-        channel: `object:${objectDef.name}`,
-    });
-
-    // Conflict resolution: detect and queue conflicts on reconnection
-    const conflictUserId = objectDef.name ? `user-${objectDef.name}` : 'current-user';
-    const { hasConflicts, resolveAllConflicts } = useConflictResolution(conflictUserId);
-
-    useEffect(() => {
-        if (realtimeMessage) {
-            // On reconnection data change, auto-resolve with server-wins strategy
-            if (hasConflicts) {
-                resolveAllConflicts('remote');
-            }
-            refreshData();
-        }
-    }, [realtimeMessage, hasConflicts, resolveAllConflicts, refreshData]);
-    
-    // Fetch record count for footer display.
-    //
-    // `$top: 0` IS the request: give me the total, send no rows. It was written
-    // `limit: 0`, which is not a `QueryParams` key — `convertQueryParams` copies
-    // exactly the `$`-prefixed keys the type declares — so the cap reached no
-    // branch and was dropped, and the platform's GET list route has no default
-    // page size. The effect therefore did the opposite of what it says: it
-    // downloaded EVERY row of the object, on every mount and every refresh of
-    // every list view, to read one integer off the envelope. The dead spelling
-    // type-checked because `QueryParams` then carried `[key: string]: any` for
-    // adapter-specific params; `object-ui/no-unprefixed-query-params` rejects it
-    // at write time now (objectui#5458), and the index signature itself is gone
-    // (objectui#7497), so `tsc` refuses it as well.
-    //
-    // `total` is the only field that can still answer the question, so the
-    // row-counting fallbacks are gone rather than repointed. Once we ask for
-    // zero rows an empty `data` means "you asked for none", not "the object is
-    // empty" — counting the response would report a confident `0` for any
-    // adapter that does not send a total. Leaving `recordCount` `undefined`
-    // omits the footer line instead of asserting a wrong number; the render is
-    // already guarded by `typeof recordCount === 'number'`.
-    useEffect(() => {
-        if (dataSource?.find && objectDef.name) {
-            dataSource.find(objectDef.name, { $top: 0 }).then((result: any) => {
-                if (typeof result?.total === 'number') {
-                    setRecordCount(result.total);
-                }
-            }).catch(() => {
-                // Silently ignore — record count is non-critical
-            });
-        }
-    }, [dataSource, objectDef.name, refreshKey]);
+    // objectstack#25992 slice 4: the realtime refresh, conflict resolution and
+    // footer record count moved to `./objectViewLiveData.ts`; the count state stays here.
+    useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
 
     // Navigation overlay for record detail (supports drawer/modal/split/popover via config)
     // Priority: activeView.navigation > objectDef.navigation > default drawer.

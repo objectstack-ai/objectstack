@@ -12,6 +12,8 @@
 import { describe, expect, it } from 'vitest';
 import { compile, manifestFromConfigs } from '../index.js';
 import { parseJsx } from '../parse.js';
+import { isHtmlTierNode } from '../provenance.js';
+import type { SchemaElement } from '../types.js';
 
 const manifest = manifestFromConfigs([
   { type: 'flex', namespace: 'ui', isContainer: true, inputs: [
@@ -78,6 +80,29 @@ describe('an authored `type` attribute is refused (the discriminator collision)'
     expect(r.diagnostics).toEqual([]);
     expect(r.tree).toMatchObject({ type: 'flex', direction: 'row', gap: 4 });
   });
+
+  it('a node with NO `type` attribute keeps the same keys, values and provenance', () => {
+    // The regression guard, stated as what was actually measured. ⚠️ It is NOT
+    // byte-identical to the pre-change output: reversing the spread moves
+    // `type` from FIRST key to LAST, so `JSON.stringify` emits the same pairs
+    // in a different order. The key SET, every value, the children and the
+    // html-tier marker are unchanged, and that is the whole of the difference —
+    // `provenance.test.ts` carries the order pin itself.
+    const { tree, diagnostics } = parseJsx('<flex direction="col" gap={8} wrap><grid columns={3} /></flex>');
+    const root = tree as SchemaElement;
+
+    expect(diagnostics).toEqual([]);
+    expect(root).toMatchObject({
+      type: 'flex',
+      direction: 'col',
+      gap: 8,
+      wrap: true,
+      children: [{ type: 'grid', columns: 3 }],
+    });
+    expect(Object.keys(root).sort()).toEqual(['children', 'direction', 'gap', 'type', 'wrap']);
+    expect(isHtmlTierNode(root)).toBe(true);
+    expect(isHtmlTierNode(root.children![0])).toBe(true);
+  });
 });
 
 /**
@@ -86,7 +111,7 @@ describe('an authored `type` attribute is refused (the discriminator collision)'
  * The order fix is DEFENSE IN DEPTH, which means the refusal makes it
  * unobservable through the public API: measured by ablation on the committed
  * tree, restoring `{ type: tag, ...props }` while LEAVING the refusal in place
- * keeps all eight of these tests GREEN, because the refused attribute never
+ * keeps all nine of these tests GREEN, because the refused attribute never
  * reaches `props` to be spread. What turns them red is removing the refusal
  * (5 red) and, additionally, the two spread-order assertions here when BOTH
  * halves are removed together (6 red).

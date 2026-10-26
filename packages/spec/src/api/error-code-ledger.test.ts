@@ -261,6 +261,20 @@ describe('ErrorCode (standard ∪ registered)', () => {
     }
   });
 
+  it('accepts the delegated-administration gate\'s scope-violation code, as its own meaning', () => {
+    // #26189 (ruling on #26059, Q3 child 3): a delegated admin's refusal that
+    // describes the caller's own scope answers 403 with this code, so a client
+    // can show the reason while `PERMISSION_DENIED` stays opaque. plugin-security
+    // stamps it and asserts the string by value — pinned here too.
+    const code = 'DELEGATION_SCOPE_VIOLATION';
+    expect(ErrorCode.parse(code)).toBe(code);
+    expect(ERROR_CODE_LEDGER['@objectstack/plugin-security'], `${code} registered under plugin-security`).toContain(code);
+    // DELEGATION, SCOPE and VIOLATION are tokens no standard member carries:
+    // not a synonym of PERMISSION_DENIED, and no waiver.
+    expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    expect(STANDARD_SYNONYM_WAIVERS.map((w) => w.code)).not.toContain(code);
+  });
+
   it('accepts the nine-code batch — every code that ships in dist, door or no door (ruled: the ledger is the published face)', () => {
     // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
     // D): the published face is this ledger, so a code that ships in `dist` is
