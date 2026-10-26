@@ -7502,7 +7502,8 @@ export function selfTest({ tier = 'full' } = {}) {
       'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       // 131 -> 133 (#22998): the header gained two lines naming the full-battery-only jobs.
-      'scripts/pm/check-expected-skips.mjs:133 self-test-reads',
+      // 133 -> 137 (#25867): the header gained four lines on the ui jobs' queue-diff outputs.
+      'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
       'scripts/pm/dispatch-gates.mjs:736 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
