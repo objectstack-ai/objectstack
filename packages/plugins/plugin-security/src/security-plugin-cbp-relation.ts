@@ -43,7 +43,7 @@
 import type { SecurityPlugin } from './security-plugin.js';
 // [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
 // reached the registry without the parse (see `resolveCbpRelation`).
-import { controlledByParentMasterRefusal } from '@objectstack/spec/data';
+import { controlledByParentMasterRefusal, controlledByParentOwnerMayEdit } from '@objectstack/spec/data';
 import { masterGovernsRowWrites, OWD_DELEGATING_ROW_WRITES } from './platform-ownership-policies.js';
 
 /**
@@ -79,12 +79,24 @@ export interface CbpRelationHost {
   readonly logger: SecurityPlugin['logger'];
   readonly ql: SecurityPlugin['ql'];
   reportCbpMasterUnresolved: SecurityPlugin['reportCbpMasterUnresolved'];
+  reportOwnerMayEditWithoutOwnerColumn: SecurityPlugin['reportOwnerMayEditWithoutOwnerColumn'];
   reportRejectedReferenceAlias: SecurityPlugin['reportRejectedReferenceAlias'];
 }
 
+/**
+ * [ADR-0055 §3 amendment] The column {@link CbpRelation.ownerMayEdit} compares
+ * the caller against: the registry's injected per-record owner
+ * (`resolveInjectedSystemColumns`' `owner` anchor, which `applySystemFields`
+ * writes into the registered schema's field map under `ownership: 'user'`, the
+ * default), or an author's own field of that name, which the registry lets
+ * win. One spelling, the sharing service's `OWNER_FIELD` and the platform's
+ * "My records" scope read the same column.
+ */
+const OWNER_COLUMN = 'owner_id';
+
 /** The body of `SecurityPlugin#resolveCbpRelation`; the method's docblock there is its contract. */
 export function resolveCbpRelation(
-  this: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'>,
+  this: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportOwnerMayEditWithoutOwnerColumn' | 'reportRejectedReferenceAlias'>,
   object: string,
 ): CbpRelation | null {
   if (this.cbpRelCache.has(object)) return this.cbpRelCache.get(object) ?? null;
@@ -151,6 +163,14 @@ export function resolveCbpRelation(
   // own type for the key and the lint's reading of it.
   const candidates = entries.filter(([, f]) => f?.type === 'master_detail' && f?.required === true && ref(f));
   const found = candidates.length === 1 ? candidates[0] : undefined;
+  // [ADR-0055 §3 amendment] Resolved HERE, on the same schema the relation
+  // came from, so the opt-in and the relation can never describe two objects.
+  // Judged only for an object whose relation resolves: an opt-in on an object
+  // that derives no master is moot — every write of it is refused anyway.
+  const optedIn = found !== undefined && controlledByParentOwnerMayEdit(schema);
+  const hasOwnerColumn = entries.some(([key]) => key === OWNER_COLUMN);
+  if (optedIn && !hasOwnerColumn) this.reportOwnerMayEditWithoutOwnerColumn(object);
+  const ownerMayEdit = optedIn && hasOwnerColumn;
   if (!found && masterGovernsRowWrites(schema)) {
     this.reportCbpMasterUnresolved(object, entries, candidates.map(([k]) => String(k)));
   }
@@ -183,6 +203,10 @@ export function resolveCbpRelation(
         def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
       // [#25095] From the same def, asked of the parse's own predicate.
       masterNotWritable: masterNotWritableRefusal(object, String(found[0]), def),
+      // [ADR-0055 §3 amendment · ruling 6398566164] The opt-in, read through
+      // the spec's one reader, and only where the schema carries the column
+      // it names — see {@link CbpRelation.ownerMayEdit}.
+      ownerMayEdit,
     };
   }
   this.cbpRelCache.set(object, rel);
@@ -225,6 +249,21 @@ export function reportCbpMasterUnresolved(
       'required: true, and from nothing else. A non-required master_detail and a required lookup no longer ' +
       'derive access.',
     { object, requiredMasters, optionalMasters, requiredLookups },
+  );
+}
+
+/** The body of `SecurityPlugin#reportOwnerMayEditWithoutOwnerColumn`; the method's docblock there is its contract. */
+export function reportOwnerMayEditWithoutOwnerColumn(
+  this: Pick<CbpRelationHost, 'logger'>,
+  object: string,
+): void {
+  this.logger.warn?.(
+    `[security/controlled-by-parent] object "${object}" declares sharing.controlledByParent.ownerMayEdit: true ` +
+      `but carries no ${OWNER_COLUMN} column (ownership is 'business_unit', 'org' or 'none', or the object is ` +
+      'platform-managed), so the opt-in names nobody: every write of its rows keeps requiring edit access to ' +
+      "the master (ADR-0055 §3). Declare ownership: 'user' (the default) so the rows carry an owner, or delete " +
+      'the key.',
+    { object },
   );
 }
 

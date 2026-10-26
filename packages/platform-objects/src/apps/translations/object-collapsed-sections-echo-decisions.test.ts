@@ -942,10 +942,16 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // `enable.approvalsVisibleToReaders` toggle — a label and a help text, two
     // leaves, all six translated leaves authored by the same card, decided in
     // the two rows above. `capabilities` reads 9 → 11; `advanced` is untouched.
-    expect(PANEL_LEAVES.length).toBe(107);
+    // 113 since #25760 (ADR-0055 §3 amendment, ruling 6398566164): that card
+    // gave `advanced` the `sharing` composite beside `sharingModel` — the block,
+    // its `controlledByParent` sub-block and the `ownerMayEdit` toggle, a label
+    // and a help text each, three rows and six leaves, all eighteen translated
+    // leaves authored by the same card. `advanced` reads 96 → 102;
+    // `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(113);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(96);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(102);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
