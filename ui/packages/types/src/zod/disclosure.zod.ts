@@ -23,7 +23,7 @@ import { BaseSchema, SchemaNodeSchema } from './base.zod.js';
 /**
  * Accordion Item Schema
  */
-export const AccordionItemSchema = z.object({
+export const AccordionItemSchema = z.looseObject({
   value: z.string().describe('Unique accordion item identifier'),
   title: z.string().describe('Accordion item title'),
   content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).describe('Accordion item content'),
@@ -101,7 +101,7 @@ export const CollapsibleSchema = BaseSchema.extend({
 /**
  * Toggle Group Item Schema
  */
-export const ToggleGroupItemSchema = z.object({
+export const ToggleGroupItemSchema = z.looseObject({
   value: z.string().describe('Item value'),
   label: z.string().describe('Item label'),
   disabled: z.boolean().optional().describe('Whether item is disabled'),
