@@ -32,7 +32,7 @@
 //     leg 1 of `typecheck` still compiles `src` under the build config's
 //     NodeNext and is where that rule is enforced.
 //   - `lib: ["ES2022"]`, for the reason `packages/rest` and `packages/lint`
-//     state: the root config's `lib` is ES2020 while vitest runs on a Node with
+//     state: the base config's `lib` is ES2020 while vitest runs on a Node with
 //     ES2022 builtins, so the gap is reported as TS2550 about the CHECK.
 //     ⚠️ Measured effect on today's tree: **zero** — this layer carries no
 //     TS2550 either way. Fidelity to the runtime, not error reduction, and it is

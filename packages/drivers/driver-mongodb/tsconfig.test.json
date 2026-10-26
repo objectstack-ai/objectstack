@@ -42,7 +42,7 @@
 //     `lib`: nothing in this layer touches a browser global.
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-//     are inherited from the root config, and `types: ["node"]` restates
+//     are inherited from the base config, and `types: ["node"]` restates
 //     `tsconfig.json`'s — load-bearing for the same reason its comment gives,
 //     since the `.test.ts` files call the `setTimeout` / `console` users in
 //     `src/test-mongod.ts` and use those globals themselves. Nothing here may

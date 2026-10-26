@@ -65,7 +65,7 @@
   // The reason is the `@objectstack/driver-sqlite-wasm` `paths` rule above.
   // That rule puts the driver's SOURCE into whichever program resolves the
   // specifier, and the only importer is the record-view integration test. In
-  // THIS program that source is compiled under the root config's CommonJS-bound
+  // THIS program that source is compiled under the base config's CommonJS-bound
   // module setting, where `knex-wasm-dialect.ts` and `wasm-connection.ts` are 4
   // × TS1470 ("`import.meta` is not allowed in files which will build into
   // CommonJS output") — a verdict about the driver's module semantics billed to

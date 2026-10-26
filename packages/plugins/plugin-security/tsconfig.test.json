@@ -41,7 +41,7 @@
 //     NodeNext and keeps demanding the `.js` extensions this package ships.
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-//     are inherited from the root config, and `types: ["node"]` from
+//     are inherited from the base config, and `types: ["node"]` from
 //     `tsconfig.json`. Nothing here may loosen a type rule; if a test does not
 //     compile, that is the finding.
 //

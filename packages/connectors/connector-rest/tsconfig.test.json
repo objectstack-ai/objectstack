@@ -36,7 +36,7 @@
 //     compiles `src` under the build config's NodeNext and is where that rule is
 //     enforced.
 //   - `lib: ["ES2022"]`, for the reason `packages/rest` and `packages/lint`
-//     state: the root config's `lib` is ES2020 while vitest runs these files on
+//     state: the base config's `lib` is ES2020 while vitest runs these files on
 //     a Node with ES2022 builtins, so the gap is reported as TS2550 about the
 //     CHECK rather than about the code. ⚠️ Measured effect today: **zero** —
 //     this layer carries no TS2550 either way. Fidelity to the runtime, not
@@ -48,7 +48,7 @@
 //   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
 //     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
 //     `types: ["node"]` and `rootDir` are inherited from `tsconfig.json` and
-//     through it the root config, and none of them is re-declared here.
+//     through it the base config, and none of them is re-declared here.
 //     `rootDir` (`./src`) needs no widening: every test file here lives under
 //     `src` and none reaches outside the package, so the TS6059 pile
 //     `packages/cli`'s sibling had to widen `rootDir` to clear does not arise —

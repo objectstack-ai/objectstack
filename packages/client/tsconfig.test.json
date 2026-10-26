@@ -20,7 +20,7 @@
 //     bulk of this package's stale TEST_DEBT entry — a measurement of the
 //     misconfigured check, not of the tests.
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
-//     `noImplicitReturns` and the rest are inherited from the root config.
+//     `noImplicitReturns` and the rest are inherited from the base config.
 //     Nothing here may loosen a type rule; if a test does not compile, that is
 //     the finding.
 //
