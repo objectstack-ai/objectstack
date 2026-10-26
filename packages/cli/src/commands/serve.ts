@@ -4,7 +4,6 @@ import { Args, Command, Flags } from '@oclif/core';
 import path from 'path';
 import fs from 'fs';
 import net from 'net';
-import { spawnSync } from 'child_process';
 import chalk, { chalkStderr } from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
@@ -12,7 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
-import { devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
+import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
@@ -2175,6 +2174,9 @@ export default class Serve extends Command {
     // An operator who never exported NODE_ENV is booting a real deployment,
     // not asking to be treated as development — this is `os serve` agreeing
     // with `os start` on that, one line, for the whole gate family at once.
+    // #26242 — the value before this command sets its own, for the one child a
+    // dev boot may start (`compileForDevBoot`), which must not inherit the write.
+    const launchNodeEnv = process.env.NODE_ENV;
     if (flags.dev) {
       if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
     } else if (!process.env.NODE_ENV) {
@@ -3518,10 +3520,10 @@ export default class Serve extends Command {
               // no door composes and the wrap is the one copy.
               //
               // The compile runs in THIS process's environment, the one the
-              // module above was evaluated in (`NODE_ENV` included, which
-              // `--dev` set; the built entry ignores it for loading, #12271),
-              // so both copies are one evaluation's answer. A failed compile
-              // refuses the boot, as it does under `os dev`.
+              // module above was evaluated in, with the launch `NODE_ENV` put
+              // back (`compileForDevBoot` says why), so both copies are one
+              // evaluation's answer exactly as under `os dev`. A failed compile
+              // refuses the boot, as it does there.
               if (!supervisorArtifact && devCompilesAtBoot({
                 compile: true,
                 pinned: Boolean(pinnedArtifact),
@@ -3529,11 +3531,7 @@ export default class Serve extends Command {
                 artifactExists: true,
               })) {
                 printDiagnostic(chalk.dim(`  Compiling ${relativeConfig} → ${path.relative(process.cwd(), hmrArtifactPath) || hmrArtifactPath}...`));
-                const compiled = spawnSync(
-                  process.execPath,
-                  [process.argv[1], 'compile', absolutePath, '--output', hmrArtifactPath],
-                  { env: process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-                );
+                const compiled = compileForDevBoot({ configPath: absolutePath, outputPath: hmrArtifactPath, launchNodeEnv });
                 if (compiled.status !== 0) {
                   console.error(
                     `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`

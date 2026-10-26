@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { spawnSync, type SpawnSyncReturns } from 'child_process';
+
 /**
  * Whether a development boot compiles the config into the artifact it is about
  * to serve, before the server starts (#26130). Both dev doors read this one
@@ -44,4 +46,36 @@ export function devCompilesAtBoot(opts: {
   if (opts.pinned) return false;
   if (!opts.artifactExists) return true;
   return opts.compile && opts.configExists;
+}
+
+/**
+ * Compile `configPath` into `outputPath` in a child `os compile`, for a direct
+ * dev boot about to serve that artifact (#26242). The output is captured and
+ * returned, so a boot whose banner is still being assembled stays quiet unless
+ * the compile fails.
+ *
+ * The child gets the serving process's environment (the project `.env` files
+ * it loaded included) with ONE value put back: `NODE_ENV` as the process was
+ * launched with it. `serve --dev` sets `NODE_ENV=development` on ITSELF after
+ * its own modules have loaded; inherited, that write would put the child under
+ * oclif's TypeScript source loader, the failure
+ * `commands/child-env-source-loader.pin.test.ts` holds every command to (and
+ * the reason `os dev`'s own compile spawn writes no `NODE_ENV`). So the child
+ * sees what `os dev`'s compile child sees: the operator's `NODE_ENV`, or none.
+ */
+export function compileForDevBoot(opts: {
+  configPath: string;
+  outputPath: string;
+  launchNodeEnv: string | undefined;
+}): SpawnSyncReturns<string> {
+  return spawnSync(
+    process.execPath,
+    [process.argv[1], 'compile', opts.configPath, '--output', opts.outputPath],
+    {
+      // `spawn` drops an `undefined` entry, so an unset launch value stays unset.
+      env: { ...process.env, NODE_ENV: opts.launchNodeEnv },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
 }
