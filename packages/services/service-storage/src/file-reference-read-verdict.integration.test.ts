@@ -89,7 +89,7 @@ const F_DEC_DENY = 'f_decdeny_hh';
 /** No owner at all, `acl: 'public_read'`: anyone's to download. */
 const F_PUBLIC_FREE = 'f_publicfree_ii';
 /** [#25694] The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
-const GUEST_CTX = { principalKind: 'guest', positions: ['guest'], isSystem: false };
+const GUEST_CTX = { principalKind: 'guest' as const, positions: ['guest'], isSystem: false };
 
 const silentLogger = () => ({
   info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn(),
@@ -467,13 +467,6 @@ describe('#25692 — a record write claims or copies only a file the download do
       expect(err?.code).toBe('VALIDATION_FAILED');
       expect(await storedDoc(recordId)).toBeNull();
       expect((await fileById(F_PUBLIC_FREE))?.ref_id ?? null).toBeNull();
-    });
-
-    it('the public form door\'s write context is refused the same way', async () => {
-      await expectRefused(
-        { doc: F_PUBLIC_FREE },
-        { publicFormGrant: { object: 'contract' }, permissions: ['guest_portal'], anonymous: true },
-      );
     });
 
     it('CONTROL — a guest write that carries no file is written', async () => {

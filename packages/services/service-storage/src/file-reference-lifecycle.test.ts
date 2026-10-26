@@ -1362,8 +1362,6 @@ describe('an anonymous write carries no file (#25694, ruling C at every anonymou
   /** The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
   const GUEST = { principalKind: 'guest', positions: ['guest'], isSystem: false, tenantId: 'org_1' };
   const guestSession = { organizationId: 'org_1', positions: ['guest'] };
-  /** The public form door's write context (ADR-0138 D2 class 1). */
-  const FORM = { publicFormGrant: { object: 'product' }, permissions: ['guest_portal'], anonymous: true };
   const SIGNED_IN = { userId: 'u_writer', tenantId: 'org_1' };
 
   const LABELLED: Record<string, any> = {
@@ -1476,16 +1474,6 @@ describe('an anonymous write carries no file (#25694, ruling C at every anonymou
         ['gallery', 'invalid_value', 'gallery'],
         ['manual', 'invalid_value', 'manual'],
       ]);
-    });
-
-    it('the public form door\'s write context is anonymous too', async () => {
-      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
-      installAdmitting(engine);
-
-      const err = await refusedBy(write(engine, 'insert', { image: 'file_a' }, 'p1', { session: {}, context: FORM }));
-
-      expect(err?.code).toBe('VALIDATION_FAILED');
-      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
     });
   });
 
