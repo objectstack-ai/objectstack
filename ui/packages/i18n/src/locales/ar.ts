@@ -2719,6 +2719,10 @@ const ar = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "مرحبًا بعودتك",
       welcomeDescription: "سجّل الدخول لمتابعة عملك",
+      invitationTitle: "اقبل دعوتك",
+      invitationDescription: "استخدم البريد الإلكتروني الذي أُرسلت إليه الدعوة.",
+      invitationSignUpButton: "إنشاء حساب والانضمام",
+      invitationSignInDivider: "أو سجّل الدخول بحساب موجود",
       showPasswordText: "إظهار كلمة المرور",
       hidePasswordText: "إخفاء كلمة المرور",
       footer: {
@@ -2729,6 +2733,8 @@ const ar = {
     register: {
       title: "إنشاء حساب",
       description: "أدخل معلوماتك للبدء",
+      invitationTitle: "أنشئ حسابًا للانضمام",
+      invitationDescription: "سجّل بالبريد الإلكتروني الذي أُرسلت إليه الدعوة، فلا يمكن قبولها إلا بهذا العنوان.",
       nameLabel: "الاسم",
       namePlaceholder: "محمد أحمد",
       emailLabel: "البريد الإلكتروني",
@@ -3524,6 +3530,7 @@ const ar = {
       organization: "المؤسسة",
       role: "الدور",
       expiresAt: "تنتهي في",
+      invitedBy: "الدعوة من",
       accept: "قبول الدعوة",
       accepted: "تم قبول الدعوة",
       acceptFailed: "فشل قبول الدعوة",

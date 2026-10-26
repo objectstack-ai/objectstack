@@ -2519,6 +2519,10 @@ const ja = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "おかえりなさい",
       welcomeDescription: "サインインして作業を続けましょう",
+      invitationTitle: "招待を承諾",
+      invitationDescription: "招待を受け取ったメールアドレスをご利用ください。",
+      invitationSignUpButton: "アカウントを作成して参加",
+      invitationSignInDivider: "または既存のアカウントでサインイン",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2529,6 +2533,8 @@ const ja = {
     register: {
       title: "アカウントを作成",
       description: "情報を入力して始めましょう",
+      invitationTitle: "アカウントを作成して参加する",
+      invitationDescription: "招待を受け取ったメールアドレスで登録してください。招待はそのアドレスでのみ承諾できます。",
       nameLabel: "名前",
       namePlaceholder: "田中太郎",
       emailLabel: "メールアドレス",
@@ -3297,6 +3303,7 @@ const ja = {
       organization: "組織",
       role: "ロール",
       expiresAt: "有効期限",
+      invitedBy: "招待者",
       accept: "招待を承諾",
       accepted: "招待を承諾しました",
       acceptFailed: "招待の承諾に失敗しました",

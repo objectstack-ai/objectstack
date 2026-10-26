@@ -2565,6 +2565,10 @@ const fr = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bon retour",
       welcomeDescription: "Connectez-vous pour reprendre votre travail",
+      invitationTitle: "Acceptez votre invitation",
+      invitationDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée.",
+      invitationSignUpButton: "Créer un compte et rejoindre",
+      invitationSignInDivider: "ou connectez-vous à un compte existant",
       showPasswordText: "Afficher le mot de passe",
       hidePasswordText: "Masquer le mot de passe",
       footer: {
@@ -2575,6 +2579,8 @@ const fr = {
     register: {
       title: "Créer un compte",
       description: "Entrez vos informations pour commencer",
+      invitationTitle: "Créez un compte pour rejoindre",
+      invitationDescription: "Inscrivez-vous avec l'adresse e-mail à laquelle l'invitation a été envoyée. Elle ne peut être acceptée qu'avec cette adresse.",
       nameLabel: "Nom",
       namePlaceholder: "Jean Dupont",
       emailLabel: "E-mail",
@@ -3349,6 +3355,7 @@ const fr = {
       organization: "Organisation",
       role: "Rôle",
       expiresAt: "Expire le",
+      invitedBy: "Invité par",
       accept: "Accepter l'invitation",
       accepted: "Invitation acceptée",
       acceptFailed: "Impossible d'accepter l'invitation",

@@ -2572,6 +2572,10 @@ const zh = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: '欢迎回来',
       welcomeDescription: '登录后继续你的工作',
+      invitationTitle: '接受邀请',
+      invitationDescription: '请使用收到邀请的邮箱。',
+      invitationSignUpButton: '注册并加入',
+      invitationSignInDivider: '或登录已有账号',
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2582,6 +2586,8 @@ const zh = {
     register: {
       title: '创建账户',
       description: '创建账号，开始搭建。',
+      invitationTitle: '注册账号并加入',
+      invitationDescription: '请使用收到邀请的邮箱注册，邀请只能由该邮箱接受。',
       nameLabel: '姓名',
       namePlaceholder: '张三',
       emailLabel: '邮箱',
@@ -3477,6 +3483,7 @@ const zh = {
       organization: '组织',
       role: '角色',
       expiresAt: '过期时间',
+      invitedBy: '邀请人',
       accept: '接受邀请',
       accepted: '邀请已接受',
       acceptFailed: '接受邀请失败',
