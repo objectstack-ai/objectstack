@@ -397,6 +397,15 @@ export interface ExplainEngineDeps {
   /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
   sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
   /**
+   * [#26188 · ADR-0057] Is a hierarchy resolver mounted (the
+   * `hierarchy-scope-resolver` service the enterprise `hierarchy-security`
+   * capability registers)? Without one the sharing service evaluates a
+   * hierarchy read depth as 'own', and the depth layer's record cell says so
+   * instead of blaming the depth. Absent → not known, and the cell reads as
+   * before.
+   */
+  hierarchyResolverMounted?: () => boolean;
+  /**
    * The concrete `sys_record_share` rows attached to the record (for `rules[]`
    * attribution).
    *
@@ -2078,6 +2087,19 @@ async function applyRecordAttribution(
                     ? depthRecord('admitted',
                         `Caller owns the record — inside every read depth, including '${depthScope}'; the baseline ` +
                         'already admits it (see owd_baseline).')
+                    // [#26188] Ahead of the depth verdict: with no hierarchy
+                    // resolver the sharing service evaluates a hierarchy depth
+                    // as 'own', so the owner is outside it for that reason,
+                    // not because they are outside the caller's unit. Below
+                    // 'org' and above 'own' every depth is a hierarchy one.
+                    : depthScope !== 'org' && deps.hierarchyResolverMounted?.() === false
+                      ? depthRecord(sharingMatches === false ? 'excluded' : 'not_evaluated',
+                          "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'. The caller's " +
+                          `'${depthScope}' read depth reaches no owner beyond the caller on this deployment` +
+                          (sharingMatches === false
+                            ? `, and the record's owner (${ownerLabel}) is not the caller; a share may still widen ` +
+                              'access (see the sharing layer).'
+                            : '; a share admits this record (see the sharing layer).'))
                     : depthAdmitsRow
                       ? depthRecord('admitted', depthScope === 'org'
                           ? "Effective read depth 'org' admits this record without a share: at org depth the sharing " +

@@ -27,6 +27,7 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
+    HIERARCHY_SCOPE_RESOLVER_SERVICE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -7144,6 +7145,7 @@ export class ObjectStackProtocolImplementation implements
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
+            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
@@ -7536,6 +7538,30 @@ export class ObjectStackProtocolImplementation implements
         const keys = (resolver as { keys?: unknown }).keys;
         if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) return undefined;
         return keys as readonly string[];
+    }
+
+    /**
+     * [#26188] Is a hierarchy resolver mounted on this runtime — a service
+     * registered under `HIERARCHY_SCOPE_RESOLVER_SERVICE` (ADR-0057; the
+     * enterprise `hierarchy-security` capability registers one, the open edition
+     * none)? The input the runtime authoring gate refuses an unenforceable
+     * hierarchy scope with on publish, and warns on a draft save with.
+     *
+     * Read per write, as {@link rlsMembershipResolverKeys} reads its service, so a
+     * resolver registered after this protocol is assembled is seen by the next
+     * write; nothing is recorded. `undefined` — the CLI's reading, under which
+     * nothing is judged — when this host has no service registry or the lookup
+     * throws.
+     */
+    private hierarchyResolverMounted(): boolean | undefined {
+        const registry = this.getServicesRegistry?.();
+        if (!registry) return undefined;
+        try {
+            const resolver = registry.get(HIERARCHY_SCOPE_RESOLVER_SERVICE);
+            return resolver !== undefined && resolver !== null;
+        } catch {
+            return undefined;
+        }
     }
 
     /**
