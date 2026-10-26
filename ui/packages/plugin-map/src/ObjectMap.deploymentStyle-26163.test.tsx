@@ -112,7 +112,7 @@ describe('ObjectMap — the deployment default map style (objectstack#26163)', (
     fireEvent.click(screen.getByTestId('simulate-map-error'));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(`Map failed to load (Failed to fetch ${DEPLOYMENT_STYLE}).`);
-    expect(alert).toHaveTextContent("the deployment's default map style could not be loaded here");
+    expect(alert).toHaveTextContent('the default map style set for this deployment could not be loaded here');
     expect(alert).not.toHaveTextContent('public default map tiles');
     expect(alert).not.toHaveTextContent('check the map style URL set on this view');
   });

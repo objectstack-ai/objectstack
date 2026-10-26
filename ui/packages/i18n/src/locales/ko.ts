@@ -4615,6 +4615,7 @@ const ko = {
       invalidCoordinatesExcluded: "좌표가 없거나 잘못되어 지도에서 제외된 레코드: {{excluded}}",
       styleFailedConfigured: "지도를 불러오지 못했습니다({{reason}}). 레코드는 아래에 나열되어 있습니다. 이 보기에 설정된 지도 스타일 URL을 확인하세요.",
       styleFailedDefault: "지도를 불러오지 못했습니다({{reason}}). 레코드는 아래에 나열되어 있습니다. 여기에서는 공개 기본 지도 타일을 불러올 수 없으므로 관리자에게 이 보기의 지도 스타일을 설정해 달라고 요청하세요.",
+      styleFailedDeployment: "지도를 불러오지 못했습니다({{reason}}). 레코드는 아래에 나열되어 있습니다. 여기에서는 이 배포에 설정된 기본 지도 스타일을 불러올 수 없으므로 관리자에게 확인을 요청하세요.",
       styleFailedUnknownReason: "지도 스타일 또는 타일을 불러올 수 없습니다",
       webgl2Unavailable: "지도를 불러오지 못했습니다(이 브라우저는 지도에 필요한 WebGL2를 지원하지 않습니다). 레코드는 아래에 나열되어 있습니다. 하드웨어 가속을 켜거나 WebGL2를 지원하는 브라우저에서 지도를 확인하세요.",
       retry: "지도 다시 시도",
