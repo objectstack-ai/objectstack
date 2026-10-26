@@ -187,9 +187,13 @@ describe('the demo satisfies the `page:header` contract (objectui#3906)', () => 
     expect(issuesOf(safeValidateSchema(demo()))).toEqual([]);
   });
 
-  it('CONTROL — the row refuses the retired `icon` by name', () => {
-    const issues = issuesOf(row.safeParse({ ...demo().properties, icon: 'users' }));
-    expect(issues).toEqual(['icon: invalid_type']);
+  it('CONTROL — the row refuses the retired `icon` as an unknown key of the bag', () => {
+    // `icon`'s tombstone aged out of the row at spec 18.2 (objectstack#25767):
+    // the strict row reports it at the bag with `unrecognized_keys`, the
+    // message naming the key and the protocol upgrade guide.
+    const result = row.safeParse({ ...demo().properties, icon: 'users' });
+    expect(issuesOf(result)).toEqual([': unrecognized_keys']);
+    expect(result.success ? '' : result.error.issues[0]?.message).toMatch(/`icon`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('CONTROL — the mirror refuses a misspelled key inside `properties`', () => {

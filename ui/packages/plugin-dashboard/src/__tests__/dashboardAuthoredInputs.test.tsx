@@ -270,14 +270,16 @@ describe('the two ruled-out keys stay unpublished — and checkably so (objectui
     expect(unrecognizedKeys(result)).toContain('title');
   });
 
-  it('the spec refuses every `aria` value — the tombstone is still standing', () => {
+  it('the spec refuses every `aria` value — as an unknown key now that its tombstone aged out (objectstack#25767)', () => {
     const result = specVerdict({ aria: { ariaLabel: 'Ops' } });
     expect(result.success, 'the spec re-admitted dashboard.aria — re-open objectui#5742').toBe(false);
+    // Through spec 18.1 the tombstone reported at `aria`; the strict
+    // dashboard now reports at its own path, naming the key and the guide.
     const ariaIssue = (result as { error: { issues: Array<{ path: unknown[]; message: string }> } })
-      .error.issues.find((i) => i.path.join('.') === 'aria');
-    expect(ariaIssue, 'no issue at path `aria`').toBeTruthy();
-    // The tombstone names the removal; a mere shape error would not.
-    expect(ariaIssue!.message).toMatch(/removed/);
+      .error.issues.find((i) => i.path.length === 0 && i.message.includes('`aria`'));
+    expect(ariaIssue, 'no root issue naming `aria`').toBeTruthy();
+    expect(ariaIssue!.message).toMatch(/Unrecognized key\(s\)/);
+    expect(ariaIssue!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it.each(NON_AUTHOR)('$key draws unknown-prop from the real validator — the ruled outcome', ({ key, sample }) => {

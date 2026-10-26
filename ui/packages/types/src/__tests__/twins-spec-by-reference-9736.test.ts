@@ -44,6 +44,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { App, Dashboard, Page } from '@objectstack/spec/ui';
+import { AppSchema as SpecAppSchema } from '@objectstack/spec/ui';
 import type { AppComponentSchema } from '../app';
 import type { DashboardComponentSchema } from '../complex';
 import type { PageNodeSchema } from '../layout';
@@ -104,13 +105,31 @@ describe('admitted spec keys land on the twin with the SPEC\'S type, not `any`',
 });
 
 describe('spec tombstones surface on the twin as a refusal — the verdict the mirror gives', () => {
-  it('App `version` / Dashboard `refreshInterval`: authoring a value is a compile error AND a parse failure', () => {
-    // @ts-expect-error — `version` is the spec's `retiredKey()` tombstone.
-    const app: AppComponentSchema = { type: 'app', version: '1.0.0' };
+  it('Dashboard `refreshInterval`: authoring a value is a compile error AND a parse failure', () => {
     // @ts-expect-error — `refreshInterval` is the #15680 rename's tombstone.
     const dashboard: DashboardComponentSchema = { type: 'dashboard', widgets: [], refreshInterval: 30 };
-    expect(AppMirror.safeParse(app).success).toBe(false);
     expect(DashboardMirror.safeParse(dashboard).success).toBe(false);
+  });
+
+  it('App `version`: its tombstone aged out of the spec (objectstack#25767) — the spec refuses it as an unknown key, and the twin refuses it on its own', () => {
+    // Through spec 18.1 `version` was a `retiredKey()` tombstone the twin
+    // inherited by reference and refused. At 18.2 the ≤16.x tombstones aged
+    // out one major on: the spec's strict `AppSchema` refuses the key as an
+    // unknown one at the app's path, naming it and the protocol upgrade guide;
+    // the twin, with no member to inherit over its `.passthrough()` base,
+    // carries the refusal as its OWN arm (`agedOutSpecKeyRefusal`) and its own
+    // `version?: never` — so the verdict the mirror gives is unchanged: a
+    // compile error AND a parse failure at the key's own path.
+    // @ts-expect-error — `version` is the twin's own `?: never`: the spec tombstone it projected aged out (objectstack#25767).
+    const app: AppComponentSchema = { type: 'app', version: '1.0.0' };
+    const spec = SpecAppSchema.safeParse({ name: 'app_x', label: 'App X', version: '1.0.0' });
+    expect(spec.success).toBe(false);
+    const root = spec.success ? '' : spec.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+    expect(root).toMatch(/Unrecognized key\(s\)[^\n]*`version`/);
+    expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    const twin = AppMirror.safeParse(app);
+    expect(twin.success).toBe(false);
+    expect(twin.success ? [] : twin.error.issues.map((i) => [i.code, i.path.join('.')])).toContainEqual(['invalid_type', 'version']);
   });
 
   it('the controls: the same documents without the tombstone key pass both faces', () => {

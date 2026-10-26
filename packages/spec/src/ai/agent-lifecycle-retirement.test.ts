@@ -296,6 +296,10 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   const EXCLUDED = new Set([
     // This pin authors the key to assert its refusal and its conversion.
     THIS_FILE,
+    // The CLI write door's pin (#25767): its fixture authors the pre-retirement
+    // agent on purpose, to assert `os migrate meta --from 17 --write` rewrites
+    // it through this kit's D2 conversion — the kit's fixture at the CLI door.
+    'packages/cli/test/migrate-meta-write.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement agent on purpose.

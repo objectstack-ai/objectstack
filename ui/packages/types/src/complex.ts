@@ -2609,7 +2609,9 @@ export interface DashboardComponentSchema extends BaseSchema, Omit<SpecDashboard
   // dashboard-root `title` read site left (pinned by that package's
   // `__tests__/dashboardAuthoredInputs.test.tsx`).
   //
-  // Unlike `aria` below there is NO spec tombstone to inherit: `@objectstack/spec`'s
+  // Unlike `aria` below — which the twin refused through the spec's tombstone
+  // for two majors and refuses on its own now that it aged out
+  // (objectstack#25767) — there was NEVER a spec tombstone to inherit here: `@objectstack/spec`'s
   // strict `DashboardSchema` refuses a root `title` as an UNRECOGNIZED key, not with
   // a named removal message, so the Zod twin (`zod/complex.zod.ts`, `.passthrough()`
   // via `BaseSchema`) gains no refusal from this deletion and ⛔ must not be given a
@@ -2700,17 +2702,34 @@ export interface DashboardComponentSchema extends BaseSchema, Omit<SpecDashboard
   // `DASHBOARD_SPEC_EXCLUDED`, and this interface inherits it from the
   // `Omit< Dashboard, … >` projection above. Pinned by
   // `__tests__/dashboard-daterange-spec-10334.test.ts`.
-  // `aria` was DECLARED here until objectui#5830, under a comment claiming
-  // alignment with @objectstack/spec AriaPropsSchema — by then the opposite of
-  // the contract: the spec removed `dashboard.aria` at the objectstack-ai/objectstack#3896 audit
-  // close-out (no dashboard renderer ever applied it), so
-  // `DashboardSchema.shape.aria` is a tombstone that refuses any value, the
-  // Zod twin (`zod/complex.zod.ts`) inherits that refusal through
-  // `SpecDashboardFields`, and `plugin-dashboard` has no `schema.aria` read
-  // site. Since objectui#9736 this interface inherits the same tombstone from
-  // the spec projection (`aria?: undefined`), so an authored `aria` is now a
-  // compile error rather than `any` through the index signature. Pinned by
-  // `__tests__/dashboard-aria-retired-contract-twins.test.ts`.
+  /**
+   * RETIRED upstream at @objectstack/spec 17.0.0 (the objectstack#3896 audit
+   * close-out: no dashboard renderer ever applied it); its tombstone aged out
+   * of `DashboardSchema` at spec 18.2 (objectstack#25767, ADR-0087 one major
+   * on). The history, so nobody re-declares it: `aria` was DECLARED here until
+   * objectui#5830 under a comment claiming alignment with the spec's
+   * `AriaPropsSchema` — by then the opposite of the contract — and from
+   * objectui#9736 this interface inherited the spec's tombstone through the
+   * `Omit< Dashboard, … >` projection above (`aria?: undefined`), so an
+   * authored value was a compile error rather than `any` through the index
+   * signature. The projection now carries nothing under the name, so the
+   * refusal is this face's own: `?: never` is the twin of
+   * `zod/complex.zod.ts`'s `agedOutSpecKeyRefusal` arm, and `plugin-dashboard`
+   * still has no `schema.aria` read site. Pinned by
+   * `__tests__/dashboard-aria-retired-contract-twins.test.ts`.
+   *
+   * @deprecated Not a key of this contract. ARIA attributes are live on
+   * `page.aria`, `page.components[].aria` and the list view's `aria`.
+   */
+  aria?: never;
+  /**
+   * Aged-out spec tombstone of the same cut (objectstack#25767); see `aria`
+   * above. No renderer or runtime read it. Pinned by
+   * `__tests__/page-app-dashboard-spec-parity.test.ts`.
+   *
+   * @deprecated Not a key of this contract.
+   */
+  performance?: never;
   /**
    * REFUSED BY NAME (objectui#9256, ADR-0049) — `dashboard` reads NEITHER
    * content channel: no renderer read consumes `body` or `children` for this

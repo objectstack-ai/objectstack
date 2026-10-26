@@ -381,26 +381,38 @@ const NAMED_VIEW_ABSENT_CONTROL = 'stickyHeader';
  * spec bump that moves a key moves this.
  */
 const PROTOCOL_LIST_VIEW_KEYS = [
-  'addRecord', 'allowPrinting', 'appearance', 'aria', 'bordered', 'bulkActionDefs', 'bulkActions',
+  'addRecord', 'allowPrinting', 'appearance', 'aria', 'bulkActionDefs', 'bulkActions',
   'calendar', 'chart', 'columns', 'compactToolbar', 'conditionalFormatting', 'data', 'description',
   'emptyState', 'exportOptions', 'fieldOrder', 'filter', 'filterableFields', 'gallery', 'gantt',
   'grouping', 'hiddenFields', 'inlineEdit', 'kanban', 'label', 'map', 'name', 'navigation',
-  'pageName', 'pagination', 'performance', 'requiredPermissions', 'resizable', 'responsive', 'rowActions', 'rowColor',
-  'rowHeight', 'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort', 'striped',
-  'tabs', 'timeline', 'tree', 'type', 'userActions', 'userFilters', 'virtualScroll',
+  'pageName', 'pagination', 'requiredPermissions', 'resizable', 'rowActions', 'rowColor',
+  'rowHeight', 'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort',
+  'tabs', 'timeline', 'tree', 'type', 'userActions', 'userFilters',
 ] as const;
 
 /**
- * Eight of those 51 are RETIREMENT TOMBSTONES, refused by name with the
- * protocol's own `[REMOVED]` text (seven until the pin move to
- * `@objectstack/spec` 18.0.0 took the retirement of `filterableFields`,
- * objectui#13261; five until `@objectstack/spec` 17.5.0 retired `pageName` and
- * `tabs`, objectui#11073). ⚠️ They are why a raw key-count diff reads
- * objectui as "narrower" and is wrong to: not declaring a key the protocol
- * refuses is agreement, not a gap. Derived by the tombstone's own marker, not
- * listed by hand.
+ * Three of those 46 are RETIREMENT TOMBSTONES, refused by name with the
+ * protocol's own `[REMOVED]` text (`filterableFields` since the pin move to
+ * `@objectstack/spec` 18.0.0 took its retirement, objectui#13261; `pageName`
+ * and `tabs` since 17.5.0, objectui#11073). Eight until spec 18.2: the five
+ * objectstack#7176 retirements (`bordered`, `performance`, `responsive`,
+ * `striped`, `virtualScroll`) were tombstones through 18.1 and AGED OUT of the
+ * shape one major on (objectstack#25767, ADR-0087) — the protocol declares
+ * nothing under those names now and refuses each as an unknown key naming the
+ * protocol upgrade guide ({@link PROTOCOL_AGED_OUT_KEYS}). ⚠️ The tombstones
+ * are why a raw key-count diff reads objectui as "narrower" and is wrong to:
+ * not declaring a key the protocol refuses is agreement, not a gap. Derived by
+ * the tombstone's own marker, not listed by hand.
  */
-const PROTOCOL_RETIRED_KEYS = ['bordered', 'filterableFields', 'pageName', 'performance', 'responsive', 'striped', 'tabs', 'virtualScroll'] as const;
+const PROTOCOL_RETIRED_KEYS = ['filterableFields', 'pageName', 'tabs'] as const;
+
+/**
+ * The five objectstack#7176 retirements after their tombstones aged out
+ * (objectstack#25767): not members of the protocol's shape any more, refused
+ * as unknown keys. Listed so the age-out is a reading here, not a silent
+ * shrink of {@link PROTOCOL_LIST_VIEW_KEYS}.
+ */
+const PROTOCOL_AGED_OUT_KEYS = ['bordered', 'performance', 'responsive', 'striped', 'virtualScroll'] as const;
 
 /**
  * The FIFTH bucket — LIVE protocol members DECLARED here and read off no named view BY
@@ -1784,22 +1796,39 @@ function foldFlagMap(): Record<string, string> {
 }
 
 describe('objectui#7924 — the unread members, in the FOUR buckets the ruling was written in plus the server-enforced fifth (objectui#12341) and the retired-ahead-of-the-pin sixth (objectui#13118), derived against the installed protocol (bucket ① empty since objectui#10758)', () => {
-  it('the protocol declares 51 keys for a named list view, and the instrument that reads them fires', () => {
+  it('the protocol declares 46 keys for a named list view, and the instrument that reads them fires', () => {
     const keys = protocolListViewKeys();
     expect(keys).toEqual([...PROTOCOL_LIST_VIEW_KEYS]);
-    expect(keys).toHaveLength(51);
+    // 46 since spec 18.2 aged the five objectstack#7176 tombstones out
+    // (objectstack#25767); 51 through 18.1.
+    expect(keys).toHaveLength(46);
+    for (const aged of PROTOCOL_AGED_OUT_KEYS) expect(keys, `${aged} is declared again`).not.toContain(aged);
     // Firing control + its negative twin, on the same query that produces every
     // "the protocol declares this nowhere" zero below.
     expect(keys).toContain(NAMED_VIEW_READ_CONTROL);
     expect(keys).not.toContain(NAMED_VIEW_ABSENT_CONTROL);
   });
 
-  it('eight of the 51 are RETIREMENT TOMBSTONES, refused BY NAME — so objectui not declaring them LIVE is agreement, not narrowness', () => {
+  it('three of the 46 are RETIREMENT TOMBSTONES, refused BY NAME — so objectui not declaring them LIVE is agreement, not narrowness', () => {
     expect(protocolRetiredKeys()).toEqual([...PROTOCOL_RETIRED_KEYS]);
     const base = { label: 'Directory', columns: ['name', 'email'] };
     // The accept leg first: without it every refusal below is a schema that
-    // refuses everything rather than a reading of these eight keys.
+    // refuses everything rather than a reading of these keys.
     expect(SpecObjectListViewSchema.safeParse(base).success).toBe(true);
+    // The five aged-out keys (objectstack#25767): refused too, but as UNKNOWN
+    // keys at the view's own path, the one issue naming the key and the
+    // protocol upgrade guide — a deleted member's refusal, by design now.
+    for (const key of PROTOCOL_AGED_OUT_KEYS) {
+      const r = SpecObjectListViewSchema.safeParse({ ...base, [key]: true });
+      expect(r.success, `the protocol accepts the aged-out \`${key}\``).toBe(false);
+      if (!r.success) {
+        const issues = r.error.issues as readonly Issue[];
+        expect(refusedAt(issues, key)).toBe(false);
+        const root = issues.filter((i) => (i.path ?? []).length === 0).map((i) => i.message ?? '').join('\n');
+        expect(root).toMatch(new RegExp('Unrecognized key\\(s\\)[^\\n]*`' + key + '`'));
+        expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
+      }
+    }
     for (const key of PROTOCOL_RETIRED_KEYS) {
       const r = SpecObjectListViewSchema.safeParse({ ...base, [key]: true });
       expect(r.success, `the protocol no longer refuses the retired \`${key}\``).toBe(false);
@@ -1812,10 +1841,10 @@ describe('objectui#7924 — the unread members, in the FOUR buckets the ruling w
           || (i.message ?? '').includes('was removed in @objectstack/spec'))).toBe(true);
       }
     }
-    // …and none of the eight is declared LIVE on the objectui face. Five were
-    // never declared; the two objectui#8980 declared are `?: never` tombstones
-    // since objectui#11073, and `filterableFields` since objectui#13118, each
-    // refused by name on this face as on the protocol's.
+    // …and none of the three is declared LIVE on the objectui face: the two
+    // objectui#8980 declared are `?: never` tombstones since objectui#11073,
+    // and `filterableFields` since objectui#13118, each refused by name on this
+    // face as on the protocol's. (The five aged-out keys were never declared.)
     const { names, tombstones } = namedListViewMembers();
     const declaredLive = names.filter((n) => !tombstones.includes(n));
     expect(PROTOCOL_RETIRED_KEYS.filter((k) => declaredLive.includes(k))).toEqual([]);

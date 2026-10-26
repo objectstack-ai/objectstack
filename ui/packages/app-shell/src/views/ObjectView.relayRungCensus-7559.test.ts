@@ -466,13 +466,12 @@ const ABSENCES: Record<string, Absence> = {
   // A rung for one of these would relay a value into a void, and the void is
   // the finding: each is pinned here so that the day a reader appears, this
   // census reddens instead of the value silently not arriving.
-  striped: { kind: 'unread', reason: 'Retired by objectstack#7176 (maintainer-ruled 2026-08-10) after every objectui reader was measured as pass-through. Present only as the spec import that carries its tombstone.' },
-  bordered: { kind: 'unread', reason: 'Retired by objectstack#7176, as `striped`.' },
+  // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance` sat
+  // here as `unread` while the spec import carried their tombstones; the
+  // tombstones aged out at spec 18.2 (objectstack#25767), so they are no longer
+  // `ListViewSchema` members and the census has nothing to declare for them.
   requiredPermissions: { kind: 'unread', reason: 'The ADR-0066 audience gate `@objectstack/spec` 18 adds to a list view (objectui#12030). The SERVER enforces it before the view is served: a user who lacks the capabilities is never listed the view and is refused it by name, so nothing on the ListView path has a value to consume.' },
-  virtualScroll: { kind: 'unread', reason: 'Retired by objectstack#7176, as `striped`.' },
   filterableFields: { kind: 'unread', reason: 'Retired by objectstack#24640 (maintainer ruling C, pulled into 18.0): no per-view Filter-panel whitelist replaces it. objectui#13118 removed its one reader, the whitelist branch of `ListView`\'s Filter-panel field list, and this relay\'s rung with it. Present only as the spec import that carries its tombstone from the pin bump that takes the retirement.' },
-  responsive: { kind: 'unread', reason: 'Imported from the spec by reference; no objectui renderer reads it.' },
-  performance: { kind: 'unread', reason: 'Imported from the spec by reference; no objectui renderer reads it.' },
   pageName: { kind: 'unread', reason: 'Page-context key with no reader on the list path.' },
   tabs: { kind: 'unread', reason: "Spec view-tab list. ListView has no reader — the object page's tab bar is `ViewTabBar`, driven by `buildViewTabs`, and the `tabs` readers in the tree belong to `plugin-detail`'s DetailView." },
   dataSource: { kind: 'unread', reason: "The spec's per-element binding (declared on the list-view arm by objectui#11070). `ListView` has no read of `schema.dataSource`: the binding is resolved one layer up, by the registered `list-view` renderer `ListViewBlock` through `ElementDataSourceGate`, and `renderListView` bypasses that layer. It renders `ListView` directly with `schema={fullSchema}` and takes the ADAPTER as its separate `dataSource` argument (`ds`), not off the node." },

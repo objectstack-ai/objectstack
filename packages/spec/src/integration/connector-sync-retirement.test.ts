@@ -289,10 +289,13 @@ describe('connector sync retirement — ADR-0087 registration', () => {
     ]) {
       expect(RETIRED_DEFS_BY_MAJOR[18], `${def} must be declared`).toContain(def);
     }
-    // The earlier `transform` retirement's key-grain row stays: its def left
-    // whole, which is the steady state gate (b3) exempts — deleting the row
-    // would erase the record that the key was ever retired.
-    expect(RETIRED_KEYS_BY_MAJOR[17]).toContain('integration/ConnectorFieldMapping:transform');
+    // The earlier `transform` retirement (17.0.0) was a key-grain row under
+    // major 17. That whole table aged out at 18.2 (objectstack#25767, ADR-0087
+    // amended 2026-10-26: a row lives one major past its tombstone, and the
+    // record that the key was ever retired is the previous major's release
+    // tag, not this registry). The row must not come back by itself.
+    expect(RETIRED_KEYS_BY_MAJOR[17]).toBeUndefined();
+    expect(Object.values(RETIRED_KEYS_BY_MAJOR).flat()).not.toContain('integration/ConnectorFieldMapping:transform');
   });
 
   it('wires the D2 conversion into the step-18 chain as a retired, stamped, lossless strip', () => {
