@@ -248,7 +248,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // is named in the sample below so the served schema is held to
         // carrying it, not merely to having one more key than before.
         // [#21795] 49 → 50: `requiresMembershipReach` joined the accepted set.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(50);
+        // [#25767] 50 → 47: the three keys that admitted no instance were ≤16.x
+        // retirements, and a retirement kit lives one protocol major past the
+        // major it retired in — at 18 they left the declared set with their
+        // tombstones. The declared total shrinks by exactly those three; the
+        // live sample below still holds every live key.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(47);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
         for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach']) {
@@ -327,9 +332,17 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * when it gained `requiredPermissions` (who may start the flow, checked at
      * every start door).
      */
+    // [#25767] The ≤16.x tombstones aged out of the declared sets at 18 (a kit
+    // lives one major past the major it retired in), so each count below moved
+    // DOWN by exactly the top-level tombstones that left its shape: `agent`
+    // 26 → 24 (`tools`, `knowledge`), `app` 30 → 22 (`version`, `homePageId`,
+    // `objects`, `apis`, `sharing`, `embed`, `mobileNavigation`, `aria`),
+    // `dashboard` 22 → 20 (`aria`, `performance`), `field` 80 → 79
+    // (`conditionalRequired`), `flow` 24 → 22 (`template`, `active`), `skill`
+    // 17 → 16 (`triggerPhrases`). The live sets are unchanged.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 24,
-        hook: 22, object: 47, page: 26, position: 13, report: 21, skill: 17, tool: 14,
+        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 79, flow: 22,
+        hook: 22, object: 47, page: 26, position: 13, report: 21, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

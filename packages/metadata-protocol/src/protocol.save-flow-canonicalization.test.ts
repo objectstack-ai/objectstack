@@ -450,19 +450,38 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
             expect(storedFlow(rows)!.body.nodes[0].config).toEqual({ functionName: 'helpdesk.triage' });
         });
 
-        it('an older-retired flow shape (`flow.active`) reaches the canonicalizer\'s verdict too — healed for the verdict, stored raw', async () => {
-            // `flow-inert-keys-removed` (retired from the load path after 16.1.0)
-            // tombstones `active`. On a host with no automation service the
-            // fallback used to judge it in the authoring posture and refuse it
-            // 422; the service-backed path replays the entry and heals it. Since
-            // #23487 the fallback replays the same chain, so both hosts agree.
+        it('an older-retired flow shape (`errorHandling.retryDelayMs`) reaches the canonicalizer\'s verdict too — healed for the verdict, stored raw', async () => {
+            // `retry-policy-converged` (retired from the load path after 17.7.0)
+            // renames `errorHandling.retryDelayMs` → `backoffMs`, and the strict
+            // block refuses the old spelling. On a host with no automation
+            // service the fallback used to judge it in the authoring posture and
+            // refuse it 422; the service-backed path replays the entry and heals
+            // it. Since #23487 the fallback replays the same chain, so both
+            // hosts agree. ([#25767] This pin rode `flow.active` and
+            // `flow-inert-keys-removed`, a ≤16.x kit, until the one-major rule
+            // retired that kit; the aged-out spelling is pinned right below.)
             const { protocol, rows, engine } = makeProtocol(new Map());
-            const body = { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), active: false };
+            const body = { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), errorHandling: { retryDelayMs: 1000 } };
             await seedStoredFlow(engine, body);
 
             const result = await save(protocol, body);
 
             expect(result.success).toBe(true);
+            expect(storedFlow(rows)!.body.errorHandling).toEqual({ retryDelayMs: 1000 });
+        });
+
+        it('[#25767] a spelling whose kit aged out (`flow.active`, retired at or below 16.x) is refused on a stored row too — no step of the chain replays it', async () => {
+            // The kit left the registry one major past its retirement, so the
+            // replay heals nothing here: the strict flow shape refuses the key
+            // as unknown, naming the protocol upgrade guide, on either host.
+            const { protocol, rows, engine } = makeProtocol(new Map());
+            const body = { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), active: false };
+            await seedStoredFlow(engine, body);
+
+            await expect(save(protocol, body)).rejects.toThrow(
+                /Unrecognized key\(s\) on this flow: `active`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/,
+            );
+            // The refused re-save wrote nothing: the row is the one seeded.
             expect(storedFlow(rows)!.body.active).toBe(false);
         });
 
