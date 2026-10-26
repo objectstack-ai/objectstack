@@ -5,22 +5,20 @@
  * execution context, moved out of `security-plugin.ts`:
  *
  * - `resolvePermissionSetsForContextUnmemoized`, the resolution itself: the
- *   positions folded into the request (never the guest's), the additive human
- *   baseline or the agent's restricted ceiling, and the post-resolution
- *   fallback for an authenticated caller whose positions resolved nothing.
- * - `dropDeactivatedFoldedSets`, the activation ledger's say over a set that
- *   reached the resolution only through a position of the same name.
- * - `reportNameFoldCollisions`, the once-per-name warning for a grant that
- *   exists only because a position and a permission set share a name
- *   (#13419, #24757).
+ *   permission sets the context names, the additive human baseline or the
+ *   agent's restricted ceiling, and the post-resolution fallback for an
+ *   authenticated caller whose sets resolved nothing.
+ * - `reportUngrantedNamesakeSets`, the once-per-name warning for a permission
+ *   set that shares a held position's name and is NOT granted through it,
+ *   because the position's definition does not name it (#13419, #24757).
  * - `permissionSetMemoKey`, the fields of the context the per-context memo is
  *   keyed on (#10757).
  *
- * A MOVE, not a redesign. Each function below is the body of the
- * `SecurityPlugin` method of the same name as it stood, re-indented one level
- * and otherwise unedited: the same request, in the same order, the same
- * baseline and fallback rules, the same ledger read, the same warning text and
- * structured payload, once per name, and the same memo key.
+ * A MOVE, not a redesign, when it landed. Each function below is the body of
+ * the `SecurityPlugin` method of the same name. #24757 then retired the
+ * position-name fold here: no position name is requested as a permission-set
+ * name any more, the folded-set ledger drop went with it, and the fold's
+ * warning became the report of a namesake set that is not granted.
  *
  * ## How the moved bodies reach the class
  *
@@ -32,11 +30,10 @@
  * so its method calls its function directly, as cut 1's `extractTargetField`
  * does. A method is handed over as a closure that calls it on the plugin at
  * call time, so a test double or spy set on the plugin is still the one the
- * body reaches: the resolution still asks the plugin's catalog loader, its
- * folded-set drop and its fold report, and the memo, the position catalog's
- * description and every other caller still reach these methods through the
- * plugin. Two of the methods were async and their functions still are; each
- * of those methods now returns its function's promise.
+ * body reaches: the resolution still asks the plugin's catalog loader and its
+ * namesake report, and the memo, the position catalog's description and every
+ * other caller still reach these methods through the plugin. The async
+ * methods return their function's promise.
  *
  * Each field was classified on its own declaration, by the rule cut 1 set.
  * `baselinePermissionSets`, `bootstrapPermissionSets` and `nameFoldWarned` are
@@ -68,16 +65,15 @@
  * Two module-level values these bodies read stay there too, and are exported
  * and imported here by value: `isGuestEnvelope`, which the middleware's
  * owner-write step reads as well (cut 6 exported it), and
- * `POSITION_NAME_FOLD_EVENT`, which the fold report's docblock there names in
- * place, with a `{@link}`. Each is read only inside a function body, at call
+ * `POSITION_NAME_FOLD_EVENT`, which the namesake report's docblock there names
+ * in place, with a `{@link}`. Each is read only inside a function body, at call
  * time, never while either module evaluates, so the two-way import is safe
  * under ESM, and the published bundle holds one module. The event name is
  * still not exported from the package: `index.ts` exports only
  * `SecurityPlugin`.
  *
  * The imports only these bodies read moved here: the agent's restricted set
- * from `@objectstack/spec/ai`, and the activation ledger's reader from
- * `@objectstack/core`. `PermissionSet` is imported from
+ * from `@objectstack/spec/ai`. `PermissionSet` is imported from
  * `@objectstack/spec/security`, as `security-plugin.ts` imports it.
  *
  * Nothing re-exports this module, so the published surface does not move.
@@ -87,7 +83,6 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, POSITION_NAME_FOLD_EVENT } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
-import { readDisabledCatalogNames } from '@objectstack/core';
 import { humanBaselineFor } from './external-baseline.js';
 
 /**
@@ -107,8 +102,7 @@ export interface PermissionSetsHost {
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
   dbLoaderForContext: SecurityPlugin['dbLoaderForContext'];
-  dropDeactivatedFoldedSets: SecurityPlugin['dropDeactivatedFoldedSets'];
-  reportNameFoldCollisions: SecurityPlugin['reportNameFoldCollisions'];
+  reportUngrantedNamesakeSets: SecurityPlugin['reportUngrantedNamesakeSets'];
 }
 
 /** The body of `SecurityPlugin#permissionSetMemoKey`; the method's docblock there is its contract. */
@@ -127,22 +121,25 @@ export function permissionSetMemoKey(
 
 /** The body of `SecurityPlugin#resolvePermissionSetsForContextUnmemoized`; the method's docblock there is its contract. */
 export async function resolvePermissionSetsForContextUnmemoized(
-  this: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'dropDeactivatedFoldedSets' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportNameFoldCollisions'>,
+  this: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportUngrantedNamesakeSets'>,
   context: any,
 ): Promise<PermissionSet[]> {
   // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
   // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
   // the organization D4 derived — and they are treated as any requested set
-  // below. Its position is NOT folded into the request: the position-name
-  // fold (#13419's ruling retires it) would hand an anonymous caller any set
-  // that merely shares the anchor's name, the one channel D3 item 3 says
-  // never reaches the guest. The baseline does not reach it either (applied
-  // only to a caller with a user id, below), and `everyone` is never among
-  // its positions.
+  // below. The baseline does not reach it (applied only to a caller with a
+  // user id, below), and `everyone` is never among its positions; its anchor
+  // is not even judged for a namesake set.
   const isGuest = isGuestEnvelope(context);
   const positions = isGuest ? [] : (context?.positions ?? []);
+  // [ADR-0131 D3/D4; #13419 ruling B, retired by #24757] The request is the
+  // permission-set NAMES the context carries and nothing else: the sets each
+  // held position's definition names in `permissionSets` (§6b of
+  // `resolveUserAuthzGrants` pushes them as names) and the directly assigned
+  // ones. A held position's NAME is not a permission-set name — the binding is
+  // written, not inferred — so a set that merely shares it is not requested.
   const explicitPermissionSets = context?.permissions ?? [];
-  const requested = [...positions, ...explicitPermissionSets];
+  const requested = [...explicitPermissionSets];
   // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
   // ceiling set(s) — the additive human baseline (member_default) must NOT
   // apply, or its write bit would silently widen a read-only agent past the
@@ -177,14 +174,11 @@ export async function resolvePermissionSetsForContextUnmemoized(
   // declaring an `isDefault` set REPLACED `member_default` here, so every
   // member of that app lost the platform floor (and with it every built-in
   // Account destination) the moment the app declared a posture of its own.
-  // [#13419] Recorded, not merely pushed: a name granted by the BASELINE is in
-  // force whether or not the position-name fold exists, so it is not evidence
-  // of the fold and must not be warned about below.
-  const baselineApplied: string[] = [];
+  // A baseline name joins the request, so a position sharing it is granted
+  // that set anyway and is not reported below.
   if (!isAgent && context?.userId) {
     for (const name of baseline) {
       if (!requested.includes(name)) requested.push(name);
-      baselineApplied.push(name);
     }
   }
   let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
@@ -194,10 +188,9 @@ export async function resolvePermissionSetsForContextUnmemoized(
     this.dbLoaderForContext(context),
     { logger: this.logger },
   );
-  permissionSets = await this.dropDeactivatedFoldedSets(positions, explicitPermissionSets, baselineApplied, permissionSets);
-  // [#13419 执行要点 3] Report — never alter — a grant that exists ONLY because
-  // this method folded a POSITION name into the permission-set request above.
-  this.reportNameFoldCollisions(positions, explicitPermissionSets, baselineApplied, permissionSets);
+  // [#13419 执行要点 5] The retirement is LOUD: a held position whose namesake
+  // set exists, and is not granted, is reported — never granted, never silent.
+  await this.reportUngrantedNamesakeSets(positions, requested, context);
   // Post-resolution fallback — closes the fail-open hole where a populated
   // `positions` array maps to no permission set yet (no sys_position binding),
   // which would otherwise skip RLS entirely and expose every tenant's data.
@@ -219,49 +212,30 @@ export async function resolvePermissionSetsForContextUnmemoized(
   return permissionSets;
 }
 
-/** The body of `SecurityPlugin#dropDeactivatedFoldedSets`; the method's docblock there is its contract. */
-export async function dropDeactivatedFoldedSets(
-  this: Pick<PermissionSetsHost, 'ql'>,
+/** The body of `SecurityPlugin#reportUngrantedNamesakeSets`; the method's docblock there is its contract. */
+export async function reportUngrantedNamesakeSets(
+  this: Pick<PermissionSetsHost, 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'logger' | 'metadata' | 'nameFoldWarned' | 'permissionEvaluator'>,
   positions: unknown,
-  explicitPermissionSets: unknown,
-  baselineApplied: string[],
-  resolved: PermissionSet[],
-): Promise<PermissionSet[]> {
-  if (!Array.isArray(positions) || positions.length === 0 || resolved.length === 0) return resolved;
-  const judged = new Set<string>(baselineApplied);
-  for (const n of Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []) {
-    if (typeof n === 'string') judged.add(n);
-  }
-  const resolvedNames = new Set(resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'));
-  const folded = positions.filter((n): n is string => typeof n === 'string' && resolvedNames.has(n) && !judged.has(n));
-  if (folded.length === 0) return resolved;
-  const disabled = await readDisabledCatalogNames(this.ql, [], [...new Set(folded)]);
-  if (disabled.permissions.size === 0) return resolved;
-  return resolved.filter((ps) => !disabled.permissions.has((ps as any)?.name));
-}
-
-/** The body of `SecurityPlugin#reportNameFoldCollisions`; the method's docblock there is its contract. */
-export function reportNameFoldCollisions(
-  this: Pick<PermissionSetsHost, 'logger' | 'nameFoldWarned'>,
-  positions: unknown,
-  explicitPermissionSets: unknown,
-  baselineApplied: string[],
-  resolved: PermissionSet[],
-): void {
+  requested: readonly string[],
+  context: any,
+): Promise<void> {
   if (!Array.isArray(positions) || positions.length === 0) return;
-  const governed = new Set<string>(
-    (Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []).filter(
-      (n): n is string => typeof n === 'string',
-    ),
+  const candidates = [...new Set(positions)].filter(
+    (n): n is string => typeof n === 'string' && n !== '' && !requested.includes(n) && !this.nameFoldWarned.has(n),
   );
-  for (const name of baselineApplied) governed.add(name);
-  const resolvedNames = new Set<string>(
-    resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'),
+  if (candidates.length === 0) return;
+  // The same three sources the resolution reads, asked only whether a set of
+  // each name exists. What comes back is never granted.
+  const namesakes = await this.permissionEvaluator.resolvePermissionSets(
+    candidates,
+    this.metadata,
+    this.bootstrapPermissionSets,
+    this.dbLoaderForContext(context),
+    { logger: this.logger },
   );
-  for (const position of positions) {
-    if (typeof position !== 'string' || position.length === 0) continue;
-    if (!resolvedNames.has(position)) continue;
-    if (governed.has(position)) continue;
+  for (const set of namesakes) {
+    const position = (set as any)?.name;
+    if (typeof position !== 'string' || !candidates.includes(position)) continue;
     if (this.nameFoldWarned.has(position)) continue;
     this.nameFoldWarned.add(position);
     // ⛔ No tracker id in the STRING — an operator reading this log has no tracker, no
@@ -269,21 +243,19 @@ export function reportNameFoldCollisions(
     // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
     // who can resolve it is already looking.
     this.logger.warn?.(
-      `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
-        `holders of position '${position}' only because the two share a name — the definition ` +
-        `of position '${position}' does not name it in its permissionSets. This name-based ` +
-        `grant is deprecated and is removed in the next major version: from then on, holders ` +
-        `of position '${position}' do not receive permission set '${position}' unless the ` +
-        `position's definition names it. To keep the grant, declare it (position ` +
-        `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
-        `coincidence, rename one of the two.`,
+      `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' shares its name ` +
+        `with position '${position}', but holders of position '${position}' are NOT granted it. ` +
+        `A position grants only the permission sets its definition names in permissionSets, ` +
+        `and the definition of position '${position}' does not name '${position}'; a shared ` +
+        `name grants nothing. To grant it, declare it (position '${position}': permissionSets: ` +
+        `['${position}']); if the shared name is a coincidence, rename one of the two.`,
       {
         event: POSITION_NAME_FOLD_EVENT,
         position,
         permissionSet: position,
         // The consequence as data, for a consumer that keys on fields rather
         // than prose. The three fields above are unchanged on purpose.
-        removedIn: 'next_major',
+        granted: false,
       },
     );
   }

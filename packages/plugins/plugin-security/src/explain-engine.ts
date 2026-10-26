@@ -1246,6 +1246,31 @@ function objectDefaultRowScopeSource(
 }
 
 /**
+ * [ADR-0131 D3/D4; #24757] For each permission set a held position's
+ * DEFINITION names in `permissionSets`, the first such position in held order —
+ * the one channel a position grants through. `undefined` when the security
+ * catalog cannot be read: the attribution then says it cannot tell a
+ * position's set from a direct grant, rather than guessing either.
+ */
+async function positionBindingsOf(deps: ExplainEngineDeps, positions: readonly string[]): Promise<Map<string, string> | undefined> {
+  try {
+    const catalog = securityCatalogReaderOf(deps.ql);
+    if (!catalog) return undefined;
+    const boundBy = new Map<string, string>();
+    for (const position of positions) {
+      const entry = await catalog.resolve('position', position);
+      const listed = (entry?.definition as { permissionSets?: unknown } | undefined)?.permissionSets;
+      for (const name of Array.isArray(listed) ? listed : []) {
+        if (typeof name === 'string' && name !== '' && !boundBy.has(name)) boundBy.set(name, position);
+      }
+    }
+    return boundBy;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * [#25234 ruling A, rider 3] The permission sets that let their holders create
  * or edit rows of the roster object `object`: whoever can write a roster row
  * can grant the membership key it defines. Read from the security catalog, the
@@ -2453,12 +2478,21 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // and it is attributed by that name (`external-baseline.ts`).
   const baselineNames = humanBaselineFor(positions, deps.baselinePermissionSets);
   const externalBaseline = holdsExternalPosition(positions);
+  // [ADR-0131 D3/D4; #24757] A set reaches a principal through a position only
+  // when that position's DEFINITION names it — never by sharing the position's
+  // name, a channel the resolver no longer has. Both definition-bound and
+  // directly assigned sets arrive as `context.permissions`, so which one a set
+  // is gets read from the held positions' definitions.
+  const boundBy = await positionBindingsOf(deps, positions);
   const viaOf = (name: string): string => {
     if (baselineNames.includes(name)) {
       return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
     }
-    if (positions.includes(name)) return `position:${name}`;
-    if ((context?.permissions ?? []).includes(name)) return 'direct grant';
+    const position = boundBy?.get(name);
+    if (position !== undefined) return `position:${position}`;
+    if ((context?.permissions ?? []).includes(name)) {
+      return boundBy ? 'direct grant' : 'direct grant or position definition (the position definitions could not be read)';
+    }
     return 'resolved';
   };
   // [ADR-0091 D2 / ADR-0049 / commit 42b05af89] Held-but-dropped grant rows (populated by
