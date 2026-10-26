@@ -201,7 +201,7 @@
 
 import { actionCopySource, actionErrorDetail } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
-import { en as enLocale, getLoadedBuiltInLocales } from '@object-ui/i18n';
+import { getLoadedBuiltInLocales } from '@object-ui/i18n';
 import { declaredUserMessage, isPermissionError } from '@object-ui/react';
 import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
@@ -321,15 +321,17 @@ interface FlowFailureCarriers {
  * read from the RESIDENT built-in catalogue — exact tag first, then its base
  * language, the registry's own order (the same read `LoadingScreen` makes).
  * The active language's catalogue is resident whenever the console runs in
- * it; anything else answers `en`, which always is.
+ * it; anything else answers the resident `en` catalogue, which always is.
+ * The literal is the last resort only for a registry that answers neither.
  */
 function permissionDeniedLine(locale: string | undefined): string {
     const resident = getLoadedBuiltInLocales();
-    const catalogue = (
-        locale ? (resident[locale] ?? resident[locale.toLowerCase().split('-')[0]]) : undefined
-    ) as { form?: { noPermissionToSave?: unknown } } | undefined;
-    const line = catalogue?.form?.noPermissionToSave;
-    return typeof line === 'string' && line.trim() ? line : enLocale.form.noPermissionToSave;
+    const lineOf = (catalogue: unknown): string | undefined => {
+        const line = (catalogue as { form?: { noPermissionToSave?: unknown } } | undefined)?.form?.noPermissionToSave;
+        return typeof line === 'string' && line.trim() ? line : undefined;
+    };
+    const active = locale ? (resident[locale] ?? resident[locale.toLowerCase().split('-')[0]]) : undefined;
+    return lineOf(active) ?? lineOf(resident.en) ?? "You don't have permission to save this record.";
 }
 
 /**
