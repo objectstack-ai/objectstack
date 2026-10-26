@@ -16,6 +16,8 @@ import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import type { useServedViewItems } from '../hooks/useServedViewItems.js';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import type { buildViewTabs } from './objectViewTabs.js';
+import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 export function useObjectViewRecordNavigation({
     activeView,
@@ -33,9 +35,9 @@ export function useObjectViewRecordNavigation({
     unlabelledViewText,
     language,
 }: {
-    activeView: any;
-    objectDef: any;
-    objects: any[];
+    activeView: ReturnType<typeof buildViewTabs>[number];
+    objectDef: ConsoleObjectViewProps['objects'][number];
+    objects: ConsoleObjectViewProps['objects'];
     appName: string | undefined;
     viewId: string | undefined;
     searchParams: URLSearchParams;
