@@ -98,19 +98,15 @@ describe.each([
   });
 });
 
-describe('what an absent bit does not change (controls)', () => {
-  it('an explicit `true` bit still grants, on the wildcard and per object', () => {
-    const wild = principalUnder(envelope({ '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }));
-    for (const action of WRITE_ACTIONS) expect(wild.can('account', action), action).toBe(true);
-    expect(wild.checkField('account', 'name', 'create')).toBe(true);
-    expect(wild.checkField('account', 'name', 'write')).toBe(true);
-    cleanup();
-    const own = principalUnder(envelope({ account: { allowRead: true, allowCreate: true } }));
-    expect(own.can('account', 'create')).toBe(true);
-    expect(own.can('account', 'edit')).toBe(false);
+describe("a served row is read through the spec's fold", () => {
+  it('a row granting only Create grants Create and nothing else', () => {
+    const p = principalUnder(envelope({ account: { allowRead: true, allowCreate: true } }));
+    expect(p.can('account', 'create')).toBe(true);
+    expect(p.can('account', 'edit')).toBe(false);
+    expect(p.can('account', 'delete')).toBe(false);
   });
 
-  it("the super-user bypasses follow the spec's fold: Modify All widens edit and delete, never create", () => {
+  it('Modify All widens edit and delete, never create', () => {
     const p = principalUnder(envelope({ '*': { modifyAllRecords: true } }));
     expect(p.can('account', 'read')).toBe(true);
     expect(p.can('account', 'edit')).toBe(true);
@@ -124,6 +120,15 @@ describe('what an absent bit does not change (controls)', () => {
     const p = principalUnder(envelope({ '*': { allowRead: true }, account: { allowRead: true, allowCreate: true } }));
     expect(p.can('Account', 'create')).toBe(true);
     expect(p.can('Account', 'edit')).toBe(false);
+  });
+});
+
+describe('what an absent bit does not change (controls)', () => {
+  it('an explicit `true` bit still grants', () => {
+    const p = principalUnder(envelope({ '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }));
+    for (const action of WRITE_ACTIONS) expect(p.can('account', action), action).toBe(true);
+    expect(p.checkField('account', 'name', 'create')).toBe(true);
+    expect(p.checkField('account', 'name', 'write')).toBe(true);
   });
 
   it('an anonymous session keeps the permissive default', () => {
