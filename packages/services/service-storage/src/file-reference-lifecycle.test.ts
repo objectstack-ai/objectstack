@@ -1357,3 +1357,202 @@ describe('a write references only a file its caller may read', () => {
     });
   });
 });
+
+describe('an anonymous write carries no file (#25694, ruling C at every anonymous write door)', () => {
+  /** The guest principal an `authRequired: false` endpoint's write executes as (ADR-0138 D9). */
+  const GUEST = { principalKind: 'guest', positions: ['guest'], isSystem: false, tenantId: 'org_1' };
+  const guestSession = { organizationId: 'org_1', positions: ['guest'] };
+  /** The public form door's write context (ADR-0138 D2 class 1). */
+  const FORM = { publicFormGrant: { object: 'product' }, permissions: ['guest_portal'], anonymous: true };
+  const SIGNED_IN = { userId: 'u_writer', tenantId: 'org_1' };
+
+  const LABELLED: Record<string, any> = {
+    sys_file: REGISTRY.sys_file,
+    product: {
+      name: 'product',
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text' },
+        image: { type: 'image', label: 'Photo' },
+        gallery: { type: 'image', multiple: true },
+        manual: { type: 'file' },
+      },
+    },
+  };
+
+  function installAdmitting(engine: Engine, storage: any = fakeStorage()) {
+    // A verdict that admits every file: the refusal must not lean on it.
+    const authorizeRead = vi.fn(async () => true);
+    installFileReferenceHooks(engine, () => storage, silentLogger(), authorizeRead);
+    return { storage, authorizeRead };
+  }
+
+  async function write(
+    engine: Engine,
+    phase: 'insert' | 'update',
+    data: Record<string, unknown>,
+    id: string,
+    caller: { session?: any; context?: any },
+  ) {
+    const ctx: any = {
+      object: 'product',
+      event: phase === 'insert' ? 'beforeInsert' : 'beforeUpdate',
+      input: { ...(phase === 'update' ? { id } : {}), data, options: caller.context ? { context: caller.context } : {} },
+      session: caller.session,
+      dispatch: recordDispatch(),
+    };
+    await engine.trigger(ctx.event, ctx);
+    let row: Record<string, unknown> & { id: string };
+    if (phase === 'insert') {
+      row = { ...(ctx.input.data as Record<string, unknown>), id };
+      (engine.tables.product ??= []).push(row);
+    } else {
+      row = (engine.tables.product ?? []).find((r) => String(r.id) === id) as any;
+      Object.assign(row, ctx.input.data);
+    }
+    ctx.event = phase === 'insert' ? 'afterInsert' : 'afterUpdate';
+    ctx.result = row;
+    await engine.trigger(ctx.event, ctx);
+    return row;
+  }
+
+  const asGuest = { session: guestSession, context: GUEST };
+  const refusedBy = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+  const sysFileWrites = (engine: Engine) =>
+    engine.calls.filter((c) => (c.op === 'update' || c.op === 'insert') && c.object === 'sys_file');
+
+  describe('a value in a file field is refused before anything is written', () => {
+    const VALUES: Array<[string, unknown]> = [
+      ['an unclaimed file id', 'file_a'],
+      ['a file id another record owns', 'file_b'],
+      ['an external URL', 'https://example.test/x.png'],
+      ['an inline file value', { url: 'https://example.test/y.png', name: 'y.png' }],
+    ];
+    for (const [what, value] of VALUES) {
+      it(`on insert: ${what}`, async () => {
+        const engine = fakeEngine({
+          registry: LABELLED,
+          files: [file(), file({ id: 'file_b', key: 'user/file_b.png', ref_object: 'product', ref_id: 'p0', ref_field: 'image' })],
+          records: { product: [{ id: 'p0', image: 'file_b' }] },
+        });
+        const { storage, authorizeRead } = installAdmitting(engine);
+
+        const err = await refusedBy(write(engine, 'insert', { name: 'n', image: value }, 'p1', asGuest));
+
+        expect(err?.code).toBe('VALIDATION_FAILED');
+        expect(err?.fields).toEqual([expect.objectContaining({ field: 'image', code: 'invalid_value', label: 'Photo' })]);
+        expect(err?.fields[0].message).toContain('Photo');
+        // Nothing was written: no row, no claim, no copy, and no file was looked up for it.
+        expect((engine.tables.product ?? []).map((r) => r.id)).toEqual(['p0']);
+        expect(sysFileWrites(engine)).toEqual([]);
+        expect(storage.download).not.toHaveBeenCalled();
+        expect(authorizeRead).not.toHaveBeenCalled();
+      });
+    }
+
+    it('on update', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()], records: { product: [{ id: 'p1', image: null }] } });
+      installAdmitting(engine);
+
+      const err = await refusedBy(write(engine, 'update', { image: 'file_a' }, 'p1', asGuest));
+
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'image', code: 'invalid_value' })]);
+      expect(engine.tables.product[0].image).toBeNull();
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+
+    it('every file field carrying a value is named in one envelope, by its label or else its name', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      const err = await refusedBy(
+        write(engine, 'insert', { image: 'file_a', gallery: ['file_a'], manual: 'https://example.test/m.pdf' }, 'p1', asGuest),
+      );
+
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields.map((f: any) => [f.field, f.code, f.label])).toEqual([
+        ['image', 'invalid_value', 'Photo'],
+        ['gallery', 'invalid_value', 'gallery'],
+        ['manual', 'invalid_value', 'manual'],
+      ]);
+    });
+
+    it('the public form door\'s write context is anonymous too', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      const err = await refusedBy(write(engine, 'insert', { image: 'file_a' }, 'p1', { session: {}, context: FORM }));
+
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+  });
+
+  describe('CONTROL — what the rule leaves as it was', () => {
+    it('an anonymous write with every file field empty or absent is written', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      for (const [id, data] of [
+        ['p1', { name: 'absent' }],
+        ['p2', { name: 'null', image: null }],
+        ['p3', { name: 'blank', image: '' }],
+        ['p4', { name: 'empty set', gallery: [] }],
+      ] as const) {
+        await write(engine, 'insert', { ...data }, id, asGuest);
+      }
+
+      expect(engine.tables.product.map((r) => r.id)).toEqual(['p1', 'p2', 'p3', 'p4']);
+      expect(engine.tables.sys_file[0].ref_id ?? null).toBeNull();
+    });
+
+    it('an anonymous update that clears a file field, or leaves it out, is written', async () => {
+      const engine = fakeEngine({ registry: LABELLED, records: { product: [{ id: 'p1', name: 'a', image: null }] } });
+      installAdmitting(engine);
+
+      await write(engine, 'update', { name: 'b' }, 'p1', asGuest);
+      await write(engine, 'update', { image: null }, 'p1', asGuest);
+
+      expect(engine.tables.product[0]).toMatchObject({ name: 'b', image: null });
+    });
+
+    it('a signed-in caller\'s write still claims the file', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file()] });
+      installAdmitting(engine);
+
+      await write(engine, 'insert', { image: 'file_a' }, 'p1', {
+        session: { userId: SIGNED_IN.userId, organizationId: 'org_1' },
+        context: SIGNED_IN,
+      });
+
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+    });
+
+    it('a system write and a context-less write still claim the file', async () => {
+      const engine = fakeEngine({ registry: LABELLED, files: [file(), file({ id: 'file_c', key: 'user/file_c.png' })] });
+      installAdmitting(engine);
+
+      await write(engine, 'insert', { image: 'file_a' }, 'p1', { session: { isSystem: true }, context: { isSystem: true } });
+      await write(engine, 'insert', { image: 'file_c' }, 'p2', {});
+
+      expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id ?? null])).toEqual([
+        ['file_a', 'p1'],
+        ['file_c', 'p2'],
+      ]);
+    });
+
+    it('an object with no file field is not judged', async () => {
+      const engine = fakeEngine({ files: [file()] });
+      installAdmitting(engine);
+      const ctx: any = {
+        object: 'tag', event: 'beforeInsert', input: { data: { label: 'file_a' }, options: { context: GUEST } },
+        session: guestSession, dispatch: recordDispatch(),
+      };
+
+      await engine.trigger('beforeInsert', ctx);
+
+      expect(engine.calls).toEqual([]);
+    });
+  });
+});
