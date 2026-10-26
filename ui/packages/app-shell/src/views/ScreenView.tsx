@@ -37,6 +37,19 @@
  *   no target to resolve and keeps the plain input it always had.
  *
  * A field declaring none of them renders exactly as it did before.
+ *
+ * ## A `type: 'file'` field is the platform upload widget (objectstack#25801)
+ *
+ * The object form's `FileField`, reached through `getLazyFieldWidget('file')`
+ * as `ActionParamDialog`'s file params reach it, uploading through the host's
+ * ambient `UploadProvider`. The upload lands as a `sys_file` no record owns yet,
+ * and the widget's value is that file's bare id. The spec makes `'file'` a value
+ * domain on resume: the engine refuses anything but a file id, so the runtime
+ * posts {@link screenResumeValues}, which reduces a file field's value to its
+ * id (a prefilled `defaultValue` may arrive in the expanded read form). A later
+ * node writes the id into an object's `file` field, and that write claims the
+ * file. While an upload is in flight the value is not an id yet, so the runtime
+ * holds Submit until it settles (`FlowRunner`).
  */
 import { Suspense } from 'react';
 import {
@@ -53,7 +66,7 @@ import {
 } from '@object-ui/components';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { evalFieldPredicate } from '@object-ui/core';
-import { getLazyFieldWidget } from '@object-ui/fields';
+import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 
@@ -64,6 +77,14 @@ import { flowScreenFieldOptionKey } from '@objectstack/spec/automation';
  * one lazy component per type, so this is the same component the dialog gets.
  */
 const LookupFieldWidget = getLazyFieldWidget('lookup');
+
+/** The object form's upload widget (`FileField`), resolved the same way. */
+const FileFieldWidget = getLazyFieldWidget('file');
+
+/** Whether a screen field is the upload widget — the widget hint, read as the renderer reads it. */
+function isFileScreenField(field: ScreenFieldSpec): boolean {
+  return (field.type || '').toLowerCase() === 'file';
+}
 
 /**
  * The screen-pause contract is OWNED by `@objectstack/spec/contracts`
@@ -212,6 +233,32 @@ export function screenFieldBoundViolations(
     if (typeof field.max === 'number' && value > field.max) out.push({ field, bound: 'max', limit: field.max });
   }
   return out;
+}
+
+/**
+ * The values a flat screen resumes with: the collected `values`, with each
+ * `type: 'file'` field's value reduced to its `sys_file` id (objectstack#25801).
+ *
+ * The engine reads a file field as a value domain and admits a bare file id
+ * alone. The upload widget already hands back a bare id, but a prefilled
+ * `defaultValue` can be served in the expanded read form (`{ id, name, url, … }`),
+ * so the reduction is `fileIdOf`, the extractor `ActionParamDialog`'s
+ * `serializeParamValues` applies to file params — one rule for both surfaces.
+ * A value carrying no id is sent as it is, so the engine's refusal names it
+ * rather than the dialog posting `undefined`. Every other value passes through.
+ */
+export function screenResumeValues(screen: ScreenSpec, values: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const field of screenFields(screen)) {
+    if (!isFileScreenField(field)) continue;
+    const value = values[field.name];
+    if (value == null) continue;
+    const id = fileIdOf(value);
+    if (id === undefined || id === value) continue;
+    out ??= { ...values };
+    out[field.name] = id;
+  }
+  return out ?? values;
 }
 
 /** The id of a screen field's help-text element, which its control names in `aria-describedby`. */
@@ -378,6 +425,26 @@ export function ScreenFieldInput({
           onChange={onChange}
           field={{ name: field.name, label: field.label, type: 'lookup', reference: field.reference, placeholder: field.placeholder }}
           dataSource={dataSource}
+          aria-required={ariaRequired}
+          aria-describedby={describedBy}
+        />
+      </Suspense>
+    );
+  }
+
+  // The platform upload widget (objectstack#25801) — the object form's own
+  // `FileField`, through the same lazy registry and behind its own Suspense for
+  // the reason the lookup's is. It uploads through the host's ambient
+  // `UploadProvider` and hands back the minted file's bare id; its in-flight
+  // state reaches the runner through the uploading scope it reports into.
+  if (kind === 'file') {
+    return (
+      <Suspense fallback={<div className="h-9 w-full animate-pulse rounded-md bg-muted" aria-hidden="true" />}>
+        <FileFieldWidget
+          id={id}
+          value={value ?? null}
+          onChange={onChange}
+          field={{ name: field.name, label: field.label, type: 'file', placeholder: field.placeholder }}
           aria-required={ariaRequired}
           aria-describedby={describedBy}
         />
