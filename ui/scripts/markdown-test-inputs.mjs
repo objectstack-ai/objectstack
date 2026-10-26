@@ -722,16 +722,6 @@ export const ADJUDICATED = new Map([
   // opened were recorded, which is also how the three tests that ENUMERATE a
   // markdown population without opening it were caught.
   // ---------------------------------------------------------------------------
-  // objectui#9727 -- the rebuilt polarity census. It walks TWO markdown trees:
-  // the real pending corpus (through the script, for the controls and the
-  // corpus-boundary pin) and its own fixture corpus (for every instrument pin).
-  [
-    'scripts/__tests__/changeset-polarity-census.test.ts',
-    {
-      reads: ['scripts/__tests__/fixtures/changeset-polarity/corpus/**'],
-      walker: 'markdown-tree',
-    },
-  ],
   // Reads no markdown: drives the gate against a fixture repository it writes in a temp directory.
   [
     'scripts/__tests__/check-changeset-claims.test.ts',
@@ -970,13 +960,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-skills-paths.test.ts',
     {
       reads: ['.claude/skills/**', 'skills/objectui/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/ci-cd-pipeline-doc.test.ts',
-    {
-      reads: ['CONTRIBUTING.md', 'content/docs/guide/ci-cd-pipeline.md'],
-      walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
   [

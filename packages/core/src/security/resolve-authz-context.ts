@@ -2197,7 +2197,17 @@ export interface ResolveLocalizationInput {
    * and `rest-server.ts` widens the provider's return to a bare promise.
    */
   settings?: any;
-  tenantId?: string;
+  /**
+   * The caller's ORGANIZATION id — the tenant rung the settings service stores
+   * and reads `localization` under (ADR-0131 D8), and the organization the
+   * direct `sys_setting` fallback may draw on. Never an environment id: an
+   * environment is not a settings scope, so one passed here matches no
+   * organization's row and every non-UTC organization silently resolves `UTC`.
+   * The key used to be spelled `tenantId`, which said none of this and let
+   * exactly that mistake type-check; it was renamed, with no alias, so the old
+   * spelling is now an excess-property error at every object-literal call.
+   */
+  organizationId?: string;
   userId?: string;
 }
 
@@ -2268,7 +2278,7 @@ type LocalizationResult = { timezone: string; locale: string; currency?: string 
  *
  * Keyed on the `ql` instance (one entry-set per environment engine, so two
  * environments/tenants sharing a process never see each other's cached
- * outcome) and then `tenantId|userId` beneath it, matching the audit writer's
+ * outcome) and then `organizationId|userId` beneath it, matching the audit writer's
  * key shape. A `ql` that isn't cacheable (missing/non-object) skips the cache
  * entirely — there is no query to dedupe in that case.
  */
@@ -2558,7 +2568,7 @@ function localizationSettingsState(settings: unknown): LocalizationSettingsState
 }
 
 /**
- * One entry per `ql` → `tenantId|userId`. ONE table, two lifecycles — the two
+ * One entry per `ql` → `organizationId|userId`. ONE table, two lifecycles — the two
  * docblocks above are why they must not collapse into a single rule:
  *
  *   `failure` — #10221/#11877. TTL only; no invalidation ever retires it.
@@ -2617,7 +2627,7 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  *
  * The DIRECT `sys_setting` read failing outright (backend fault — table
  * missing, connection refused, etc.) is memoized for
- * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, tenantId, userId)` so
+ * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, organizationId, userId)` so
  * the failing query — and the driver's log line for it — does not repeat
  * every request (#10221). A settings-service refusal is not a backend fault
  * and never populates that memo (#11877).
@@ -2634,8 +2644,8 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * a `ql` with no seam declines to cache rather than falling back to the TTL.
  */
 export async function resolveLocalizationContext(input: ResolveLocalizationInput): Promise<LocalizationResult> {
-  const { ql, settings, tenantId, userId } = input;
-  const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+  const { ql, settings, organizationId, userId } = input;
+  const cacheKey = `${organizationId ?? ''}|${userId ?? ''}`;
   const cacheable = Boolean(ql) && typeof ql === 'object';
 
   // ⭐ Both invalidation readings are taken BEFORE the resolve, and it is these
@@ -2712,10 +2722,10 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  * the one in force, and a failed derivation degraded where the service
  * propagates it — both make this fallback the stricter reader.
  */
-async function localizationFallbackReach(ql: any, tenantId: string | undefined): Promise<OrganizationReach> {
+async function localizationFallbackReach(ql: any, organizationId: string | undefined): Promise<OrganizationReach> {
   try {
     return await resolveOrganizationReach({
-      callerOrganizationId: tenantId,
+      callerOrganizationId: organizationId,
       wallStands: () => postureEnforcesWall(resolveTenancyPosture()),
       deriveOrganization: () => resolveGuestOrganization(ql, resolveTenancyPosture()),
     });
@@ -2730,13 +2740,15 @@ async function localizationFallbackReach(ql: any, tenantId: string | undefined):
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
 ): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
-  const { ql, settings, tenantId, userId } = input;
+  const { ql, settings, organizationId, userId } = input;
   // ONLY the direct `sys_setting` read below sets this. The settings-service
   // legs deliberately do not — see the cache doc above (#11877).
   let backendFailed = false;
   try {
     if (settings && typeof settings.get === 'function') {
-      const sctx = { tenantId, userId } as any;
+      // The settings service's own scope still spells the organization
+      // `tenantId`; that rename is its own surface, not this input's.
+      const sctx = { tenantId: organizationId, userId } as any;
       // [#10826] ONE grouped namespace read instead of three: `getMany`
       // resolves all three keys over at most two `loadRows` calls (queries
       // 16–18 of 24 on the measured rig collapse to one). Same per-key
@@ -2794,7 +2806,7 @@ async function resolveLocalizationContextUncached(
   // [ADR-0131 D8] The organization this read may draw on — the reach the
   // settings service itself reads with (#25226): never another organization's
   // row, and a row with no organization only where no organization can exist.
-  const reach = await localizationFallbackReach(ql, tenantId);
+  const reach = await localizationFallbackReach(ql, organizationId);
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,

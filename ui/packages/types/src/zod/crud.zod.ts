@@ -56,7 +56,7 @@ export const ActionExecutionModeSchema = z.enum(['sequential', 'parallel']).desc
 const ActionConditionPredicateSchema = z.union([
   z.boolean(),
   z.string(),
-  z.object({ dialect: z.string().optional(), source: z.string() }),
+  z.looseObject({ dialect: z.string().optional(), source: z.string() }),
 ]);
 
 /**
@@ -89,7 +89,7 @@ export const ActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.l
   // `retirementTombstone()` so the refusal carries the remedy it teaches.
   confirm: retirementTombstone('RETIRED (objectui#4314) — author confirmText instead'),
   confirmText: z.string().optional().describe('Confirmation message — shows a confirm dialog before executing'),
-  dialog: z.object({
+  dialog: z.looseObject({
     title: z.string().optional().describe('Dialog title'),
     content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).optional().describe('Dialog content'),
     size: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Dialog size'),
@@ -134,14 +134,14 @@ export const ActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.l
   // reached that call (`2760075ff`'s mirror-wider-than-declared direction).
   onClick: handlerKeyRefusal('onClick', 'runtime-slot', 'Custom click handler'),
   redirect: z.string().optional().describe('Redirect URL after success'),
-  tracking: z.object({
+  tracking: z.looseObject({
     enabled: z.boolean().optional().describe('Enable tracking'),
     event: z.string().optional().describe('Event name'),
     metadata: z.record(z.string(), z.any()).optional().describe('Additional metadata'),
   }).optional().describe('Action logging/tracking'),
   timeoutMs: z.number().optional().describe('Timeout in milliseconds'),
   timeout: retirementTombstone(durationKeyRenamedGuidance('timeout', 'timeoutMs', 'milliseconds')),
-  retry: z.object({
+  retry: z.looseObject({
     maxAttempts: z.number().optional().describe('Maximum retry attempts'),
     delayMs: z.number().optional().describe('Delay between retries (in ms)'),
     delay: retirementTombstone(durationKeyRenamedGuidance('delay', 'delayMs', 'milliseconds')),
@@ -182,10 +182,10 @@ export const DetailSchema = BaseSchema.extend({
     .string({ error: (issue) => (issue.code === 'invalid_type' ? RECORD_ID_IS_A_STRING_GUIDANCE : undefined) })
     .optional()
     .describe('Resource ID to display \u2014 a string, never a number (objectui#9511)'),
-  groups: z.array(z.object({
+  groups: z.array(z.looseObject({
     title: z.string().optional(),
     description: z.string().optional(),
-    fields: z.array(z.object({
+    fields: z.array(z.looseObject({
       name: z.string(),
       label: z.string().optional(),
       type: z.enum(['text', 'image', 'link', 'badge', 'date', 'datetime', 'json', 'html', 'custom']).optional(),
@@ -194,7 +194,7 @@ export const DetailSchema = BaseSchema.extend({
     })),
   })).optional().describe('Field groups for organized display'),
   actions: z.array(ActionSchema).optional().describe('Actions available in detail view'),
-  tabs: z.array(z.object({
+  tabs: z.array(z.looseObject({
     key: z.string(),
     label: z.string(),
     content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]),

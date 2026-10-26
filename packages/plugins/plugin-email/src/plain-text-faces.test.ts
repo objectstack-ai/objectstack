@@ -100,6 +100,7 @@ const LINK_SENDS = [
       role: 'member',
       acceptUrl: LINK,
       appName: 'Acme',
+      expiresAt: '2031-03-04T05:06:07.000Z',
     },
   },
   { template: 'auth.magic_link', data: { magicLinkUrl: LINK, expiresInMinutes: 10, appName: 'Acme' } },
@@ -156,6 +157,7 @@ describe('control: a value carrying markup characters, per face', () => {
       template: 'auth.invitation',
       to: 'alice@acme.test',
       locale: 'en-US',
+      timezone: 'UTC',
       data: {
         inviter: { name: "O'Brien", email: 'ob@acme.test' },
         organization: { name: 'R&D <Lab>' },
@@ -163,15 +165,22 @@ describe('control: a value carrying markup characters, per face', () => {
         role: 'Member',
         acceptUrl: LINK,
         appName: 'Acme',
+        // #25802 — and the expiry, which the text body states after the link.
+        expiresAt: '2031-03-04T05:06:07.000Z',
       },
     });
 
     const sent = transport.sent[0];
     expect(sent.html).toContain('<strong>R&amp;D &lt;Lab&gt;</strong>');
     expect(sent.html).toContain('<strong>O&#39;Brien</strong>');
-    expect(sent.text).toBe(
+    const [body, expiry] = (sent.text ?? '').split('\n\nThis invitation expires on ');
+    expect(body).toBe(
       "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme as Member.\n\n" + `Accept: ${LINK}`,
     );
+    // The long date is ICU locale data, so it is computed with this Node's own `Intl`.
+    const instant = new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeStyle: 'long', timeZone: 'UTC' })
+      .format(new Date('2031-03-04T05:06:07.000Z'));
+    expect(expiry).toBe(`${instant}.`);
     expect(sent.subject).toBe("O'Brien invited you to R&D <Lab>");
     expect(rows[0].subject).toBe("O'Brien invited you to R&D <Lab>");
   });

@@ -50,12 +50,10 @@
     "census:body-dialect-producers": "node scripts/body-dialect-producer-scan.mjs",
     "census:tsconfig-test-parity": "node scripts/tsconfig-test-parity-census.mjs",
     "census:cross-file-line-citations": "node scripts/cross-file-line-citation-census.mjs",
-    "census:page-key-reads": "node scripts/page-key-read-census.mjs",
     "census:dollar-dialect-aliases": "node scripts/dollar-dialect-alias-census.mjs",
     "census:changeset-polarity": "node scripts/changeset-polarity-census.mjs",
     "check:new-line-citations": "node scripts/check-new-cross-file-line-citations.mjs",
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
-    "check:action-ref-convention": "node scripts/check-action-ref-convention.mjs",
     "check:published-dist": "node scripts/check-published-dist-tooling.mjs",
     "check:published-tsconfig-exclude": "node scripts/check-published-tsconfig-tooling-exclude.mjs",
     "check:i18n-keys": "node scripts/check-i18n-call-site-keys.mjs",
@@ -149,7 +147,6 @@
     "globals": "^17.11.0",
     "happy-dom": "^20.11.2",
     "jsdom": "^29.1.1",
-    "msw": "^2.15.0",
     "playwright": "^1.62.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -171,10 +168,5 @@
     "vitest-axe": "^0.1.0",
     "wait-on": "^9.5.1",
     "yaml": "^2.9.0"
-  },
-  "msw": {
-    "workerDirectory": [
-      "public"
-    ]
   }
 }

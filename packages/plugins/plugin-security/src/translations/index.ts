@@ -18,6 +18,7 @@ import { esESObjects } from './es-ES.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { zhCNPermissionSets, jaJPPermissionSets, esESPermissionSets } from './permission-sets.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -48,9 +49,24 @@ import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
  */
 const enSource: TranslationData = { objects: enObjects };
 
+/**
+ * The built-in permission sets' description translations (`permissions`) are
+ * hand-authored beside the generated objects (`permission-sets.ts` says why).
+ * They sit outside `withSourceFallback`'s inputs: `enSource` carries no
+ * `permissions` group, so no leaf of theirs is judged stale.
+ */
 export const SecurityTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+  'zh-CN': {
+    ...withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
+    permissions: zhCNPermissionSets,
+  },
+  'ja-JP': {
+    ...withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
+    permissions: jaJPPermissionSets,
+  },
+  'es-ES': {
+    ...withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+    permissions: esESPermissionSets,
+  },
 };
