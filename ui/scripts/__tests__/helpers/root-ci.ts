@@ -12,12 +12,13 @@
  * the root `.github/workflows/` directory through `rootWorkflowFiles()`. It
  * never reads a copy under `ui/.github/`: nothing runs one.
  *
- * What the port did not carry (the coverage lane, the docs job, the shard
- * aggregate, the type-check-scope selector, the timings upload) has no job
- * here, and the pins on those retired with a disposition beside them rather
- * than being pointed at a job that does something else. The affected-test
- * selector was wired into `test-ui` later (objectstack#25868), and its pins
- * read that job.
+ * What the port did not carry (the docs job, the shard aggregate, the
+ * type-check-scope selector, the timings upload) has no job here, and the pins
+ * on those retired with a disposition beside them rather than being pointed at
+ * a job that does something else. The affected-test selector was wired into
+ * `test-ui` later (objectstack#25868), and its pins read that job. The
+ * coverage lane came back as a nightly workflow of its own
+ * (objectstack#25924), named by `UI_COVERAGE` below.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,6 +31,17 @@ export const UI_JOBS = {
   test: 'test-ui',
   lint: 'lint-ui',
   buildE2e: 'build-e2e-ui',
+} as const;
+
+/**
+ * objectui's coverage lane, ported to the root as a nightly workflow
+ * (objectstack#25924): the file, the sharded job and the merge job that
+ * enforces the thresholds.
+ */
+export const UI_COVERAGE = {
+  file: 'ui-coverage-nightly.yml',
+  shards: 'ui-coverage',
+  report: 'ui-coverage-report',
 } as const;
 
 /** The directory GitHub runs: `.github/workflows/` at the workspace root. */

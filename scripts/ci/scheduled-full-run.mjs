@@ -289,6 +289,8 @@ const titlePrefix = (cadence) => `${cadence} full run: red on main`;
 export const CARD_CADENCES = Object.freeze({
   CI: '4-hourly',
   'Lint & Type Check': '4-hourly',
+  // ui-coverage-nightly.yml (#25924): objectui's coverage lane, nightly.
+  'UI Coverage': 'nightly',
 });
 
 // THE CADENCES A CADENCE REPLACED, newest first. `CI` and `Lint & Type Check`
@@ -1072,7 +1074,7 @@ async function releaseGate(argv) {
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 32,
-  'scheduled-full-run card identity and de-dup': 42,
+  'scheduled-full-run card identity and de-dup': 46,
   'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
@@ -1525,6 +1527,40 @@ async function selfTest() {
       }
     });
   }
+  // UI Coverage is the one NIGHTLY workflow the card watches (#25924): its card
+  // says nightly, never 4-hourly, and the workflow runs exactly one daily cron.
+  const uiCoverage = cardIdentity('UI Coverage');
+  await check(() => {
+    if (uiCoverage.cadence !== 'nightly' || uiCoverage.title !== 'nightly full run: red on main (UI Coverage)' || uiCoverage.marker !== 'os-nightly-full-run-ui-coverage') {
+      throw new Error(`cadence: the UI Coverage identity is (${uiCoverage.cadence}, '${uiCoverage.title}', '${uiCoverage.marker}'), not the nightly one`);
+    }
+  });
+  await check(() => {
+    for (const b of bodiesOf(uiCoverage)) {
+      if (!/every night/.test(b)) throw new Error(`cadence: a nightly card body does not say nightly:\n${b}`);
+      if (/every 4 hours|4 hours ago|every hour\b|an hour ago/.test(b)) throw new Error(`cadence: a nightly card body names another cadence:\n${b}`);
+    }
+  });
+  await check(() => {
+    const file = '.github/workflows/ui-coverage-nightly.yml';
+    const text = readFileSync(file, 'utf8');
+    const name = /^name:\s*(.+?)\s*$/m.exec(text)?.[1];
+    if (name !== 'UI Coverage') throw new Error(`cadence: ${file} is named '${name}', not the 'UI Coverage' CARD_CADENCES holds`);
+    const crons = [...text.matchAll(/^\s*-\s*cron:\s*'([^']+)'/gm)].map((m) => m[1]);
+    if (crons.length !== 1 || !/^\d{1,2} \d{1,2} \* \* \*$/.test(crons[0])) {
+      throw new Error(`cadence: ${file} declares ${JSON.stringify(crons)}, but CARD_CADENCES says nightly (one daily cron)`);
+    }
+  });
+  await check(() => {
+    // Every name the watcher lists has a cadence, and every cadence is watched.
+    const text = readFileSync('.github/workflows/scheduled-full-run-card.yml', 'utf8');
+    const line = /^\s*workflows:\s*\[(.*)\]\s*$/m.exec(text)?.[1] ?? '';
+    const watched = [...line.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+    const held = Object.keys(CARD_CADENCES).sort();
+    if (JSON.stringify(watched) !== JSON.stringify(held)) {
+      throw new Error(`cadence: scheduled-full-run-card.yml watches ${JSON.stringify(watched)}, CARD_CADENCES holds ${JSON.stringify(held)}`);
+    }
+  });
   await check(() => {
     let message = '';
     try {
