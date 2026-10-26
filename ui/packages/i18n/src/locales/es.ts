@@ -4431,6 +4431,8 @@ const es = {
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
       detailChangedKeys: 'También cambió:',
+      detailNewKeys: 'Incluye:',
+      generatedGroup: 'Generado por la plataforma ({{n}})',
       confirmNote: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
       confirmNote_one: 'Publicar libera atómicamente {{count}} borrador pendiente de este paquete.',
       confirmNote_many: 'Publicar libera atómicamente los {{count}} de borradores pendientes de este paquete.',
