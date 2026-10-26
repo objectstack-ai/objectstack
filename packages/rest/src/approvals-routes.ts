@@ -65,22 +65,22 @@ import {
 } from './rest-server.js';
 
 /**
+ * [#26314] The closed query-parameter set of
+ * `GET {basePath}/approvals/records/:object/:recordId/lock`: EMPTY.
+ * **Measured**: the handler reads the object and the record id from the path
+ * and nothing from the query string, and neither do the helpers it calls
+ * (the caller's context comes from the session and headers). A name sent there is
+ * refused with the located 400 (AGENTS.md route rule 5), never dropped.
+ */
+export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
+
+/**
  * The `RestServer` members {@link registerApprovalsEndpoints} reads — every one
  * of them, and no other. Each is typed AS the class member (an indexed access
  * on the class), so a change to a member's signature on the class is a change
  * here too, and naming a member the class does not have is a compile error.
  * See the module header for why `approvalsServiceProvider` is a getter.
  */
-/**
- * [#26314] The closed query-parameter set of
- * `GET {basePath}/approvals/records/:object/:recordId/lock`: EMPTY.
- * **Measured**: the handler reads the object and the record id from the path
- * and nothing from the query string, and neither do the helpers it calls
- * (`resolveExecCtx` reads the session and headers). A name sent there is
- * refused with the located 400 (AGENTS.md route rule 5), never dropped.
- */
-export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
-
 export interface ApprovalsRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: RestServer['approvalsServiceProvider'];

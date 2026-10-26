@@ -489,7 +489,13 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('61 invocation sites, 144 mentions — the thread\'s two control numbers hold', () => {
+    it('62 invocation sites, 145 mentions — the thread\'s two control numbers hold', () => {
+        // [#26314] 61 → 62 sites / 144 → 145 mentions: the record-anchored
+        // approval lock read (`GET /approvals/records/:object/:recordId/lock`,
+        // `approvals-routes.ts`) resolves the caller as every approvals route
+        // does, a BARE site (45 → 46) behind the shared floor on the next line.
+        // The caught half (16) and the forwarder count are untouched.
+        //
         // [#25104] 62 → 61 sites / 145 → 144 mentions: the OpenAPI document's
         // `/docs` viewer page retired with its route, taking one BARE site
         // (46 → 45) from `discovery-routes.ts` with it and no prose mention. The
@@ -840,8 +846,8 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // counted as the history module's second registrar in BOTH maps and the new
         // module in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
         expect(SITE_FILES).toHaveLength(18);
-        expect(SITES.length).toBe(61);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(144);
+        expect(SITES.length).toBe(62);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(145);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(4);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
@@ -850,7 +856,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
             .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
     });
 
-    it('the split is 16 locally caught / 45 bare — NOT 12 / 45, which does not add to 61', () => {
+    it('the split is 16 locally caught / 46 bare — NOT 12 / 46, which does not add to 62', () => {
         // 12 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 12 and the arithmetic
         // silently loses four sites. [#20237] 15 → 13 and 23 → 21: the list
@@ -864,27 +870,27 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         const sameLine = CAUGHT.filter((s) => SOURCES.get(s.file)!.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(12);
         expect(CAUGHT.length).toBe(16);
-        expect(BARE.length).toBe(45);
+        expect(BARE.length).toBe(46);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 16 caught ones is', () => {
+    it('⭐ every one of the 46 bare sites is guarded on the VERY NEXT LINE, and none of the 16 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
         // next statement; the locally-caught ones carry a `.catch` because
         // they are NOT behind that floor and each must decide for itself.
-        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(45);
+        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(46);
         expect(CAUGHT.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(0);
     });
 });
 
 // ---------------------------------------------------------------------------
-// 3. The 45 bare sites, driven
+// 3. The 46 bare sites, driven
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
-    it('all 45 are reached by the mounted route table, so none is classified by inference', async () => {
+describe('[#13160] §3 the 46 bare sites — driven, every one of them', () => {
+    it('all 46 are reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
         const unreached = BARE.map((s) => s.key).filter((k) => !reached.has(k));
         // ⛔ A bare site that stopped being reachable must show up as a
@@ -892,7 +898,7 @@ describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
         expect(unreached).toEqual([]);
     }, 120_000);
 
-    it('an absent context is the ANONYMOUS SUBJECT at all 45: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
+    it('an absent context is the ANONYMOUS SUBJECT at all 46: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
         const bareLines = new Set(BARE.map((s) => s.key));
