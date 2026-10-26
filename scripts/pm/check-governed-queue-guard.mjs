@@ -1197,19 +1197,85 @@ export function unreadableApproval(reason) {
   return { state: 'unreadable', approvers: [], changesRequestedBy: [], reviewsRead: 0, reason: String(reason ?? 'unknown error') };
 }
 
+// ── the ENQUEUE leg (maintainer ruling 2026-10-26 — see the header) ────────
+
+/** The timeline events a queue entry starts and ends with. Measured on this repository, 2026-10-26. */
+export const ENQUEUE_EVENT = 'added_to_merge_queue';
+export const DEQUEUE_EVENT = 'removed_from_merge_queue';
+
+/**
+ * WHO put this pull request into the queue, read off its timeline. Pure; the
+ * array is expected in GitHub's chronological order, so last wins.
+ *
+ * The answer is the actor of the NEWEST `added_to_merge_queue` event, and only
+ * while no `removed_from_merge_queue` follows it. A newest queue event that is
+ * a REMOVAL means the timeline has not recorded the entry this build judges
+ * yet, and the add before it belongs to an entry that already left: reading
+ * its actor would carry an earlier enqueue (the maintainer's, say) onto a
+ * re-entry somebody else made. So that shape, no add at all, and an add whose
+ * actor names no login are all UNDETERMINED — never a reading.
+ */
+export function enqueuerFromTimeline(events) {
+  if (!Array.isArray(events)) return undeterminedEnqueue('the timeline was not a list of events');
+  let newest = null;
+  for (const event of events) {
+    const kind = String(event?.event ?? '');
+    if (kind === ENQUEUE_EVENT || kind === DEQUEUE_EVENT) newest = event;
+  }
+  if (newest === null) return undeterminedEnqueue(`the timeline carries no \`${ENQUEUE_EVENT}\` event`);
+  if (newest.event === DEQUEUE_EVENT) {
+    return undeterminedEnqueue(`the newest queue event on the timeline is \`${DEQUEUE_EVENT}\`, so the entry this build judges is not recorded there yet`);
+  }
+  const login = typeof newest.actor?.login === 'string' && newest.actor.login !== '' ? newest.actor.login : null;
+  if (login === null) return undeterminedEnqueue(`the newest \`${ENQUEUE_EVENT}\` event names no actor`);
+  return { state: 'read', login, at: typeof newest.created_at === 'string' ? newest.created_at : null };
+}
+
+/**
+ * The enqueue leg's verdict: was this queue entry made by an account in
+ * `GOVERNED_APPROVERS`? Pure. `authorized` satisfies a governed entry exactly
+ * as an authorized APPROVED review does; `unauthorized` and `undetermined`
+ * satisfy nothing and leave the approval leg to decide alone — an enqueuer
+ * that could not be read is never a pass, and never a refusal of its own.
+ */
+export function authorizedEnqueueVerdict(reading) {
+  if (reading?.state !== 'read') return undeterminedEnqueue(reading?.reason ?? 'no enqueuer reading was recorded');
+  return {
+    state: GOVERNED_APPROVERS.includes(reading.login) ? 'authorized' : 'unauthorized',
+    login: reading.login,
+    at: reading.at ?? null,
+  };
+}
+
+/** The enqueue reading a throw, an unusable timeline or a missing reader produces. Never a pass. */
+export function undeterminedEnqueue(reason) {
+  return { state: 'undetermined', login: null, at: null, reason: String(reason ?? 'unknown error') };
+}
+
 /**
  * Is this governed pull request SATISFIED?
  *
- * ⭐ The approval limb is first and is unchanged, which is what makes Tier S
- * MONOTONE: an entry the 2026-09-04 predicate already cleared is cleared here
- * by the same reading, at the same cost, in the same words. The tier limb can
- * only ADD a pass, and only on an entry whose `record` key exists — merge_group,
- * Tier S. ⛔ Never reorder these two: a record consulted ahead of an approval
- * would let a seat's own review displace a maintainer's.
+ * ⭐ The approval limb is first and is unchanged, which is what makes the two
+ * limbs after it MONOTONE: an entry the 2026-09-04 predicate already cleared is
+ * cleared here by the same reading, at the same cost, in the same words. The
+ * enqueue limb (2026-10-26) and the tier limb can only ADD a pass — the enqueue
+ * limb only on an entry whose `enqueue` key exists (merge_group), the tier limb
+ * only on one whose `record` key exists (merge_group, Tier S). ⛔ Never reorder
+ * them: a record consulted ahead of an approval or of the maintainer's own
+ * enqueue would let a seat's own review displace a maintainer's act.
  */
 export function entrySatisfied(entry) {
   if (entry?.approval?.state === 'approved') return true;
+  if (entry?.enqueue?.state === 'authorized') return true;
   return entry?.tier === TIER_S && entry?.record?.state === 'stands';
+}
+
+/** Which leg satisfied a satisfied entry, for the log and the size lift: `review`, `enqueue`, `record`, or null. Pure. */
+export function satisfiedBy(entry) {
+  if (entry?.approval?.state === 'approved') return 'review';
+  if (entry?.enqueue?.state === 'authorized') return 'enqueue';
+  if (entry?.tier === TIER_S && entry?.record?.state === 'stands') return 'record';
+  return null;
 }
 
 /**
@@ -1227,11 +1293,17 @@ export function entryUnreadable(entry) {
  * The verdict, as data. Pure — every branch of the decision is here, and the
  * renderer and the exit code both read it rather than re-deriving it.
  */
-export function guardVerdict({ event, repo, governed = [], unattributed = [], approvals = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
+export function guardVerdict({ event, repo, governed = [], unattributed = [], approvals = new Map(), enqueues = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
   assertGovernedRepo(repo, 'guardVerdict');
   const entries = governed.map((entry) => ({
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
+    // ⭐ The enqueue key EXISTS only on the queue leg (2026-10-26): the
+    // `pull_request` run has no queue entry to read, and its rendering stays
+    // free of the line by construction, the way the record key's does.
+    ...(event === EVENT_MERGE_GROUP
+      ? { enqueue: enqueues.get(entry.pr) ?? undeterminedEnqueue('no enqueuer reading was recorded for this pull request') }
+      : {}),
     // ⭐ The record key EXISTS only where the tier leg ran — merge_group, on a
     // Tier S entry. That is not a nicety: the `pull_request` leg's record
     // block is absent BY CONSTRUCTION, since the renderer can only print what
@@ -1649,12 +1721,13 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
+export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline = null, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows, assertGovernedRepo(repo, 'runGuard'));
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, repo, governed, unattributed, apiCalls: 0, lifted });
   }
   const approvals = new Map();
+  const enqueues = new Map();
   const records = new Map();
   const heads = new Map();
   const pulls = new Map();
@@ -1697,6 +1770,26 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     } catch (error) {
       approvals.set(entry.pr, unreadableApproval(String(error?.message ?? error).split('\n')[0]));
     }
+    // ── the ENQUEUE leg (2026-10-26): who put this entry in the queue ──────
+    //
+    // ⭐ SECOND, and only for what the approval did not satisfy — an unreadable
+    // review list included, since an authorized enqueue satisfies the entry on
+    // its own. So it is MONOTONE (it never reads, let alone decides, for an
+    // entry an authorized approval already cleared) and FREE on every such
+    // entry. A missing reader or a throw is UNDETERMINED: never a pass, and
+    // never a refusal of its own — the approval leg's verdict stands as it was.
+    if (event === EVENT_MERGE_GROUP && approvals.get(entry.pr)?.state !== 'approved') {
+      if (typeof fetchTimeline !== 'function') {
+        enqueues.set(entry.pr, undeterminedEnqueue('no timeline reader was supplied to the queue leg'));
+      } else {
+        try {
+          apiCalls += 1;
+          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(entry.pr))));
+        } catch (error) {
+          enqueues.set(entry.pr, undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`));
+        }
+      }
+    }
   }
   // ── Tier S: the record leg (#18020, generalised to the tier by #19133) ──
   //
@@ -1710,6 +1803,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     for (const entry of governed) {
       if (entry.tier !== TIER_S) continue;
       if (approvals.get(entry.pr)?.state === 'approved') continue;
+      if (enqueues.get(entry.pr)?.state === 'authorized') continue;
       if (recognisers === null) {
         try {
           recognisers = await loadRecognisers();
@@ -1769,7 +1863,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
     }
   }
-  return guardVerdict({ event, repo, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
+  return guardVerdict({ event, repo, governed, unattributed, approvals, enqueues, records, apiCalls, headNotes, lifted });
 }
 
 // ── every queued pull request: the enumeration the SIZE leg reads ──────────
@@ -1894,7 +1988,7 @@ export function sizeGuardVerdict({ event, repo, pulls = [], readings = new Map()
  * count is printed and pinned. A throw is caught into an `unreadable` reading,
  * never a pass and never an escaping rejection.
  */
-export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, approvals = new Map() }) {
+export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, fetchTimeline = null, approvals = new Map() }) {
   assertGovernedRepo(repo, 'runSizeGuard');
   if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event, repo });
   const pulls = queuedPullsInGroup(rows, namedPull);
@@ -1924,6 +2018,24 @@ export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchP
               approval = unreadableApproval(String(error?.message ?? error).split('\n')[0]);
             }
           }
+        }
+        // ⭐ THE ENQUEUE LIFT (2026-10-26): no authorized approval, so who put
+        // this entry in the queue is asked — the reading the governed leg
+        // attached when it read this pull request, else one timeline read of
+        // this leg's own. Undetermined lifts nothing; the sibling decides.
+        if (approval.state !== 'approved' && approval.enqueue === undefined) {
+          let enqueue;
+          if (typeof fetchTimeline !== 'function') {
+            enqueue = undeterminedEnqueue('no timeline reader was supplied to the size leg');
+          } else {
+            try {
+              apiCalls += 1;
+              enqueue = authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(pr)));
+            } catch (error) {
+              enqueue = undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`);
+            }
+          }
+          approval = { ...approval, enqueue };
         }
         reading = sizeReading(pr, pull?.size ?? null, repo, approval);
       }
@@ -1988,11 +2100,18 @@ export function renderSizeVerdict(verdict) {
   const numbers = (e) => `${e.verdict.size.changedLines} changed line(s) (+${e.verdict.size.additions} / -${e.verdict.size.deletions})`;
   // Why an oversized entry was NOT lifted, off the approval verdict this leg
   // read (or reused): the four non-lift cases of the 2026-09-27 ruling, named.
+  // ...and the enqueue reading beside it (2026-10-26), named the same way.
+  const enqueueClause = (enqueue) =>
+    enqueue?.state === 'unauthorized'
+      ? `; enqueued by ${enqueue.login}, outside GOVERNED_APPROVERS — that enqueue is not the maintainer's hand`
+      : enqueue?.state === 'undetermined'
+        ? `; enqueuer UNDETERMINED (${enqueue.reason}) — never a lift`
+        : '';
   const noLift = (approval) => {
     if (!approval) return 'no review reading was recorded for this pull request';
-    if (approval.state === 'unreadable') return `the review list could NOT be read (${approval.reason ?? 'unknown error'}) — fail closed, no lift`;
+    if (approval.state === 'unreadable') return `the review list could NOT be read (${approval.reason ?? 'unknown error'}) — fail closed, no lift${enqueueClause(approval.enqueue)}`;
     const unauthorized = (approval.unauthorizedApprovers ?? []).length > 0 ? `; APPROVED only by account(s) outside GOVERNED_APPROVERS: ${approval.unauthorizedApprovers.join(', ')} — never counts` : '';
-    return `no authorized APPROVED review on record (${approval.reviewsRead ?? 0} review(s) read; authorized: ${GOVERNED_APPROVERS.join(', ')}; dismissed and superseded approvals never count)${unauthorized}`;
+    return `no authorized APPROVED review on record (${approval.reviewsRead ?? 0} review(s) read; authorized: ${GOVERNED_APPROVERS.join(', ')}; dismissed and superseded approvals never count)${unauthorized}${enqueueClause(approval.enqueue)}`;
   };
   for (const entry of verdict.entries) {
     if (entry.state === 'oversized') {
@@ -2000,7 +2119,16 @@ export function renderSizeVerdict(verdict) {
         '',
         `  #${entry.pr} — ⛔ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}`,
         '        (additions + deletions, generated files INCLUDED) — and nothing lifts it: ' + noLift(entry.approval) + '.',
-        '        This pull request lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE.',
+        '        This pull request lands by an authorized APPROVED review and then the OWNING seat, by the maintainer\'s',
+        '        own enqueue from an account in GOVERNED_APPROVERS, or by a HUMAN MERGE.',
+        `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
+      );
+    } else if (entry.state === 'lifted' && entry.verdict.size.lifted?.enqueuedBy) {
+      lines.push(
+        '',
+        `  #${entry.pr} — ✅ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}, LIFTED by the maintainer's own`,
+        `        enqueue from an authorized account: ${renderLiftApprovals(entry.verdict.size.lifted)} — ${entry.verdict.size.lifted.ruling},`,
+        '        verbatim 「大部分我还是希望入队，但是我想省掉 Approve」 — the enqueue IS the human review; no APPROVED review was owed.',
         `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
       );
     } else if (entry.state === 'lifted') {
@@ -2022,7 +2150,8 @@ export function renderSizeVerdict(verdict) {
     lines.push(
       '',
       `  ✅  CLEAR — no queued pull request is over the human-merge line (${HUMAN_MERGE_LINE_THRESHOLD} changed lines,`,
-      '      additions + deletions, generated files INCLUDED) without an authorized APPROVED review lifting it. The number',
+      '      additions + deletions, generated files INCLUDED) without an authorized APPROVED review, or an enqueue from an',
+      '      authorized account, lifting it. The number',
       '      is read off the pull object, per queued pull request; the threshold, the comparison and the lift are',
       '      scripts/pm/check-governed-merges.mjs\'s, imported.',
     );
@@ -2050,11 +2179,13 @@ export function renderSizeVerdict(verdict) {
       '      At least one queued pull request above is over the human-merge line — the SIZE limb, whatever',
       '      paths it touches (additions + deletions, generated files INCLUDED: no regen family, docs build or',
       '      revert is carved out, because the case that prompted the ruling, PR #18971, was exactly that) —',
-      '      and no authorized APPROVED review lifts it. The maintainer\'s rulings (verbatim, untranslated):',
+      '      and neither an authorized APPROVED review nor an enqueue from an authorized account lifts it. The',
+      '      maintainer\'s rulings (verbatim, untranslated):',
       '',
       '        2026-09-18 「修改代码量超过某个行数（比如5000）就应该人工审核」',
       '        2026-09-27 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 (objectstack#20153)',
       '        2026-10-09 「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」',
+      '        2026-10-26 「大部分我还是希望入队，但是我想省掉 Approve」',
       '',
       '      landed as `HUMAN_MERGE_LINE_THRESHOLD` and the lift in scripts/pm/check-governed-merges.mjs, which',
       '      this leg IMPORTS — the number, the comparison, what counts and what lifts are that file\'s, never',
@@ -2071,7 +2202,7 @@ export function renderSizeVerdict(verdict) {
     '           it back to DRAFT, which disarms it so it does not re-enter once removed; then confirm from the',
     '           remote that it is in neither the queue nor `origin/main` — the pull-back of AGENTS.md Prime',
     '           Directive #14. Out of the queue and in draft is the SAFE state.',
-    '        2. Then ONE of the two landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
+    '        2. Then ONE of the landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
     '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
     `           (${GOVERNED_APPROVERS.join(', ')}); and then EITHER`,
     '           (a) an APPROVED review by one of those accounts, on ANY commit (2026-09-27, objectstack#20153) —',
@@ -2082,7 +2213,11 @@ export function renderSizeVerdict(verdict) {
     '               only while ruleset `main` configures a bypass actor — ⛔ NOT a second Merge button: `main`',
     '               mandates the queue and requires this check, so with none configured every re-enqueue comes',
     '               back here (#19344). The audit log records the bypass and `check-governed-merges` lists such',
-    '               a landing on size, as it lists a lifted one.',
+    '               a landing on size, as it lists a lifted one;',
+    '           (c) OR the maintainer\'s own "Merge when ready" from an account in GOVERNED_APPROVERS (2026-10-26):',
+    '               that enqueue IS the human review, and this check passes on it with no APPROVED review. ⛔ No seat',
+    '               enqueues or arms auto-merge under such an account in its place; a seat\'s own re-enqueue after an',
+    '               ejection is a new entry and needs (a) or another such click.',
     '',
     '      When the governed-surface leg above ALSO refused, both limbs fired on this group: the exit code is',
     '      the governed leg\'s (precedence governed > size, pinned) and this limb stands regardless.',
@@ -2284,7 +2419,7 @@ export function installStepAudit(source) {
   };
 }
 
-// ── the GitHub reads (PR head + reviews — the only API surface) ─────────────
+// ── the GitHub reads (PR head, reviews, threads, timeline — the only API surface) ─
 
 function apiHeaders(token) {
   return {
@@ -2397,6 +2532,37 @@ export function makeCommentReader({ apiUrl, slug, token, fetchImpl = fetch, perP
   };
 }
 
+/**
+ * The pull request's TIMELINE, paginated — where the enqueue leg reads who put
+ * the entry in the queue (2026-10-26).
+ *
+ * Scope, measured the way the comment reader's was: `GET
+ * /repos/{o}/{r}/issues/{n}/timeline` answers `X-Accepted-GitHub-Permissions:
+ * issues=read; pull_requests=read` — alternative sets — so the workflow's
+ * existing `pull-requests: read` covers it and this leg widens NO scope.
+ * Measured 2026-10-26 against the live API on this repository.
+ *
+ * ⚠️ Truncation is fatal here in a way it is not for a review list: the
+ * timeline is oldest-first, so the event this leg reads is on the LAST page. A
+ * list cut at `maxPages` would answer an older enqueue as the newest, so it
+ * throws instead — the caller turns that into UNDETERMINED, never a pass.
+ */
+export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, perPage = 100, maxPages = 10 }) {
+  return async function fetchTimeline(pull) {
+    const all = [];
+    for (let page = 1; page <= maxPages; page += 1) {
+      const url = `${apiUrl}/repos/${slug}/issues/${pull}/timeline?per_page=${perPage}&page=${page}`;
+      const res = await fetchImpl(url, { headers: apiHeaders(token) });
+      if (!res.ok) throw new Error(`GET /repos/${slug}/issues/${pull}/timeline answered HTTP ${res.status}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch)) throw new Error(`the timeline endpoint answered a non-array body for #${pull}`);
+      all.push(...batch);
+      if (batch.length < perPage) return all;
+    }
+    throw new Error(`#${pull} has more than ${perPage * maxPages} timeline events — the newest is on a page this read never reached`);
+  };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -2463,9 +2629,10 @@ async function main() {
   const fetchReviews = makeReviewReader(reader);
   const fetchPull = makePullReader(reader);
   const fetchComments = makeCommentReader(reader);
+  const fetchTimeline = makeTimelineReader(reader);
 
   const runGit = (args, input) => git(repoRoot, args, input);
-  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
+  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline, lifted, runGit, baseRef: context.baseSha ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -2479,7 +2646,10 @@ async function main() {
     namedPull: context.namedPull,
     fetchPull,
     fetchReviews,
-    approvals: new Map(verdict.entries.map((e) => [e.pr, e.approval])),
+    fetchTimeline,
+    // The enqueue reading rides WITH the approval verdict it was read beside,
+    // so the size lift reads both off one object and never re-reads either.
+    approvals: new Map(verdict.entries.map((e) => [e.pr, e.enqueue === undefined ? e.approval : { ...e.approval, enqueue: e.enqueue }])),
   });
   const sizeBlock = renderSizeVerdict(size);
   const report = [
@@ -3677,8 +3847,9 @@ export async function selfTest() {
     text18971,
   );
   assert(
-    'and-an-oversized-entry-with-NO-authorized-approval-says-so-and-names-both-landings-on-its-own-line',
-    /and nothing lifts it: no authorized APPROVED review on record \(0 review\(s\) read/.test(text18971) && /lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE/.test(text18971),
+    'and-an-oversized-entry-with-NO-authorized-approval-says-so-and-names-every-landing-on-its-own-line',
+    /and nothing lifts it: no authorized APPROVED review on record \(0 review\(s\) read/.test(text18971) &&
+      /lands by an authorized APPROVED review and then the OWNING seat, by the maintainer's\s+own enqueue from an account in GOVERNED_APPROVERS, or by a HUMAN MERGE/.test(text18971),
     text18971,
   );
   assert('and-the-read-source-is-printed-so-a-log-shows-where-the-number-came-from', text18971.includes('read from: GET /repos/objectstack-ai/objectstack/pulls/18971'));
