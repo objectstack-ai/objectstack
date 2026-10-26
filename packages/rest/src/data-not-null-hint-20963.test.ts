@@ -25,15 +25,18 @@
  * ⚠️ Not pinned: telling the two cases apart. That needs a registry read, which
  * the mapper does not make.
  *
- * [#24715] The door now makes that read, and pins it in
- * `data-not-null-field-label-24715.test.ts`: the field's label in the sentence,
- * and a declared `storage.notNull` column's own hint. THIS harness registers no
- * stored-metadata family, so the protocol's object read fails, the door's
- * relabel declines, and the classification's answer goes out as it is — which
- * makes these cases the fail-safe control for that read. The hint they pin
- * changed with #24715 too: its first sentence no longer adds "or declare the
- * field `required`", which for a column a hook populates is the move ADR-0113
- * D1 / D2 rule out.
+ * [#24768] A field the object DECLARES no longer reaches the classification at
+ * all: the engine refuses that write as the record validator's own
+ * `ValidationError`, named by the field's label, and this door relabels
+ * nothing (`data-not-null-field-label-24715.test.ts` pins both `/data` doors'
+ * answer for it, the `PATCH` included). What the classification's hint still
+ * answers is a NOT NULL column the served metadata does not declare: the drift
+ * where a field was dropped and its column stayed NOT NULL. So `must` is
+ * declared when the table is built, and dropped from the metadata the door
+ * serves afterwards; only the create can reach that column then (a `PATCH`
+ * naming it is refused as an undeclared field before any driver runs). The
+ * hint pinned below is the one a declared column used to get, and it holds for
+ * this case too: it leads with the value and names drift only as a condition.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -44,15 +47,21 @@ import { RestServer } from './rest-server';
 
 const OBJECT = 'proj_notnull_hint_20963';
 
+/** The metadata as the DDL saw it: `must` is built NOT NULL. */
 const PROJ = {
   name: OBJECT, label: 'Proj notnull hint 20963', systemFields: false,
   fields: {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     title: { name: 'title', type: 'text' as const },
-    // Physically NOT NULL, not `required`: declared on purpose, so nothing has drifted.
     must: { name: 'must', type: 'text' as const, storage: { notNull: true } },
   },
 };
+
+/** The metadata the door serves afterwards: `must` is no longer declared. */
+const SERVED = (() => {
+  const { must: _must, ...fields } = PROJ.fields;
+  return { ...PROJ, fields };
+})();
 
 function createMockServer() {
   const noop = () => {};
@@ -84,6 +93,7 @@ async function boot() {
   engine.registry.registerObject(PROJ as any);
   await engine.syncSchemas();
   await engine.insert(OBJECT, { id: 'e1', title: 'existing', must: 'm' } as any);
+  engine.registry.registerObject(SERVED as any);
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
@@ -138,28 +148,17 @@ function expectHintLeadsWithTheRemedy(hint: unknown) {
   expect(sentences.indexOf(drift[0]!), text).toBeGreaterThan(0);
 }
 
-describe('[#20963] a declared `storage.notNull` column\'s refusal does not assert drift', () => {
-  it('the fixture is the ADR-0113 posture: the database refuses what the validator lets through', async () => {
+describe('[#20963] a NOT NULL column the metadata does not declare: the hint leads with the remedy', () => {
+  it('the fixture: the database refuses the omitted column, and no field is there to name', async () => {
     const { engine } = await boot();
-    expect(PROJ.fields.must).toMatchObject({ storage: { notNull: true } });
-    expect('required' in PROJ.fields.must).toBe(false);
+    expect('must' in SERVED.fields).toBe(false);
     await expect(engine.insert(OBJECT, { id: 'x', title: 't' } as any)).rejects.toThrow(/not null/i);
   });
 
-  it('POST /data/:object with no value for the column: the same answer, a hint that leads with the remedy', async () => {
+  it('POST /data/:object with no value for the column: the column\'s answer, a hint that leads with the remedy', async () => {
     const { call } = await boot();
     const door = await call('POST', '/api/v1/data/:object', { title: 't' });
     expectNotNullAnswer(door);
     expectHintLeadsWithTheRemedy(door.body.hint);
-  });
-
-  it('PATCH /data/:object/:id writing null onto the column: the same answer, the same hint', async () => {
-    const { call } = await boot();
-    const created = await call('POST', '/api/v1/data/:object', { title: 't' });
-    const door = await call('PATCH', '/api/v1/data/:object/:id', { must: null }, { object: OBJECT, id: 'e1' });
-    expectNotNullAnswer(door);
-    expectHintLeadsWithTheRemedy(door.body.hint);
-    // One branch answers both doors: the update says what the create said.
-    expect(door.body.hint).toBe(created.body.hint);
   });
 });

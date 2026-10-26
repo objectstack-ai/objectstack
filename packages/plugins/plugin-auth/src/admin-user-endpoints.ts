@@ -231,6 +231,7 @@ import { resolveDefaultOrgId } from './tenancy-service.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
+import { temporaryPasswordLength } from './temporary-password-length.js';
 import { isCloudManaged } from '@objectstack/core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 
@@ -241,7 +242,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 // Must satisfy the ADR-0069 class-mix policy (lower + upper + digit + symbol),
 // so one guaranteed character per class + random fill. Never shorter than 12;
 // a caller holding the deployment's length range sizes it to that range (see
-// `temporaryPasswordLength`). Ambiguous glyphs (O/0, l/1) are excluded — these
+// `temporaryPasswordLength` in temporary-password-length.ts). Ambiguous glyphs (O/0, l/1) are excluded — these
 // passwords are read off a dialog and typed once.
 const LOWER = 'abcdefghijkmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -324,11 +325,6 @@ export function isLikelyEmail(value: string): boolean {
  * maps the `auth.password_min_length` / `password_max_length` settings onto.
  */
 type PasswordLengthPolicy = AuthContextLike['password']['config'];
-
-/** A generated password's length: 16, raised to the range's minimum and capped at its maximum. */
-function temporaryPasswordLength({ minPasswordLength, maxPasswordLength }: PasswordLengthPolicy): number {
-  return Math.min(Math.max(16, minPasswordLength), maxPasswordLength);
-}
 
 /**
  * Resolve the password for a create/set request: an explicit `password` /

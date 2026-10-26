@@ -21,8 +21,8 @@
  * Resolution strategy, in priority order:
  *
  *   1. `@objectstack/console` — the framework-vendored, version-locked
- *      build. Shipped as a dist-only npm package frozen at the objectui
- *      SHA recorded in `<framework>/.objectui-sha`. This is what a
+ *      build. Shipped as a dist-only npm package built from this
+ *      workspace's `ui/apps/console` (`pnpm console:build`). This is what a
  *      fresh `@objectstack/cli` install gets: the CLI declares this
  *      package as a dependency and both ship at one version from the
  *      Changesets `fixed` group, so no app installs it by hand. Cloud /
@@ -408,20 +408,26 @@ export function formatConsoleDistMissingWarning(consolePath: string | null): str
 
 /**
  * The vendored console `dist/` is a locally-built, gitignored artifact
- * rebuilt only by `scripts/build-console.sh` (pnpm objectui:build /
- * objectui:refresh / release) — never by `turbo run build`. When a
- * developer pulls a branch that bumps the framework's `.objectui-sha` pin
- * without re-running `pnpm objectui:build`, the dist stays frozen at the
- * previous objectui commit and would be served silently. The npm-major
- * version guard above can't catch this: the objectui SHA moves underneath a
- * single `@objectstack/console` version.
+ * rebuilt only by `pnpm console:build` (and release) — never by
+ * `turbo run build`. The guard below was built for the two-repo era: the
+ * framework pinned objectui by SHA in a committed `.objectui-sha`, the old
+ * build script stamped the built SHA into `dist/.objectui-sha`, and a pull
+ * that moved the pin without a rebuild left the dist frozen at the previous
+ * objectui commit, served silently. The npm-major version guard above can't
+ * catch that: the objectui SHA moves underneath a single
+ * `@objectstack/console` version.
  *
- * build-console.sh stamps the built SHA into `dist/.objectui-sha`. Here we
- * compare it against the framework's committed `.objectui-sha` pin, located
- * by walking up from the resolved console package. This is inherently a
- * monorepo/dev concern: a published install ships no `.objectui-sha` pin
- * (so the stamped dist is authoritative), and the sibling-repo dev fallback
- * writes no stamp — both cases are skipped silently.
+ * Since #25745 the framework repo carries no pin (the Console builds from
+ * `ui/apps/console` in this workspace) and `packages/console/build-dist.sh`
+ * writes no stamp and replaces the whole dist, so this guard can no longer
+ * fire there. It is kept because a tree that still carries its own
+ * `.objectui-sha` above the console package (the objectos overlay named in
+ * this file's header) with a stamped dist reaches it, and that tree is not
+ * readable from this repository. Here we compare the stamp against the
+ * nearest `.objectui-sha`, found by walking up from the resolved console
+ * package. A published install ships no pin (so the stamped dist is
+ * authoritative), and the sibling-repo dev fallback writes no stamp — both
+ * cases are skipped silently.
  */
 function findObjectuiPin(startDir: string): { pin: string; file: string } | null {
   let dir = startDir;
@@ -469,7 +475,7 @@ export function detectConsoleShaDrift(consoleDir: string): ConsoleShaDrift | nul
   } catch {
     return null; // unreadable stamp — fail open
   }
-  // Unstamped dist: can't prove drift; `pnpm check:console-sha` surfaces it.
+  // Unstamped dist (every `pnpm console:build` since #25745): can't prove drift.
   if (!stamp || stamp === found.pin) return null;
 
   return { stamp, pin: found.pin, pinFile: found.file };
@@ -481,7 +487,7 @@ export function formatConsoleShaDriftWarning(drift: ConsoleShaDrift): string {
     `  ⚠ Console version drift: serving @objectstack/console built from objectui@${drift.stamp.slice(0, 12)}, ` +
     `but ${drift.pinFile} pins objectui@${drift.pin.slice(0, 12)}. ` +
     `packages/console/dist is a gitignored local build that 'turbo run build' does not refresh — ` +
-    `rebuild it with 'pnpm objectui:build'.`
+    `rebuild it with 'pnpm console:build'.`
   );
 }
 
@@ -506,18 +512,16 @@ function describeConsoleShaDrift(drift: ConsoleShaDrift, hostPaths: boolean): st
     `    packages/console/dist is a gitignored local build that 'turbo run build' does NOT refresh,\n` +
     `    so this server would serve a Console SPA the repo no longer pins — and anything you\n` +
     `    observed in it would describe a different objectui commit.\n\n` +
-    `    Rebuild the console at the pinned SHA:\n\n` +
-    `        pnpm objectui:build\n\n` +
-    `    (Use 'pnpm objectui:refresh' only when you intend to move the pin to your local ../objectui HEAD.)\n` +
+    `    Rebuild the console:\n\n` +
+    `        pnpm console:build\n\n` +
     `    To boot anyway with the stale bundle: ${DRIFT_OVERRIDE_ENV}=1 — the API still serves either way.\n`
   );
 }
 
 /**
- * The refusal block — `os dev` declines to mount a drifted console. Mirrors
- * the remediation of `scripts/check-console-sha.mjs` verbatim (rebuild at the
- * *pinned* SHA with `pnpm objectui:build`; `objectui:refresh` would re-bump
- * the pin to the local ../objectui HEAD, which is the opposite of the fix).
+ * The refusal block — `os dev` declines to mount a drifted console. The remedy
+ * is the rebuild, `pnpm console:build`, the same script the not-built remedy
+ * names ({@link describeConsoleDistMissing}).
  */
 export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
   return `\n  ✗ Console version drift — refusing to serve /_console in dev.\n\n${describeConsoleShaDrift(drift, true)}`;
@@ -534,10 +538,10 @@ function driftOverridden(env: NodeJS.ProcessEnv): boolean {
 /**
  * Decide whether the Console SPA may mount, given what resolution found.
  *
- * The drift guard has two seats and this is the second one. The first —
- * `pnpm check:console-sha` — is wired into the root `pnpm dev` /
- * `dev:showcase` / `dev:crm` / `dev:todo` scripts, and every boot that does
- * not go through those scripts misses it: `objectstack dev` run directly in
+ * The drift guard had two seats and this is the one that remains. The other —
+ * `pnpm check:console-sha`, wired into the root `pnpm dev` scripts — retired
+ * with the framework's pin (#25745). Even while it ran, every boot that did
+ * not go through those scripts missed it: `objectstack dev` run directly in
  * an example dir, an example's own `dev` script, a `.claude/launch.json`
  * config, `pnpm exec objectstack dev`. That is how a QA sweep came to measure
  * a console two days behind the pin (#7752) — the pin had moved, the local

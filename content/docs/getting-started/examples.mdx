@@ -64,8 +64,8 @@ Each script starts one example's dev server. `pnpm dev` is an alias for `pnpm de
   `pnpm install` alone leaves the workspace unbuilt. This is the same sequence
   `README.md` documents.
 
-  `pnpm build` still does not produce the Console SPA at `/_console/` — that is built
-  separately by `pnpm objectui:build`.
+  `pnpm build` still does not put the Console SPA served at `/_console/` in place —
+  `pnpm console:build` does, copying it into `packages/console/dist`.
 </Callout>
 
 ---

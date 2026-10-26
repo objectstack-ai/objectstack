@@ -3,9 +3,9 @@
 /**
  * objectui-SHA drift guard — the seat on the boot path itself (#7752).
  *
- * `pnpm check:console-sha` guards the root `pnpm dev` / `dev:showcase` /
- * `dev:crm` / `dev:todo` scripts. Every other way to boot reaches the server
- * without passing it: `objectstack dev` run inside an example dir, an
+ * `pnpm check:console-sha` guarded the root `pnpm dev` / `dev:showcase` /
+ * `dev:crm` / `dev:todo` scripts until it retired with the framework's objectui
+ * pin (#25745). Every other way to boot reached the server without passing it: `objectstack dev` run inside an example dir, an
  * example's own `dev` script (`objectstack dev --seed-admin`), a
  * `.claude/launch.json` config driving `pnpm exec objectstack dev`. A QA sweep
  * booted that way and spent the run measuring a console two days behind the
@@ -97,7 +97,7 @@ describe('decideConsoleMount', () => {
 
   it('keeps "no dist at all" distinct from "refused for drift"', () => {
     // Both leave the Console unmounted, but they need different messages —
-    // "run objectui:build" vs the existing "console dist not found" hint.
+    // "rebuild, the dist is not the pin" vs the "console dist not found" hint.
     expect(decideConsoleMount({ hasDist: false, drift: null, isDev: true, env: {} })).toEqual({
       mount: false,
       refusedForDrift: false,
@@ -106,17 +106,16 @@ describe('decideConsoleMount', () => {
 });
 
 describe('drift messages', () => {
-  it('names the rebuild, never the pin bump — refresh would move the pin instead', () => {
+  it('names the rebuild script that exists, never a retired pin script', () => {
     for (const message of [
       formatConsoleShaDriftWarning(drift),
       formatConsoleShaDriftRefusal(drift),
     ]) {
-      expect(message).toContain('pnpm objectui:build');
+      expect(message).toContain('pnpm console:build');
+      // The `objectui:*` pin scripts retired with the pin (#25745); a remedy
+      // naming one sends the reader to a script `pnpm` cannot find.
+      expect(message).not.toMatch(/objectui:(build|refresh|bump|clean)/);
     }
-    // `objectui:refresh` appears only as the explicitly-labelled wrong turn.
-    expect(formatConsoleShaDriftRefusal(drift)).toContain(
-      "(Use 'pnpm objectui:refresh' only when you intend to move the pin",
-    );
   });
 
   it('shows both SHAs and the escape hatch, so the boot log is self-explaining', () => {
@@ -189,14 +188,14 @@ describe('what a dev server that refused a drifted Console answers', () => {
       request = await serve(createConsoleShaDriftRefusalPlugin(drift));
     });
 
-    it.each(CONSOLE_REQUESTS)('GET %s answers 503 naming `pnpm objectui:build`, not the SPA', async (p) => {
+    it.each(CONSOLE_REQUESTS)('GET %s answers 503 naming `pnpm console:build`, not the SPA', async (p) => {
       const res = await request(p);
       expect(res.status).toBe(503);
       expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
       expect(res.headers.get('cache-control')).toBe('no-store');
       const body = await res.text();
       expect(body.split('\n')[0]).toBe(HEADLINE);
-      expect(body).toContain('pnpm objectui:build');
+      expect(body).toContain('pnpm console:build');
       expect(body).toContain(PIN.slice(0, 12));
       expect(body).toContain(STAMP.slice(0, 12));
       expect(body).toContain(DRIFT_OVERRIDE_ENV);
