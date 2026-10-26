@@ -36,11 +36,7 @@
 #
 # The label set IS the PM state machine (.claude/skills/pm-dispatch/SKILL.md,
 # "State model"): every label here is consumed by a named query or gate.
-# ⛔ The retired lanes (domain:ui — retired as a MAIN-repo lane and still absent
-# from the main-repo lane loop; the NAME re-entered circulation 2026-08-21 as an
-# objectui-repo STREAM label only, maintainer ruling 「按 domain:ui 定稿」 — see
-# the objectui stream block below, the same re-entry shape as domain:engine;
-# domain:spec-surface and domain:spec-tooling,
+# ⛔ The retired lanes (domain:spec-surface and domain:spec-tooling,
 # retired 2026-08-16 — maintainer ruling 「A」 merged both into the single
 # domain:spec lane, the sub-lane criteria surviving as the spec seat's dispatch
 # reference; domain:engine-core / domain:metadata / domain:drivers /
@@ -468,7 +464,7 @@ gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registr
 # scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES). The cleanup PR that
 # retires the three objects (zero open cards on each) deletes these three rows
 # and that map together, and the header's rule resumes for them.
-for D in server devx spec skills; do
+for D in server devx spec skills ui; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 gh label create domain:engine   -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (engine surface); in-flight cards keep it until they land" 2>/dev/null || true
@@ -527,9 +523,9 @@ gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked
 # per-layer children, spec and backend first, and its objectui child is now
 # domain:ui. Cards whose landing surface is undetermined stay unstreamed for
 # triage first-touch rather than guessed. The row below creates the objectui-
-# repo label OBJECT: the main-repo lane roster (the loop above) is untouched,
-# and the retired main-repo domain:ui lane stays retired there (see the
-# header). Named consumer: the objectui execution seat's candidate query
+# repo label OBJECT. Since objectui moved into this repository's ui/ tree
+# (objectstack#25677), domain:ui is also a main-repo lane, in the loop above
+# and SKILL.md's domain table. Named consumer: the objectui execution seat's candidate query
 # (.claude/skills/pm-dispatch/references/lanes/ui.md). Re-laning the open
 # objectui backlog onto domain:ui was triage's act on the ruling's day, by
 # file-path evidence — not this script's.

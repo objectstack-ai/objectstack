@@ -636,7 +636,13 @@ describe('[#11663 L5] standing across postures — three arms invariant, the leg
         requestPosture(p);
         envelopes[p] = await resolveUserAuthzGrants(makeQl(tables()), 'usr_1', { nowMs: NOW });
       }
-      expect(envelopes.single).toEqual(envelopes.isolated);
+      // [#25799] `directPermissions` names the CHANNEL a set arrives through,
+      // not the standing: under \`single\` the legacy grant row anchors and so
+      // applies with no active organization, while walled it applies nowhere
+      // and the config confers the same set. The standing envelope is compared
+      // without it.
+      const standing = ({ directPermissions: _channel, ...rest }: any) => rest;
+      expect(standing(envelopes.single)).toEqual(standing(envelopes.isolated));
     });
   }
 

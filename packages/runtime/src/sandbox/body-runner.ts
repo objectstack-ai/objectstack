@@ -72,6 +72,8 @@ import {
   storedMetadataBodySubjectRecordRefusal,
   storedMetadataFamilyTableList,
 } from '../stored-metadata-body-boundary.js';
+import { mapDataError } from '@objectstack/types';
+import { isRelayedSandboxRefusal } from './quickjs-runner.js';
 
 interface FactoryOptions {
   ql: any;
@@ -378,6 +380,39 @@ function executionContextFromHook(engineCtx: any): any {
   };
 }
 
+/**
+ * [#26153] The one log line for a sandboxed hook's or action's throw, written
+ * by both catches below before they rethrow.
+ *
+ * A BUSINESS REFUSAL — a throw the HTTP doors answer in the 4xx band — is an
+ * ordinary outcome: one `info` line naming the body, its declared `code` and
+ * the status, and no stack. A FAULT (5xx) keeps `error` with the error and its
+ * stack. The band is read off {@link mapDataError}, ADR-0112's table the doors
+ * answer with, ⛔ never a second list of codes or names that could drift from
+ * the status the caller saw; `body-throw-log-level.test.ts` pins that band
+ * against the `/actions` door's answer for each shape reaching these catches.
+ *
+ * A nested body's refusal re-thrown unchanged ({@link isRelayedSandboxRefusal})
+ * was already logged by the nested body's own catch, so the outer one writes
+ * nothing for it: one refused action is one line. A relayed FAULT is still
+ * logged at both catches, as before.
+ */
+function logBodyThrow(opts: FactoryOptions, origin: { kind: 'hook' | 'action'; name: string }, err: any): void {
+  const subject = { appId: opts.appId, [origin.kind]: origin.name };
+  const { status } = mapDataError(err);
+  if (status >= 500) {
+    opts.logger?.error?.(`[BodyRunner] sandboxed ${origin.kind} threw`, err, subject);
+    return;
+  }
+  if (isRelayedSandboxRefusal(err)) return;
+  opts.logger?.info?.(`[BodyRunner] sandboxed ${origin.kind} refused`, {
+    ...subject,
+    code: typeof err?.code === 'string' ? err.code : undefined,
+    status,
+    message: typeof err?.message === 'string' ? err.message : String(err),
+  });
+}
+
 export function hookBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
@@ -451,10 +486,7 @@ export function hookBodyRunnerFactory(
         });
         applyMutationsToInput(engineCtx, result, sandboxCtx.input);
       } catch (err: any) {
-        opts.logger?.error?.('[BodyRunner] sandboxed hook threw', err, {
-          appId: opts.appId,
-          hook: hook.name,
-        });
+        logBodyThrow(opts, { kind: 'hook', name: hook.name }, err);
         throw err;
       }
     };
@@ -559,10 +591,7 @@ export function actionBodyRunnerFactory(
         warnDiscardedRecordWrites(result, action.name, action.object, opts);
         return result.value;
       } catch (err: any) {
-        opts.logger?.error?.('[BodyRunner] sandboxed action threw', err, {
-          appId: opts.appId,
-          action: action.name,
-        });
+        logBodyThrow(opts, { kind: 'action', name: action.name }, err);
         throw err;
       }
     };

@@ -89,7 +89,7 @@ import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';
-import { recordListPath } from './useOpenRecordList.js';
+import { exactRecordListFilter, recordListPath } from './useOpenRecordList.js';
 import { resolveRecordFormTarget } from '../utils/recordFormNavigation.js';
 
 /**
@@ -479,7 +479,7 @@ export function RelatedRecordActionsBridge({
 
   const value = useMemo<RelatedRecordActionsValue>(
     () => ({
-      resolve: ({ objectName, relationshipField, parentId }) => {
+      resolve: ({ objectName, relationshipField, parentId, filter }) => {
         const childDef = objects.find((o: any) => o?.name === objectName);
         if (!childDef || !base) return {} as RelatedRecordHandlers;
         // [objectstack#3546] Intersect the child object's bucket affordances with the
@@ -555,31 +555,40 @@ export function RelatedRecordActionsBridge({
 
         /**
          * "View all" (objectui#12741): the child object's list page, scoped to
-         * this parent on the list's own relationship. The destination is the
-         * ADR-0055 bare data surface (`recordListPath`, the route
-         * `useOpenRecordList` drills to). It is not anchored to a saved view,
-         * so the page shows every related record rather than the related
-         * records some default view also lets through.
+         * this parent on the list's own relationship AND by the list's own
+         * `filter` (objectstack#25888), so it shows the rows the list showed.
+         * The destination is the ADR-0055 bare data surface (`recordListPath`,
+         * the route `useOpenRecordList` drills to). It is not anchored to a
+         * saved view, so the page shows every related record rather than the
+         * related records some default view also lets through.
          *
-         * Offered only where that route can say "this parent's children". Its
-         * `filter[FIELD]=VALUE` arm is EQUALITY, so the handler is withheld:
+         * Offered only where that route can say exactly that scope, so the
+         * handler is withheld:
          *   - without a relationship or a parent value: an unscoped list is
          *     every record of the object, not this parent's;
          *   - on a `multiple: true` relationship: membership has no URL
          *     spelling, and equality against an array of ids matches nothing
          *     (the reason `RelatedList`'s raw-URL fetch refuses it, objectui#7299);
-         *   - on a relationship field the viewer cannot read: `ObjectDataPage`
-         *     drops that condition and would open the whole table.
+         *   - when `exactRecordListFilter` cannot write every condition: a
+         *     field the viewer cannot read (the relationship or one the filter
+         *     names), which `ObjectDataPage` drops, or a filter condition the
+         *     route has no spelling for. Writing the rest would open a WIDER
+         *     list, and a read gate that admits a reader only on a fully pinned
+         *     read answers a wider read with a smaller slice, not more rows.
          * A withheld handler draws no link: no link is better than a wrong list.
          */
-        if (
+        const viewAllFilter =
           relationshipField &&
           parentId != null &&
           parentId !== '' &&
-          !isMultiValueRelationship(childDef.fields, relationshipField) &&
-          perms.checkField(objectName, relationshipField, 'read')
-        ) {
-          const viewAllPath = recordListPath(appName, objectName, { [relationshipField]: parentId });
+          !isMultiValueRelationship(childDef.fields, relationshipField)
+            ? exactRecordListFilter(
+                [{ [relationshipField]: parentId }, filter],
+                (field) => perms.checkField(objectName, field, 'read'),
+              )
+            : null;
+        if (viewAllFilter) {
+          const viewAllPath = recordListPath(appName, objectName, viewAllFilter);
           handlers.onViewAll = () => navigate(viewAllPath);
         }
 
