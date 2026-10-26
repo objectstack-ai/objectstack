@@ -19,7 +19,6 @@
     // The package build emits `dist`; this project emits nothing, so it must
     // not inherit `composite` / `declaration` from the build config.
     "composite": false,
-    "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
     // Two global augmentations, neither of them an import:
     //   - `node` for `spec-symbol-batch7.test.tsx`, which resolves

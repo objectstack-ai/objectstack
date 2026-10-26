@@ -2,7 +2,6 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
@@ -17,8 +16,7 @@
     // tree as soon as anything runs `tsc` (objectui#9189). Pinned in every composite
     // package so the location is a decision, not a side effect of an unrelated option.
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
-    "composite": true,
-    "skipLibCheck": true
+    "composite": true
   },
   "include": ["src"],
   // Tests are excluded from the BUILD program so they stop being emitted into

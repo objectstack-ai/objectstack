@@ -82,6 +82,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "参照元フィールド",
         help: "このファイル ID を保持する、所有レコード側のフィールド名"
       },
+      released_ref_object: {
+        label: "解放元オブジェクト",
+        help: "このファイルを最後に所有し、解放したレコードのオブジェクト短縮名"
+      },
+      released_ref_id: {
+        label: "解放元レコード",
+        help: "このファイルを最後に所有し、解放したレコードの主キー"
+      },
       metadata: {
         label: "メタデータ(JSON)"
       },

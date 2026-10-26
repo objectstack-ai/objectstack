@@ -3421,7 +3421,7 @@ const zh = {
     accountMenu: '账户菜单',
     profile: '个人资料',
     settings: '设置',
-    logout: '注销',
+    logout: '退出登录',
     preferences: '偏好设置',
     theme: '主题',
     language: '语言',
