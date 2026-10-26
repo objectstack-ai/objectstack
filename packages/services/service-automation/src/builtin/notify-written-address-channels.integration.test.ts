@@ -34,6 +34,10 @@ import { registerNotifyNode } from './notify-node.js';
  *  B. A written-out address a user holds reaches that user's inbox, as before.
  *  C. A node whose `channels` include `email` sends the address as written.
  *  D. With no directory to check it, the address is not sent.
+ *  E. The same holds for an address a value envelope COMPUTES: on a node that
+ *     does not name `email`, one no user holds fails the node, naming the
+ *     envelope's source and never the value; one a user holds reaches that
+ *     user. On a node that names `email`, ruling B's screen answers as before.
  */
 
 function silentLogger(): any {
@@ -116,9 +120,10 @@ function notifyFlow(config: Record<string, unknown>): any {
     };
 }
 
-async function runOnce(stack: ReturnType<typeof boot>, config: Record<string, unknown>) {
+async function runOnce(stack: ReturnType<typeof boot>, config: Record<string, unknown>, record?: Record<string, unknown>) {
     stack.engine.registerFlow('escalation', notifyFlow(config));
-    const run = await stack.engine.execute('escalation', { tenantId: 'org_1' } as any);
+    const context = record ? { tenantId: 'org_1', object: 'crm_lead', record } : { tenantId: 'org_1' };
+    const run = await stack.engine.execute('escalation', context as any);
     const runs = await stack.engine.listRuns('escalation');
     const step = runs[0]?.steps.find((s) => s.nodeId === 'alert_exec');
     return { run, step };
@@ -181,5 +186,48 @@ describe('#25758 — a written-out address on a node that does not name email', 
         expect(run.success).toBe(false);
         expect(step?.error?.message).toContain('`exec@example.com`');
         expect(stack.mailed).toHaveLength(0);
+    });
+});
+
+describe('#25758 — a computed address on a node that does not name email', () => {
+    const CEL = (source: string) => ({ dialect: 'cel', source });
+    const LEAD = {
+        id: 'lead_1',
+        contact: 'stranger@outside.example',
+        prefixed: 'user:exec@company.example',
+        owner_email: 'exec@company.example',
+    };
+
+    it.each([
+        ['an address no user holds', 'record.contact', undefined],
+        ['user: plus an address', 'record.prefixed', undefined],
+        ['an address no user holds, on sms', 'record.contact', 'sms'],
+    ])('E: an envelope that evaluates to %s fails the node, naming its source and not the value', async (_label, source, channels) => {
+        const stack = boot();
+        const { run, step } = await runOnce(stack, { recipients: [CEL(source)], ...(channels ? { channels } : {}) }, LEAD);
+        expect(run.success).toBe(false);
+        const message = step?.error?.message ?? '';
+        expect(message).toContain('`alert_exec`');
+        expect(message).toContain(`source: \`${source}\``);
+        expect(message).toContain('`channels`');
+        expect(message).not.toContain('stranger@outside.example');
+        expect(rowsOf(stack, NOTIFICATION_EVENT_OBJECT)).toHaveLength(0);
+        expect(rowsOf(stack, INBOX_OBJECT)).toHaveLength(0);
+        expect(stack.mailed).toHaveLength(0);
+    });
+
+    it('E: an envelope that evaluates to an address a user holds reaches that user\'s inbox', async () => {
+        const stack = boot();
+        const { run } = await runOnce(stack, { recipients: CEL('record.owner_email') }, LEAD);
+        expect(run.success).toBe(true);
+        expect(rowsOf(stack, INBOX_OBJECT).map((r) => r.user_id)).toEqual(['usr_exec']);
+    });
+
+    it('E: on a node that names email, ruling B\'s screen answers as before', async () => {
+        const stack = boot();
+        const { run, step } = await runOnce(stack, { recipients: [CEL('record.contact')], channels: ['inbox', 'email'] }, LEAD);
+        expect(run.success).toBe(false);
+        expect(step?.error?.message).toContain('no user holds it');
+        expect(step?.error?.message).toContain("`recipients: { emailField: 'FIELD' }`");
     });
 });
