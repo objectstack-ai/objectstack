@@ -1,0 +1,36 @@
+{
+  "number": 26099,
+  "kind": "pull_request",
+  "title": "docs(qa): ai checklist — apply the 18.2.0 sweep's 14 ledger findings (#25836)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:00:55Z",
+  "updated_at": "2026-10-26T12:39:11Z",
+  "closed_at": "2026-10-26T12:39:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:39:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26099",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DF1Sr5Z9ggF6iF1xM67fuqu)_\nFixes #25836\nClause-②: no\nMetadata-protocol: none\n\nApplies the 14 ai checklist-accuracy findings of the 18.2.0 release sweep (wave anchor #25807) to `docs/qa/platform-checklist/areas/ai.json`. Each revised item has its `revision` bumped and a `history` row citing its run record: P0 #25812 or Tier 1 #25815, both measured at 6679644a. Every line was re-read against `main` at b4199c96 first. No clause is added or dropped, and no `status` changes.\n\n## Per line\n\n| Item | Finding (record) | Applied as |\n|---|---|---|\n| `ai.mcp-stdio-fail-closed` | steps 2/9 need `--log-level info`; `query_records` caps `limit` at 50 (#25812) | steps[2], [3], [9] and acceptance[7].verify. `os start` still defaults to `warn`; `DEFAULT_MAX_LIMIT` is still 50 |\n| same | a0: pin checks the variable name only (#25815) | `automated.ref` prose: pin layer and reach |\n| same | a1/a6/n4: no API_KEY_REVOKED pin (#25815) | `automated.ref` prose. Still true on main: no `packages/mcp` test names it |\n| `ai.mcp-coded-refusals-and-runtime-exposure` | a1: `mcp-coded-refusal.test.ts` not in the ref (#25815) | added to the ref, plugin-unit layer |\n| same | a2: no pin drives `query_records` across a restart (#25815) | **No longer holds on main**: `packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts` does, on the stdio door at engine layer. Added to the ref with that layer; the HTTP door across a restart stays a live leg |\n| `ai.mcp-http-surface` | a3: 401 status only; a4: session bearer, no initialize, 2 names; ref bare (#25815) | ref names every pin with its layer and what it leaves unasserted. **Part no longer holds**: a0–a2 and a5 do have pins on main (dispatcher units and Hono integrations in `packages/runtime`, scope narrowing in `packages/mcp`). None scores those clauses pass alone |\n| `ai.mcp-oauth-private-host-transport` | a0–a4: unit-only pin scores no clause; a4 predicate half only (#25815) | ref prose. `mcp-oauth-plaintext-notice.test.ts` is added as plugin-unit corroboration of a2 |\n| `ai.mcp-validate-expression` | a2: no same-expression site flip; a0/a1/a3: fake bridge (#25815) | acceptance[2].verify and ref prose |\n| `ai.skill-instructions-mcp-prompts` | a3: unknown name only; n1: no prompts/get-inactive pin (#25815) | acceptance[3].verify and ref prose |\n\nPlus, per the dispatch order, one retired-pin edit: `ai.console-ai-surface-gating` acceptance[5].verify told runners to run two objectui tests \"at the .objectui-sha revision\". It now points at their home in this tree, `ui/packages/plugin-chatbot/src/__tests__/` (#26035, #25745).\n\nNo line described a product defect, so no card was filed.\n\n## Verification\n\n- `pnpm check:platform-checklist`: OK (16 areas, 329 items).\n- `node scripts/pm/dispatch-gates.mjs --commands` for this file list: all 13 commands exit 0. `check:doc-formula-expressions` exited 3 (prerequisite) until `@objectstack/lint` and its deps were built, then 0.\n- Every file newly named in an `automated.ref` passes at this head:\n  - mcp: `mcp-coded-refusal`, `mcp-http-tools.scopes`: 2 files, 52 tests.\n  - runtime: `http-dispatcher.mcp`, `http-dispatcher.mcp-oauth`, `mcp-anonymous-first.hono.integration`, `mcp-skill-method-not-allowed.hono.integration`: 4 files, 52 tests.\n  - plugin-auth: `mcp-oauth-plaintext-notice`: 1 file, 26 tests.\n  - dogfood: `mcp-stdio-runtime-object-exposure`: 1 file, 10 tests.\n- Governed surface: none. `docs/qa/**` is not on the governed register. Not Tier H, no contract review.\n\n`skip-changeset`: docs only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GJ41Um5Ueq9ESR3Nj5D7qW\n"
+}

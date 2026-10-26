@@ -1,0 +1,26 @@
+{
+  "number": 26182,
+  "kind": "issue",
+  "title": "record:related_list: `actions: []` still draws \"New\" — a page cannot drop the create button from one related list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:59:05Z",
+  "updated_at": "2026-10-26T14:59:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26182",
+  "body": "Filing class: ① user-visible defect — reach: public door, measured in a browser on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`). **Reader:** the UI lane, `ui/packages/plugin-detail` (`RelatedList.tsx` / `renderers/record-related-list.tsx`) and the spec's `RecordRelatedListProps`.\n\n## Business reason\nA related list often shows children that must only be created through a process (a renewal through its flow, a version through upload, a signature round through signing). The page author says so with `actions: []`, and the list still offers a generic **New** that opens the raw object form with the relationship prefilled — bypassing the process and showing users a form of mostly refused fields.\n\n## Measured\nhotclm's contract page declares its Renewals list with `actions: []` (`src/pages/contract_detail.page.ts`, `contract_renewals`, comment: \"None of the contract's own list actions\"). As a business requester the list still shows **新建**, which opens `?form=new&formObject=clm_contract&formLink=renewed_from:<id>` — the full contract form, status select included.\n\n## Why\n`RelatedList.tsx` draws **New** whenever the host passes `onNew`; the host omits it only when the parent object's `userActions.create.visibleWhen` is false (#4646). `actions` governs the toolbar list only, so there is no per-component way to drop New.\n\n## Expected\n`actions: []` (or a declared `create: false` on `record:related_list`) suppresses New on that list, independent of the object-wide `userActions.create`.\n\nApp-side card: objectstack-ai/hotclm#136.\n\nDedupe: objectstack and the archived objectui issues (2,000 most recently updated each, all states) grepped for `related list … New|create … hide|disable|suppress` — 0 hits; #4646 (greyed New) and objectui#12870 (toolbar on parentDataSource lists) are neighbours.\n\n---\n_Filed from the hotclm browser regression thread (2026-10-26); maintainer: 「平台的问题应该提交issue到平台」._"
+}

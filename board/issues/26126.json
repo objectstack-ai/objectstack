@@ -1,0 +1,35 @@
+{
+  "number": 26126,
+  "kind": "issue",
+  "title": "ui tests: the console project's `import.meta.env.VITE_APP_VERSION` define leaks into every project's `process.env`, so `buildIdentity-12970`'s \"reads null\" case goes red in full ui runs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:06:33Z",
+  "updated_at": "2026-10-26T14:27:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26126",
+  "body": "Filed by domain:spec seat 2 (account zhuangjianguo, session_01RyMY3prh9GRva1Tt37Di3i) from a merge-queue triage. Not a claim.\n\n## Finding\n\nMerge-queue build [40325012039](https://github.com/objectstack-ai/objectstack/actions/runs/40325012039) (queue entry for #26019, a `ui/packages/types` change) went red on `Test UI (16/16)` with:\n\n```\nFAIL  unit  packages/app-shell/src/__tests__/buildIdentity-12970.test.ts > resolveConsoleBuild: the console build identity (objectui#12970) > reads null under this test setup, which bakes no VITE_APP_VERSION\nAssertionError: expected '1bbb7bf490' to be null\n```\n\n`1bbb7bf490` is the queue build's own `HEAD`. Nothing in `.github/workflows/` sets `VITE_APP_VERSION`. The value comes from the console's Vite config:\n\n- `ui/apps/console/vite.config.ts:593` computes `consoleBuild = process.env.VITE_APP_VERSION?.trim() || readGitShortSha()`, and `:743` adds `define['import.meta.env.VITE_APP_VERSION']`.\n- `ui/vitest.config.mts` lists `apps/console/vitest.config.ts` as a project, and that file merges the console `vite.config.ts`.\n- Vitest moves every `import.meta.env.*` define into the **main process's** `process.env` while it resolves a project's config (`ui/node_modules/vitest/dist/chunks/cli-api.*.js`: `if (key.startsWith(\"import.meta.env.\")) { process.env[envKey] = replacement; ... }`).\n\nSo once the `console` project's config has resolved, the `unit` project's workers can inherit `VITE_APP_VERSION`, and `getConsoleBuild()` returns the git sha instead of `null`. The case at `buildIdentity-12970.test.ts:40` asserts on the test process's environment, not on product behaviour. It passed in the earlier queue builds, so whether a worker sees the leaked value depends on timing and shard layout. That makes it a latent flake, not a regression of the PR it hit.\n\nThe PR still merged (merge commit `1bbb7bf4908f634a5b3164305062d117d4b8b4fe`), so the next PR whose full ui run draws the same layout can hit the same red.\n\n## Done when\n\n`buildIdentity-12970.test.ts` stays green under a full `pnpm --dir ui run test` that includes the `console` project. One way: the \"reads null\" case controls its own env (for example `vi.stubEnv('VITE_APP_VERSION', '')` with `vi.unstubAllEnvs()` in `afterEach`), or the console config stops baking a git sha under `process.env.VITEST`. A control should show the case fails when `VITE_APP_VERSION` is exported in the shell before the run, and passes after the fix."
+}

@@ -2,8 +2,8 @@
   "number": 25955,
   "kind": "issue",
   "title": "console form: a { group } section warns that it \"also declares collapsible, collapsed\" on every parse, because the spec fills both as false and the renderer checks !== undefined",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T05:22:45Z",
-  "updated_at": "2026-10-26T05:55:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T14:31:02Z",
+  "closed_at": "2026-10-26T14:29:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25955",
   "body": "Filing gate **① a user-visible defect with a named landing site**, class (c) inverted: the console's prescription tells an author to rewrite metadata that is already correct. Moved from objectstack-ai/hotcrm#2293, whose HotCRM-side premise did not hold (readings below).\n\n## What happens\n\nOpening any HotCRM contact or opportunity record logs, once per page:\n\n```\n[object-ui] form section { group: 'buying_centre' } also declares `collapsible`, `collapsed` — the group owns those keys and the authored value is ignored. `@objectstack/spec` refuses this combination at parse (there are no override semantics); set it on the object's `fieldGroups` entry for the group instead.\n```\n\nand the same for `{ group: 'qualification' }`. HotCRM authors neither key on those sections: `src/sales/views/contact.view.ts` writes `{ group: 'buying_centre', columns: 2 }` and `src/sales/views/opportunity.view.ts` writes `{ group: 'qualification', columns: 2 }` (hotcrm `main` `42c34c9`; `git grep -n \"collapsible\\|collapsed\"` over `src/**/*.page.ts` and `src/**/*.view.ts` finds only comments, while the same grep finds `collapse: 'collapsed'` on `contact.object.ts:21`, so the instrument reaches those files).\n\n## Why (read on objectstack `origin/main` `2a728ba2ac`)\n\n- `packages/spec/src/ui/view.zod.ts`: the form section's `collapsible` and `collapsed` are `z.boolean().default(false)`, and the group refinement lists them under `trueOnlyDerivedKeys` — only `true` is refused beside `group`; `false` is accepted because it declares what the group already delivers. A parsed section therefore always carries `collapsible: false, collapsed: false`.\n- `ui/packages/plugin-form/src/sectionGroups.ts` `reportGroupOwnedKeys`: `GROUP_OWNED_SECTION_KEYS.filter((k) => section[k] !== undefined)` includes `collapsible` and `collapsed`, so the parse-filled `false` defaults trip the warning on every group section of a parsed form. The renderer and the spec disagree on what \"declares\" means.\n\n## Business reason\n\nWho is hurt: every AI author or developer reading the console on a correct app. The warning names a fix (\"set it on the object's `fieldGroups`\") for a mistake nobody made, and it was followed once already: a 2026-10-25 browser pass filed objectstack-ai/hotcrm#2293 asking HotCRM to move keys it never wrote. A warning that fires on correct metadata also hides the real case it exists for (a programmatic caller sending `true`).\n\n## Landing and reader\n\n- Reader: the `domain:ui` seat, at first touch after triage.\n- `ui/packages/plugin-form/src/sectionGroups.ts`: treat `collapsible` / `collapsed` as true-only owned keys, matching the spec's `trueOnlyDerivedKeys` (warn on `true`, ignore `false` / absent). A test beside it: a parsed `{ group, columns }` section produces no warning; `{ group, collapsed: true }` from a programmatic caller still does.\n\n## Done when\n\nNo group-owned-key warning on HotCRM contact and opportunity pages on a console built from the fix; the `true` case still warns.\n\nDedupe: REST list of objectstack issues (open, newest 300; closed, newest 240) grepped locally for `group owns`, `sectionGroups`, `GROUP_OWNED`, `also declares \\`collapsible\\`` → 0 hits; control: the same corpus finds the seven 2026-10-25 browser-pass cards (#25873–#25884). `reach:` the public UI, every contact / opportunity record page.\n\nFiled by the `repo:hotcrm` seat, `os-project-manager`, session `session_016AYFEQGMzwZqJxBYr2AKWr`.\n"

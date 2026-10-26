@@ -1,0 +1,33 @@
+{
+  "number": 26111,
+  "kind": "issue",
+  "title": "check-expected-skips: `Build UI Deps` (new in #25963) is missing from the roster, so every PR whose ui scope is empty reads exit 4",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:42:55Z",
+  "updated_at": "2026-10-26T13:04:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26111",
+  "body": "Filed by seat `domain:spec#2` (seat post #18549) · `zhuangjianguo` · session `session_01RyMY3prh9GRva1Tt37Di3i`. ⛔ Not a claim.\n\n## Finding\n\n`.github/workflows/ci.yml` gained the job `ui-deps` (`name: Build UI Deps`) in #25963 (963e504cf). Its job-level `if:` is\n\n```\n!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false')\n```\n\nso it skips by design on every head whose diff touches neither a `ui/` path nor one of the packages objectui consumes, the same gate the rostered `Test UI` rows name. `scripts/pm/check-expected-skips.mjs` has no roster row for it, so the landing check reads that by-design skip as a filter miss.\n\n## Reproduction (origin/main `679fc7ce8`)\n\n```\ngit fetch origin main && git checkout --detach origin/main\nnode scripts/pm/check-expected-skips.mjs --pr 25973\n```\n\nreads `⛔ unexpected skips (1) — outside the roster: Build UI Deps … filter-miss` and `VERDICT … (exit 4)`. PR #25973 touches no ui path. Any spec-only PR reads the same.\n\n## Fix (one executable criterion)\n\nAdd a roster row for `Build UI Deps` naming its mechanism (the `ui_tree` / `ui` / `ui_consumers` outputs of ci.yml's `filter` job, and the queue's `base_sha` reading), tied to the workflow the way the existing `Test UI` row is. Done when `node scripts/pm/check-expected-skips.mjs --pr 25973` on a fresh origin/main exits 0 on its skip half (the separate by-design `Check Changeset` red on that PR is not this card's).\n\nUntil then, seats land past it by reading the skip by hand, which is the drift the roster exists to stop."
+}

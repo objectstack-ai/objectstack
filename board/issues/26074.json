@@ -1,0 +1,38 @@
+{
+  "number": 26074,
+  "kind": "issue",
+  "title": "Merge queue: full Test Core builds go red 5 of 27 since #25968's shard layout, and each ejection rebuilds every entry behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:11:51Z",
+  "updated_at": "2026-10-26T13:51:54Z",
+  "closed_at": "2026-10-26T11:58:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26074",
+  "body": "Filing gate: ③ a task ordered directly by the maintainer, quoted verbatim below.\nReader: `domain:devx` seat 1 (#6023), card thread 「修复合并队列积压」 (`session_01SrpCjPfYv8N9P9EJvoDyN9`); next PR = a revert of #25968 on `scripts/partition-test-shards.mjs` + `scripts/test-shard-timings.json`.\nDedupe (repo-scoped listings; `/search` is refused from cloud sessions): open `queue-flake-anchor` issues = 4. #26047, #26049 and #26065 each name one victim test file below and no cause; #25862 is the 01:00Z Test UI episode, unrelated. Issues created since 2026-10-25 with queue / Test Core / timeout / shard / flake in the title = 5, none about queue throughput. 0 duplicates.\n\n## The order\n\nElon, 2026-10-26, project \"Objectstack devx\", verbatim and untranslated:\n\n> 现在队列正常吗？积压了很多pr，立刻立卡派发修复 (10:57:32Z)\n>\n> 最高优先级，开发完成后请我人工提到队列第一优先。 (10:57:55Z)\n\n## What the queue is doing (read 2026-10-26 ~11:05Z over REST: merge_group runs of `ci.yml`, ruleset 12119582)\n\n- **Not stalled.** Six entries are building (`max_entries_to_build` 5, ALLGREEN, squash). Runners are not the bottleneck: a new group's jobs start within 2 s of the run.\n- **Slower.** 12–13 merges an hour in 08:00–10:00Z, 6 in 10:00–11:00Z, with a 29-minute gap from 10:29Z to 10:58Z.\n- **Cause: full Test Core queue builds go red 5 of 27 since 08:16Z** (the first build on #25968's layout), against **0 of 19** in 05:00–08:10Z. Every red ejects its PR and rebuilds every entry behind it, about 20 minutes each.\n\n| queue build | PR | shard / package | failing test | reason line |\n|---|---|---|---|---|\n| 40298562907 | #25979 | 2/8 `@objectstack/cli` | `test/hook-timeout-override-refusal.test.ts` ⭐ CONTROL | child `vitest list` exits 1 (expected 0) |\n| 40300684735 | #26012 | 8/8 `@objectstack/objectql` | `src/hook-run-as.test.ts` (the `import('./index.js')` case, L389) | `Test timed out in 5000ms` |\n| 40302541664 | #26007 | 2/8 + 8/8 | both of the above | same two |\n| 40306457347 | #26026 | 7/8 `@objectstack/plugin-security` | `src/objects/shipped-sets-identity-default-row-scope.test.ts` L395 | `Test timed out in 5000ms` |\n| 40307144724 | #26014 | 7/8 `@objectstack/plugin-security` | same package (the FAIL line is past the 5,000-line log reach) | — |\n\nThe heads that went back in unchanged then passed (#25979 and #26012 merged; #26007 passed on its next build). So these are load failures, not regressions in those PRs.\n\n- **Load signal.** The Test Core aggregator's suite-duration ceiling annotations on builds after 08:16Z read plugin-security 605–611 s (ceiling 474), plugin-auth 617–928 s (600), driver-sql 603–612 s (451), objectql 1102 s (952). The two builds before 08:16Z that I read (40274667933, 40285852731) carry no overshoot on those four packages.\n- **Mechanism** (the #25870 thread replayed `planRun()` on both trees). Before: five whole-package shards carried about 1866 s of four-wide work each, objectql sat on 2/8, and plugin-security sat on a cli-slice shard with only 899 s of whole-package work. After: four whole-package shards carry about 2141 s each, and objectql and plugin-security share one shard. `turbo --concurrency=4` did not change. What changed is the neighbours, so the heavy suites run 1.3–1.5x slower, and tests that use the 5 s default timeout are the first to fail.\n\n## Fix\n\n1. **Now:** revert #25968 (f36f6190). Its two files have no later commits. This brings back the layout that went red 0 times in 19 builds. Only `scripts/` changes, so it is not governed. Cost: the slowest spec-PR shard goes back to about 25–29 min, from about 20.\n2. #25870 stays open for a placement that takes contention into account, and that work happens off the queue's critical path. The next shard-timings refresh (cron Mon 2026-11-02 05:30Z) has to be read against pin 3c at 3 cli slices again.\n3. After landing, the three anchors (#26047, #26049, #26065) are closed with the queue reading below, or kept open if their test still fails.\n\n## Acceptance\n\n- The revert is merged (the maintainer moves it to the front of the queue by hand).\n- The next 10 full Test Core queue builds after it have no timeout ejection. The reading is posted here with run ids.\n"
+}

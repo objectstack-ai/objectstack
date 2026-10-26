@@ -1,0 +1,31 @@
+{
+  "number": 26190,
+  "kind": "issue",
+  "title": "Record form toast: a delegated-admin scope refusal shows the fixed no-permission line instead of the server's reason",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:11:10Z",
+  "updated_at": "2026-10-26T15:11:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26190",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 4 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nWhen a delegated admin saves something outside their scope in Setup, the toast says only \"You don't have permission to save this record.\" The specific reason the server gave is lost. Once child 3 gives that refusal its own code, the form should show the server's message for that code. Every ordinary permission denial keeps the fixed line.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nBlocked-by: #26189 (card 3 of this split, the server half; number filled in at filing)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 4 (ui, p2): item 3, ui half. Brief 6415795834, item-by-item reading 6415971852 (item 3).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** A delegated admin who hits their boundary needs to know which boundary it was (unit, allowlist or target user) to fix the assignment or ask the right person. The generic line sends them to a tenant admin for something they could correct themselves.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step, after the blocker lands: one os-dev, one PR on the shared refusal helpers in `ui/packages/react/src/utils/error-message.ts` and their two render sites.\n\n**Spec contract.** The new code from child 3, as registered in the ADR-0112 ledger. No other contract.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `noPermissionToSave.{0,300}(delegat|reason|server message)` and the reverse order found 0 hits. #26040 (a refused submit focuses the first invalid field) is adjacent, not this.\n\n## Ruled scope (ruling Q3 item 4)\n\n- The toast renders **that code's server message**.\n- `PERMISSION_DENIED` keeps `form.noPermissionToSave`. **Ruling #24914 B′ is unchanged**, so a denial never leaks why; only the delegation-scope code is shown.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `ui/packages/react/src/utils/error-message.ts`:\n  - `:202` `isPermissionError` holds. It answers true for **any** status 403 (`:206`), for `PERMISSION_DENIED` / `FORBIDDEN` (`:208`), and for \"access denied\" text (`:209–214`). A 403 carrying the new code would still be classed as a plain denial, so the new code has to be read before this check.\n  - `:125–137` `declaredUserMessage` is the existing producer-side `userMessage` marking. It is read first at the form site.\n- `ui/packages/components/src/renderers/form/form.tsx:3033–3044` is the record-form toast: `declaredUserMessage(error) ?? (isPermissionError(error) ? t('form.noPermissionToSave') : …)`. The ruling did not cite this site; it is where the reported toast comes from.\n- `ui/packages/app-shell/src/utils/flowResponse.ts:336–369` holds. It is the same 24914 B′ rule on the flow-run path: `permissionDeniedLine` at `:336–346`, and the refusal arm at `:369`.\n- `form.noPermissionToSave`: `ui/packages/i18n/src/locales/en.ts:216`.\n\n**Note for the dev (found while verifying, not a new rule).** The ruled shape is the code. A server-side `userMessage` marking also exists (above). If the dev finds that the marking would serve instead, that is a question to ask on this card, linking the ruling. It is not a silent swap.\n\n## Expected / acceptance\n\n- A save refused with child 3's code shows that refusal's server message in the toast and the in-form banner, on the record form and on the flow-run path that applies the same rule.\n- A `PERMISSION_DENIED`, a plain 403, `FORBIDDEN` or a row-level-security denial still shows `form.noPermissionToSave`.\n- Tests cover both branches on both render sites."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26023,
+  "kind": "pull_request",
+  "title": "docs(ui): cut ROADMAP.md to a pointer, delete the console-streamlining summary, rename the app-shell extraction guide",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:26:08Z",
+  "updated_at": "2026-10-26T10:21:20Z",
+  "closed_at": "2026-10-26T10:21:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T10:21:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26023",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D8qAi6V5b7pkuny9oUKDyVw)_\n\nPart of #25919. This is PR 1 of the ruled workload (ruling 6407900763, item 3, housekeeping), minus the `ui/AGENTS.md` lines. #25919 remains open for PR 2, the `ui/AGENTS.md` restructure.\n\n## What changed\n\n- `ui/ROADMAP.md`: 1,899 lines cut to a 20-line pointer file. The old text stopped at v3.3.2 (May 2026) and claimed 80 Storybook stories; there is no `.storybook` anywhere in the tree. The pointer names where plans live now: issues and their `area:*` / `priority:*` labels, milestones and `target:*`, the platform `ROADMAP.md` and `NORTH-STAR.md`, the changelogs, and the ADRs. It also states that ADR numbers are allocated in the ObjectStack repository's `docs/adr`.\n- `ui/docs/CONSOLE-STREAMLINING-SUMMARY.md`: deleted. It was a one-off session summary that duplicated the architecture guide.\n- `ui/docs/ARCHITECTURE.md` renamed to `ui/docs/app-shell-extraction-guide.md`, content unchanged. It is the 2026-04 app-shell extraction guide, not an architecture overview; the current overview is `content/docs/guide/architecture-overview.md`. Readers that follow the new name: the real-tree pin in `check-doc-snippet-types.test.ts`, the four `reads` entries in `markdown-test-inputs.mjs` (the deleted file's entries removed), and the `setup.sh` hint, which now points at the architecture overview.\n\n## Acceptance notes\n\n- **`SCAN_ROOTS` row for `ROADMAP.md` kept, against the ruling's wording.** The ruling says to drop it, but `check-doc-links.test.ts` holds the invariant \"scans EVERY tracked root-level markdown file\". `ROADMAP.md` stays a tracked root file, so dropping its row would turn that test red. Keeping it is also the stricter reading: the pointer file's links stay checked. The row could only go if the file were deleted.\n- **`.github/prompts/`** is already absent under `ui/` on `main`. Nothing to delete.\n- **`ui/docs/adr/README.md` is not in this PR.** `ui/docs/adr/**` is on the governed surface, so it would make this PR Tier H and need contract review. It rides PR 2. The fact it would state, that ADR numbers come from objectstack, is in the pointer file meanwhile.\n- **Dependabot item dropped with a reading.** `ui/.github/dependabot.yml` is dead: GitHub reads only the repository-root `.github`. The live root config has a `github-actions` entry with no `groups:` key, and no test pins the `changesets/action` SHA (the card's `changeset-release-action-ref-pin.test.ts` does not exist on `main`). The collision the card describes cannot happen today.\n- **Left on purpose:** comments in `check-doc-expression-carriage.mjs` and its test that tell the history of `docs/ARCHITECTURE.md` (the ruling says existing comments are not swept), and the synthetic `docs/ARCHITECTURE.md` fixtures in `check-doc-links.test.ts`, which build their own tree. The published `ui/apps/console/README.md` still calls the roadmap \"the Console phases and their status\". It was not edited, because a shipped-file change would owe a changeset for the whole fixed group.\n- **No changeset (`skip-changeset`).** No package's `files[]` content changes: `ui/ROADMAP.md` and `ui/docs/**` belong to no package, and `ui/scripts/**` is private tooling.\n\n## Verification (head 29ac985a)\n\n- `pnpm exec vitest run` in `ui/` on `check-doc-links`, `check-doc-snippet-types`, `markdown-test-inputs`, `cross-file-line-citation-census` and `check-doc-expression-carriage` tests: Test Files 5 passed, Tests 377 passed (after `pnpm --filter @objectstack/spec build`, because the carriage test imports the built spec).\n- `node scripts/check-doc-links.mjs` (in `ui/`): exit 0, \"Links are valid across 17 scan roots\".\n- `node scripts/markdown-test-inputs.mjs --audit` (in `ui/`): exit 0, \"114 candidate test files, all adjudicated; 80 declared entries, all present\".\n- `dispatch-gates --commands` derived 22 commands; every one ran with exit 0. `--ran` reconciliation: 18 derived families accounted for, 0 NOT MEASURED.\n- `check-commit-card-trailers --range origin/main..HEAD`: pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01SvjM7dLb5MChvhDJnoGbHV\n"
+}

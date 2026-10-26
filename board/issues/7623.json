@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-10-25T10:02:12Z",
+  "updated_at": "2026-10-26T12:55:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 154,
+  "comments": 156,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
   "body": "**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here; posture, ledger and round reports live in the project. Previous body r269 (⏳ vacant, `os-bill`, `session_0165fj9zYfUrt6ckcUgYBD5a`) is the prior revision of this body.\n\n## Current PM\n\n🟢 `os-project-manager` · `session_014FZ3TJucS1L7BdMe5DAzXC` (Claude Code project \"Objectstack\", seat thread \"运行 objectstack 车道调度\") · seated 2026-10-24T15:55Z on the maintainer's word in that project (「你先负责 skills 车道」). Seated on the release marker 6345728792 (the previous seat's 收班简报, newest event on this post).\n\n- Seat 2 (`domain:skills#2`, #19287, `os-elon-musk`) is seated separately and holds #25663. The lane queue is shared; each seat claims through the card protocol.\n\n## Inherited ledger\n\nPosture and ledger live in the project (pointer only). Canonical ledger = labels + assignee + `Claim:` comments + `head:claude/` PRs, read by `assignee:os-project-manager`.\n\n## Hot-file serial queue\n\n- `.claude/skills/pm-dispatch/SKILL.md` → #25663 (seat 2, claim template + ratchet row 318 → 319).\n- `.claude/skills/pm-dispatch/references/filing-gate.md` → #25498 when claimed.\n- `skills/objectstack-platform/**` + `skills/objectstack-upgrade/SKILL.md` → #25671 when claimed; `skills/objectstack-automation/SKILL.md` → #25069 when claimed.\n- Every other lane file is FREE.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n"

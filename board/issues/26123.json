@@ -1,0 +1,33 @@
+{
+  "number": 26123,
+  "kind": "pull_request",
+  "title": "feat(app-shell,i18n): the Console draws the DEPENDENCY_MISSING install refusal in the author's terms",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:55:21Z",
+  "updated_at": "2026-10-26T14:42:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26123",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XJ5XLtgWVaBQg2nkK9T9j9j)_\n\nPart of #25792\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nADR-0141 D2 refuses an install whose declared `dependencies` the environment does not satisfy: `422 DEPENDENCY_MISSING`, with `details.unmet[]` naming each entry's `packageId`, `dependency`, `range`, what was `found` and the `installedVersion`. Until now the Console showed only the envelope's English sentence, the same in every locale and without the ranges.\n\nThis is item 3 of #25792 (claim amendment 6415110715). The Console now draws the refusal in the author's terms at every install surface that goes through `install-local`: a heading saying nothing was installed, then one line per unmet entry, built from the refusal's own facts.\n\n| Surface | Before | After (zh-CN) |\n|---|---|---|\n| Package page → Install | the server's English sentence | `安装被拒绝：…` then `• 请先安装 app.objectstack.hotcrm 6.x。` |\n| Catalog → Your organization → Install (self-hosted, `installLocal`) | same | same, in the strip above the cards |\n| Setup → Packages → Import | `<sentence> (DEPENDENCY_MISSING)` | same lines |\n\nAn out-of-range entry reads `• 请先安装 com.acme.billing ^2.1.0（当前安装的是 1.4.0）。` / `• Install com.acme.billing ^2.1.0 first. Version 1.4.0 is installed.` The `unreadable-range`, `unreadable-version` and `unreadable-declaration` entries each get their own line.\n\n## How\n\n- `console/marketplace/dependencyMissing.ts` (new): `readDependencyMissing(details)` reads `details.unmet[]` all or nothing. An unknown `found`, an empty list, or an entry missing its `dependency`/`range` returns `null`, so the Console never shows fewer things to install than the server refused for. `dependencyMissingText(facts, t)` builds the heading plus one bullet per fact. `useDependencyMissingText()` returns the text for a caught error whose code is `DEPENDENCY_MISSING` and whose facts it can read, else `null`, and the caller keeps its own message.\n- `marketplaceApi.installLocal()` now also carries the envelope's `details` on the error it throws, next to `code` and `status`.\n- `PackagesPage`'s `apiJson` now carries `code` and `details` on its thrown `Error`. No existing caller reads either one; the message is unchanged.\n- `MarketplacePackagePage.doInstallLocal`, `MarketplacePage.doOrgInstall` and `PackagesPage.onImportFile` try the refusal text first. The org strip and the import note gain `whitespace-pre-wrap` so the lines stay lines; the package page note already had it.\n- `@object-ui/i18n`: `marketplace.install.dependencyMissing.{heading,absent,outOfRange,unreadableRange,unreadableVersion,unreadableDeclaration}` in all ten locale packs. Setup → Packages uses the packs through the hook because the `engine.*` table is en/zh only.\n- `scripts/sdui-manifest.record.json`: the locale packs are registry sources, so the recorded source digest moves. It was regenerated with `node scripts/gen-sdui-manifest-node.mjs`; `sdui.manifest.json` is byte-identical.\n\nThe dependency shows as its package ID (`app.objectstack.hotcrm`), not a display name: the refusal's facts carry no display name, and this PR adds no server change.\n\n## Tests\n\n- `dependencyMissing-25792.test.ts`: the reader (all or nothing, every `found`), the text, and `installLocal` rejecting with `code`, `status` and `details` over a stubbed wire.\n- `MarketplacePackagePage.dependencyMissing-25792.test.tsx`: the real `marketplaceApi` over a stubbed `fetch`. The note equals the heading plus two lines carrying each entry's id, range and version, and the server sentence is gone. A control case (no `unmet`) keeps the server message.\n- `MarketplacePage.orgInstallDependencyMissing-25792.test.tsx`: the org install's real `installLocal`, the same lines, the `whitespace-pre-wrap` class, and a `MANIFEST_CONFLICT` control.\n- `PackagesPage.importDependencyMissing-25792.test.tsx`: the real `I18nProvider`. It checks the exact zh-CN lines (`• 请先安装 app.objectstack.hotcrm 6.x。`) and en lines, plus a control case.\n\nEvidence:\n- **Red first:** with the wiring reverted, 5 failed and 7 passed. The controls and the pure reader/text cases passed.\n- **Green:** 12/12 pass.\n- **Ablations:** 5, all red, each restored to HEAD:\n  - drop the hook at the import door\n  - drop the hook at the org install\n  - drop `details` in `installLocal`\n  - drop `details` in `apiJson`\n  - drop `whitespace-pre-wrap` on the org strip\n- **Wider runs:** `marketplace/`, `views/metadata-admin/` and `packages/i18n` ran 727 files and 8276 tests, all passing. After merging main, the new tests and `packages/i18n` ran 1365 tests, all passing.\n- **Checks:** app-shell `tsc --noEmit` passed. Scoped eslint shows 0 errors; its first run was red on an unused import in one new test. `check-i18n-call-site-keys`, en-drift, dead-keys and designer-parity all pass.\n\nWhat to do: nothing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NndsH9Qm7k6AS2i2fWbjNA\n\n_Generated by [Claude Code](https://claude.ai/code/session_01NndsH9Qm7k6AS2i2fWbjNA)_\n"
+}

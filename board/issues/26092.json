@@ -1,0 +1,35 @@
+{
+  "number": 26092,
+  "kind": "issue",
+  "title": "tooling: the root tsconfig.json is both the shared base for 72 packages and the scripts/ program (the one DEBT entry, 26 errors); 14 packages re-set module resolution three ways; 18 vitest configs are byte-identical; three debt ledgers are empty",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tech-debt",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:33:28Z",
+  "updated_at": "2026-10-26T13:29:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26092",
+  "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat — one os-dev, two PRs (tsconfig; vitest). Dedupe: REST list (439 issues), grep `tsconfig|vitest.config|preset` → #7849 (open, tracking: a package with tests and no vitest.config lets a stale core dist decide), #25949 (on hold, ui: 28 vite configs use `__dirname`), #25947 (tracking, ui: root tsconfig's `noUnusedLocals`), #25920 (ui: 94 tsconfigs, 25 declare unused `@/*`). The root-tree base-config split is on none of them; a shared vitest preset is the structural answer to #7849. **New.**\n\n**谁付代价（业务筛）:** every package author copies a tsconfig and a vitest config and gets one of three module resolutions by accident; the type-check debt ledger carries a permanent root entry whose note says the cause is one missing `types: [\"node\"]`; a package that forgets its vitest config tests a stale dist (#7849) and nothing structural prevents it.\n\n## Measured (HEAD 0d83ee8f77)\n\n- `tsconfig.json` files: 83 (142 `tsconfig*.json`); 72 extend `../../tsconfig.json` or `../../../tsconfig.json`; 11 extend nothing. `module`/`moduleResolution` re-set in 14 packages with three combinations (NodeNext, bundler, ES2020); `target` re-set in 13 (ES2020 / ES2022); `types` set in 71.\n- `scripts/check-type-check-coverage.mjs` `DEBT` (about line 835): one entry, the workspace root, 26 errors, its own note naming the missing `types: [\"node\"]` for `scripts/`; `TEST_DEBT` (about 1134) is empty but kept with about 240 comment lines.\n- `test-typecheck-debt.json` ledgers: 20, holding 1,220 errors across 357 files (plugin-approvals 324, spec 242, objectql 233, runtime 190, plugin-auth 88, mcp 53); three are empty `{entries:{}}`: `packages/rest`, `packages/client`, `packages/plugins/knowledge-ragflow`.\n- `vitest.config.*` outside `ui/`: 77 files, 5,755 lines; 18 are byte-identical (md5 `0d3c266a…`), each setting only `disableConsoleIntercept: true`, which `scripts/check-console-intercept-disarm.mjs` then enforces per file; `packages/cli/vitest.config.ts` is 897 lines. tsup, by contrast, is shared (39+ packages use `--config ../../../tsup.config.ts`).\n\n## Wanted\n\n- PR 1 (tsconfig): add `tsconfig.base.json` (and `tsconfig.test.base.json` for the 42 `tsconfig.test.json`); packages extend the base; the root `tsconfig.json` becomes the `scripts/` program with `types: [\"node\"]`, which clears the one `DEBT` entry — delete it in the same PR per the ratchet rule (\"a package that graduates deletes its entry in the same PR\"); delete the three empty ledgers and the empty `TEST_DEBT` block's dead prose. ⛔ Strictness is not loosened anywhere; a package that re-sets `module` keeps doing so only with a one-line reason.\n- PR 2 (vitest): export one shared preset (e.g. `vitest.preset.mts` at the root) with `disableConsoleIntercept: true` and the other invariants `check-console-intercept-disarm.mjs` guards; the 18 identical configs become `mergeConfig(preset, {})` or the preset directly. The gate stays (it reads the effective config; it goes green by construction) — ⛔ not deleted on this card. #7849's hazard is addressed by the preset making a per-package config a one-liner; the card notes it, does not close it.\n- Debt pay-down of the 1,220 errors is NOT this card: per-package cards if triage wants them (plugin-approvals and spec first).\n\n## Acceptance\n\n- `pnpm typecheck` and `pnpm check:type-check-coverage` / `check:type-check-debt` green with the root `DEBT` entry gone and three ledgers deleted.\n- `find packages apps examples -name 'vitest.config.*' -exec md5sum {} + | sort | uniq -c | sort -rn | head -1` → count 1 (no identical copies), or the remaining copies are the preset import itself.\n- `pnpm test` on the affected packages unchanged in pass/fail.\n\n**Size:** M (PR 1), S (PR 2). **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#7849 (open), #25949 (on hold), #25947, #25920."
+}

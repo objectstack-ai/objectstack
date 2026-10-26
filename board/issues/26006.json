@@ -1,0 +1,37 @@
+{
+  "number": 26006,
+  "kind": "pull_request",
+  "title": "fix(pm): fleet-roster and mailbox-open page their reads in the script, not through gh --paginate --slurp",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:50:06Z",
+  "updated_at": "2026-10-26T09:24:43Z",
+  "closed_at": "2026-10-26T09:24:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T09:24:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26006",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D6hfpTrgtTBiyXscg9Lfr1f)_\n\nFixes #25962\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\n`scripts/pm/fleet-roster.mjs` and `scripts/pm/mailbox-open.mjs` read lists through `gh api --paginate --slurp`, which the built-in gh of cloud sessions refuses. The fleet roster (#25462) could not be regenerated from a cloud seat.\n\n- New `scripts/pm/gh-pages.mjs`: `readAllPages(path)` forces `per_page=100`, walks `page=1, 2, …` with plain `gh api <path>` until a short page, and returns an error (never a partial list) on a failed page, a non-list page, or more than 50 full pages. No `Link` header, the same rule as `board-snapshot.mjs`.\n- Both scripts import it; `ghJson()` keeps its call shape, so no caller changes.\n- Each `--self-test` gains the battery \"paging: a three-page read through the loop equals the slurped array\" (4 cases: 100+100+37 rows equal the slurped array flattened; the pages asked and kept query keys; an exact multiple stops after one empty page; a failed or non-list page is an error). Battery floor 7 → 8 in both.\n\nNo change to what the roster shows or its columns. No relay change. Publishes nothing, so `skip-changeset`.\n\n## Evidence\n\n- `node scripts/pm/fleet-roster.mjs --self-test` → 73 cases in 8 batteries pass; `node scripts/pm/mailbox-open.mjs --self-test` → 44 cases in 8 batteries pass.\n- With a fake `gh` first on PATH that refuses `--paginate` and `--slurp` and forwards everything else to the real CLI: the base commit exits 3 (`gh: --paginate is not supported…`), this branch exits 0 and its `--json` rows (22) equal the base commit's rows read with the real gh.\n- `readAllPages` on `/repos/objectstack-ai/objectstack/pulls?state=open` under the fake gh: 20 rows, the same count as `gh api --paginate --slurp`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Lv8mtVfg8BPpU5Zkh3xGj8\n"
+}

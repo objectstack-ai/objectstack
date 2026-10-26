@@ -1,0 +1,36 @@
+{
+  "number": 26127,
+  "kind": "pull_request",
+  "title": "chore(ui): re-pin the console eager-closure ceiling after the spec shared chunks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:09:03Z",
+  "updated_at": "2026-10-26T13:46:09Z",
+  "closed_at": "2026-10-26T13:46:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T13:46:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26127",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9VQKUCrmuRDnacLPUeKUV3p)_\n\nPart of #25925\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nRe-pins the console eager-closure budget in `ui/scripts/check-eager-closure-budget.mjs` onto a reading of `main`, and moves the two rendered-reading literals its unit test pins. Nothing reaches a bundler input, nothing under `ui/packages/**` changes, so the sdui manifest record does not move.\n\n| constant | before | after |\n|---|---:|---:|\n| `MAX_EAGER_CLOSURE_GZIP_BYTES` | 3,579,945 | 2,489,948 (down 1,089,997) |\n| `BASELINE` | 3,072,056 · 85 of 2291 · `b6f11d3` | 1,982,059 · 85 of 2387 · `cc378e93` |\n| `PER_CHUNK_GZIP_CEILINGS['vendor-objectstack']` | 1,867,000 | 842,730 (down 1,024,270) |\n| `PER_CHUNK_BASELINE['vendor-objectstack']` | 1,531,986 | 507,716 |\n\nEach line comes down by exactly what its payload lost, so each keeps the headroom it had: aggregate 507,889 bytes (0.71x the 695 KiB regression), `vendor-objectstack` 335,014 (0.47x). The other three per-chunk rows stayed in range and are untouched.\n\n## Why\n\nOn `main` at `cc378e93` the gate exits 2: its headroom-sensitivity half calls the aggregate ceiling (1560.4 KB of headroom, 2.25x) and the `vendor-objectstack` row (1327.4 KB, 1.91x) blind. The closure shrank by about a third since the objectui-era baseline, almost all of it `vendor-objectstack`, after `@objectstack/spec` moved to one shared-chunk ESM graph (`3a2d38c6e2`) and objectui moved into this repository as `ui/`. How the drop splits between those two is not measured.\n\n## Readings (one container, one instrument)\n\n`pnpm --filter '@object-ui/console^...' build`, then `CI=true pnpm exec vite build` in `ui/apps/console`, both under `scripts/pm/os-verify-lock.sh` (VERDICT command-exit 0), reading `ui/apps/console/dist/eager-closure.json`.\n\n| build | eager gz bytes | chunks | `vendor-objectstack` gz |\n|---|---:|---:|---:|\n| `main` `cc378e93` (control) | 1,982,059 | 85 of 2387 | 507,716 |\n| `cc378e93` again, after the edit (re-read) | 1,982,059 | 85 of 2387 | 507,716 |\n| experiment: both `SystemFieldName` imports replaced by a local literal, uncommitted | 1,981,898 | 85 of 2387 | 507,693 |\n\nThe experiment moved the aggregate by -161 bytes (largest moves: `vendor-objectstack` -23, `ui-components` -19, `index` -16): zero saving. On-disk proof before its build: marker count 1 and old-import count 0 in both files; restored with `git checkout HEAD --` under a trap, both blob hashes equal to HEAD's and `git diff HEAD` empty afterwards. The console aliases workspace packages to `src`, so the build read the mutated sources.\n\n## Gate output on this branch\n\n`node scripts/check-eager-closure-budget.mjs` after the re-pin: closure ✅ 1935.6 KB / 2431.6 KB, per-chunk ✅ ×4, sensitivity ✅ ×5 (aggregate 0.71x, `vendor-objectstack` 0.47x). It still exits 1 on the membership half, which this PR does not touch (see Acceptance notes).\n\n## Acceptance notes\n\n- The card's first step, repointing the two `SystemFieldName` imports at `@objectstack/spec/data`, is not possible: `packages/spec/src/data/index.ts` re-exports no `SystemFieldName` (it is declared in `packages/spec/src/system/constants/system-names.ts` and reaches consumers through `system/index.ts` only), so the repoint would fail type-check. It would also save nothing: `FlowRunner.tsx` and `flowResponse.ts` in app-shell still import `/system` by value, and the local-literal experiment above measured -161 bytes. Both import lines are left as they are.\n- The membership half reds on `main` before and after this change: \"`packages/core` is declared in `framework` but 1 in `vendor-objectstack` (89 of its 90 modules landed in `framework`)\". Which module moved is not measured here. Its fix lives in the grouping rules in `ui/apps/console/vite.config.ts`, outside this card's file surface, and the gate itself says not to move a ceiling to absorb it.\n- No workflow under `.github/workflows/` runs `check:eager-closure` today, so the gate is local-only until the ui CI lands; this re-pin makes it meaningful again when it does.\n- The spec half of #25925 (re-exporting `stripReadDecorations` / `ValidateDataIssueSchema` from a subpath the console already loads) is `domain:spec` work and is not addressed here.\n\n## Tests\n\n- `./node_modules/.bin/vitest run --maxWorkers=2` in `ui/` over `scripts/__tests__/check-eager-closure-budget.test.ts` plus the five other test files that name the checker (`check-eager-locale-catalogues`, `check-side-effects-array`, `vite-declared-lazy-views`, `vite-types-zod-lazy`, `vite-ineffective-dynamic-imports`): Test Files 6 passed (6), Tests 300 passed (300). Before the literal move, the same run failed exactly the two cases that pin the rendered reading.\n- No changeset: `ui/scripts/**` belongs to the private `object-ui-monorepo` root and publishes nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PykFDU1CQLdgAD1T6LPhLS)_\n"
+}

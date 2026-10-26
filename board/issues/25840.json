@@ -2,8 +2,8 @@
   "number": 25840,
   "kind": "issue",
   "title": "qa(checklist): automation — 24 ledger edits from the 18.2.0 release sweep (#25807)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:on-hold",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T23:01:55Z",
-  "updated_at": "2026-10-26T00:01:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T13:35:08Z",
+  "closed_at": "2026-10-26T13:34:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25840",
   "body": "Filing gate: maintainer-directed task. Filed by the 18.2.0 release-assessment thread · `session_01G3h9iZTpL8aCiXbfsp8H5u`. ⛔ Not a claim, ⛔ not dispatched.\n\n**Maintainer's words** (project thread, 2026-10-25, verbatim): 22:54Z 「约 300 条清单准确性问题：是不是应该开卡？」, then 22:55Z 「写issue，不派发」.\n\n**Parent:** wave anchor #25807 (18.2.0 release test sweep). RUNNER's extraction obligation parks checklist-accuracy findings on the anchor; the maintainer asked for them as issues, so the wave's findings are split into one card per ledger file and the anchor links each card. This is not a release blocker, so it carries no `target:v18`.\n\n**Reader who acts:** the lane owning `docs/qa/platform-checklist/**` (`domain:devx`). Dedupe (open and closed): no card holds these lines; the 18.0 precedent closed its accuracy rows on its anchor #24579.\n\n## Wanted\n\nFor each line below, edit `docs/qa/platform-checklist/areas/automation.json`: revise the item's text, bump its `revision`, and append a `history` entry citing the run record the line comes from. Keep `pnpm check:platform-checklist` green. A line that turns out to describe a product defect rather than stale text gets its own card instead of a ledger edit.\n\n## Findings (24)\n\n### From #25812 — `priority:P0`, 23 items, at `6679644a`, pin `b41ed7f68956`\n\n- `automation.packaged-flow-disable-durable`: steps 2/8/10 task POST needs `project`; step 4's \"reads are open\" holds only at the apiMethods layer (a contributor gets 403 on `sys_metadata_activation`).\n\n### From #25815 — `release-18.2.0-tier1`, 156 items, at `6679644a`, pin `b41ed7f68956` (clause labels: aK = acceptance[K], nK = negative[K])\n\n- `automation.durable-suspend-restart` a0/a1/a4: the pin drives its own fixture (flow_durable_suspend, a screen-node pause) — not the showcase showcase_task_follow_up timer or the showcase_project_closure → showcase_closure_signoff nested pair the steps name; the generic persistence/consumption assertions hold, the per-kind rows are not observed\n- `automation.durable-suspend-restart` a1: the pin's 'cold boot' is a second bootStack kernel over the same file inside one test process, not a separately spawned server process\n- `automation.flow-authoring-refusals-v18` ref is accurate: it scopes the nine unit files to acceptance[0] only and says a1-a3 are manual; all nine files exist with ≥1 test\n- `automation.flow-run-semantics-v18` a2/n0: the ref's two elevated-door pins (packages/runtime/src/{action,endpoint}-flow-elevated-door.test.ts) are unit door pins over a scripted automation service and never drive the trigger door the step names (POST /automation/:name/trigger); the wire pins that do — packages/verify/src/automation-trigger-elevated-door.test.ts (HTTP injection, 403 PERMISSION_DENIED, runs 0 by listRuns) and packages/qa/dogfood/test/flow-door-elevated-start.dogfood.test.ts — are not in the ref (the runtime file's own header names them as the wire half)\n- `automation.flow-run-semantics-v18` a1: no pin in the ref reads back a field a record-triggered run stamped over HTTP; flow-cel-current-user.test.ts drives the engine only\n- `automation.inbound-hook-timestamped-signature` a2: no pin byte-compares the refusal arms' bodies against each other; rows assert code + typeof message only (member-vs-mount parity is per row, not across arms)\n- `automation.paused-run-trigger-record-masked` a0: the column parse is an engine (isSystem) read of sys_automation_run, plus an HTTP data-door read that checks only variables_json.record; 'null where unset' is not exercised\n- `automation.paused-run-trigger-record-masked` a3: the 'second process' is a second bootStack over the same SQLite file inside the same vitest process, not a spawned server\n- `automation.paused-run-trigger-record-masked` n0: every reader in the pin is the dev admin token; 'whichever persona reads it' is not driven across personas\n- `automation.scheduled-work-opt-in` a1/a2: both pins assert that flows are ARMED (or not) and the refusal sentence on a LiteKernel; neither observes a served boot log line or run rows after intervals\n- `automation.screen-flow-roundtrip` a4: the spec's final assertion is page.getByText(assignee) on the grid — exactly the 'not just the refreshed grid cell' the clause excludes\n- `automation.screen-flow-roundtrip` a0/a3: the spec never reads the run (status paused/completed); only request capture and UI toast\n- `automation.setup-packaged-automation-board` a0: the objectui ref→URL half names PackagedAutomationPage.navContribution.test.tsx (exists at the pin) in the clause's verify but not in automated.ref; it is component-layer and scores nothing either way.\n- `automation.trigger-type-matrix` n0: names packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts › 'anonymous POST /automation/:name/trigger is denied (401)' (exists, line 587) but the file is not in automated.ref, so a ref-driven run never executes it\n\n### From #25817 — `release-18.2.0-manual-set`, 29 items, at `6679644a`, pin `b41ed7f68956`\n\n- `automation.trigger-status-contract`: steps[7] asks for \"the SAME disabled flow\" through `/actions` and an endpoint, but no stock flow is reachable from all three doors.\n- `automation.trigger-status-contract`: The runner used `showcase_reassign_wizard` with `showcase_bulk_reassign`, and `showcase_inquiry_purge` with its endpoint.\n- `automation.trigger-status-contract`: The `/actions` 400 and 422 rows need a type:'flow' action. The recipe could add `PUT /api/v1/meta/action/NAME?package=com.objectstack.qa.automation`.\n- `automation.trigger-status-contract`: The recipe knownGap \"NOT yet proven by a live run\" is stale.\n- `automation.trigger-status-contract`: A bodyless resume of the stock wizard answers 400 `INVALID_SCREEN_INPUT`, not 200.\n- `automation.packaged-flow-subflow-disable-refusal`: knownGaps[0] is partly stale: a tenant caller can be authored through `POST /api/v1/automation`, and it does not guard.\n- `automation.packaged-flow-subflow-disable-refusal`: A `?package=`-authored flow counts as deployment-authored (the toggle answers 409 `RESOURCE_CONFLICT` \"authored in this deployment\"). So the self-caller arm and N1 need a package-loader-installed package.\n- `automation.packaged-flow-clone-contract`: For `{}`, A0's `details` names only the first missing field.\n- automation.flow-run-step-nesting steps[4]: the Studio route is `/_console/studio/com.example.showcase/automations?surface=flow:NAME`, then the Runs tab; probe flows are under `~org`.\n\n## Acceptance\n\n- Every line above is either applied (item revised, `revision` bumped, `history` cites the record) or answered on this card with the reason it was not.\n- `pnpm check:platform-checklist` is green.\n- The PR links this card and #25807.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

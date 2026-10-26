@@ -1,0 +1,37 @@
+{
+  "number": 26027,
+  "kind": "pull_request",
+  "title": "fix(plugin-dashboard): a compareTo KPI tile shows its number when the reader picks All time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:31:15Z",
+  "updated_at": "2026-10-26T14:34:13Z",
+  "closed_at": "2026-10-26T14:34:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:34:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26027",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9KA65exXwidHdYJ3vG9pE5U)_\n\nFixes #25970\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA dataset-bound widget with `compareTo` now asks for a comparison only when its resolved filter carries a date condition on the compared field (on any field when `compareTo.dimension` is omitted). When the filter dates nothing, which is what the reader's **All time** on the dashboard date filter produces, the widget sends the same query a widget without `compareTo` sends and the tile shows its number with no comparison badge.\n\n- `ui/packages/plugin-dashboard/src/DatasetWidget.tsx`: new exported `filterDatesField(filter, dimension?)`. The widget's declared comparison becomes `declaredCompareTo`; the `compareTo` the query, the signature and the overlay read is that value only when `filterDatesField` holds. No window is lowered either, so `runtimeFilter` is untouched in that case.\n- `ui/packages/plugin-dashboard/SKILL.md`: the \"When NOT to use `compareTo`\" line now separates a date condition that is not a closed window (still an error) from a filter that dates nothing (no comparison, no error).\n\n## Mechanism, measured\n\nPicking All time calls `onChange(undefined)` (`DashboardFilterBar.tsx`, the ALL sentinel). `buildWidgetScopedFilter` skips an empty value, so `DashboardRenderer` merges no condition and the widget's own `filter` reaches `DatasetWidget` unchanged: the date key is ABSENT, not an open range. For the HotCRM \"Selected Period\" tile that means a runtime filter with no date at all, the case this PR omits the comparison for.\n\n## The ruling this PR implements (the seat's delegated call)\n\n- An author-declared one-bound window (`$gte` only, e.g. a YTD tile) **stays an error**. The executor and the spec define `compareTo` only on a two-bound window, so the widget still sends `compareTo`, and the executor's refusal names the fix. HotCRM's YTD / QTD / 12M tiles written as one bound keep erroring until they are written as a closed pair.\n- Two dated fields with no `compareTo.dimension` stay the executor's ambiguity error.\n- The omission applies only when the filter carries no date condition on the compared field at all. \"A date condition\" is any ISO-date operand under the field, at any depth and in any position (`$or` / `$not` included), deliberately wider than the windows `extractDateWindows` lowers. A custom range with only a start date picked in the filter bar (`{ $gte }`) therefore also keeps erroring.\n\n## Tests\n\nAt head `b256ae44`:\n\n- `ui/packages/plugin-dashboard` whole package, `vitest run --maxWorkers=2 packages/plugin-dashboard/` under the verify lock: Test Files 188 passed (188), Tests 1842 passed, 6 skipped.\n- New in `DatasetWidget.compareTo.test.tsx`: `filterDatesField` unit cases, and four widget cases against a source that answers the way the executor does: no filter, a non-date filter, a named dimension left undated (all three send no `compareTo` and render the number with no badge), and a one-bound `$gte` window (still sends `compareTo` and shows the refusal).\n- New `DashboardRenderer.compareToAllTime-25970.test.tsx` drives the real Radix select: under the default `this_quarter` range the tile compares, then after picking All time the last selection is exactly the no-comparison query, the number shows, and no badge appears. A YTD tile (`$gte` only, opted out of the dashboard filter) keeps the refusal.\n- Four existing fixtures declared `compareTo` with no dated filter and had the mock answer a `__compare` column the real executor would have refused (`DatasetWidget.test.tsx` forwarding case, `colorVariant`, `comboPresentation`, `dimensionlessMeasures-11261`). Each now states a closed window. The objectui#7495 control (bar vs pie with no window) now uses a one-bound filter so its refusal still has something to refuse.\n- `pnpm --filter @object-ui/plugin-dashboard type-check`: exit 0; `tsc -p tsconfig.test.json --listFiles` includes both changed compareTo test files.\n- Ablation, once: the omission condition replaced with the bare declared value through `scripts/ablation-replace.mjs` (anchor x1 to x0, marker x0 to x1, restored blob equal to HEAD). The three omission cases and the All-time dashboard case went red (4 failed, 36 passed); the one-bound and YTD cases stayed green, as they pin unchanged behaviour.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `b256ae44`: 46 derived commands, each run, every one exit 0. `--ran` with exit codes: \"46 derived famil(ies) accounted for — 46 run, 0 NOT-MEASURED (a DERIVED zero)\". `node scripts/check-sdui-manifest.mjs` is among them after the re-record; `node scripts/check-changeset-fixed.mjs` (roster under `.changeset`) also exit 0. Type-check lanes, Test Core and the wide-population families are CI's.\n\n## Acceptance notes\n\n- A widget whose author wrote `compareTo` with no date anywhere and no dashboard date filter bound to it now shows no comparison silently, where it used to show the refusal. At runtime that case cannot be told apart from the reader's All time, and the ruling puts the reader's case first. Catching it would belong at authoring time (a lint on `compareTo` over a widget that no date filter can reach); not filed here.\n- The dataset-bound path of `ObjectChart` (`ui/packages/plugin-charts`) does not forward `compareTo` to `queryDataset` at all, so it never hit this refusal. Observation only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RJW3o457EFFwmLN1429vn9)_\n"
+}

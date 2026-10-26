@@ -1,0 +1,37 @@
+{
+  "number": 26036,
+  "kind": "pull_request",
+  "title": "fix(storage)!: an anonymous write carries no file, at every anonymous door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:54:19Z",
+  "updated_at": "2026-10-26T11:34:44Z",
+  "closed_at": "2026-10-26T11:34:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:34:42Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26036",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X5Y7YBfgeAvejMYwsPJZwdM)_\n\nFixes #25694\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## What this changes\n\nRuling C on #25572 (\"an anonymous submission carries no file\", landed at the public form door by #25682) now holds at every anonymous write door of ADR-0138 D2, as the maintainer chose for this card (「立卡,先实测再修」).\n\n- **The rule, in one place** (`@objectstack/service-storage`, the file-reference lifecycle). A record write whose caller has no user may not put a value in a file field (`FILE_REFERENCE_TYPES`). It is refused in the before-write hook, before the driver runs and before any file is looked up, so a refused write leaves nothing behind.\n- **The answer is the form door's.** `400 VALIDATION_FAILED`, one `fields[]` entry per refused field with the ADR-0114 field code `invalid_value` and the field's label, built with the same `validationFailure` and judged with the same emptiness rule (`isEmptyForRequired`). No error code is added.\n- **Unchanged.** An empty or absent file field is written as before, so an anonymous update may still leave a file field out or clear it under the grants a deployment binds. Signed-in callers, system writes and context-less programmatic writes are not judged. \"Has no user\" is the caller the #25692 read verdict already asks about, so the two rules read one caller.\n- **Per door class.** Classes 2, 3 and 6 are reads. Class 1 keeps its own judgement at the door (#25682). Class 4 is closed by this change. Class 5 was measured closed on `main` before this change, and the rule above holds for it as well. The measurements are with the server seat.\n\nWhy the lifecycle and not each door: one guard closes the whole class, including a door added later, and it sits on the path the claim file surface names. The class-4 door itself (`@objectstack/runtime`) is not edited.\n\n## Declarations\n\n- `Clause-②: no (narrowing)`, measured on this diff: an anonymous write that carried a file value is refused. Nothing refused becomes accepted. The claim wrote `Clause-②: no` and named this arm as expected.\n- `Metadata-protocol: none`: nothing a metadata author writes changes.\n- One `patch` changeset on `@objectstack/service-storage`, `fix(storage)!:`, with the BREAKING section and the ADR-0087 disposition `not-required (no-migration-prescription)`.\n\n## Three existing fixtures changed, with their subjects kept\n\n`sys-file-copy-backfill-organization-stamping.test.ts` (three cases) and `backfill-sys-file-public-scope.test.ts` drove a copy-on-claim write with a caller that carried an organization and no user. Their subject is organization stamping and scope on the copy, not the caller, and a user-less caller is now the anonymous case. Each now names a user. Nothing they assert changed.\n\n## Tests\n\nAll on head `b2f90ab2b5`.\n\n- `pnpm --filter @objectstack/service-storage test`: Test Files 65 passed (65), Tests 1197 passed (1197). `typecheck` (including `check:test-typecheck`): exit 0.\n- Red first: the pins were committed ahead of the fix (`cb5bb350`, `be589179`) and failed on the unchanged lifecycle; the fix is `1171d6c2`. The ablation below is the same proof on the final tree.\n- `file-reference-lifecycle.test.ts`, new describe, 11 cases: refusal on insert for four value shapes, refusal on update, several fields named in one envelope by label or name, and five controls (empty or absent values, an anonymous update that leaves out or clears a file field, a signed-in caller, a system and a context-less write, an object with no file field). Each refusal asserts `code` and the `fields[]` entry, and that nothing was written, no file was looked up and no bytes moved.\n- `file-reference-read-verdict.integration.test.ts`, new describe, 7 cases on a real `ObjectQL` over `SqlDriver` with `StorageServicePlugin` booted: insert and update refused for the guest envelope across the file arms the read verdict distinguishes, nothing written and no ownership moved, plus a guest write with no file and a signed-in control.\n- `eslint --no-inline-config` with the root config over `packages/services/service-storage/src`: exit 0. The repo-wide `pnpm lint` is CI's run.\n- Full dogfood battery (owed for the `(narrowing)` arm), `pnpm --filter @objectstack/dogfood test` under the verify lock, no shard, no path, on `b2f90ab2b5`: Test Files 295 passed, 1 failed, 3 skipped (299); Tests 2522 passed, 1 failed, 18 skipped (2541). The one failure is `authz-probe-blind-spot.test.ts`, the `packages/runtime/src/domains/i18n.ts` control count (expects 3 `handleI18nRequest`, finds 4). It is red on `main` independently of this diff: neither that test nor that file differs between this branch's base `05f7758f` and current `main` `39a78b15`, and this diff touches neither package.\n\n## Proof\n\nThrough `node scripts/ablation-replace.mjs` (anchor 1 to 0, blob changed, restored blob equals HEAD, `git diff HEAD` empty). With the anonymous-caller test replaced by an always-pass, 12 pins redden: the 6 unit refusal pins, the 5 integration refusal pins, and the integration signed-in control, which follows from the guest pins having left the file claimed. The 5 unit controls and the guest no-file control stay green. Both suites import the lifecycle through relative `src` paths, so no `dist/` is involved.\n\n## Gates\n\n- Derived on `b2f90ab2b5` by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (no paths; the change set is from the merge base): 71 commands, each exit code captured before any pipe. 70 exited 0 in sequence. `pnpm check:dual-build-cjs-loads` first exited 3 (seven packages outside the dogfood closure had no `dist/`, nothing measured), and after building those seven its rerun exited 0. `--ran`: 71 derived, 71 run, 0 NOT-MEASURED, 0 UNRUN, exit 0.\n- CI check-runs had not concluded when this PR opened; convergence is read by the seat.\n\n## Acceptance notes\n\n- The rule lives where the file-reference hooks are installed, so it binds wherever the storage service is composed (it is on the always-on slate `serve` mounts). A kernel composed without the storage service has no platform files for an anonymous write to carry.\n- The class-4 refusal message is inline English beside the form door's, from the same pattern. No catalog key is added.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VG2Ug3VQqDPcepHcmoD9m1)_\n"
+}

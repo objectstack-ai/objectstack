@@ -1,0 +1,36 @@
+{
+  "number": 26152,
+  "kind": "pull_request",
+  "title": "refactor(app-shell): move ObjectView's module-level helpers into sibling modules (slice 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:58:03Z",
+  "updated_at": "2026-10-26T14:34:13Z",
+  "closed_at": "2026-10-26T14:34:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:34:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26152",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WvBJiP2QdLXNLC6mVASH5U)_\n\nPart of #25992 (slice 1 of the move-only split; the card stays open for the next slices).\n\nClause-②: no\nMetadata-protocol: none\n\n## What moved\n\nRe-measured on `origin/main` 8a990d8b before coding: `ui/packages/app-shell/src/views/ObjectView.tsx` was 4414 lines, module-level code on lines 1-1436, the component from line 1437. This slice moves module-level helpers, types and constants, verbatim, into three sibling modules:\n\n- `objectViewHelpers.ts`: `VIEW_TYPE_ICONS`, `FALLBACK_USER`, `substituteFilterTokens`, `declaredPrimaryToolbarAction`, `selectFilterParams`, `MOBILE_FAB_LIST_CLEARANCE`.\n- `objectViewRecordLinks.ts`: `listRecordDetailUrl`, `NO_RELATED_HANDLERS`, `listRecordActionsValue`, `ListRecordRoutes`.\n- `objectViewTabs.ts`: `defaultListColumnsFromObject` (with its docblock), `bulkWiredActionNamesKey`, `buildAddViewSpec`, `sanitizeViewOverride`, `loadViewOverrides`, `buildViewTabs`, `setDefaultViewPatches`, `VIEW_ROW_STATE_KEYS`, `getListViewConfigKeys`, `buildViewConfigSaveBody`.\n\n`ObjectView.tsx` keeps the component, imports these back, and re-exports every name it exported before (`ListRecordRoutes` as a type re-export). The package entry (`src/index.ts`, `src/views/index.ts`) is untouched. The only edits beyond the move are the `export` keyword on the five formerly file-local names the component now imports (`VIEW_TYPE_ICONS`, `FALLBACK_USER`, `substituteFilterTokens`, `MOBILE_FAB_LIST_CLEARANCE`, `bulkWiredActionNamesKey`), a one-line file header per new module, and pruning the imports `ObjectView.tsx` no longer uses.\n\nMove-only proof: the multiset of non-blank lines of the base file equals the multiset of the new `ObjectView.tsx` plus the three modules' bodies, once the added `export` keyword is normalised away. The only lines that differ are import lines and the new import / re-export block.\n\n## Kept in ObjectView.tsx on purpose\n\n- The per-kind options family (`timelineViewOptions`, `calendarViewOptions`, `ganttViewOptions`, `galleryViewOptions`, `kanbanViewOptions`, `storedLegacyOptions`, `isSameOptionsValue`). Four app-shell tests scan `ObjectView.tsx` source text for this family: `ObjectView.galleryBinding-7547`, `ObjectView.ganttBinding-7070`, `ObjectView.calendarBinding-7029` and `ObjectView.titleFieldConvergence` (its \"exactly six\" seam count). Moving the family turned three of them red (measured). Re-pointing those reads is a change to test logic, not an import or `vi.mock` path, so it is left for the seat to rule on before a later slice.\n- `dispatchViewPatches`: `writeRefusalCensus-11583`'s ledger keys that write site by `file: 'ObjectView.tsx'`.\n- `ConsoleObjectViewProps`, `ObjectNotFoundState`, `useViewTabsFit` (with `VIEW_TABS_MIN_WIDTH` / `viewTabsFitNow`) and `keepInlineEditModeForTheSession`: the component's own props, a React component and a hook, which belong with the component-body slices.\n\n## Test edits\n\nNone. No import, `vi.mock` or other test file changed.\n\n## Verification\n\n- `@object-ui/app-shell` whole suite, before and after, at the same tree otherwise (`vitest run --maxWorkers=3 packages/app-shell/` under `scripts/pm/os-verify-lock.sh`):\n  - after, head 25b9143d: Test Files 1729 passed, 1 skipped (1730); Tests 15924 passed, 9 skipped (15933). VERDICT command-exit 0.\n  - before, `ObjectView.tsx` restored to the 8a990d8b blob and the new modules removed: the same counts, VERDICT command-exit 0. The tree was restored from HEAD afterwards and `git status` was clean.\n- The 24 tests that read `ObjectView.tsx` as text (app-shell, `types`, `react`, `plugin-form`, `plugin-grid`, `ui/scripts`): 24 files / 819 tests passed.\n- After merging `origin/main` (head 646c0e73): rebuilt the `@objectstack/*` and `@object-ui/app-shell^...` closures, `pnpm --filter @object-ui/app-shell type-check` (src and `tsconfig.test.json`) exit 0, and a scoped re-run of 128 files (the text readers, every `ObjectView*` / `CreateViewDialog*` test, and the `AppContent*` tests that mock this module) passed 1705/1705. The incoming main commits touch app-shell only outside `views/` (home, layout, preview), so the whole suite was not re-run on the merge; CI `Test Core` covers it.\n- `eslint` on the four changed source files: 0 errors (warnings are the pre-existing `no-explicit-any` ones, moved with their lines).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on 646c0e73: 29 families, each run, each exit 0; `--ran` reconciles 29/29. `check-sdui-manifest` is green and the record did not move.\n\n## Acceptance notes\n\n- Source-text scans that read `ObjectView.tsx` (for example the absence checks in `ObjectView.urlFilterSuffix-9196`, `ObjectView.overlayPatchOnly` and `ObjectView.unboundAdapterCall`) now read the component and the helpers that stayed, and no longer read the moved helpers. All of them still pass, and none of them was aimed at the moved code. Noted, not filed.\n- One comment in the component body still says \"`loadViewOverrides` above\"; that function now lives in `objectViewTabs.ts`. Left unchanged so this slice stays move-only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XoX8HCroGnX4axVMMZ1JDd)_\n"
+}

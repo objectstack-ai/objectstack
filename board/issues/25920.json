@@ -2,8 +2,8 @@
   "number": 25920,
   "kind": "issue",
   "title": "tooling surface: 15 check:*/census:* scripts no workflow runs, five censuses only their own tests reach, a 759-line wrapper around pnpm dedupe --check, 23 copy-pasted vite configs (UMD forces inlineDynamicImports), 94 tsconfigs, dead turbo inputs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3",
     "tech-debt",
     "tooling"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T12:57:48Z",
-  "updated_at": "2026-10-26T08:19:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T14:54:26Z",
+  "closed_at": "2026-10-26T14:53:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25920",
   "body": "## 维护者速读\n\n`scripts/` 135 文件 **105,093 行**（43 % 注释）加 196 个测试文件 103,281 行；根 `package.json` 126 个脚本里 27 个没有任何接线，**15 个 `check:*` / `census:*` 从不被 workflow 调用**，5 个 census 只被自己的测试触达。`check-lockfile-dedupe.mjs`（552 行）+ `lockfile-dedupe.yml`（207 行）只是包了 `pnpm dedupe --check` 且 report-only。23 份近乎相同的 `vite.config.ts`（默认出 UMD，UMD 又强制 `inlineDynamicImports`，与首屏预算要的插件内分块相反）。94 份 tsconfig，25 份声明无人用的 `@/*`。`turbo.json` 有指向已删文件的 `globalDependencies` 和无人调用的 `test` 任务。原则：删大于加。\n\n## Measured (2026-10-24, HEAD 7981384)\n\n- Root scripts never invoked by any workflow (grep over `.github` for `pnpm NAME` / `pnpm run NAME`; positive control `check:readme-exports`, `check:doc-types`, `check:i18n-keys` all found): `check:unused-deps`, `check:i18n-dead-keys`, `check:registry-bare-names`, `check:component-surface-parity`, `check:lint-rule-coverage`, `check:pending-changeset-literals`, `check:installed-pin-claims`, `check:comment-mask-corpus`, `census:body-dialect`, `census:body-dialect-producers`, `census:tsconfig-test-parity`, `census:cross-file-line-citations`, `census:page-key-reads`, `census:dollar-dialect-aliases`, `census:changeset-polarity`. Scripts reachable only from their own test: `census-recorder-wait-shape.mjs` (898 LOC), `check-hand-rolled-comment-mask.mjs` (452), `coverage-red-cause-census.mjs` (337), `tsconfig-test-parity-census.mjs` (264), `extract-mdx-demos.mjs` (418). Six root aliases (`cli`, `objectui`, `doctor`, `studio`, `generate`, `g`) point at `packages/cli/dist/cli.js`, which does not exist until a build.\n- Wrappers around native tools: `check-lockfile-dedupe.mjs` spawns `pnpm dedupe --check` (its own header says so) and `lockfile-dedupe.yml` runs it `--report-only` (objectui#9562); 145 runs in 90 days, 0 failures; `pnpm dedupe --check` exits 0 today. `sync-quick-reference-release.mjs` (426 LOC with its test) exists to keep version numbers in `QUICK_REFERENCE.md` current.\n- Vite: 23 library `packages/*/vite.config.ts` files, about 1,419 non-comment lines; 36 distinct lines appear in 20 or more of them; the `external` predicate is byte-identical in 22; `inlineDynamicImports: true` in 22; 19 take Vite's default `['es', 'umd']` formats and 21 manifests publish `\"require\": \"./dist/index.umd.cjs\"`. `__dirname` in them is objectui#3592. `apps/console/vite.config.ts` is 1,597 lines, 818 of them comments.\n- tsconfig: 94 tracked `tsconfig*.json`; 30 packages repeat `composite` / `noEmit: false` / `tsBuildInfoFile` / `declaration` / `outDir`; `jsx` (37) and `skipLibCheck` (31) are already set in the root; `paths: {\"@/*\": …}` in 25 tsconfigs while `git grep -lE \"from ['\\\"]@/\" -- packages | grep /src/` finds 0 packages (positive control `lucide-react` 363 files); root `tsconfig.react.json` and `tsconfig.node.json` have no in-repo extender (`tsconfig.tier-base.json`'s own header says so).\n- turbo: `globalDependencies` names `node_modules/@objectstack/spec/.spec-main-shape-gate.json`, absent after a fresh `pnpm run setup` (its producer was removed by objectui#12596); the `test` task appears in no workflow `run:` line (root `pnpm test` is `vitest run`); `build.inputs` hand-lists ten `packages/sdui-parser/src/*` files and `type-check.inputs` seven specific sources — a new sdui-parser file is not hashed.\n- Build tooling declared per package: `typescript` in 39 manifests, `vite` 29, `@types/react` 30, `@vitejs/plugin-react` 27, `vite-plugin-dts` 22, `vitest` 17 — identical ranges to the root; six packages already omit `typescript` and build fine.\n\n## Recommendation\n\n- [ ] Delete `eval-console.mjs`, `release-bump.cjs`, the five test-only censuses and their tests; for each of the 15 never-invoked root names decide \"wire into `repo-gates.yml` only if its red would block a merge today, else drop the script and the alias\"; drop the six unbuilt CLI aliases, `build:all`, `start`, `site:start`, `test:unit`, `test:integration`.\n- [ ] Replace `check-lockfile-dedupe.mjs` + `lockfile-dedupe.yml` with one `continue-on-error: true` step `pnpm dedupe --check` in an existing workflow; delete `sync-quick-reference-release.mjs` and the version rows it maintains (link the package CHANGELOG instead).\n- [ ] One `scripts/vite-lib-config.ts` factory (ES-only, `import.meta.dirname`, the two dts helpers, the Vitest guard); each package config becomes about 8 lines; drop the `require` / UMD condition from the 21 manifests in the same release (contract change, changesets). UMD bytes saved are 未实测.\n- [ ] Add `tsconfig.lib.json` with `${configDir}`-relative `outDir` / `tsBuildInfoFile` (TS 5.5+; repo is on 6.x); the 30 emitting packages keep only `include` / `exclude`; delete the 25 `@/*` maps and `baseUrl`, the redundant `jsx` / `skipLibCheck`, and the two orphan root tier files (point `skills/objectui/guides/plugin-development.md` at a published template); fix the AGENTS.md objectstack-ai/objectui#7 wording that still says import from `@/ui/...`.\n- [ ] turbo: delete the dead `globalDependencies` entry and the `test` task; make `@object-ui/sdui-parser` a devDependency of `@object-ui/console` so `^build` covers it instead of the hand list (or at least a glob); same for the `type-check` list. `scripts/__tests__/turbo-build-inputs.test.ts` moves with it.\n- [ ] Declare build/test tooling only in the root `package.json`.\n\nBenefit: roughly 1,100 lines of vite config, 300 of tsconfig, 760 of the dedupe gate, 190 manifest lines and about 2,400 lines of hand-run-only census code gone; one place to fix objectui#3592; plugin-internal code splitting becomes possible. No new gate.\n\nRefs: objectui#3592, objectui#9562, objectui#9189, objectui#9330, objectui#12596, objectui#4806.\n\nFiled by the read-only whole-repo review session `https://claude.ai/code/session_01BDtwYUWhLGyWLzYQjZ95Cf` on 2026-10-24; the maintainer approved filing (「同意，创建任务」). Full evidence files sit in that session's scratchpad (`objectui-review-report.md`, `findings-*.md`). ⛔ Not a claim; for triage to grade and route.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

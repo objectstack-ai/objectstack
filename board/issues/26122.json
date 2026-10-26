@@ -1,0 +1,32 @@
+{
+  "number": 26122,
+  "kind": "issue",
+  "title": "pm-dispatch: drop the per-round tooling dispatch cap (≤10%); keep the pm-rule filing gate and the two round-report readings (ruling A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:54:42Z",
+  "updated_at": "2026-10-26T13:04:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26122",
+  "body": "Filing gate: ③ 维护者直派(改 pm 规则,维护者点名)。Maintainer Leehom, decision card in the skills seat thread, chose 「A 删上限,留读数和立卡门」 on 「\"tooling 卡至多一成\"这条规则保留、改还是删？」 (2026-10-26T09:22Z). Ruling record: #25768 comment 6412560587, which carries the measured basis. The card was requested by the maintainer's 「可以请skills 车道重新评估工具卡1成这个规则是否合理」.\n\nBusiness reason: ③,以原话代。The cap starves lanes whose work is tooling by nature: `domain:devx` has 21 and `domain:skills` 5 of the 28 open `tooling` cards, and it also holds back bug fixes. Its aim, keeping attention on product, is already met (about 143 of 159 commits on `main` in the last 48h touch product code).\nReader who acts: the `domain:skills` seat (next shift).\nDedupe: `domain:skills` titles, open + closed, grep \"10%|cap|一成\" → only #25768 (closed, it landed the cap). No card asks for its removal.\n\n## What changes\n\n- `references/execution-duties.md` 候选与批次: delete the line 「`tooling` 卡至多占一轮派发的 10%,溢出留积压、⛔ 不入 `pm:queue`;⛔ 无门禁无脚本强制。」\n- `SKILL.md` `tooling` glossary row: drop the reader 「每轮派发 ≤10%」 (四具名读者 → 三具名读者).\n- Kept unchanged: `filing-gate.md` 「增改 pm 规则的卡只在维护者点名时立」 and the two round-report readings in `seat-lifecycle.md`. Per the option's consequence, when the product-commit share reads low for consecutive rounds the seat reports it to the maintainer. If that sentence is not already carried by the readings line, add it there, paid in-file.\n\n## Boundary\n\n- Line ratchet: a deletion frees lines. ⛔ Do not lower ceilings in this card unless the ratchet requires it.\n- Tier S (`.claude/**`). `SKILL.md` touched ⇒ `CONTRACT_REVIEW_TIER` review.\n\nSession: `session_014FZ3TJucS1L7BdMe5DAzXC` (`domain:skills#1`, filing only; the lane is off shift)"
+}

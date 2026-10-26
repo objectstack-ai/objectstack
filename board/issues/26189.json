@@ -1,0 +1,31 @@
+{
+  "number": 26189,
+  "kind": "issue",
+  "title": "delegated-admin gate: scope violations answer PERMISSION_DENIED, so a client cannot tell them from an opaque denial (own registered code)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:10:40Z",
+  "updated_at": "2026-10-26T15:10:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26189",
+  "body": "Filing gate ②: a maintainer ruling, carried out as child 3 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nWhen a delegated admin acts outside their scope, the server knows exactly why. Examples: \"business unit … is outside the delegated subtree\", or \"position 'pos_mgr' distributes permission set 'ps_mgr', which is not in the scope's allowlist\". But it throws that reason as a plain `PERMISSION_DENIED` 403. A client cannot tell it from a denial whose reason must stay hidden, so the console shows only the fixed \"You don't have permission to save this record.\" This card is the server half: the gate answers its own code. The UI half is child 4 and waits on this one.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 3 (server, p2): item 3, server half. Brief 6415795834, item-by-item reading 6415971852 (item 3).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** A delegated admin (a regional manager who assigns positions in their own subtree) who hits the boundary sees only \"you don't have permission\". They cannot tell whether they picked the wrong unit, the wrong position, or lack the right altogether. These reasons describe the caller's own scope, so they are safe to show. They just cannot be told apart on the wire today.\n\n**Reader who acts.** The `domain:server` execution seat, dispatch step: one os-dev, one PR on `packages/plugins/plugin-security/src/delegated-admin-gate.ts` plus its ledger row in `packages/spec/src/api/error-code-ledger.zod.ts`, with pins.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `DELEGATION_SCOPE_VIOLATION|delegated.?admin.{0,80}(code|reason|toast|message)` found 4 hits, all closed and none this. #24082 / #23945 gave the invitation role-cap refusals their own codes, a precedent rather than a duplicate. #23323 and #23957 are docs / invite-dialog cards.\n\n## Ruled scope (ruling Q3 item 3)\n\n- The delegated-admin gate (`delegated-admin-gate.ts:403–503`, reasons `:1136–1179`) answers **its own code**, for example `DELEGATION_SCOPE_VIOLATION`, with status 403. The code gets a row in the **ADR-0112 ledger** and stays distinct from `PERMISSION_DENIED`.\n- The UI side is child 4 (`Blocked-by:` this card). Ruling #24914 B′ is unchanged: an ordinary `PERMISSION_DENIED` stays opaque.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `packages/plugins/plugin-security/src/delegated-admin-gate.ts`:\n  - `:403–503` holds: the gate's entry refusals, each a `PermissionDeniedError` (throws at `:403`, `:415`, `:446`, `:480`, `:487`, `:503`).\n  - `:1136–1179` holds: the scope-violation reasons. One more reason, \"target user … is outside the delegated subtree\", sits at `:1185`.\n  - Those reasons are thrown at `:1157` (`sys_user_position`) and `:1193` (`sys_user_permission_set`).\n- `packages/plugins/plugin-security/src/errors.ts:41–44`: `PermissionDeniedError`, with `code = 'PERMISSION_DENIED'` and status 403.\n- `packages/spec/src/api/error-code-ledger.zod.ts`:\n  - `ERROR_CODE_LEDGER` is at `:190`.\n  - The same gate family already has its own 403 code: `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE` (`:586`, #24254).\n  - The ledger's synonym check (`StandardSynonymWaiverSchema` / `STANDARD_SYNONYM_WAIVERS`, `:1795–1850`, where `FORBIDDEN` already shadows `PERMISSION_DENIED`) means the new code has to register as its own meaning, not as a synonym.\n- `docs/adr/0112-error-code-vocabulary-and-ledger.md`: the ledger ADR.\n\n**Note for the dev (found while verifying, not a new rule).** The `:403–503` block also holds refusals that are not about the caller's delegated scope:\n- the audience anchor (`:403`)\n- principal-less writes (`:415`)\n- `sys_member` being tenant-only (`:446`)\n- plain CRUD with no scope (`:487`)\n- filter writes (`:503`)\n\nThe ruling's test decides which ones move: a reason that describes the caller's **own** scope may take the new code, and anything else keeps `PERMISSION_DENIED`. Name the split in the PR.\n\n## Expected / acceptance\n\n- A delegated-admin write outside the caller's scope (unit outside the subtree, set not in the allowlist, target user outside the subtree) answers 403 with the new code and the gate's reason as the message.\n- Every other refusal of the gate, and every other `PERMISSION_DENIED` in the platform, is unchanged on the wire.\n- The code has its ADR-0112 ledger row and passes the ledger's admission / synonym gate.\n- Pins cover the new code on each scope-violation path and `PERMISSION_DENIED` on a non-scope refusal."
+}

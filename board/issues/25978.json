@@ -2,7 +2,7 @@
   "number": 25978,
   "kind": "pull_request",
   "title": "fix(i18n): localise the console's round-3 leftovers — data table titles, chart fallback, react pages, References columns, Flow Runs diagnostics",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T07:41:44Z",
-  "updated_at": "2026-10-26T08:08:30Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-26T09:22:40Z",
+  "closed_at": "2026-10-26T09:22:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T09:22:38Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25978",

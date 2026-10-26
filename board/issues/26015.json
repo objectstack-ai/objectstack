@@ -1,0 +1,37 @@
+{
+  "number": 26015,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): upsert with nothing left to merge is a plain INSERT, not merge-ALL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:11:45Z",
+  "updated_at": "2026-10-26T11:56:30Z",
+  "closed_at": "2026-10-26T11:56:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:56:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26015",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XENoZnG15Ne6zvnM6q3Fq5d)_\n\nFixes #8740\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## What changed\n\n`SqlDriver.upsert` merges every payload column that is not insert-only, or, when there is none, the conflict-target columns the payload carries (a no-op). When the payload carried neither, the statement fell back to knex's bare `merge()`, which compiles to merge-ALL on every dialect (`do update set` / `on duplicate key update` over every inserted column, insert-only ones included).\n\nThat fallback is removed. With nothing to merge, the statement is a plain `INSERT` with no conflict clause, so a collision surfaces as the driver's own unique-violation error and the stored row is left as it was. It is not `insert ignore` / `do nothing`, which would hide the collision. The reachable no-op merge on the conflict-target columns is unchanged.\n\n- `packages/drivers/driver-sql/src/upsert-conflict-clause.ts` (new, not exported from the package): `withUpsertConflictClause(insertion, mergeKeys, columnsToMerge)` returns the plain insertion when `columnsToMerge` is empty, else `onConflict(mergeKeys).merge(columnsToMerge)`. Kept free of the driver so its SQL is pinned per dialect with no server.\n- `sql-driver.ts`: the upsert statement goes through it; the in-statement merge predicate is applied only when the statement merges.\n- `.changeset/8740-upsert-nothing-to-merge.md`: `patch`, BREAKING banner (a served-set narrowing), ADR-0087 `not-required (no-migration-prescription)`.\n\n## Tests\n\nNew `src/sql-driver-upsert-empty-merge-set.test.ts`:\n\n- compiled SQL with nothing to merge, via `toSQL()` with no server, exact strings for `better-sqlite3`, `pg` and `mysql2`: no `on conflict`, `do update set`, `on duplicate key update` or `insert ignore`; plus the contrast (something to merge keeps the clause and merges only the named column);\n- per dialect cell (SQLite always; PostgreSQL and MySQL where `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL` are provisioned): a collision on a conflict-target column the payload omits (non-null default) is refused with a unique violation and rewrites nothing; a primary-key collision whose payload carries only insert-only columns is refused and rewrites nothing; controls: a payload that collides with nothing still inserts and answers the row, and a payload carrying its conflict target still upserts onto the stored row. The refusal is asserted by `isUniqueViolationError` AND the dialect's native code (`SQLITE_CONSTRAINT_*`, `23505`, `ER_DUP_ENTRY`).\n\nRed first, on the unfixed driver (commit 19a401bd): 4 failed / 12 passed, the non-null-default collision red on all three cells, the primary-key collision red on the MySQL-dialect cell. Green after the fix (commit fc2ee277), with the four neighbouring upsert suites: 5 files, 119 tests passed, all three cells live.\n\nLocal cells: SQLite in-process; PostgreSQL 16.15 local; the MySQL cell against MariaDB 10.11.14 (no MySQL 8 server in the container). CI's `Temporal Conformance (live PG + MySQL)` job runs this package's whole suite, so the new file's MySQL cell runs there on MySQL 8.\n\n## Gates\n\n- `pnpm --filter @objectstack/driver-sql test`: 236 files passed, 12 skipped; 3795 tests passed (SQLite cells; live cells via CI). `typecheck`: exit 0.\n- With local live URLs the package run shows 49 failures in 24 files, all live PG/MariaDB cells and none in an upsert file; the same 24 files on the base commit `05f7758f05` show the same 49 failures (local MariaDB / PG environment, not this diff).\n- `eslint --no-inline-config` on the three touched source files: exit 0.\n- `dispatch-gates --commands`: 71 derived, 70 run, every exit 0; 1 NOT MEASURED: `check:dual-build-cjs-loads` (exit 3, needs the whole tree built; CI runs it). `--ran` reconciliation: 71 accounted, 0 unrun.\n\n## Acceptance notes\n\n- An unbacked conflict target is still refused VALIDATION_ERROR / 400 on the nothing-to-merge path on every dialect, checked against the table keys before the plain INSERT (pinned per dialect cell).\n- **`isUniqueViolationError` reads a non-unique error as a unique violation when the error message echoes an `on duplicate key update` statement** (driver-level repro: a MySQL `ER_TRUNCATED_WRONG_VALUE` whose message carries the statement answers `true`; the same code without the statement text answers `false`). Not fixed here; the new tests pin the native code alongside it for that reason. No public door measured.\n- `driver-turso`'s remote transport is a separate statement builder (`DO NOTHING` on an empty merge set, SQLite dialect only) and is untouched; its local face inherits this fix through `super.upsert`.\n- Full dogfood battery (owed by the `(narrowing)` arm) is run on the final head and reported on #8740.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T6USnvRkjp4BPytcNttAuF)_"
+}

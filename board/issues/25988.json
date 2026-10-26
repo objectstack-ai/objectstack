@@ -2,8 +2,8 @@
   "number": 25988,
   "kind": "issue",
   "title": "dogfood: main's Dogfood Regression Gate (3/3) is red since #25956 — the authz blind-spot census still pins `handleI18nRequest` at 3 in packages/runtime/src/domains/i18n.ts; #25956 made it 4",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "tests"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:09:22Z",
-  "updated_at": "2026-10-26T08:18:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T13:49:03Z",
+  "closed_at": "2026-10-26T09:11:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25988",
   "body": "Filing gate ③: **maintainer-directed task.** The maintainer, 2026-10-26 08:01Z: 「main 上的 `Dogfood Regression Gate (3/3)` 时红时绿，跟合仓无关，还没有 issue 跟踪」. Filed by the devx seat (seat post #6023, session `session_01LKHDniRQSWjRJyDtacwpEd`). The claim follows separately.\n\n**Business reason:** `Dogfood Regression Gate (3/3)` is red on every `main` run that runs it, starting at #25956 (06:42Z today). The release gate (`full-battery`) reads those runs. A red full battery at the version commit refuses a cut, and every red push run also re-files #25438.\n\n**Reader who acts:** `domain:devx`. `packages/qa/dogfood` is the QA harness, and the server lane is not seated today. One small PR.\n\n## It looks intermittent, but it is a deterministic red\n\nThe red comes from one assertion. It fails the same way on every run that runs shard 3/3:\n\n```\nFAIL [isolated] test/authz-probe-blind-spot.test.ts > authz probe blind-spot census (#13260)\n  > packages/runtime/src/domains/i18n.ts — every positive control is still present in THAT file\nAssertionError: control \"handleI18nRequest\" moved in packages/runtime/src/domains/i18n.ts: expected 4 to be 3\n```\n\n- **Cause:** `69fa23d60b` (#25956, Part of #25785, server card thread). It added a 4th occurrence of `handleI18nRequest` to `packages/runtime/src/domains/i18n.ts`. On `origin/main` the file holds 4 occurrences (lines 20 and 73 are docblock `{@link handleI18nRequest}`, 150 is the call, 155 is the declaration); at `37617109` it held 3. `PROBE_FILE_CENSUS` still records 3.\n- **Why it looks intermittent:** a `push` run on `main` is affected-only (#16467), so a merge that does not touch the dogfood closure skips the `Dogfood Regression Gate (N/3)` legs. The aggregate is then green, for example 0c372288's run 40282257384. `pull_request` and `merge_group` never run the dogfood legs at all (#24073), which is how #25956 merged green.\n- **Reproduced locally on `origin/main` `cdd4eea938`:** `npx vitest run test/authz-probe-blind-spot.test.ts` in `packages/qa/dogfood` → `1 failed | 46 passed`, the same assertion.\n\n## Runs on `main` (CI workflow), newest first\n\n| run | event | head | `Dogfood Regression Gate (3/3)` |\n|---|---|---|---|\n| [40284424233](https://github.com/objectstack-ai/objectstack/actions/runs/40284424233) | push | cdd4eea9 | ❌ failure (job 121444813097) |\n| [40283575048](https://github.com/objectstack-ai/objectstack/actions/runs/40283575048) | push | 963e504c | ❌ failure (job 121442160635) |\n| [40282257384](https://github.com/objectstack-ai/objectstack/actions/runs/40282257384) | push | 0c372288 | skipped (affected-only), aggregate ✅ |\n| [40281628332](https://github.com/objectstack-ai/objectstack/actions/runs/40281628332) | push | 38050ced | ❌ failure (job 121436163074) |\n| [40281437744](https://github.com/objectstack-ai/objectstack/actions/runs/40281437744) | push | 69fa23d6 (#25956) | ❌ failure (job 121435563374), first red |\n| [40281225169](https://github.com/objectstack-ai/objectstack/actions/runs/40281225169) | push | 37617109 | ✅ success (job 121434899004), last green before the cause |\n| [40280560677](https://github.com/objectstack-ai/objectstack/actions/runs/40280560677) | push | d5f4c2a2 | ✅ success |\n| [40277513449](https://github.com/objectstack-ai/objectstack/actions/runs/40277513449) | schedule | 9ca36b16 | ✅ success |\n\nBefore 69fa23d6, the 3/3 leg was green on all 56 `main` runs from 2026-10-25 05:57Z to 06:40Z today that ran it. The red `CI` conclusions in that window came from other jobs (#25438 tracks those).\n\n## Wanted\n\n- The census is a **measurement pin**. Its own header says that whoever moves a count re-reads it, so don't just bump the number. Read the 4th occurrence. If it is only the new docblock `{@link}` and the probe's reach is unchanged (the population and reachable rows for `i18n.ts` still pass today), record 4 and say so in the PR body.\n- If the new code added a handler or route that the probe should see, stop and report it. That is a census row change, not a count bump.\n- Check whether any other control or row in `authz-probe-blind-spot.census.ts` moved with #25956 or with later merges. Run the whole `packages/qa/dogfood` shard 3/3 locally (or the census + `authz-conformance` files) before you push.\n- Acceptance: `Dogfood Regression Gate (3/3)` is green on the first `main` push run after landing that runs it, and on the next scheduled run. Report the run ids on this card.\n\n## Not in scope\n\n- Making PR or merge-group CI run the dogfood legs. That was ruled on in #24073 / #22653, and is a separate decision.\n- The ui-merge Test UI red (`check-pre-install-import-graph`, `scripts/objectstack-pin.mjs`), which is #25957 / #25712.\n\nClause-②: no\nMetadata-protocol: none\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

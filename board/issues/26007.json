@@ -1,0 +1,37 @@
+{
+  "number": 26007,
+  "kind": "pull_request",
+  "title": "fix(service-analytics)!: a filtered dataset measure asked as CUBE.MEASURE applies its filter, as the bare name does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:54:47Z",
+  "updated_at": "2026-10-26T11:05:28Z",
+  "closed_at": "2026-10-26T11:05:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:05:25Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26007",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XF3gy1HC3Hh5j3w4UgZkNj5)_\nFixes #25906\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\nContract review owed: the `(narrowing)` arm. The field-level read gate now judges the fields of a filtered measure's filter when the measure is asked as `CUBE.MEASURE`, so a caller who may not read such a field, answered `200` (with the unfiltered number) on `main`, is now refused `403 PERMISSION_DENIED`, exactly as the bare spelling already was. Nothing is widened, and no `packages/spec/**` path is touched. The seat's claim (6411271126) carries `Clause-②: yes (expected …)`; the lines above are the values measured on this diff, as the dispatch order asked.\n\n## What was wrong\n\nA registered dataset measure can carry its own `filter`. `GET /analytics/meta` lists every cube member as `CUBE.MEASURE`, and the cube door accepts that spelling: `lookupMember` strips the cube's own qualifier, so the measure resolves under both. But every reader of the measure's scoped filter (`DatasetScope.measureFilters`) looked it up by the spelling as asked, so the listed spelling missed it. Measured at `AnalyticsService.query` on `origin/main` `05f7758f`, native SQL, SQLite dialect:\n\n| `measures` | statement run |\n|---|---|\n| `['won_amount']` | `COALESCE(SUM(CASE WHEN stage = $1 THEN amount END), 0) AS \"won_amount\"` |\n| `['sales.won_amount']` | `COALESCE(SUM(amount), 0) AS \"sales.won_amount\"` |\n\nThe ObjectQL face dropped the aggregation's `filter` the same way, its dry-run echo rendered `SUM(amount)`, and `namedQueryFields` (the read gate) never judged the filter's fields.\n\n## What changed\n\nOne rule, `scopedMeasureKey` (new `scoped-measure-key.ts`): the bare name if it is an own key of the record, else the name without its own cube's `CUBE.` qualifier. It is the rule `durationMeasureKey` already used for duration measures (PR #25903), and `durationMeasureKey` now delegates to it, so the two records cannot drift. `scopedMeasureFilter` reads `measureFilters` through it. Every reader now calls it:\n\n| reader | file |\n|---|---|\n| `compileClauses` (the statement) | `native-sql-strategy.ts` |\n| `jsonConstructOnUnknownDialectIn` (routing decline) | `native-sql-strategy.ts` |\n| `nestedRelationConditionIn` (routing decline) | `native-sql-strategy.ts` |\n| `execute` aggregations | `objectql-strategy.ts` |\n| `generateSql` echo | `objectql-strategy.ts` |\n| `filterMemberView` (cross-object refusal) | `objectql-strategy.ts` |\n| `namedQueryFields` (the read gate) | `analytics-service.ts` |\n\nThe two native routing declines had to move with the statement: once the statement compiles the qualified measure's filter, a decline that still missed it would let a nested-relation filter reach the native compiler, which refuses it as a bare fault.\n\nNot changed: `DatasetExecutor` (the `POST /analytics/dataset/query` path) builds bare names; the draft-preview evaluator runs under it. Another dotted prefix keys nothing, as before. No raw `measureFilters?.[…]` lookup is left in the package (`grep` over `src/` outside tests).\n\n## Tests\n\nNew `src/__tests__/cube-qualified-measure-filter.test.ts`, red first on unfixed readers (5 failed / 2 passed, the 2 being the helper's own unit cases):\n\n- native SQL: the qualified statement equals the bare one with only the alias changed, same bound values `['won']`;\n- ObjectQL: the aggregation carries the same `filter` under both spellings; the dry-run echo renders the same conditional aggregate;\n- read gate: with `stage` unreadable, both spellings answer `PERMISSION_DENIED` / 403 naming `stage` and nothing runs; with every field readable both run (control);\n- `NativeSQLStrategy.canHandle` declines a nested-relation measure filter asked either way;\n- `scopedMeasureKey`: bare, own-cube qualified, another prefix (none), no cube name (none), `Object.prototype` names (none).\n\nAblation (one-time, committed fix first): `scripts/ablation-replace.mjs` put the read gate's raw lookup back in `analytics-service.ts` (anchor 1 to 0, blob `f6a5b05b` to `c366dfb4`); exactly the read-gate case went red (1 failed / 6 passed); restored blob equals HEAD, `git diff HEAD` empty.\n\nLocal, at head ``6c314cfe``:\n\n- `pnpm --filter @objectstack/service-analytics test`: Test Files 189 passed (189), Tests 4570 passed, 282 skipped (os-verify-lock VERDICT command-exit 0)\n- `pnpm --filter @objectstack/service-analytics typecheck`: exit 0\n- `eslint --no-inline-config packages/services/service-analytics`: exit 0\n- derived gates (`dispatch-gates.mjs --commands`, 70 commands): 68 exit 0, 2 NOT MEASURED on a local prerequisite (exit 3): `check-plugin-teardown-shape.mjs --self-test` (shallow clone; a checker-health self-test) and `check:dual-build-cjs-loads` (needs a full workspace build); CI runs both. `dispatch-gates --ran`: 70 derived, 68 run, 2 NOT-MEASURED, 0 UNRUN, exit 0\n\n## Acceptance notes\n\n- The measured narrowing is the read gate only: the statement change is a correction of the number, not a refusal. A caller who relied on the unfiltered total under a filtered measure's name now gets the filtered one.\n- Open PRs re-measured on this file surface before opening: 22 open, none touches the five source files.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014YyczUJLen7od4GYKjPdY2)_\n"
+}

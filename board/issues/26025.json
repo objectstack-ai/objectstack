@@ -1,0 +1,34 @@
+{
+  "number": 26025,
+  "kind": "pull_request",
+  "title": "docs(releases): the 18.1 page's commit-hash caution now describes only the published tarballs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:28:49Z",
+  "updated_at": "2026-10-26T10:29:12Z",
+  "closed_at": "2026-10-26T10:29:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T10:29:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26025",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DVe7K5wbt1RCJLMKYAJjoWy)_\n\n## What\n\n`content/docs/releases/v18/18-1.mdx`, the first of the two CHANGELOG cautions. It said 260 of the 265 entries in the 18.1.0 CHANGELOGs open with `3937697` (the #25605 revert). Since #25804 that is true only of the published npm tarballs, which are never republished. The caution now says so, and points readers at the repository's CHANGELOGs, which name each entry's own commit. The sentence \"this page cites each entry's own commit\" stays.\n\n## Verified before writing\n\n- `npm pack @objectstack/cli@18.1.0`: all 34 entries of the packed CHANGELOG's `## 18.1.0` section read `3937697`.\n- `git show origin/main:packages/cli/CHANGELOG.md`: 34 entries in `## 18.1.0`, zero occurrences of `3937697`; `git grep 3937697 origin/main -- 'packages/**/CHANGELOG.md'` finds no file.\n\n## Gates run locally\n\n- `pnpm check:release-notes`: OK\n- `pnpm check:release-page-status` (with `--self-test`): OK\n- `node scripts/check-release-section-coverage.mjs --self-test` and the run: OK\n- `node scripts/check-closed-ceremony-text.mjs`: OK\n\nDocs only; publishes nothing from any released package, so `skip-changeset`.\n\nClause-②: no\nMetadata-protocol: none\n\nFixes #25806\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FH3aXUQ8ZbZARzGd17x1Nf\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 26156,
+  "kind": "pull_request",
+  "title": "fix(release): the stable cut folds each prerelease section into the stable section instead of copying it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:02:42Z",
+  "updated_at": "2026-10-26T14:38:30Z",
+  "closed_at": "2026-10-26T14:38:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:38:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26156",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9DjkzyES5iJcSWAVHScrQBe)_\nFixes #26079\nClause-②: no\nMetadata-protocol: none\nRuling-ref: 6417011624 (batch #397 item 3, letter A′, maintainer 「同意」)\n\n## What this does\n\nOn the stable cut out of pre mode (`changeset pre exit`, then `pnpm run version`), the changelog generator now **folds** every `X.Y.Z-next.N` section of the cycle into the `X.Y.Z` section instead of leaving it as a second copy below it. Today that cut re-applies every changeset the prereleases consumed, so the stable section repeats each prerelease section verbatim (18.0.0 left `packages/spec/CHANGELOG.md` with about 4,076 duplicated long lines).\n\nRuled scope, kept: only `scripts/changeset-changelog.mjs` changes behaviour; its pins go into the self-test CI already runs for it (`node scripts/release-pending-publish.mjs --self-test`, lint.yml), the file surface the seat widened on the claim. ⛔ No `files` change in any `package.json` — `CHANGELOG.md` keeps shipping (AGENTS.md, Documentation Guardrails). ⛔ No existing CHANGELOG text is rewritten by this PR, and the generator never touches an older cycle (#25919 A 「存量不横扫」). No workflow change, no new gate.\n\n## Timing — when the fold runs, and on what\n\nThe generator API (`getReleaseLine` / `getDependencyReleaseLine`) hands out one line at a time and is told neither the package nor the version, and `@changesets/apply-release-plan` writes every `CHANGELOG.md` only after all lines are generated. So:\n\n1. **Armed on the first generated line**, and only when `.changeset/pre.json` says `\"mode\": \"exit\"` (the stable cut; the version pass itself deletes that file later). An rc cut (`mode: \"pre\"`) and a normal cut (no `pre.json`) arm nothing.\n2. **Snapshot at arming:** each tracked `*CHANGELOG.md` whose top `## VERSION` is a prerelease (read from the first 64 KiB only).\n3. **Run when the `changeset version` process exits 0** (a `process.once('exit')` handler; a failed version pass folds nothing). For each snapshotted file whose top is now a new stable section sitting directly above the old top, the prerelease sections between that stable section and the next stable one below are dropped — each one only if every changeset entry it carries is found in the new stable section (compared without the commit prefix). Dependency-bump entries (`Updated dependencies`, `pkg@X.Y.Z-next.N`) are superseded by the stable section's own. A section holding an entry the stable section does not reproduce (amended in place by a docs PR, say) stays, with a `::warning::` naming it.\n\nWhat may fold is fixed by the file as it stood before the cut, never by a version guess, so every stable section and every older cycle's prerelease sections are kept byte for byte. One plain line reports the count: `changeset-changelog: the stable cut folded N prerelease section(s) in M CHANGELOG(s) into their stable section.`\n\n## Evidence\n\n- `node scripts/release-pending-publish.mjs --self-test` at `2f44043a`: `✓ release-pending-publish self-test: 136 cases across 34 batteries pass.` Three new batteries (floor 31 → 34): a prerelease section folds (4 cases); the stable section is kept whole, and so is every older cycle, and a section with an entry the stable section lacks stays (5 cases); armed only on an exit-mode cut, for the files whose top was a prerelease, folded after the write (3 cases).\n- **End to end through the real CLI** (`@changesets/cli` 3.0.3, throwaway repo, two fixed packages, this generator): `pre enter next` → version (`1.2.0-next.0`) → version (`1.2.0-next.1`) → `pre exit` → version (`1.2.0`). Result: `## 1.2.0` (all three entries, each naming the commit that added its changeset), then the untouched `## 1.1.0` / `## 1.1.0-next.0`; the run printed `folded 4 prerelease section(s) in 2 CHANGELOG(s)`. The rc cuts in between folded nothing.\n- **Control leg**, same history, the generator at `origin/main` `95294be3`: the stable cut leaves 5 sections (`1.2.0`, `1.2.0-next.1`, `1.2.0-next.0`, `1.1.0`, `1.1.0-next.0`), 37 + 36 lines, against 3 sections and 23 + 22 lines with this change.\n\n## Confidence gap from the card\n\nNo downstream tooling reads an installed CHANGELOG's prerelease section:\n- This repo: the CHANGELOG readers (`check:release-notes`, `check:release-page-status`, `check-release-section-coverage.mjs`) read `## N.x.y` headings for majors / GA versions; the stable heading the fold keeps is what they count.\n- `objectstack-ai/hotcrm` at `9464673`: no script reads `node_modules/@objectstack/*/CHANGELOG.md`; one code comment cites the `17.0.0` heading of installed CHANGELOGs, a stable heading.\n- `objectstack-ai/cloud`: NOT MEASURED — not readable from this session.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `2f44043a` derives 33 commands; all 33 exit 0, and `--ran` reconciles `33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN`. CI families outside the derivation are read from this PR's check-runs.\n\n## Acceptance notes\n\n- The fold applies at the next stable cut out of pre mode; nothing in the tree changes on merge. Rollback is reverting this PR before that cut.\n- `skip-changeset`: the diff is repository tooling under `scripts/`, which no package's `files` ships.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PbYqgMPfuTjR2CMEqrjHVL)_\n"
+}

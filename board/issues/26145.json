@@ -1,0 +1,37 @@
+{
+  "number": 26145,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): translate the built-in permission sets' labels",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:41:08Z",
+  "updated_at": "2026-10-26T14:34:13Z",
+  "closed_at": "2026-10-26T14:34:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:34:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26145",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XB1tL9mxxeTxkG8bGaGBugq)_\n\nFixes #26094\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nSetup → Permission Sets showed the nine built-in permission sets with English labels under zh-CN (and ja-JP, es-ES), next to each app's translated sets and, since #26090, next to their own translated descriptions. Each built-in set's label is now translated through `permissions.NAME.label`, in the same hand-authored group as the descriptions (`packages/plugins/plugin-security/src/translations/permission-sets.ts`). `translatePermissionSet` already overlays that key on `GET /meta/permission`, so no wiring changed.\n\n| Set | en | zh-CN | ja-JP | es-ES |\n| --- | --- | --- | --- | --- |\n| `admin_full_access` | Administrator — Full Access | 管理员 — 完全访问 | 管理者 — フルアクセス | Administrador — Acceso total |\n| `organization_admin` | Organization Administrator | 组织管理员 | 組織管理者 | Administrador de organización |\n| `organization_admin_no_bypass` | Organization Administrator (no record bypass) | 组织管理员（不绕过记录权限） | 組織管理者（レコード権限のバイパスなし） | Administrador de organización (sin omitir permisos de registro) |\n| `member_default` | Member — Standard Access | 成员 — 标准访问 | メンバー — 標準アクセス | Miembro — Acceso estándar |\n| `viewer_readonly` | Viewer — Read-Only | 查看者 — 只读 | 閲覧者 — 読み取り専用 | Lector — Solo lectura |\n| `external_default` | External Member — Own Records | 外部成员 — 仅本人记录 | 外部メンバー — 自分のレコードのみ | Miembro externo — Solo sus registros |\n| `mcp_agent_data_read` | MCP Agent — Read Only | MCP AI 助手 — 只读 | MCP AI アシスタント — 読み取り専用 | Asistente de IA MCP — Solo lectura |\n| `mcp_agent_data_write` | MCP Agent — Read & Write | MCP AI 助手 — 读写 | MCP AI アシスタント — 読み書き | Asistente de IA MCP — Lectura y escritura |\n| `mcp_agent_restricted` | MCP Agent — No Data Access | MCP AI 助手 — 无数据权限 | MCP AI アシスタント — データ権限なし | Asistente de IA MCP — Sin acceso a datos |\n\nEach label keeps the English label's noun-phrase shape (the same \" — \" split) and reuses the terms its description in #26090 chose (for example \"AI 助手\" / \"AI アシスタント\" / \"Asistente de IA\" for the MCP agent sets, \"无数据权限\" / \"データ権限なし\" / \"sin acceso a datos\" for the restricted one), so a label and its description agree on one row. No set's grants, name, English label or description changed.\n\n**Files:** `translations/permission-sets.ts` (27 label entries and the header comment), `objects/permission-set-descriptions.test.ts` (the pin now covers labels and the served overlay), one `patch` changeset.\n\n## Evidence\n\nLive read on `pnpm dev:crm -- --fresh` built from head `57b2effa`, signed in as the seeded admin: `GET /api/v1/meta/permission?scope=environment` with `Accept-Language: zh-CN` serves all nine built-in sets with the zh-CN label and zh-CN description, beside the app's own `CRM 销售用户` and `访客（公开表单）`:\n\n- `admin_full_access` · 管理员 — 完全访问 · 平台运维人员：可读取和修改所有组织中的每条记录…\n- `viewer_readonly` · 查看者 — 只读 · 只读用户：在共享允许的范围内查看所有对象的记录…\n- `mcp_agent_restricted` · MCP AI 助手 — 无数据权限 · 用户在无数据权限下连接的 AI 助手…\n\nWith `Accept-Language: en` the same read serves the English labels unchanged. The CRM example declares only `en` and `zh-CN` (`GET /api/v1/i18n/locales`), so ja-JP was read on `pnpm dev:todo -- --fresh` (it declares ja-JP): all nine ja-JP labels were served. No example declares es-ES, so es-ES is pinned at unit level only, through the same resolver the REST boundary calls. I did not build the console here, so there is no browser screenshot; the REST read is the list the page renders.\n\n## Tests (head `57b2effa`)\n\n- `pnpm --filter @objectstack/plugin-security test`: Test Files 224 passed (224), Tests 4798 passed, 45 skipped. `pnpm --filter @objectstack/plugin-security typecheck`: exit 0.\n- `permission-set-descriptions.test.ts` (99 tests): per translated locale, every built-in set carries a label (trimmed, at most 80 characters, no line break, no closing full stop, no code span or set id, the same \" — \" split as the English label, not an English copy), no two sets share a label, and `translateMetadataDocument('permission', set, SecurityTranslations, { locale })` serves exactly the set with that locale's label and description. The old assertion that the group carries no label is gone.\n- Ablation on the committed tree (`scripts/ablation-replace.mjs`, anchor hit 1 → 0, restored to the HEAD blob `97aad9a1`): deleting the zh-CN `viewer_readonly` label failed 2 tests (\"carries a translated label\" and \"is served in this locale\").\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 69 families on `57b2effa`; all 69 ran with exit 0. `--ran` reconciliation: 69 derived, 69 run, 0 NOT-MEASURED. Three first exited 3 on a missing prerequisite and were re-run: `check-plugin-teardown-shape --self-test` after fetching its positive-control commit, and `check:i18n` and `check:dual-build-cjs-loads` after a full `pnpm build` (`check:i18n`: all bundles in sync). Scoped `eslint --no-inline-config packages/plugins/plugin-security`: exit 0. CI runs everything else.\n\n## Acceptance notes\n\n- **Still hand-authored, no provenance.** The labels share the descriptions' limitation: no source-hash table judges this group, so a changed English label leaves its three translations stale with no warning (the file header says so). The pin catches a missing or English-copy entry, not a stale one. Moving labels and descriptions onto a generated, provenance-checked path was out of scope; it is raised to the seat, not built.\n- `translations/index.ts` still says the hand-authored `permissions` group carries \"description translations\". The claim allowed that file only if the wiring needed it, and it did not, so the comment is left for the next change there.\n- The pin bounds a label at 80 characters, room above the longest translation (63, the es-ES no-bypass label) while refusing a sentence pasted as a label.\n- No other open PR touches `plugin-security/src/translations/`, `default-permission-sets.ts` or the pin (39 open PRs read before pr_create).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XpZzdGG7nKkYUhqd3reNzL)_\n"
+}

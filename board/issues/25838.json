@@ -2,8 +2,8 @@
   "number": 25838,
   "kind": "issue",
   "title": "qa(checklist): approvals — 19 ledger edits from the 18.2.0 release sweep (#25807)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:on-hold",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T23:00:55Z",
-  "updated_at": "2026-10-26T00:01:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T13:35:02Z",
+  "closed_at": "2026-10-26T13:34:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25838",
   "body": "Filing gate: maintainer-directed task. Filed by the 18.2.0 release-assessment thread · `session_01G3h9iZTpL8aCiXbfsp8H5u`. ⛔ Not a claim, ⛔ not dispatched.\n\n**Maintainer's words** (project thread, 2026-10-25, verbatim): 22:54Z 「约 300 条清单准确性问题：是不是应该开卡？」, then 22:55Z 「写issue，不派发」.\n\n**Parent:** wave anchor #25807 (18.2.0 release test sweep). RUNNER's extraction obligation parks checklist-accuracy findings on the anchor; the maintainer asked for them as issues, so the wave's findings are split into one card per ledger file and the anchor links each card. This is not a release blocker, so it carries no `target:v18`.\n\n**Reader who acts:** the lane owning `docs/qa/platform-checklist/**` (`domain:devx`). Dedupe (open and closed): no card holds these lines; the 18.0 precedent closed its accuracy rows on its anchor #24579.\n\n## Wanted\n\nFor each line below, edit `docs/qa/platform-checklist/areas/approvals.json`: revise the item's text, bump its `revision`, and append a `history` entry citing the run record the line comes from. Keep `pnpm check:platform-checklist` green. A line that turns out to describe a product defect rather than stale text gets its own card instead of a ledger edit.\n\n## Findings (19)\n\n### From #25812 — `priority:P0`, 23 items, at `6679644a`, pin `b41ed7f68956`\n\n- `approvals.account-app-entry`: \"drawer\" wording in steps 6–7 and acc[1], acc[3], acc[4] is stale — objectui removed the side sheet (objectui#12484); a row click or `?request=` now opens `/apps/APP/sys_approval_request/record/ID`; the account app answers on two URL segments (`account` and `com.objectstack.account`), which matters for acc[5].\n\n### From #25815 — `release-18.2.0-tier1`, 156 items, at `6679644a`, pin `b41ed7f68956` (clause labels: aK = acceptance[K], nK = negative[K])\n\n- `approvals.decision-only-via-service` all clauses: the ref (kind 'test') is packages/services/service-automation/src/resume-authority-gate.test.ts, an AutomationEngine + InMemorySuspendedRunStore unit — every clause's oracle is the api (route status, run/actions reads); precedent #24840 scored rev 1 PASS from it before the layer rule. Needs an HTTP pin (generic resume route + approvals API) to be Tier 1.\n- `approvals.email-action-token-door` a0: clause's live at-rest sys_notification read stays a run leg; FORBIDDEN arm is exercised with 'stranger' (not an approver at all) rather than a non-pending approver\n- `approvals.email-action-token-door` a1: pin asserts status pending + no decisions, not byte-identity of the actions timeline / token consumed_at\n- `approvals.email-action-token-door` a3: 'a decide that fails still burns it' (consume-first under a failing decide) is not asserted by any named pin\n- `approvals.request-page-reply-and-reader-visibility` a1: no pin asserts the approval_comment reply landing in the timeline, or the pending-approver/submitter-only restriction on replying\n- `approvals.request-page-reply-and-reader-visibility` a2: ref says request-read-gate covers acceptance[2]; it drives ObjectQL/protocol in-process, never /data/sys_approval_request over HTTP\n- `approvals.status-mirror-field` a2: the clause names the SLA auto-decision as a second user-less machine transition; the pin drives only the dead-run sweep (the verify asks only for the sweep)\n- `approvals.status-mirror-field` a0/a1/a3/a4: the ref is the only pin and covers a2/n2 alone; the api/log clauses have no automation\n\n### From #25817 — `release-18.2.0-manual-set`, 29 items, at `6679644a`, pin `b41ed7f68956`\n\n- `approvals.approver-resolution-matrix`: The suggested fallback, `org_membership_level` owner, does not discriminate on stock, because the owner is the sole admin. Use `{type:'user', member}` instead.\n- approvals.decision-action-matrix:\n  - knownGaps[0]: the \"one untried candidate\" (a schedule-triggered approval) is refuted, and so is an api-hook on an object with no organization column. No stock door mints an org-less request.\n  - N1 quotes \"a reminder was sent recently\"; the live text is \"a reminder was already sent recently\".\n  - A0 says \"exactly one\" row, but the maxRevisions auto-reject appends `revise` then `reject`.\n- approvals.per-group-signoff:\n  - A3.verify says end nodes log no step, but the approve branch now logs `mark_approved`.\n  - Steps 3/4 say \"drawer\" and 待我审批. The row opens the served `sys_approval_request` record page, and the English tab is \"My Pending\".\n  - The N0 contrast has no stock per_group collapsed-slate request; the unanimous invoice (admin×2) was used.\n- approvals.quorum-m-of-n: A2 says the reject edge is unobservable, but the run logs `return_to_draft` on reject. On a fresh boot the fixture needed no unbinding.\n- approvals.inbox-metadata-actions:\n  - Steps 1/2/5 and A0 still say \"drawer\" and 待我审批/我发起的.\n  - The Record cell opens the subject record, which also renders the bar, while the Request cell opens the request page. The steps should name the cell.\n\n## Acceptance\n\n- Every line above is either applied (item revised, `revision` bumped, `history` cites the record) or answered on this card with the reason it was not.\n- `pnpm check:platform-checklist` is green.\n- The PR links this card and #25807.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

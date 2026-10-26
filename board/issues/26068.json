@@ -1,0 +1,36 @@
+{
+  "number": 26068,
+  "kind": "pull_request",
+  "title": "chore(changeset): release Object UI's 18.1.0-to-merge changes to the 38 @object-ui packages as one consolidated changeset",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:57:56Z",
+  "updated_at": "2026-10-26T12:18:46Z",
+  "closed_at": "2026-10-26T12:18:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:18:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26068",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao5i8uQrVQjUoGbnnYhTVNrR)_\n\nFixes #25831\nPart of #25677 (objectui merge aftercare). Gates the joint 18.2.0 Version PR, #25753.\n\nClause-②: yes (narrowing)\nMetadata-protocol: narrowed\n\n## What changed\n\nOne new file, `.changeset/25831-object-ui-18-1-to-merge.md`, executing maintainer ruling item 28 = B (card comment 6404422838) as amended by the Claim amendment 6413971007:\n\n- **Frontmatter:** the 38 public `@object-ui/*` packages of the fixed group, each `minor`. The private `object-ui` (VS Code extension) moves with the group through `PRIVATE_FIXED_MEMBERS`; the ignored `example-*`, `site`, `runner` and `test-support` are not named.\n- **Body:** a `**BREAKING**` lead naming the range (objectui `a3c0da9`, the 18.1.0 release commit, to `9e1fe03`, the freeze), one paragraph for each of the five `!` commits (PRs #13475, #13473, #13506, #13507, #13515) saying what was retired and who it reaches, each pointing at its original `ui/.changeset/*.md` for the migration table, then a summary of the other 30 PRs with their objectui numbers.\n- The 65 originals under `ui/.changeset/` are untouched (no root reader; kept as history).\n\n## Why one ADR-0087 marker, not five\n\n`check-adr-0087-registration` accepts exactly one disposition marker per changeset file. Measured on main `bbf70614`: a probe changeset carrying five markers exits 1 with \"5 `adr-0087:` markers -- exactly one disposition is expected\" (self-test battery R9). Every mechanical category (`registered`, `runtime-export-retired`, `type-surface-only`, `runtime-interface-only`) compares the merge base with HEAD, and the five retirements are already on `main`, so the only admissible category for this diff is `not-required (no-migration-prescription)`, which refuses an inline FROM/TO table. Hence the paragraphs point at the original changesets instead of restating their tables. The PM accepted this (option A) in Claim amendment 6413971007; per-break markers would be option B (six files) and can be reopened on the card.\n\nThe marker, in an HTML comment in the changeset body, reads in words: `adr-0087: not-required (no-migration-prescription)`, reason: the five retirements are `@object-ui/*` surfaces (a renderer node type and its schema, a widget source member, unread exports, three providers duplicating `@object-ui/react` / `@object-ui/app-shell` names, nine `@object-ui/types` schema keys), none is an `@objectstack/spec` key, object definition or stored shape, so the `packages/spec` registries have no entry to write; objectui had no conversion registry; each old spelling is refused by name, and each change's migration ships in the original changeset this entry points to.\n\n## Verification (head `0329dd0514`)\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`: 20 derived commands, all exit 0; `--ran` reconciliation: 20 derived, 20 run, 0 NOT-MEASURED. Includes `check-adr-0087-registration --base origin/main` (1 declared-breaking changeset, disposition accepted), `check-empty-changeset`, `check-changeset-no-major`, their self-tests, `check:changeset-gate-self-tests`, `check:nul-bytes`, `check:published-files`.\n- `node scripts/check-changeset-no-major.mjs --base origin/main --event E` with this body's two declaration lines: exit 0 (LEVEL AXIS green). The same with `Clause-②: no` / `Metadata-protocol: none`: exit 1 (a `minor` beside `none` is refused), which is why the Claim's lines were amended.\n- `node scripts/check-changeset-fixed.mjs`: exit 0, 111 public packages + 1 declared private member in sync.\n- `pnpm changeset status --verbose --since origin/main`: 112 fixed-group members to 18.2.0, the 38 `@object-ui/*` among them, each citing this file.\n- changesets v3.0.3 has no `version --dry-run`, so `pnpm changeset version` was run on a scratch state of this worktree and reset: all 38 public `@object-ui/*` manifests read 18.2.0 and `ui/packages/core/CHANGELOG.md` gains the 18.2.0 entry with the marker hidden as a comment (337 files touched, discarded with `git reset --hard`). That run was at `213e4d2b`; the head differs only by moving the two declaration lines to the end of the body, so the CHANGELOG headline is the BREAKING lead rather than the `Clause-②:` line.\n- Push-environment battery (`GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push node scripts/pm/check-dispatch-gates.mjs`): result posted on the card with the report.\n\n## Acceptance notes\n\n- Arithmetic: root `.changeset/*.md` count goes from 96 to 97 (+1, this file; README excluded); `ui/.changeset/` keeps 65 changesets + README.\n- Each of the 38 CHANGELOGs receives the same entry, because the group is fixed and the ruling names all 38.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0119jY1rheeWvbYGGbLXr6sL)_\n"
+}

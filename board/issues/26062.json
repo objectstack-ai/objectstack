@@ -1,0 +1,36 @@
+{
+  "number": 26062,
+  "kind": "pull_request",
+  "title": "fix(fields): lookup subtitle no longer repeats the referenced object's name field",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:39:22Z",
+  "updated_at": "2026-10-26T14:58:52Z",
+  "closed_at": "2026-10-26T14:58:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:58:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26062",
+  "body": "Fixes #25860\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nThe lookup quick-picker shows each candidate as a title over a subtitle (the preview line) of the referenced object's other columns. A lookup that declares no `displayField` titles the option through the referenced object's own name field (`recordToOption` calls `getRecordDisplayName`: declared `nameField`, else a `titleFormat` template, else the derived title field). But `previewColumns` in `ui/packages/fields/src/widgets/LookupField.tsx` seeded its `seen` set with `displayField` only, and without a declared one that is the widget's `'name'` guess. So on an object whose name field is anything other than `name` (`title`, `customer_name`, every AI-built object), the subtitle's first and widest slot repeated the title. The phone number, the field that tells two records apart, was pushed into truncation.\n\n`previewColumns` now also adds the referenced object's resolved name field to `seen` (`resolveNameField(refObjectSchema)` from `@object-ui/core`) when the lookup declares no `displayField`. It follows the same ladder the title follows:\n\n- A declared `displayField` titles the option, so it alone is skipped and the object's name field stays in the subtitle (unchanged).\n- An object with no declared name field but a `titleFormat` is titled by the template, not by a field, so nothing more is skipped (`declaredNameField` decides this).\n- An explicitly authored `descriptionField` still leads the subtitle (unchanged).\n\nThe memo's deps gain `declaredDisplayField` and `refObjectSchema`. The import line gains `declaredNameField` and `resolveNameField`. Nothing else in the component changed.\n\n`scripts/sdui-manifest.record.json` is re-recorded (`node scripts/gen-sdui-manifest-node.mjs`, under the verify lock), because the registry source digest covers `ui/packages/fields/src`. `sdui.manifest.json` itself is byte-unchanged (sha256 `1f6e1ccb925a…`, 106 components). The branch merged `origin/main` before this PR to pick up main's own re-record of that file. The merge took main's copy and the next commit (`dcee0130`) re-recorded it on the merged tree, so the digest describes the tree this PR lands.\n\n## Tests\n\nNew `ui/packages/fields/src/widgets/LookupField.subtitleNameField-25860.test.tsx` (5 cases). It opens the real dropdown against a stub data source and reads each option's title and its previewed fields (`data-lookup-preview`) in order:\n\n- The object declares `nameField: 'title'`: the subtitle is `phone, source`, and `title` is no longer first.\n- No `nameField` is declared (the title field is derived as `title`): the same result.\n- An authored `descriptionField: 'source'` still leads: `source, phone`.\n- Control: a declared `displayField: 'code'` titles the option, and `title` stays in the subtitle.\n- Control: a `titleFormat`-only object keeps the derived `title` in the subtitle.\n\nAblation, run once and not kept. The fix was committed first. `node scripts/ablation-replace.mjs` replaced `if (nameField) seen.add(nameField);` with a comment (anchor count 1 to 0, blob `04c7cbb215e3` to `b6be553ded33`). The result was `Tests 3 failed | 2 passed (5)`: the three behaviour cases went red and both controls stayed green. The restore was verified (blob equal to HEAD `04c7cbb215e3`, `git diff HEAD` empty). No build or `dist` is involved: the test imports `./LookupField` from source, and the ui vitest config points `@object-ui/core` at `packages/core/src`.\n\nAll runs below went through `scripts/pm/os-verify-lock.sh`. The `@object-ui/fields^...` closure was built first.\n\n- `cd ui && pnpm exec vitest run --maxWorkers=2 packages/fields/`: `Test Files 278 passed | 1 skipped (279)`, `Tests 4295 passed | 7 skipped (4302)`, VERDICT command-exit 0. This ran on the pre-merge head `a200f71d`. The merge brought no change under `ui/packages/fields`, `ui/packages/core` or `ui/packages/types`.\n- After the merge, at `dcee0130`: the new test plus `labelOrder-10343`, `optionDescription` and `previewBadges-13123` gave `Test Files 4 passed (4)`, `Tests 21 passed (21)`, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/fields type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0. `tsconfig.test.json` includes `src/**/*.test.tsx`, so it checks the new test too.\n\nGates: at `dcee0130`, `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 46 commands. All 46 exit 0, including `node scripts/check-sdui-manifest.mjs`, `pnpm check:nul-bytes` and `pnpm check:type-check-coverage`. The `--ran` reconciliation reports 46 derived, 46 run, 0 NOT-MEASURED (a derived zero, with every exit code recorded). CI runs the rest of the families.\n\n## Acceptance notes\n\n- `effectiveDescriptionField` still falls back to the first picker column that is not `displayField`, so for an undeclared lookup it can be the name field. It is only used for the option's `description`, which feeds the popover's text match and is not rendered as the subtitle. It is outside this card's file surface, so it is left as is. No user-visible effect was measured.\n- `getRecordDisplayName` decides per record. If the declared name field is blank on one record, that record's title falls through to the template or the derived field. The subtitle skips the name field for every row, and a blank value would not render anyway (`previewOf` drops empty cells).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

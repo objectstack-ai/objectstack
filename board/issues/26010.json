@@ -1,0 +1,32 @@
+{
+  "number": 26010,
+  "kind": "pull_request",
+  "title": "feat(ui): the Studio permission-set form offers the field permission `when` — patch round of #25980 (#25866)",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:01:08Z",
+  "updated_at": "2026-10-26T14:46:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26010",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb7q6UepuLZRqHF7Q7j1iobb)_\n\nPart of #25866\n\nClause-②: yes (widening)\nMetadata-protocol: none\nRuling-ref: 6408558941\n\n## Why a second PR\n\n#25980 landed the key (merged by os-zhuang at 08:51Z, squash `c8cb510a`) while the seat's patch round on it (verdict 6411666422, after contract review 6411620876 PASS) was being written: auto-merge had been armed before the verdict, and the merge queue took the approved head. The merge deleted the branch; the patch push recreated it, so the branch is rebuilt here from `main` with the patch commit, plus a merge commit that keeps the pushed history reachable (no content beyond `main` and the patch round — the diff against `main` is the seven files below). This PR is that patch round: the Studio clause of ruling 6408558941 (part ①, item 4), the ADR sentence, and the record corrections the seat asked for. #25866 was closed by #25980; this PR is a follow-up and leaves it so.\n\n## What lands\n\n- **Studio form (ruling part ①, \"the Studio permission-set form offers the key\").** `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`: each field row carries a **When (edit)** column. An authored condition shows as a chip; the row opens the same CEL editor the RLS clauses use (`CelPredicateField`, clause `check`), linted the same way, and a blocking finding holds the save (package-door autosave and Save button alike) as an RLS clause does. The Read-off cascade in `updateFieldPerm` clears the condition, so the shape the spec refuses (`when` beside `readable: false`) is never authored; `bulkSetFields` rewrites the two booleans and keeps an authored `when` (`withFieldBits`); Clear drops the entry; blank text removes the key; a condition typed on a Read-off entry switches Read on. `FieldPerm` (`permission-slice.ts`) gains `when`, carried verbatim by the package-door slice merge. en and zh rows in `i18n.ts`.\n- **ADR-0066 ⑧ note.** The garbled last sentence now reads \"Taking an edit away that another set grants remains the job of the muting/deny layer ⑦ still owes.\"\n- **Docs.** `content/docs/permissions/field-level-security.mdx` names the Studio control under the `when` section.\n- **Changeset** `.changeset/25866-studio-field-permission-when.md`: `@object-ui/app-shell` patch (Metadata-protocol `none`: the key itself landed with #25980). The merged changeset of #25980 is left as it landed (check-changeset-overwrite).\n\n## Record corrections the seat asked for\n\n- The \"Not measured\" Studio paragraph of #25980's body stated a false premise (`../objectui`, unreadable). That body already carries the correction made after the contract review; #25980 is merged, so it stays as the record of that PR, and this PR is where the Studio clause is delivered.\n- \"byte-identical\" for the evaluator (Core bullet of #25980's body), softened here: bits are read `=== true` — identical to the previous merges for a parsed entry (the schema materialises both booleans), and fail-closed where the old truthiness read was wider: a malformed stored entry carrying a non-boolean truthy value no longer grants (contract review ①.8).\n\n## Acceptance notes\n\n- `PermissionMatrixEditor.fieldWhen-25866.test.tsx` (6): offer, show and save; a stored condition on load; Read off clears; the Edit toggle and Read all / Write all keep, Clear drops; blank removes the key; a refused condition holds the save and a fixed one releases it.\n- Re-run green: the authored-keys census (`permission-slice.authoredKeys.test.ts` — the bulk rewrite moved into `withFieldBits` so the census reads no spread-first literal), field bulk / envelope / basics / autosave / RLS-hold / dirty, `permission-slice`, the zh base-term census, the Studio access-tabs test (43/43); `@object-ui/app-shell` type-check (source and test tsconfig) and ESLint, all from the ui root as `ui/AGENTS.md` prescribes.\n- The ui CI families (Type Check UI, Lint UI, Test UI shards, Build & E2E UI) are CI's own lanes; they are cited from this PR's check-runs in the os-dev report addendum.\n\n## 维护者速读(草稿)\n\n- Studio 权限集表单的字段行新增「条件(改)」列:已填写的条件以 chip 展示,点开后用与 RLS 子句相同的 CEL 编辑器编辑、同样 lint;会被发布门拒绝的条件会挂起保存。\n- 关闭「读」会清除条件(规范拒绝 `readable: false` 旁的 `when`,表单永不生成该形状);「全部可读 / 全部可写」保留条件;「清空」删除条目;空文本删除键。\n- ADR-0066 ⑧ 注的末句已改写。本 PR 是 #25980 的补丁轮(该 PR 已先行合入),不关闭 #25866。\n\n## Verification\n\nSee the os-dev report addendum on #25866 for the gate run record on this head (exit codes captured before any pipe, reconciled with `dispatch-gates --ran`) and the ui test, type-check and lint runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01N3GzdgZRZ3z4wYfkWX1RJd)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01N3GzdgZRZ3z4wYfkWX1RJd\n"
+}

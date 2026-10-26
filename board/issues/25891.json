@@ -14,18 +14,20 @@
     "area:devpath",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T10:58:35Z",
-  "updated_at": "2026-10-26T02:54:11Z",
+  "updated_at": "2026-10-26T15:00:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25891",
   "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (`@objectstack/console` 18.1.0, a runtime whose outbound network is blocked)\n\nSetup → 浏览应用市场: `GET /api/v1/marketplace/packages?limit=100` answers 502 (the runtime could not reach the catalog host). The panel reads:\n\n> 应用市场加载失败\n> 应用市场目录返回了错误(HTTP 502)。\n> fetch failed\n> 应用市场目录通过本运行时访问。请检查运行时是否在线、能否访问该目录。\n> [重试]\n\nTwo things mislead: the catalog did not \"return an error\", the runtime's fetch to it failed (the third line says so, in the raw Node error string); and \"fetch failed\" is a developer string on an admin page. [t03-应用市场.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/t03-应用市场.png).\n\n`reach:` the public UI, measured once as the dev admin on an intranet-style sandbox; every air-gapped or proxied deployment meets it.\n\n## Expected\n\nThe runtime's marketplace proxy tells upstream-unreachable apart from upstream-error (it knows: `fetch failed` vs a response), and the panel says 「运行时无法连接应用市场目录（<host>）。请检查运行时的出网或代理设置。」 with the raw error behind a 「详情」 toggle (T2-U07's rule: one plain sentence, details behind More).\n\n## Dedupe\n\nMCP `search_issues` objectui \"marketplace page error shows fetch failed when catalog unreachable\" → 5 hits: objectstack-ai/objectui#11688 (closed: wrong cause named for a 403 allowlist refusal, the same family), objectstack-ai/objectui#12097, objectstack-ai/objectui#11726, objectstack-ai/objectui#11627, objectstack-ai/objectui#5557 — none covers the unreachable-host case. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §7 S1."

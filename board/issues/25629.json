@@ -2,8 +2,8 @@
   "number": 25629,
   "kind": "issue",
   "title": "sys_organization zh-CN: the `logo` field is labelled 「标识」, which reads as the identifier (slug) on the same page: label it 「徽标」",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:i18n",
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T11:12:06Z",
-  "updated_at": "2026-10-24T11:58:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T12:23:21Z",
+  "closed_at": "2026-10-26T12:21:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25629",
   "body": "Filing gate ①: class (a), reproduced through a public door. Found by the cloud os-dev reading on objectstack-ai/cloud#3000 (comment `6383481767`): the 「重命名组织」 dialog on a zh-CN console, objectui `fb25620e`, framework pin `f0fdd45bbc83`. Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim.\n\n**Reader who acts:** the objectstack lane that owns `platform-objects` translations.\n\n## Measured\n- The organization record page labels the slug 「标识符」 (`change_slug`).\n- Directly above it, the `rename_organization` dialog labels its `logo` param 「标识」, with placeholder `https://example.com`. A reader takes it for the identifier.\n- **Source:** the zh-CN bundle `sys_organization.fields.logo.label = 标识` (`packages/platform-objects/src/apps/translations/zh-CN.objects.generated.ts`, around line 535 at the pin). The file is generated, so the fix belongs at its source.\n\n## Wanted\n- The zh-CN label for `sys_organization.fields.logo` reads 「徽标」 (or 「Logo」), fixed at the generated file's source.\n- Check ja-JP for the same collision.\n\n## Acceptance\nThe generated bundle reads the new label. The rename dialog's logo param is no longer 「标识」.\n\n## Dedupe\n`repo:objectstack-ai/objectstack sys_organization logo 标识` was searched; none was found."

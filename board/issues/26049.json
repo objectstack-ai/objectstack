@@ -1,0 +1,39 @@
+{
+  "number": 26049,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/hook-run-as.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "priority:p2",
+    "queue-flake-anchor",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:07:26Z",
+  "updated_at": "2026-10-26T14:14:51Z",
+  "closed_at": "2026-10-26T14:13:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26049",
+  "body": "`src/hook-run-as.test.ts` has ejected **2 pull requests** from the merge\nqueue within a rolling 24 hours — **2 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #26007 | independent | [40302541664](https://github.com/objectstack-ai/objectstack/actions/runs/40302541664) |\n| #26012 | independent | [40300684735](https://github.com/objectstack-ai/objectstack/actions/runs/40300684735) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [40302541664](https://github.com/objectstack-ai/objectstack/actions/runs/40302541664) (PR #26007).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/hook-run-as.test.ts -->"
+}

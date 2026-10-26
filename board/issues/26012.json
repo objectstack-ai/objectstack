@@ -1,0 +1,37 @@
+{
+  "number": 26012,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): the platform OP emits the standard locale claim at userinfo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:04:40Z",
+  "updated_at": "2026-10-26T10:00:28Z",
+  "closed_at": "2026-10-26T10:00:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T10:00:26Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26012",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XFnVxNqd2vYJpRNfm3Fxkww)_\n\nFixes #25529\n\nClause-②: yes\nMetadata-protocol: none\n\n## What\n\nThe OIDC provider plugin-auth composes (`oauthProvider({...})` in `auth-manager-plugin-list.ts`, where the composition now lives after the `auth-manager.ts` split) gains `customUserInfoClaims`. It returns `{ locale }` only when the access token's scopes include `profile` and the user's `sys_user.locale`, read through the data engine in system context, is a tag the platform's one column reader accepts (`normalizeRecipientLocale`: non-empty, BCP-47-shaped, never the stringified-nothing literals). Otherwise it returns nothing. The rule lives in the new `oidc-userinfo-locale-claim.ts`.\n\n- No new host configuration key, no new column, no better-auth `additionalField`: every ObjectStack OP emits the claim.\n- Userinfo only. The ID token is untouched (the provider keeps profile claims out of it); the first test asserts the ID token carries no `locale`.\n- A failed locale read never fails userinfo: the claim is omitted and the host logger gets one `warn` naming the user (functional degradation, AGENTS.md degradation log levels).\n\n## Measured premises (tree `05f7758f05`)\n\n- better-auth and `@better-auth/oauth-provider` are both `1.7.12` on `main`. `customUserInfoClaims(info: { user, scopes, jwt, requestedClaims })` exists there (`oauth-DXiqbRzK.d.mts:1761`), is called only when scopes are non-empty, and its result is merged after the provider's own claims with `sub` re-pinned (`introspect-DeWu79D4.mjs` userinfo).\n- The OP composition named in the card moved: `auth-manager.ts:4252` on the filing tree is now `auth-manager-plugin-list.ts:500`. Still plugin-auth, inside the claimed file surface.\n\n## Tests\n\n`packages/plugins/plugin-auth/src/oidc-userinfo-locale-claim.test.ts` drives a REAL `AuthManager` with its OIDC provider on, over the shared in-memory engine, through its HTTP surface (sign-up, create-client, authorize with PKCE, consent, token, userinfo):\n\n- zh-CN user under `profile`: userinfo `locale: \"zh-CN\"`, ID token without `locale`;\n- no stored locale: no `locale` key;\n- stored `\"undefined\"` literal: no `locale` key;\n- `profile` not granted: no `locale`, and the column is never read;\n- the locale read throws: userinfo still 200 with `sub`/`name`, no `locale`, exactly one `warn` carrying the user id;\n- **one round trip end to end**: a second `AuthManager` as the platform RP (`genericOAuth`, provider `objectstack-cloud`, configured by OIDC discovery) signs in through this OP over a `fetch` routed to the OP's handler (the discovery document through `oauthProviderOpenIdConfigMetadata`, as `registerOidcDiscoveryRoutes` mounts it). The RP's JIT path (`idp-locale-claim.ts`) stores `zh-CN` on the RP's own `sys_user`.\n\nRed first, on `main` plus the test only (`b6c90526`): 3 failed / 13 passed — the zh-CN leg (`expected undefined to be 'zh-CN'`), the read-failure leg (`warn` called 0 times) and the round trip (RP user's locale `undefined`). The other three legs assert absence and are green on `main` by construction.\n\nGreen with the fix (`630e39c2`): 16/16 in the file (the count includes the imported shared engine module's own cases).\n\nAblation (`node scripts/ablation-replace.mjs`, anchor `customUserInfoClaims: ({ user, scopes }) =>` renamed so the provider never reads it; the test imports `./auth-manager` from source, no `dist` in the path): anchor 1 → 0, blob `dade996dd516` → `2de5c1541934`; the same 3 legs red (3 failed / 13 passed); restored to the HEAD blob `dade996dd516`, `git diff HEAD` empty.\n\n- `pnpm --filter @objectstack/plugin-auth typecheck`: exit 0 (incl. `check:test-typecheck`: no new test-layer errors).\n- `pnpm --filter @objectstack/plugin-auth exec vitest run`: 196 files / 3737 passed / 10 skipped, exit 0.\n- `eslint --no-inline-config packages/plugins/plugin-auth`: exit 0.\n\n## Gates (head `630e39c2`)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on this diff: 68 commands, every exit code captured before any pipe; `--ran` reconciliation: 68 derived, 68 run, 0 NOT-MEASURED, exit 0. Three first runs exited 3 (PREREQUISITE NOT MET, nothing measured) and were re-run green after the prerequisite: `check-plugin-teardown-shape.mjs --self-test` (shallow clone, positive-control commit fetched), `check:dual-build-cjs-loads` (needs a full build; `turbo run build` 120/120), `check:type-check-debt` (lock budget spent behind that build). Every CI family is read off this PR's check-runs, not re-run here.\n\n## Acceptance notes\n\n- Discovery `claims_supported` does not list `locale`. The provider computes that list itself from its standard-claim table and overwrites any `claims` option; only `advertisedMetadata.claims_supported` would replace it wholesale. OIDC Discovery makes the list RECOMMENDED and non-exhaustive, the platform RP never reads it, and a `claims.userinfo` request naming `locale` is filtered by it, so a client asking for `locale` individually without `profile` gets nothing, which matches the ruled scope rule. Noted, not filed.\n- A second read site of `sys_user.locale` exists beside `storedRecipientLocale` (email/SMS). It shares the column constant and the normalizer; it does not reuse that function because that function swallows a read failure silently by contract, and this order asks the failure to be logged.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XCJ2r3w7jCsheYguravx4H)_\n"
+}

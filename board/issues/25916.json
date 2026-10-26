@@ -2,8 +2,8 @@
   "number": 25916,
   "kind": "issue",
   "title": "console: four routed developer/system pages import no i18n at all (ApiConsolePage, PublicFormsPage, IntegrationsPage, AiPendingActionsPage) and DatasourceResourcePage has 17 English literals — 233 hard-coded strings",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -15,7 +15,6 @@
     "bug",
     "domain:ui",
     "i18n",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T15:41:02Z",
-  "updated_at": "2026-10-26T08:07:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T11:27:50Z",
+  "closed_at": "2026-10-26T11:27:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 15,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25916",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-24, verbatim: 「同意：建议新建：与合并无关、独立成卡的产品/契约项（可现在建）」, approving the review's list of independent product / contract cards. Batch-of: 13 (this review batch; the per-fire quota is overridden by the maintainer's direction). Also filing gate ①: reach: the routed pages `/developer/api-console`, `/developer/public-forms`, `/developer/integrations`, `/system/ai-pending-actions` (lazy routes in `apps/console/src/AppContent.tsx`) render English regardless of the user's locale.\n\n## 维护者速读\n\n全仓 TSX（非测试、不含 Shadcn `ui/`）按 JSX 文本节点与 `placeholder/title/aria-label/alt/label` 字面量统计：**233 处硬编码英文**，apps/console 136、app-shell 48、components 27。其中四个路由页面**完全不导入 `@object-ui/i18n`**：`ApiConsolePage.tsx`（603 行）、`PublicFormsPage.tsx`（744）、`IntegrationsPage.tsx`（218）、`AiPendingActionsPage.tsx`（60）；`DatasourceResourcePage.tsx` 17 处，与开卡 objectstack-ai/objectui#13353 是同一页。i18n 的 key 对齐本身是健康的（十语 10/10），所以这是「漏接」不是「漏翻」。\n\n## Measured (2026-10-24, HEAD 7981384; regex over 592 non-test TSX files: JSX text nodes starting with a capital letter and the attribute literals above, TS-generic noise removed; the hit list is in the review scratchpad `hardcoded-clean.txt`)\n\n- 233 hits. Per file: `apps/console/src/pages/system/AuditLogPage.tsx` 25, `pages/developer/PublicFormsPage.tsx` 24, `pages/developer/FlowRunsPage.tsx` 18, `packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx` 17, `apps/console/src/components/PerformanceDashboard.tsx` 11, `pages/developer/AgentConnectSection.tsx` 10, `packages/components/src/debug/DebugPanel.tsx` 9, `pages/developer/IntegrationsPage.tsx` 9, `pages/developer/ApiConsolePage.tsx` 9, `packages/components/src/share/ShareDialog.tsx` 7.\n- 35 of the hit files never call `t(` or `useTranslation`; the four routed pages above import nothing from `@object-ui/i18n` (22 of 26 console page files do use `useObjectTranslation`).\n- Samples (file, then the literal): `PublicFormsPage.tsx` \"No public forms yet\" and \"Publish a FormView\"; `ApiConsolePage.tsx` `placeholder=\"Search endpoints...\"` and \"Send\"; `IntegrationsPage.tsx` \"Base URL\"; `AiPendingActionsPage.tsx` `title=\"Queue\"`; `AuditLogPage.tsx` \"No audit entries\" and \"Change payload\"; `DatasourceResourcePage.tsx` `title=\"Delete\"` and \"No remote tables found on this datasource.\"; `ShareDialog.tsx` `placeholder=\"e.g. Sent to design review\"`.\n- Existing instruments judge existing call sites (`check-i18n-call-site-keys.mjs`, `check-i18n-en-drift.mjs`) and the aria-label literal family (`ariaLabelLiteralCensus-12145.test.ts`); no census covers JSX text / `placeholder` / `title` literals. Locale packs themselves are healthy: 3,611 `en` keys, parity 10/10.\n- Business reason: a zh / ja / ko / ar / ru operator opening Developer → API Console or Public Forms gets an English page; NORTH-STAR i18n row \"整个应用说客户的语言\".\n- Dedup (`ApiConsolePage|PublicFormsPage|IntegrationsPage|AiPendingActionsPage|hard-coded English`): 25 hits, 1 open — objectui#13418 (a different Integrations defect); closed and related: objectui#13405, objectstack-ai/objectui#13131, objectstack-ai/objectui#12889, objectstack-ai/objectui#12145 (each fixed one cluster). Open and overlapping on the same page: objectui#13353.\n\n## Task\n\n- [ ] Localise the four routed pages (one PR each; keys under `console.developer.*` / `console.system.*`), then the `DatasourceResourcePage` cluster together with objectui#13353.\n- [ ] Move dev-only surfaces (`apps/console/src/dev/*`, `DebugPanel`, `PerformanceDashboard`) under a `dev/` folder so a future census can exclude them by path; no new gate in this card.\n\nWho acts: objectui `domain:ui` seat. Effort M (about 150 of the 233 hits). Risk low.\n\nFiled by the read-only whole-repo review session `https://claude.ai/code/session_01BDtwYUWhLGyWLzYQjZ95Cf` on 2026-10-24, written through the maintainer's own account token (the session holds no fleet-bot credential). Evidence files: that session's scratchpad (`objectui-review-report.md`, `findings-*.md`). ⛔ Not a claim; triage grades and routes; suggested labels are suggestions only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

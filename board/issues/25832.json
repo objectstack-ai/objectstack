@@ -2,8 +2,8 @@
   "number": 25832,
   "kind": "issue",
   "title": "aftercare(ui-merge): move the objectui skill bundle into the root skills/ catalog (decision C): token pricing, reserved-word uses, visibleOn alias, internal flag (parent #25677, Tier H)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,26 @@
   "labels": [
     "area:devpath",
     "domain:devx",
+    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T18:27:56Z",
-  "updated_at": "2026-10-25T18:27:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T13:15:24Z",
+  "closed_at": "2026-10-26T13:15:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25832",
   "body": "Filing gate ③ + ④: post-cutover card of the epic #25677 (`pm:epic`; epic PM `session_01RSDL3SFtJaKzcymvCD8RsU`). Part of #25677. Blocked-by: #25752 (cutover PR #25825 on `main`). Touches `skills/**` = Tier H governed surface: GOVERNED_APPROVERS review, the PR stops at draft.\n\n**谁付代价（业务筛）:** decision C (maintainer, 2026-10-25) puts objectui's skill bundle into the root `skills/` catalog so one `skills` CLI serves both products. The cutover PR carries the bundle at `ui/skills/objectui` with `metadata.internal: true` (bill item 18), which hides it from the root catalog: an agent that installs skills from the merged repo gets `@objectstack` skills and nothing for objectui until this lands. Every day it stays hidden is a day the merge is invisible to the skill consumers it was meant to serve.\n\n## 维护者速读\n\n你裁的 C（objectui 技能包进根 `skills/`）在切换 PR 里被回退了：J 的 19 号补丁一搬过去就撞四道根门禁（token 定价表缺 27 个文件、「role」保留词 38 处、spec 的 visibility 别名退役测试抓到 `visibleOn`、CI 过滤计数）。切换时用 `internal: true` 把包藏起来保平，这张卡把搬家做完并把四道门禁一次清掉。Tier H，要人批。\n\n## Inputs (read first)\n\n- Bill items 18, 41, 42 (+ addendum) in `/mnt/project-files/d1-merge/out/5-cutover-bill-notes.md`; SERIES.md patch `19-*.patch` (reverted on the cutover branch by 3ee2fbc0eb) and the `0b8ae93c0a` flag commit.\n- Gates that red on the move, each measured on the cutover branch: `node scripts/check-skills-token-ratchet.mjs` (27 unpriced files under `skills/objectui/**`), `pnpm check:role-word` (38 uses of the reserved word in the bundle's prose), `@objectstack/spec` `test:repo` `src/ui/visibility-alias-keys-retirement.test.ts` (`skills/objectui/guides/schema-expressions.md` authors the retired `visibleOn` alias), `node scripts/check-ci-filter-parity.mjs` (skills count), `create-objectstack` template-consistency \"skills catalog boundary\" (the flag that keeps it green today).\n\n## What to do\n\n1. Re-apply patch 19 on `main` (`git mv ui/skills/objectui skills/objectui`, readers repointed as the patch does), remove `metadata.internal: true` from `skills/objectui/SKILL.md`.\n2. Token ratchet: price the 27 files in the ratchet's table per its own remedy text (`--self-test` must keep passing; no ceiling raised without the maintainer's word).\n3. Reserved word: rewrite the 38 \"role\" uses in the bundle's prose to the catalog's vocabulary, or ratchet rows where the gate's remedy allows; state the split.\n4. `visibleOn`: the guide stops authoring the retired alias (use the live key the retirement kit names, or route the example through the kit); the spec repo test passes with the bundle inside its radius.\n5. CI filter parity: update the skills count the way its remedy text says; `--self-test` 0.\n6. `create-objectstack` template-consistency and `check:skills-*` family 0; `skills` CLI lists the objectui bundle.\n\n## Acceptance\n\n- `skills/objectui/**` present, `ui/skills/` gone; the five gates above exit 0 with before/after in the PR body; `pnpm --filter create-objectstack test` 0; the derived gate list for the diff 0.\n- Tier H: review by a GOVERNED_APPROVER; PR stays draft until then.\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none. **Responsibility:** n/a — epic step.\n\n## 风险\n\n- The token ratchet's ceiling is deletion-funded (fleet memory): pricing 27 files may need prose cuts elsewhere in the bundle; say which.\n- The ui console or docs may read the bundle by its old path at runtime: patch 19 repointed the known readers; `grep -rn \"ui/skills\\|skills/objectui\" ui/ content/ scripts/` once more on `main`.\n\n## Dedupe\n\nEpic family only: bill item 18 (card H objectui#13527 flagged the other three ui SKILL.md internal), #25803 (J) carried the move as patch 19 and the epic PM reverted it (ruling 17:45Z, \"decision C deferred to its own card\"). **New** as a card."

@@ -1,0 +1,32 @@
+{
+  "number": 26050,
+  "kind": "pull_request",
+  "title": "fix(fields): a user field's person object is always sys_user (user cell and picker)",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:09:14Z",
+  "updated_at": "2026-10-26T10:55:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26050",
+  "body": "Fixes #25937\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nA `user` field's person object is now always `sys_user` in the console, matching the spec contract from #24952 (PR #25074): `FieldSchema` refuses a `user` field whose `reference` names any object but `sys_user`, and `referenceTargetOf` resolves every `user` field to `sys_user` whatever the field carries.\n\n- `ui/packages/fields/src/index.tsx`, `UserCellRenderer`: the read gate's object was `field.reference || 'sys_user'`. It is now the constant `'sys_user'`, and the renderer no longer reads `field` at all. The JSDoc is rewritten: it said the person's object is \"the field's `reference`\".\n- `ui/packages/fields/src/widgets/UserField.tsx`: the picker's target was `meta?.reference || 'sys_user'`. It is now `'sys_user'`, with the comment rewritten to match.\n- `ui/packages/fields/src/__tests__/userCell.readGate-10535.test.tsx`: the `crm_member` case flips. A `{ type: 'user', reference: 'crm_member' }` field is now gated by the `sys_user` policy, and its drawing is byte-equal to a plain `{ type: 'user' }` field under the same policy. A `crm_member` policy no longer reaches it. The header bullet and the test title no longer say the person's object is the field's `reference`. The retired `reference_to` case is unchanged and still passes.\n- `scripts/sdui-manifest.record.json`: re-recorded with `node scripts/gen-sdui-manifest-node.mjs`, because `ui/packages/fields/src` is a registry source the record digests.\n- `.changeset/25937-user-cell-sys-user.md`: `@object-ui/fields` patch.\n\nThe route is the type's constant, not a call to `referenceTargetOf`. That helper reads the field's reference carrier first and throws when the carrier is unreadable (`referenceCarrierOf`), so it does not belong in a render path. objectui also does not import the spec's field helpers.\n\n## Behaviour change to note: which policy gates a stored foreign `reference`\n\nThe renderer read gate (`withoutDeniedFields`) is keyed by object name. A stored object saved before the spec refusal can still carry a `user` field with a foreign `reference`, for example `crm_member`. The cell used to gate that field by the `crm_member` policy. It now gates it by the **`sys_user` policy**. That is the object the runtime expands the field into (`referenceTargetOf`), so the cell now hides exactly what the served row's own object denies. The picker also searches `sys_user` for such a field now, not the foreign object. This is the card's intent: a link to another object is a `lookup`.\n\n## Verification\n\nAll readings were taken at head `11a85a02`, after `main` was merged in at `c8cb510a`, on a shared box.\n\n- `cd ui && pnpm exec vitest run --maxWorkers=2 packages/fields/` under the verify lock: **Test Files 277 passed | 1 skipped (278), Tests 4290 passed | 7 skipped (4297)**, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/fields type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the test config compiles `__tests__`): VERDICT command-exit 0.\n- `eslint` over the three edited ui files: 0 errors. The 152 warnings were already there.\n- Ablation, one leg, with the fix committed first. `scripts/ablation-replace.mjs` put the old read back in place of `const personObject = 'sys_user';`, that is `field.reference || 'sys_user'`. The tool reported the anchor going 1 to 0 and the blob going `2ac4abd3f41c` to `644362b7ff75`. Result: `userCell.readGate-10535.test.tsx` **1 failed | 6 passed**. The flipped case failed at `:164`: `expected … not to contain 'Amy Lin'`, because the `crm_member` field was no longer gated by the `sys_user` policy. On restore, the blob was back to the HEAD blob `2ac4abd3f41c` and `git diff HEAD` was empty. The green leg at the same head: 7 of 7 passed.\n- The test imports `../index` (source), so the ablation needs no `dist/` rebuild.\n- `node scripts/gen-sdui-manifest-node.mjs` (under the lock, exit 0) re-recorded only `inTree.registrySourcesSha256`. `sdui.manifest.json` is byte-identical: sha256 `1f6e1ccb925a…`, 106 components. `node scripts/check-sdui-manifest.mjs` passes.\n- Derived gates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` gave 46 commands, and all 46 exited 0. `pnpm check:type-check-debt` hit a 300 s local timeout on its first run and passed on the rerun, with no surplus. `--ran` reconciliation: 46 derived, 46 run, 0 NOT-MEASURED, 0 UNRUN.\n- `node scripts/check-changeset-fixed.mjs`: in sync. Its roster sits under `.changeset/`, which this PR touches.\n- Full dogfood: not run. The title has no `!` and `Clause-②` has no `(narrowing)` arm.\n\n## Acceptance notes\n\n- `LookupCellRenderer`'s comment in `ui/packages/fields/src/index.tsx` still lists `UserField` among the readers that read `reference`. That is now stale, because `UserField` fixes the target. The comment sits outside this card's declared file region (`UserCellRenderer` only), so this PR leaves it alone. Carrier: none.\n- `RecordMetaFooter`'s `UserRef` (`ui/packages/plugin-detail`) still builds `reference: fieldDef?.reference || 'sys_user'` for audit fields. When the field is typed `user`, the cell renderer now ignores that `reference`, so nothing visible changes. Observation only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 26085,
+  "kind": "issue",
+  "title": "ci: 17 jobs inherit the 360-minute default timeout (four of them run on every push to main), 11 PR-triggered workflows cancel nothing when superseded, and check-links runs on every PR without a paths filter",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:25:41Z",
+  "updated_at": "2026-10-26T12:16:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26085",
+  "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one PR, Tier H. Dedupe: REST list (439 issues), grep `timeout-minutes|concurrency` → 0 hits. **New.**\n\n**谁付代价（业务筛）:** a hung job in any of these 17 holds a runner for six hours; a PR that gets three pushes in ten minutes runs three copies of eleven workflows; every docs-free PR still runs the link checker.\n\n## Measured (HEAD 0d83ee8f77)\n\n- Jobs with no `timeout-minutes` (GitHub default 360): `check-links/link-checker`, `codeql/analyze`, `cross-repo-issue-closer/close-foreign-issues`, `docker-publish/publish`, `docs-drift-check/docs-drift`, `duplicate-fix-guard`, `partof-closing-keyword`, `pr-automation/{pr-size,auto-label,changeset-check}`, `release/{version-pr,release-integrity,stale-prompts,publish}`, `single-claim-path`, `spec-liveness-check/liveness`, `stale`. `release-integrity` and `stale-prompts` run on every push to main (`release.yml` `push: branches: [main]`).\n- PR-triggered workflows with no `concurrency` block: `check-links`, `docs-drift-check`, `duplicate-fix-guard`, `engine-split-metric`, `os-create-smoke`, `pack-smoke-optin`, `pr-automation`, `scaffold-e2e`, `spec-liveness-check`, `upgrade-harness-optin`, `validate-deps`.\n- `check-links.yml:23-27`: `on: pull_request: branches: [main]` with no `paths:`; it checks `content/**`, `README.md`, `ARCHITECTURE.md` (lychee.toml).\n\n## Wanted\n\n1. Explicit `timeout-minutes` on the 17 jobs, sized from their recent run history (most 5–15 min; `publish` and `docker-publish` from their own readings). ⛔ Not a blanket number: each value cites the p99 it was read from, in the PR body.\n2. `concurrency: { group: <workflow>-${{ github.event.pull_request.number || github.ref }}, cancel-in-progress: true }` on the 11, following `ci.yml:112-114`'s shape; for workflows that also run on `push` to main keep push runs uncancellable as ci.yml does (`github.event.after` segment).\n3. `check-links.yml`: a `paths:` filter matching what lychee.toml reads; keep `workflow_dispatch`.\n4. Optional, same PR: `permissions: {}` at the top of the eight workflows that declare only job-level permissions (`check-links`, `ci`, `codeql`, `lint`, `pr-automation`, `release`, `stale`, `validate-deps`) — a one-line deny-by-default backstop; the dev may leave it out if any job turns out to rely on the default token.\n\n## Acceptance\n\n- `grep -L 'timeout-minutes' …` over the job blocks → 0 jobs without one (the dev writes the exact read in the PR).\n- A PR with two pushes a minute apart shows the first run of each of the 11 workflows cancelled.\n- `scripts/ci/scheduled-full-run.mjs --check-concurrency` still green (it evaluates ci.yml's expression; do not weaken it).\n\n**Size:** S–M. **Clause-②:** no. **Metadata-protocol:** none. **Tier:** H."
+}

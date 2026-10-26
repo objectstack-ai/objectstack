@@ -2,24 +2,35 @@
   "number": 25991,
   "kind": "issue",
   "title": "pm-dispatch: a project seat creates its own patrol schedule in-session, hourly by default (lanes may relax it); drop the \"maintainer creates it in the Routines UI\" step (maintainer's word 2026-10-26)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:14:37Z",
-  "updated_at": "2026-10-26T08:14:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T13:38:23Z",
+  "closed_at": "2026-10-26T13:34:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25991",
   "body": "Filing gate: ③ maintainer-directed task (a pm rule change the maintainer named).\n\n## Maintainer's words (verbatim, 2026-10-26, ui-lane project)\n\n> 你应该自己创建定时啊\n\n> 为什么不是每小时\n\n> 那需要立卡改 skills吗\n> 立卡\n\nContext: the `domain:ui` project seat (#25966) asked the maintainer to create its patrol routine in the Routines UI, every 2–4 h, as the skill says. The maintainer answered that the seat should create the schedule itself, asked why it is not hourly, and asked for this card.\n\n## What changes (two points, nothing else)\n\n1. **Interval.** The project seat's patrol runs **hourly by default**; a lane may relax it when it has a reason, and states the interval on its seat post. This replaces the hard-coded \"every 2–4 hours\".\n2. **Who creates it.** The project seat creates its own patrol schedule from inside its session, bound to that session (`create_trigger` with no `create_new_session_on_fire`, firing into the seat's own project thread). The \"the maintainer creates it in the claude.ai Routines UI\" requirement is removed for project seats.\n\n## Lines that say otherwise today (at `origin/main`)\n\n- `.claude/skills/pm-dispatch/SKILL.md` — 「项目席唤醒 = PR 订阅事件 + 每项目一个巡查 routine;⛔ 无自绑 cron、无 `send_later` 链。」 The \"⛔ no self-bound cron\" clause forbids exactly what point 2 asks for, so it needs a scoped rewording, not deletion of the `send_later`-chain ban.\n- `.claude/skills/pm-dispatch/references/seat-post-protocol.md` § 座位 Routine 创建 — 「由维护者在 claude.ai 的 Routines UI 创建…」 and 「会话内 `create_trigger` 的 Routine 拿不到 GitHub 工具、零产出」. The second line is about a fresh-session trigger; a trigger bound to a live project-seat session runs with that session's own tools and the fleet-write relay. Measured: `trig_015KLmxJkto73scJDw4s14Sg` (ui seat, hourly, fires into the seat's session). The editor should keep the zero-output warning for fresh-session triggers and scope it.\n- `.claude/skills/pm-dispatch/references/seat-lifecycle.md` — 「项目席巡查 routine 每 2–4 小时跑各车道待命项…」.\n- `.claude/skills/pm-dispatch/references/project-forms.md` — 「首次坐席建本项目的 routine:巡逻每 2–4 小时…」.\n\nRoutine (non-project) seats are out of scope: this card changes only the project-seat form.\n\n## Business reason\n\n③ — the maintainer's words above stand in for it. Effect: a newly seated project lane has a patrol from the first minute, without a maintainer round-trip, and a patrol that is not event-driven (retriage answers, half-state sweep, slot refill) runs at most an hour late instead of up to four.\n\n## Who acts on it\n\nThe `domain:skills` seat, as one governed PR to the four files above (pm-dispatch root, contract-review tier per the lane's standing commitments).\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"pm-dispatch project seat patrol routine interval Routines UI create_trigger self-bind\": 11 hits, none open. Nearest closed: #17728 (patrol timer armed once at seating as a self-bound Routine, Routine-seat form), #25379 / #25412 (project-seat forms that introduced the current wording).\n\nFiled by seat `domain:ui#1`, session `session_017iXjUm1rujwDk7f3KT1Pkk`."

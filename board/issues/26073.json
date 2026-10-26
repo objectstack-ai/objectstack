@@ -1,0 +1,32 @@
+{
+  "number": 26073,
+  "kind": "issue",
+  "title": "[Decision] Two different documents are both called the \"North Star\" and four pointers disagree on which outranks AGENTS.md; the one that does is Chinese-only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:11:04Z",
+  "updated_at": "2026-10-26T14:04:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26073",
+  "body": "Ruled: 6417934431 · letter A′ · 2026-10-26T14:02Z\n\nFiling gate ②: a maintainer-only decision. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). Reader: the director seat presents this card in a decision batch; after the ruling the lane named under \"After the ruling\" dispatches. ⛔ Not a claim. Dedupe: REST list (439 issues), grep `north.?star|NORTH-STAR` → 0 hits. **New.**\n\n## 维护者速读\n\n仓里有两份「北极星」：`docs/NORTH-STAR.md`（中文，目标与优先级，125 行）和 `content/docs/concepts/north-star.mdx`（英文，架构）。四处指向互相矛盾：AGENTS.md 第 7 行说前者高于 AGENTS.md；AGENTS.md 第 200 行（Prime Directive 8）和 ROADMAP.md 第 4 行把后者当唯一真源；CONTRIBUTING.md 第 69 行又指回前者。一个新贡献者或新席位读到「先读北极星」，有一半概率打开错的那份。另一层：高于 AGENTS.md 的那份是纯中文（3,194 个 CJK 字符），AGENTS.md 第 31 行却说仓库产物以英文为主——英文贡献者读不了最高优先级文档。请裁：**A** 把 `content/docs/concepts/north-star.mdx` 改名为 `architecture-overview`（或并入 `concepts/architecture.mdx`），四处指向统一到 `docs/NORTH-STAR.md`，并为它加一节英文摘要（中文原文不动）；**B** 反过来，`docs/NORTH-STAR.md` 改名 `docs/PRIORITIES.md`，「北极星」只指 mdx；**C** 两份都保留原名，只修四处指向写清各管什么。选 A / B / C？\n\n## Governing text\n\n- `AGENTS.md:7`: \"`docs/NORTH-STAR.md` (先做什么: goals, priority) outranks it; `content/docs/concepts/north-star.mdx` = architecture.\"\n- `AGENTS.md:200` (Prime Directive 8): \"Read `content/docs/concepts/north-star.mdx` before structural changes.\"\n- `ROADMAP.md:4`: \"Source of truth: content/docs/concepts/north-star.mdx for product direction\".\n- `CONTRIBUTING.md:69`: points to `docs/NORTH-STAR.md`.\n- `AGENTS.md:31`: repository artifacts keep their existing language convention, \"以英文为主\".\n- Prime Directive 14: `docs/NORTH-STAR.md` and `AGENTS.md` are Tier H governed surfaces, so any option lands by maintainer approval.\n- pm-dispatch SKILL.md 「优先级」: 维护者裁决 > 北极星 > AGENTS.md — the skill itself needs one unambiguous referent.\n\n## Premises\n\n- P1 — the two files differ in content, not translation: `wc -l docs/NORTH-STAR.md content/docs/concepts/north-star.mdx` and read both headings; the md is a priority ladder, the mdx an architecture narrative.\n- P2 — the four pointers: `grep -n 'north-star\\|NORTH-STAR' AGENTS.md ROADMAP.md CONTRIBUTING.md`.\n- P3 — language: `grep -o '[一-龥]' docs/NORTH-STAR.md | wc -l` → about 3,194; the mdx has none.\n\n## One-sentence problem\n\nThe document that outranks every other rule in this repository cannot be found from half of the places that tell you to read it, and cannot be read at all by an English-only contributor.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | Rename the mdx (architecture), point all four references at `docs/NORTH-STAR.md`, add an English summary section under the Chinese text. | One North Star; English readers get the ladder; the mdx keeps its content under an honest name. Published docs URL changes once (add a redirect entry in the docs redirects ledger, `check:docs-redirects`). | devx · 1 PR Tier H · precedent: none read |\n| B | Rename the md to `docs/PRIORITIES.md`; \"North Star\" means the mdx. | The skill's 「北极星」 and AGENTS.md:7 must be reworded; the priority ladder loses the name every seat already uses for it. | skills + devx · 2 PRs Tier H |\n| C | Keep both names, fix the four pointers to say which is which. | Ambiguity stays in the name; every reader still has to learn there are two. | devx · 1 PR Tier H |\n\n## Business meaning\n\n- A: the priority ladder is the North Star, and it is readable by everyone who ships here.\n- B: the architecture page is the North Star; priorities become a side document.\n- C: live with two.\n\n## 四维分析\n\n- **实际业务需求**：读者是每个新席位与每个人类贡献者。pm-dispatch 的优先序「维护者裁决 > 北极星 > AGENTS.md」每轮都在用这个词；指错一次就是一次派错的定级。\n- **项目长远合理性**：北极星是「先做什么」，架构是「怎么做」；名字应跟着职责。A 让名字和 AGENTS.md:7 已经写明的层级一致，是最小改动。\n- **防 AI 犯错**：席位按文件名加载文档；两个同名文件就是一个开放的歧义。闭合为一个名字优于在两处解释。英文摘要让非中文席位也能按同一张表定级，不是靠猜。\n- **创业阶段不扩散**：不加文件、不加门禁；A 只是改名加一节。\n\n## Recommendation\n\n**A.** 只看①选 A；②③④ 是否翻转：否。\n\nConfidence gaps: whether the public docs site has inbound links to `/concepts/north-star` from outside this repo (the blog, README badges); the dev checks `grep -rn concepts/north-star` across README, ui/, and the docs redirects before renaming.\n\n## After the ruling\n\n- A or C: the devx execution seat dispatches one os-dev; file surface `AGENTS.md`, `ROADMAP.md`, `CONTRIBUTING.md`, `docs/NORTH-STAR.md`, `content/docs/concepts/`, `content/docs/meta.json`, the redirects ledger. Tier H.\n- B: the skills lane also edits `.claude/skills/pm-dispatch/SKILL.md` 「优先级」 wording; two PRs.\n\nos-decision-facets\n① 项目长远合理性：一个名字一个文件，与 AGENTS.md:7 已写的层级一致，不新增解释。\n② 实际业务拉动：每轮派发都按「北极星」定级；四处指向有两处指错。\n③ 防 AI 犯错：闭合歧义优于两处注释；英文摘要让非中文席位也能按同一张表定级。\n④ 创业阶段不扩散：改名加一节，零新文件零新门禁。\nPrior rulings read: north star,NORTH-STAR,priority ladder → 0 hits; none; thread: none; repo: objectstack-ai/objectstack\n\n## Related\n\n#26035 (open, dispatched: AGENTS.md frontend section rewrite — the same file; serialize behind it).\n"
+}

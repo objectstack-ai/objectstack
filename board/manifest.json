@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-10-26T08:38:57.527Z",
+  "generated_at": "2026-10-26T15:11:42.261Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-10-26T08:38:43Z",
-      "since": "2026-10-26T02:32:50Z",
+      "cursor": "2026-10-26T15:11:10Z",
+      "since": "2026-10-26T08:38:43Z",
       "slice": 300
     },
     "history": {
@@ -20,41 +20,41 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-10-26T02:32:50Z",
-  "since_reason": "incremental from the previous run's next_since (2026-10-26T02:32:50Z)",
-  "next_since": "2026-10-26T08:38:43Z",
+  "since": "2026-10-26T08:38:43Z",
+  "since_reason": "incremental from the previous run's next_since (2026-10-26T08:38:43Z)",
+  "next_since": "2026-10-26T15:11:10Z",
   "resume": null,
   "counts": {
-    "issues_open": 272,
-    "issues_closed": 11242,
-    "pulls_open": 29,
-    "pulls_closed": 12347,
-    "records": 23890
+    "issues_open": 274,
+    "issues_closed": 11316,
+    "pulls_open": 45,
+    "pulls_closed": 12443,
+    "records": 24078
   },
   "board": {
-    "open_issues_count": 230,
-    "open_pull_requests": 20,
-    "read_at": "2026-10-26T08:38:56.611Z"
+    "open_issues_count": 247,
+    "open_pull_requests": 36,
+    "read_at": "2026-10-26T15:11:41.258Z"
   },
   "count_check": {
-    "verdict": "ok",
+    "verdict": "surplus",
     "reason": null,
-    "expected": 210,
-    "archived": 272,
+    "expected": 211,
+    "archived": 274,
     "shortfall": 0,
-    "surplus": 0,
+    "surplus": 1,
     "gone_ledger": 62,
-    "ok": true
+    "ok": false
   },
   "freshness": {
     "verdict": "fresh",
     "pending_since": null,
     "reason": null
   },
-  "requests": 360,
+  "requests": 605,
   "run": {
-    "numbers_read": 212,
-    "files_written": 416,
+    "numbers_read": 333,
+    "files_written": 645,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,

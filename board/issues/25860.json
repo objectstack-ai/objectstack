@@ -2,8 +2,8 @@
   "number": 25860,
   "kind": "issue",
   "title": "Lookup picker: the subtitle repeats the record name when the referenced object's name field is not `name` — every AI-built lookup",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:15:35Z",
-  "updated_at": "2026-10-26T06:58:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T14:58:51Z",
+  "closed_at": "2026-10-26T14:58:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25860",
   "body": "Filing gate **① a reproduced UX defect** (class a, public door: a lookup picker on a record form). `reach:` local stack, objectui pin `6f629a7` (cloud `main` `36b07fdf`), zh-CN, 2026-10-25. In an AI-built app, the 关联客户 picker on 新建家装项目 lists each customer as the title 「周明轩」 over a subtitle that **repeats it**: 「客户姓名: 周… · 联系电话: 1862457… · 客户来源: 门店」.\n\nBatch-of: 6 · 2026-10-25 desktop E2E, second pass (magic-flow UX, reviewed in-session). Filed at the maintainer's request: 「必要的合理的建议都可以立卡」 / 「体验问题 也请fable 审核是否需要立卡」.\n\n**Business reason.** The subtitle exists to tell similar records apart. Its first, and widest, slot is spent on the name the title already shows, which pushes the phone number (the field that actually disambiguates two 王静 records) into truncation. This happens on every lookup to an object whose name field is not literally `name`, which is every AI-built app.\n\n**Reader who acts.** The `repo:objectui` ui seat: `packages/fields/src/widgets/LookupField.tsx`. objectui-only: AI-built lookups declare no `displayField` / `descriptionField`, so no metadata change is needed.\n\n## Where (objectui pin `6f629a7`)\n- `LookupField.tsx:376` `displayField = declaredDisplayField || DEFAULT_DISPLAY_FIELD` (`'name'`).\n- The option **title** resolves through `getRecordDisplayName` → `objectDef.nameField` (`core/src/utils/record-title.ts:26-31`), here `customer_name`.\n- `previewColumns` (:585-599) seeds `seen` with `displayField` (`'name'`) only. `deriveLookupColumns.ts:86` leads with that absent `name`, so `customer_name` becomes the first subtitle item.\n- objectui#10343 (closed) fixed the title ladder, not the subtitle's `seen` set.\n\n## Expected\n`seen` also holds the field the title actually resolved from (`objectDef.nameField`, or whatever `getRecordDisplayName` used), so the subtitle starts with 联系电话.\n\n## Dedupe\n`gh api search/issues` on objectui, incl. closed:\n- `lookup descriptionField repeats name`: 0.\n- `lookup picker subtitle display field nameField`: 1, a seat card.\n- `DEFAULT_DISPLAY_FIELD nameField lookup`: 1. objectui#10343 (closed) is the other half (the title)."

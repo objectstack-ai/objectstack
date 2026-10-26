@@ -1,0 +1,32 @@
+{
+  "number": 26030,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): fill a bulk confirmText's {{ count }} hole with the run's record count",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:46:09Z",
+  "updated_at": "2026-10-26T14:41:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26030",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi91vuMhRJwN3WrWzqrtvosbw)_\nPart of #25942\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nStep 1 of ruling B on #24798 (the renderer half): a bulk action's `confirmText` fills its `{{ count }}` hole with the number of records the run covers.\n\n- `ui/packages/plugin-grid/src/components/bulkConfirmText.ts` gains `bulkConfirmText(confirmText, { count })`. It reads the slot through the existing `bulkConfirmTextSource` (string or `{ dialect: 'template', source }`), and when the sentence carries a `{{ }}` hole it fills it through `@object-ui/core`'s `fillTemplateHoles`, the template engine the flow notifications and the single-record `confirmText` already render with. The root is the protocol's own constant, `BULK_CONFIRM_COUNT_ROOT` from `@objectstack/spec/ui`, bound to `rows.length` (the selection after the def's `visible` narrowed it, the same number the default sentence states).\n- `BulkActionDialog.tsx` renders the confirm description through it. The default sentence, the place of the confirm step and everything else in the dialog are untouched.\n- `bulkConfirmTextEnvelope-13183.test.tsx`: the dialog test that pinned an envelope's `{{ count }}` printed as written now expects it filled (`Archive 2 account(s)?`); the reader tests there are unchanged, since the reader still returns the source as written.\n- `scripts/sdui-manifest.record.json` re-recorded (`node scripts/gen-sdui-manifest-node.mjs`), because the registry source hash moved.\n- Changeset: `.changeset/25942-bulk-confirm-holes.md`, `@object-ui/plugin-grid` patch.\n\nThe ruling, verbatim: \"Nothing else moves: no CEL inside holes, no change to the default text, no change to where the confirm step sits.\" A hole holding logic, an unbalanced delimiter or an unknown formatter is refused by the engine, and the dialog then shows the sentence as written (the server-side doors refuse such a sentence by name already).\n\n## What stays for step 2 (the `Fixes #25942` PR)\n\nThe param roots. At this step only `count` is bound, so a hole naming one of the def's params prints empty, as an unbound path does in every template. Step 2 binds each param to its display value under the spec's rule (option label, lookup/user display name, the raw value otherwise so formatters apply), and #25942 remains open for it.\n\n## Verification (head `b8e5134c`)\n\n- Targeted: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-grid/src/__tests__/bulkConfirmCount-25942.test.tsx packages/plugin-grid/src/__tests__/bulkConfirmTextEnvelope-13183.test.tsx` → Test Files 2 passed, Tests 20 passed.\n- New file `bulkConfirmCount-25942.test.tsx`, 9 tests: the protocol root name; a bare string and an envelope; `{{ count | number }}` → `1,234`; a hole-less sentence and a dollar-brace token shown as written; blank, source-less and absent slots return `undefined`; an unbalanced and a logic-bearing source returned as written; the dialog shows `Archive 3 account(s)?` / `Archive 1 account(s)?` for the rows it was handed and keeps the default sentence when no `confirmText` is authored.\n- Ablation (after commit `812c71ec`): the render site set back to `bulkConfirmTextSource(def.confirmText)` through `scripts/ablation-replace.mjs` (anchor 1 → 0, blob `c1b43e1f66ea` → `2e7497c942ea`) → `Tests 3 failed | 17 passed` (the three dialog fill tests); restored to blob `c1b43e1f66ea`, `git status --porcelain` empty. No build leg: the tests import the dialog by relative path.\n- Whole package: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-grid/` under the lock → Test Files 248 passed (248), Tests 2213 passed (2213), VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-grid run type-check` (both `tsc --noEmit` and `tsconfig.test.json`) → exit 0, after `pnpm --filter '@object-ui/plugin-grid^...' run build`.\n- `node scripts/check-sdui-manifest.mjs` → exit 0 after the re-record.\n- Derived gates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `b8e5134c` → 46 commands, all exit 0; `--ran` with exit codes → 46 derived, 46 run, 0 NOT-MEASURED, 0 UNRUN. CI owns the type-check lanes, `Test Core` and the repo-wide scans.\n\n## Acceptance notes\n\n- The `number` / `currency` / `date` formatters render in the engine's default locale (`en-US`), as the single-record `confirmText` fill does today; `fillTemplateHoles` takes no locale. Step 2 looks at this together with the param roots, since the engine reads its formatter locale from the same scope the roots are passed in.\n- `ObjectGrid.tsx`, `ui/.github/**` and the root `ci.yml` are not touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016zsTRTJ3SP3dpjEkyLrzWS)_\n"
+}

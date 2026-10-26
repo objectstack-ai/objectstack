@@ -1,0 +1,37 @@
+{
+  "number": 26029,
+  "kind": "pull_request",
+  "title": "docs(releases): describe the in-tree Console release flow; drop the deleted objectui pin procedure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:41:06Z",
+  "updated_at": "2026-10-26T11:05:28Z",
+  "closed_at": "2026-10-26T11:05:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:05:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26029",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D92ykJ9hN1nxRBvkJbs7bzh)_\n\nFixes #26021\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n`docs/releases-maintenance.md` only (+~73 / −~225). #25745 deleted `.objectui-sha`, `scripts/bump-objectui.sh` (+ selftest), `scripts/objectui-changeset-digest.mjs`, `scripts/objectui-range.mjs` and `scripts/build-console.sh`, but the release runbook still described them as the live procedure. Every sentence that depended on the pin was rewritten or removed, not only the ~25 lines the card counted:\n\n- **Intro and layer diagram:** the fixed group holds both `@objectstack/*` and `@object-ui/*`; ui/ PRs write ordinary root changesets; `ui/**/CHANGELOG.md` joins the generated detail layer. The `objectui bump → .changeset/console-*.md` row is gone.\n- **\"The frontend is a package too\":** replaces the bump-script usage, \"the pin must be a commit on objectui main\" and the unreadable-pin refusal with today's flow: `pnpm console:build` → `@objectstack/console#build:dist` → `packages/console/build-dist.sh` (copies `ui/apps/console/dist`, ships the tracked `sdui.manifest.json`, single-zod canary). Notes that the pre-merge `ui/.changeset/` files wait on #25831.\n- **Manifest regeneration:** rewritten for the in-tree producer (`node scripts/gen-sdui-manifest-node.mjs` builds `ui/packages/` registry; `check-sdui-manifest.mjs` recomputes the source digest), per #25712. `pnpm objectui:build` / `objectui:refresh` are gone.\n- **Sourcing the Console section:** from the `@object-ui/*` changelogs `changeset version` writes, not `objectui-range.mjs`.\n- **\"Which objectui revision we pin is a decision\":** replaced by a short \"No objectui pin\" paragraph linking #25711/#25745/#25697/#10134 instead of retelling the history.\n- **Cutting a release:** the table's `objectui pin` row becomes `Console` (built from `ui/apps/console` at the snapshot / version commit); cut-rc steps 1–2 now match `cut-rc.yml` (`pnpm run build` then `pnpm run console:build`); the \"On the pin\" paragraph and the GA pin-freshness aside are removed. The rc.6 pin-chasing paragraph stays, as history in the past tense.\n\nOut of scope, per the card: `.claude/skills/**`, workflow comments, `docs/qa/platform-checklist/areas/*.json`, `docs/audits/**`. `docs/adr/0082` still names the deleted scripts in its historical addendum; left as written.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands` on this diff derives 13 commands; all 13 exit 0 on `0f5c90ab` (after `pnpm install` and `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` for the doc-formula gate's prerequisite):\n\n`check-ci-filter-parity`, `check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus`, `check:doc-formula-expressions`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:refd-timer-probe`, `check:required-contexts` (reads this page scan-only; `Console Pin Gate` stays past tense), `check:watch-hint-literal`.\n\nReaders of this page's text: `scripts/pm/release-rehearsal-clone.mjs --self-test` (C10 asserts the page names the script) passes. No test quotes the deleted prose.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DpQiiNz96hbwQVmyGCrmZh\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26042,
+  "kind": "pull_request",
+  "title": "fix(plugin-form): report collapsible / collapsed beside group only when true",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:05:59Z",
+  "updated_at": "2026-10-26T14:29:22Z",
+  "closed_at": "2026-10-26T14:29:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T14:29:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26042",
+  "body": "Fixes #25955\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n`@object-ui/plugin-form`'s `reportGroupOwnedKeys` (`ui/packages/plugin-form/src/sectionGroups.ts`) no longer reports `collapsible` / `collapsed` on a `{ group }` form section unless they are `true`. `name`, `label`, `description` and `visibleWhen` are still reported on any value, and a `true` beside `group` (a programmatic SDUI caller that skips the spec's parse) is still reported.\n\n## Why\n\n`FormSectionSchema` in `@objectstack/spec` gives both keys `.default(false)`, so every parsed section carries `collapsible: false, collapsed: false`, and its group refinement lists them under `trueOnlyDerivedKeys`: only `true` is refused beside `group`. The renderer filtered `GROUP_OWNED_SECTION_KEYS` by \"is not `undefined`\", so every `{ group }` section of every parsed form logged \"also declares `collapsible`, `collapsed`\" and told the author to move keys they never wrote (HotCRM contact and opportunity pages, as the card measured).\n\nPer the triage ruling (comment 6409254426) the fix is in the renderer, not the spec: the spec's `default(false)` stays and no protocol changes.\n\n## How the two lists stay in agreement\n\nThe spec passes its true-only list inline to `sectionGroupReferenceRefinement` and exports no name for it, so the renderer cannot import it. The renderer keeps a private two-key set, `TRUE_ONLY_GROUP_OWNED_SECTION_KEYS`, and the new test measures agreement by parse instead of copying the list a third time: for every key in `GROUP_OWNED_SECTION_KEYS`, at `false` and at `true` (and at a string for the non-boolean keys), the warning names the key exactly when `FormSectionSchema.safeParse` refuses that key with a `custom` issue at that path. If the spec ever moves a key between `derivedKeys` and `trueOnlyDerivedKeys`, that leg goes red. The new set is not exported, so the package entry surface pinned by `sectionGroupResolverPublished-8641.test.ts` is unchanged.\n\n## Files\n\n- `ui/packages/plugin-form/src/sectionGroups.ts`: the true-only set, a `restatesGroupOwnedKey` predicate, and `reportGroupOwnedKeys` filtering through it.\n- `ui/packages/plugin-form/src/__tests__/sectionGroupTrueOnlyKeys-25955.test.ts` (new, `unit` project): a parsed `{ group, columns }` section warns nothing; a parsed explicit `false` pair warns nothing; `{ group, collapsed: true }` warns naming only `collapsed`; `true` beside a `false` names only the `true` key; `label` still warns; and the per-key agreement with the spec described above.\n- `scripts/sdui-manifest.record.json`: re-recorded with `node scripts/gen-sdui-manifest-node.mjs` (registry source digest only; `sdui.manifest.json` is byte-unchanged).\n- `.changeset/25955-group-section-true-only.md`: `@object-ui/plugin-form` patch.\n\n## Verification\n\nAll heavy runs went through `scripts/pm/os-verify-lock.sh`; the verdict lines are quoted.\n\n- Whole `@object-ui/plugin-form` suite, `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-form/` at `722a309d` (before the merge with main): `Test Files 200 passed (200)`, `Tests 2385 passed | 1 skipped (2386)`, `VERDICT command-exit 0`.\n- After merging `origin/main`, at the final head `5e82f1cd`: the new file plus the three existing group-reference suites (`formSectionGroupReference-7051`, `sectionGroupResolverPublished-8641`, `modalFormSectionGroupReference-11542`): `Test Files 4 passed (4)`, `Tests 41 passed (41)`, `VERDICT command-exit 0`. Nothing the merge brought in touched `ui/packages/plugin-form` or the spec's form-section schema.\n- `pnpm --filter @object-ui/plugin-form run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): `VERDICT command-exit 0`; `tsc -p tsconfig.test.json --listFilesOnly` lists the new test file (1 hit).\n- Ablation (one-off; the fix was committed first): `node scripts/ablation-replace.mjs` put the old `(section as any)[k] !== undefined` filter back (anchor 1 -> 0, blob `1576b8c4` -> `ca9a570b`). Result: 5 of 6 new tests red. `PROGRAMMATIC_TRUE_STILL_WARNS` stayed green, as expected, because it pins behaviour the old code already had. Restored: blob back to `1576b8c4` (the HEAD blob), and `git diff HEAD` empty.\n- `node scripts/check-sdui-manifest.mjs`: `sdui.manifest.json is present, intact (sha256 1f6e1ccb925a…, 106 components) and generated from the in-tree registry as it stands … sha256 71a312ed6efe…`.\n- Derived gates at `5e82f1cd`: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` gave 46 commands, and all 46 exited 0. Reconciliation: `dispatch-gates --ran: 46 derived famil(ies) accounted for — 46 run, 0 NOT-MEASURED (a DERIVED zero — all 46 recorded an exit code and none of them is 3)`.\n- Not run locally, left to CI: the repo-wide `test:repo` project, the type-check lanes `dispatch-gates` lists as CI-only, and the full UI test shards.\n- Dogfood: n/a. The title has no `!` and the `Clause-②` line has no `(narrowing)` arm.\n\n## Acceptance notes\n\n- The card's \"Done when\" names a console built from the fix showing no warning on HotCRM contact and opportunity pages. That browser reading was not taken here; the unit legs feed the resolver the spec's own parse output for the exact shape HotCRM writes (`{ group, columns: 2 }`), which is what any parsed form carries; the console path itself was not traced here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 26091,
+  "kind": "issue",
+  "title": "tooling: root scripts/ is about 462k lines, 20 scripts are referenced from nowhere, 22 root check:* aliases are called by no workflow, hook or script, the same gate is spelled two ways, and 5 check-* scripts have no --self-test",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tech-debt",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:31:45Z",
+  "updated_at": "2026-10-26T14:55:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26091",
+  "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat (gate-class scripts route to `domain:spec` per the lane table; triage decides) — one os-dev, one or two PRs. Dedupe: REST list (439 issues), grep `scripts/ |orphan|unreferenced|dead script` → #25921 (open, ui dead modules — different tree); #25920 (open, dispatched, `domain:devx`: \"tooling surface: 15 check:*/census:* scripts no workflow runs … 原则：删大于加\") — that card's readings are the `ui/` tree's `scripts/` (135 files, 105k lines, 126 root scripts). This card is the root `scripts/` (453 files). Same mechanism, different tree; the ruling direction on #25920 (删大于加) is carried here. **New for the root tree.**\n\n**谁付代价（业务筛）:** every seat that reads `scripts/` to find the gate it tripped reads through one-off census and audit scripts that nothing runs; two spellings of the same gate (`node scripts/x.mjs` in CI, `pnpm check:x` in docs) mean a fix to one is not a fix to the other.\n\n## Measured (HEAD 0d83ee8f77; static reachability over package.json, .github, .githooks, turbo.json, configs and other scripts)\n\n- `scripts/`: 453 files (291 `.mjs`, 120 `.json`, 88 under `adr-anchors/`, 48 under `pm/`); `wc -l` over the 316 entry points → 461,961 lines. Largest: `scripts/pm/check-half-states.mjs` 35,243, `pm/dispatch-gates.mjs` 16,271, `pm/dispatch-gates.self-test.mjs` 14,017, `check-adr-0087-registration.mjs` 9,038, `check-type-check-coverage.mjs` 8,351.\n- Reachability of the 316 entry points: 270 named by a package.json / workflow / hook / turbo / config; 26 reached only from other code; 20 referenced only in comments or docs, or nowhere: `scripts/ablation-replace.mjs`, `scripts/audits/14096-…census.mjs`, `scripts/audits/14423-*` (4 files), `scripts/audits/14744-*` (2), `scripts/bench/permission-bench.mts`, `scripts/bench/runtime-publish-gate.bench.mts`, `scripts/codemod/view-to-viewitem.mjs`, `scripts/measure-markdown-ts-blocks.mjs`, `scripts/measure-partial-retirement-annotation.mjs`, `scripts/measure-reserved-identity-name-census.mjs`, `scripts/measure-return-propagating-durability-seams.mjs`, `scripts/measure-self-test-floor.mjs`, `scripts/pm/fleet-git-credential.sh`, `scripts/pm/fleet-roster.mjs`, `scripts/pm/measurement-claim-triage.mjs`, `scripts/qa/qa-rollup.mjs`.\n- Root `package.json`: 198 scripts, 172 `check:*`; all 172 are exercised by CI by name or by inlined command (see the sibling card on inlined commands), but 22 root scripts are invoked by no workflow, hook or other script, e.g. `check:adr-0087-registration`, `check:undeclared-dep-imports`, `check:keyed-text-bounds`, `check:system-context-census`, `check:rest-log-declared` (the dev re-derives the list; some are run by inlined `node scripts/…` lines, which is the dual-spelling case, not an orphan).\n- `--self-test`: 271 of 316 have it; of the 183 `check-*` scripts, 5 do not: `check-changeset-fixed.mjs`, `check-node-version.mjs`, `check-release-notes.mjs`, `check-service-providers.mjs`, `docs-audit/check-drift-comment.mjs`.\n\n## Wanted\n\n1. For each of the 20: confirm zero references with a positive control, then delete (git keeps them) — ⛔ not an `archive/` folder; a one-off audit script's reading already lives in its `docs/audits/*.md`. Any that a `docs/audits` file cites as \"re-run with\" keeps the citation pointing at the commit that held it.\n2. One invocation spelling: CI calls `pnpm check:<name>` (or `pnpm run`), never `node scripts/<file>` directly, so `package.json` is the one map; delete the root aliases nothing calls after that normalization, or wire them where the gate family that owns them runs.\n3. `--self-test` for the 5 `check-*` scripts, following AGENTS.md 「Writing a --self-test」.\n4. ⛔ No gate weakened or removed on this card: a script that IS a gate stays; the card deletes only what nothing reaches.\n\n## Acceptance\n\n- The reachability census re-run on the PR → 0 unreferenced entry points; 0 root `check:*` with no caller; `for f in scripts/check-*.mjs; do grep -q -- --self-test $f || echo $f; done` → empty.\n- `pnpm check:pm-skill-ratchet` and the other repo-tooling lanes green.\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#25920 (open, dispatched: the ui tree's version), #25921 (open), the inlined-commands card in this batch."
+}

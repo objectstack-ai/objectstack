@@ -1,0 +1,35 @@
+{
+  "number": 26077,
+  "kind": "pull_request",
+  "title": "ci(test-shards): revert Test Core to the plain-sum layout and the 2026-10-23 dataset (undo #25968)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:15:35Z",
+  "updated_at": "2026-10-26T11:58:09Z",
+  "closed_at": "2026-10-26T11:58:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T11:58:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26077",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D5ZEhycrEz6EHUjW1whANXQ)_\n\nFixes #26074\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nThis is a clean revert of f36f6190 (#25968). It changes two files and nothing else: `scripts/partition-test-shards.mjs` goes back to plain-sum bin placement, and `scripts/test-shard-timings.json` goes back to the 2026-10-23 dataset with cli in 3 slices. Neither file has a later commit on `main`. No other file imports the exports this removes (`WHOLE_LEG_PARALLELISM`, `loadOf`, `wallOf`).\n\n## Why\n\nSince the first queue build on the #25968 layout (08:16Z), full Test Core `merge_group` builds have gone red 5 times in 27. On the old layout, 05:00–08:10Z, they went red 0 times in 19. Every red ejects its PR and rebuilds every entry queued behind it, so throughput fell from 12–13 merges an hour to 6. The failing tests are all load-sensitive:\n\n- objectql `src/hook-run-as.test.ts` (cold `import('./index.js')`): Test timed out in 5000ms\n- plugin-security `src/objects/shipped-sets-identity-default-row-scope.test.ts`: Test timed out in 5000ms\n- cli `test/hook-timeout-override-refusal.test.ts` CONTROL: the `vitest list` child exits 1\n\nThe heads that failed passed when they went back in unchanged.\n\nThe #25870 thread replayed `planRun()` on both trees. Before, five whole-package shards carried about 1866 s of four-wide work each, and plugin-security sat on a cli-slice shard with 899 s. After, four whole-package shards carry about 2141 s each, and objectql and plugin-security share one shard. The suite-duration ceiling annotations show the effect: plugin-security reads 605–611 s against a ceiling of 474, plugin-auth 617–928 s against 600, driver-sql 603–612 s against 451, and objectql 1102 s against 952.\n\n## Cost and rollback\n\nThe slowest spec-PR shard goes back to about 25–29 min, from about 20. #25870 stays open for a placement that takes contention into account. Rollback means re-landing f36f6190 as it is.\n\n## Verification\n\n- `node scripts/partition-test-shards.mjs --self-test`: OK. 75 measured packages, 77 items, 8 shards, max/mean 1.00x, bins about 1866 s, all within the 2899.02 s density cap, cli x3.\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: pass.\n- The other gates are left to this PR's own CI run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01SrpCjPfYv8N9P9EJvoDyN9\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 26184,
+  "kind": "issue",
+  "title": "skills: audit what the skills teach against the protocol since 18.0 — (A) published skills/ vs every added, changed or retired authorable key; (B) where pm-dispatch requires the skills/docs follow-up",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T15:00:13Z",
+  "updated_at": "2026-10-26T15:01:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26184",
+  "body": "Filing gate ③: **a maintainer-directed task.** The maintainer, in the triage seat thread on 2026-10-26: 「我不问你你也想不到立卡，如何避免出现类似的情况，需要更新 skills吗」「是否建议单独立卡完整的评估一下现有 skills的缺口」「包括 pm-dispatch skills 和对外的skills」, then, on triage's option 甲 (both halves in one card), 「立\"skills 缺口评估卡\"」. Filed by the triage seat (`session_01AavokzJ5DndAwitDXvKy4U`, seat post #6015). ⛔ Not a claim.\n\n## Why (the case that surfaced it)\n\n#25866's field permission `when` landed (#25980), and its Studio form is PR #26010. Nobody owed a skills or docs follow-up until the maintainer asked. The published `skills/objectstack-data/rules/security.md` never mentions `when`. So an AI author asked for \"finance may not edit the legal terms after approval\" writes a validation rule that locks the fields for **everyone**, which is the trap #25866 exists to escape. Filed after the fact: #26178 (docs recipe) and #26179 (skill + eval).\n\n**What the triage seat measured in pm-dispatch (`origin/main`, 2026-10-26):**\n- The PR template carries `Metadata-protocol: added | narrowed | semantic | none`, but nothing follows from `added`, `semantic` or `narrowed`. No line names the skills or docs the change owes.\n- The seat's ACCEPT checklist (席位核对) reads code, protocol, gates and scope, not \"will the customer and the AI author know to use it\".\n- Triage's first grade of a protocol-addition card writes no skills or docs item into the done-when.\n- The skills lane rules govern **how** a `skills/**` PR is written (line budget, value density). None says a change elsewhere owes one.\n\n## Part A: the published skills (`skills/**`, what customers' AI authors read). **p1**\n\nMechanical, not recalled:\n1. **The surface diff.** `packages/spec/authorable-surface/*.json` at the tag `@objectstack/spec@18.0.0` against `main`. List every key added, every key whose shape or semantics changed, and every key retired or narrowed. The generated surface is the source; the changesets' `Metadata-protocol:` lines are a cross-check.\n2. **Coverage.** For each added or changed key, check whether `skills/**` (rules, references, examples) teaches it and whether an eval exercises it. A key a skill must teach is any key an author picks between options for, such as `when` against a validation rule. A purely mechanical key may be covered by the spec's `.describe()` alone; say which, per key.\n3. **The reverse direction (stale advice is worse than none).** Find every place `skills/**` still teaches a retired or narrowed form: the ≤16.x kits retired by PR #26138, the position-name fold retired by PR #26064 (#24757), and anything else the diff names. Also check the skills' `references/_index.md` symbol anchors.\n4. **The objectui skill bundle** moving into `skills/` (#25832): it is audited in the same pass once it is there, or listed as pending if it is not.\n5. **Output:** one gap table (key × skill file × taught? × eval? × stale?), posted on this card. Then **one fix card per skill package**, batched and graded p2 unless a gap is on an 18.2 headline feature (p1). #26179 is the first known row.\n\n## Part B: pm-dispatch (`.claude/skills/pm-dispatch/**`, `.claude/agents/os-dev.md`). **p2**\n\nFind **where** the follow-up belongs, and draft the rule text for the maintainer to rule on. Triage's candidate is a review item, **not a new gate** (「新增门禁默认否」):\n- A PR whose `Metadata-protocol` is `added`, `semantic` or `narrowed` carries one more line, `Skills-docs: updated here | follow-up #N | none — <reason>`.\n- The seat's 席位核对 checks that line. Missing means no ACCEPT.\n- Triage's first grade of a protocol-addition card writes \"skills + docs + eval\" into its done-when.\n\n**Sequencing:** the skills lane already holds six pm-dispatch edits today (#25991, #26066, #26121, #26122, #26143, #26155). Part B drafts against `main` after those land, or rides the same holder, so the rule text does not collide.\n\n## Acceptance\n\n- Part A's table is posted, its fix cards are filed, and each row cites the surface diff line it came from.\n- Part B's rule draft is posted for the maintainer's ruling. Once ruled, it lands as one governed PR.\n- Nothing is removed from `skills/**` in this card. Fixes ride the per-package cards.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

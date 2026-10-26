@@ -1,0 +1,32 @@
+{
+  "number": 26076,
+  "kind": "issue",
+  "title": "[Decision] docs/adr: 143 ADRs with no index, four numbers used twice, 19 Proposed older than three months, three status-line spellings — how the registry gets put in order",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:14:26Z",
+  "updated_at": "2026-10-26T13:42:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26076",
+  "body": "Ruled: 6417460375 · letter A · 2026-10-26T13:41Z\n\nFiling gate ②: a maintainer-only decision. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). Reader: the director seat presents this card in a decision batch; after the ruling the lane named under \"After the ruling\" dispatches. ⛔ Not a claim. Dedupe: REST list (439 issues), grep `ADR index|adr.*(index|duplicate|Proposed|status)` → 0 hits. **New.**\n\n## 维护者速读\n\n`docs/adr/` 143 份 ADR 没有任何索引（`PRIORITIZATION.md:3` 自称已退役却留着一条活规则）。编号重复：0006 有三份版本文件（`.md` / `.v2.md` / `.v4.md`），0010、0019、0057 各有两份互不相关的 ADR（如 `0010-metadata-protection-model` 与 `0010-nl-to-flow-authoring`）。状态分布：Accepted 104、Proposed 21、Superseded 4、Draft 3、Withdrawn 2、其余各 1；19 份 Proposed 早于 2026-07-26，三份 Draft 自五月起未动；12 份文件首个状态行不在三种已知拼写里（`**Status**:` / `## Status` / `- **状态**:`），机器读不出。AGENTS.md 第 13 条规定「编号永不重新分配」，所以重号不能靠改号解决，只能在索引里并列并在文件头互相指认。ADR 是你亲手批的面（Tier H），索引怎么生成、旧 Proposed 怎么处置是你的决定。请裁：**A** 生成 `docs/adr/README.md` 索引（编号、标题、状态、日期，由脚本从状态行生成，状态行统一为一种拼写），重号在索引里并列标注，19 份旧 Proposed 由你逐份裁 Accept / Withdraw / Defer（席位出一张清单附每份的实现读数）；**B** 同 A 但旧 Proposed 一律改 Deferred，不逐份裁；**C** 只生成索引，状态与重号不动。是否要把「索引与状态行格式」做成门禁（`check:adr-index`）：默认不加，除非你点名。选 A / B / C，门禁加 / 不加？\n\n## Governing text\n\n- AGENTS.md Prime Directive 13: an accepted ADR binds until superseded; \"Files never move between registries and numbers are never reassigned.\"\n- AGENTS.md Prime Directive 14: `docs/adr/**` is Tier H.\n- `scripts/check-adr-anchors.mjs` resolves bare numbers against this registry — a duplicated number is ambiguous to it.\n- `scripts/check-adr-links.mjs` (run by check-links.yml:115) checks link targets, not the index or status.\n- pm-dispatch 四轴 ④: 新增门禁默认否.\n\n## Premises\n\n- P1 — duplicates: `ls docs/adr | grep -oE '^[0-9]{4}' | sort | uniq -d` → 0006 0010 0019 0057.\n- P2 — status spellings: `grep -l -m1 -iE '^(\\*\\*Status\\*\\*|## Status|- \\*\\*状态\\*\\*|Status:)' docs/adr/0*.md | wc -l` vs the file count; 12 files match none of the four.\n- P3 — stale Proposed: grep each Proposed file's date line; 19 are before 2026-07-26 (0022, 0025, 0026, 0027, 0038, 0046, 0050–0052, 0063, 0064, 0071–0073, 0077, 0080, 0096 among them).\n- P4 — `check-adr-anchors.mjs` behaviour on a duplicated number: `node scripts/check-adr-anchors.mjs --self-test` and read how it resolves `ADR-0010`.\n\n## One-sentence problem\n\nA decision nobody can find is a decision that will be reversed (AGENTS.md's own words), and today 143 decisions have no list, four of them share a number with an unrelated one, and 19 proposals have been neither accepted nor withdrawn for a quarter.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | Script-generated index; one status-line spelling; duplicates cross-referenced in each file's header and listed side by side; a triage list of the 19 Proposed with implementation readings for the maintainer to rule one by one. | The registry becomes greppable and the anchor checker unambiguous; the maintainer spends one ruling batch (19 rows, so four batches of five). | spec lane (ADR tooling) + maintainer · 1 PR Tier H + ruling batches · precedent: none read |\n| B | Same tooling; the 19 Proposed all become Deferred by one edit. | Fast; a proposal that is actually implemented stays mislabelled until someone notices. | 1 PR Tier H |\n| C | Index only. | Findable but still inconsistent; the anchor checker still ambiguous on four numbers. | 1 PR Tier H |\n\n## Business meaning\n\n- A: the decision log is a log again, and the backlog of undecided proposals is decided.\n- B: the log is tidy; the proposals are shelved, not judged.\n- C: a table of contents on an unsorted shelf.\n\n## 四维分析\n\n- **实际业务需求**：读者是每个要「grep ADR 再改行为」的席位（AGENTS.md 第 13 条要求）。没有索引时席位靠文件名猜；重号时 `check-adr-anchors.mjs` 可能解析到错的那份。\n- **项目长远合理性**：ADR 是这个仓库最持久的面；索引由脚本从状态行生成，状态行是单一事实，索引永不手写——这和 `docs/qa/platform-checklist/coverage.json` 的做法一致。\n- **防 AI 犯错**：三种状态拼写意味着任何自动读取都要猜；闭合为一种拼写让「这份 ADR 还有效吗」变成一次 grep。19 份 Proposed 里有「partially implemented」字样的，席位可能据此以为被裁过了。\n- **创业阶段不扩散**：索引脚本放在已有的 `scripts/check-adr-*.mjs` 旁，不加必查门禁；若你点名加门，门只校验「索引与文件一致」，不校验内容。\n\n## Recommendation\n\n**A，门禁不加**（索引脚本带 `--self-test`，由 lint 的现有 ADR 步骤顺手调用一次只报告不红；若你点名再升必查）。只看①选 A；②③④ 是否翻转：否。\n\nConfidence gaps: the 12 files whose status line matches no known spelling may be non-ADR notes (PRIORITIZATION.md among them); the dev lists them before normalizing.\n\n## After the ruling\n\n- A: the spec lane dispatches the tooling PR (index script + normalization + duplicate cross-references); the director seat then presents the 19 Proposed in batches of five with implementation readings.\n- B / C: one PR.\n\nos-decision-facets\n① 项目长远合理性：索引从状态行生成、单一拼写，重号在索引里并列而不改号（第 13 条）。\n② 实际业务拉动：第 13 条要求席位改行为前 grep ADR；今天 grep 到的可能是重号的另一份。\n③ 防 AI 犯错：三种状态拼写让自动读取只能猜；闭合为一种后「还有效吗」是一次 grep。\n④ 创业阶段不扩散：不加必查门禁，索引脚本只报告；19 份 Proposed 由维护者裁，不由席位改。\nPrior rulings read: ADR index,Proposed,superseded,renumber → 0 hits; ADR-0013 D(numbers never reassigned); thread: none; repo: objectstack-ai/objectstack\n\n## Related\n\nAGENTS.md Prime Directive 13; `scripts/check-adr-anchors.mjs`; `scripts/check-adr-links.mjs`.\n"
+}

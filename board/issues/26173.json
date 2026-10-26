@@ -1,0 +1,32 @@
+{
+  "number": 26173,
+  "kind": "pull_request",
+  "title": "docs(github): add issue forms that ask for the ObjectOS edition",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:45:25Z",
+  "updated_at": "2026-10-26T14:49:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26173",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9BsoHYhn9dhaC43DMJY7Ff1)_\nFixes #26157\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThis repository is the one public issue tracker for every ObjectOS edition, so a report now says which edition it comes from. Three new files under `.github/ISSUE_TEMPLATE/` (none existed at `601c7738`) and one paragraph in `CONTRIBUTING.md`. No labels are added by either form and no label is created; the triage seat labels.\n\n### Rendered: `bug-report.yml` (\"Bug report\", \"Something in ObjectOS does not work the way it should.\")\n\n| # | Element | id | Label | Required |\n|---|---|---|---|---|\n| 1 | dropdown | `edition` | Edition | **yes** |\n| 2 | input | `version` | Version | no |\n| 3 | textarea | `what-happened` | What happened / What you expected | no |\n| 4 | textarea | `steps` | Steps (placeholder 1. 2. 3.) | no |\n\nEdition options, in order: `ObjectOS Community (self-hosted, this repository's code)` · `ObjectOS Cloud (cloud.objectos.ai)` · `ObjectOS Enterprise (licensed, self-managed)` · `Not sure`. Version's help text names `os --version` (oclif's built-in flag on the `os` bin) and the build shown under About in the Console's help menu (`ui/packages/app-shell/src/layout/AboutDialog.tsx`).\n\n### Rendered: `feature-request.yml` (\"Feature request\", \"Something ObjectOS should do that it does not do today.\")\n\nThe same four fields with the same ids, labels, options and `required` flags; only the descriptions are worded for a request (what ObjectOS does today and what you expected; the steps that reach the place where the feature is missing).\n\n### Rendered: `config.yml`\n\n`blank_issues_enabled: true` (seats keep filing through the relay with their own body shape) and one contact link, **Documentation** → `https://objectstack.ai/docs`. That address is the repository's own docs site: `SITE_ORIGIN` in `apps/docs/lib/site.ts` is `https://objectstack.ai`, and `README.md` and `CONTRIBUTING.md` already link `/docs` as the published docs site.\n\n### `CONTRIBUTING.md`\n\nOne paragraph at the end of **Community**: this repository is the public tracker for every edition (Community, Cloud, Enterprise); say the edition, the forms ask for it; Cloud and Enterprise reports are triaged by the cloud seat and may be moved to the repository where that code lives.\n\n## How it was verified (head `9ce387ca`)\n\n- **YAML parse + schema.** Each file parsed with `yaml@2.9.1` (`parseDocument`, zero errors) and validated with `ajv@8.20.0` against SchemaStore's `github-issue-forms.json` (the two forms) and `github-issue-config.json` (`config.yml`): `VERDICT PASS (0 bad)`, exit 0. Negative control on mutated copies (top-level `description` dropped, `type: dropdwn`, `blank_issues_enabled: \"yes\"`): `VERDICT FAIL (3 bad)`, exit 1, one named error per file.\n- **Field-by-field against GitHub's docs**, read from `github/docs` main (`syntax-for-issue-forms.md`, `syntax-for-githubs-form-schema.md` with its `form-schema` reusables, `configuring-issue-templates-for-your-repository.md`):\n  - top level: `name`, `description` and `body` are the three required keys and all are present; none of the optional `labels`, `assignees`, `title`, `type`, `projects` is used;\n  - every element `type` is in the documented set (`dropdown`, `input`, `textarea`) and carries the required `attributes.label`;\n  - `id`: \"Can only use alpha-numeric characters, `-`, and `_`. Must be unique in the form definition.\" (`edition`, `version`, `what-happened`, `steps`);\n  - dropdown `options`: \"Cannot be empty and all choices must be distinct\" (4 distinct); no `default` is set, so the \"None\"/\"n/a\" restriction does not arise;\n  - `validations.required` \"Prevents form submission until element is completed. Only for public repositories.\" It is set on Edition alone, and the repository reads `visibility: public`;\n  - `config.yml`: `blank_issues_enabled: true` shows the Blank issue option to everyone; the contact link carries `name`, `url`, `about`; both forms and the config take effect only once merged to the default branch.\n- **The live acceptance** (New issue offers Bug report / Feature request / blank; the Bug report form refuses submission without an Edition) is read only from the default branch, so it is observable after merge, not from this PR.\n- **Governed surface:** `node scripts/pm/check-governed-merges.mjs --test` on the four paths: `0 of 4 path(s) hit the register`, exit 0.\n- **Gates:** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 20 commands; all 20 exit 0, each exit taken before any pipe; `--ran` reconciliation: `20 run, 0 NOT-MEASURED, 0 UNRUN`. Also `node scripts/pr-labels.mjs --self-test` (its roster sits under `.github`): `VERDICT: pr-labels self-test PASSED`.\n- **Changeset:** none. Repository config and docs only, nothing ships in any package's `files[]`, so this carries `skip-changeset`.\n\n## Acceptance notes\n\n- Only Edition is `required: true`, as the card lists. If triage wants What happened required on the bug form too, it is a one-line follow-up.\n- A second docs host, `https://docs.objectos.ai`, is named in `LICENSING.md` for the commercial editions. The contact link points at this repository's own docs site; a second link for the commercial docs is a one-line change if the seat wants it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Qo38qkqPonKzLDqgv8GqU1)_\n"
+}

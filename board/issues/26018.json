@@ -1,0 +1,37 @@
+{
+  "number": 26018,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth)!: admin import-users sizes a generated temporary password to the deployment's length range",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:16:14Z",
+  "updated_at": "2026-10-26T10:24:11Z",
+  "closed_at": "2026-10-26T10:24:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T10:24:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26018",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XNJBeHjn3bakXGPZdmRLiDi)_\nFixes #25932\n\nClause-②: no (narrowing) — the exported `IdentityImportDeps` gains a required member, `getAuthContext()`, so a deps object without it no longer type-checks against `runAdminImportUsers`. No request shape is widened or refused.\nMetadata-protocol: none\n\n## Why\n\n`POST /api/v1/auth/admin/import-users` minted every temporary password at 16 characters: `generateTemporaryPassword()` was called with no length, and the import deps carried no auth context to read the range from. Under a configured minimum above 16 the row got a password below it and the user signed in with it (the card's measurement). This is the import half of what PR #25927 did for create-user.\n\n## What changed\n\n- **`IdentityImportDeps.getAuthContext()`** (required): better-auth's `$context`, the reader create-user already holds. `AuthPlugin`'s import route wires it to `AuthManager.getAuthContext()`. No second reader of the range exists: the import reads `password.config` from that context, as create-user does.\n- **`runAdminImportUsers` reads the range once, before any row is written**, and sizes each generated temporary password `min(max(16, minPasswordLength), maxPasswordLength)`. If the context cannot be read the request is refused through `mapAuthApiError` (`import-users failed`) with nothing created, the same mapping create-user uses for the same read.\n- **The sizing has one home.** `temporaryPasswordLength` moved from `admin-user-endpoints.ts` to the internal module `temporary-password-length.ts` (not re-exported from the package index), and both doors import it.\n- Nothing else about import changes. With the default range a temporary password is still 16 characters.\n- Every test fixture that builds `IdentityImportDeps` gains the member (real-manager fixtures wire `manager.getAuthContext()`, mocks answer better-auth's default 8 to 128 range).\n\nChangeset: `.changeset/25932-import-users-temporary-password-length.md` (`@objectstack/plugin-auth` patch, BREAKING banner for a host that calls `runAdminImportUsers` itself, ADR-0087 `not-required (runtime-interface-only packages/plugins/plugin-auth/src/admin-import-users.ts#IdentityImportDeps)`, before / now / fix).\n\n## Verification\n\nCode head `71668cb6` (the changeset commit after it touches no code).\n\n- **Red first** (`admin-import-users-password-length.test.ts`, commit `0c9118a4`, run before the fix): real `AuthManager` over SQLite, the plugin's real mounted route.\n  - ① `temporary` policy, `minPasswordLength: 24`: `expected 'nw33z7aozuB%upS@' to have a length of 24 but got 16`.\n  - ② `auto` policy, no email service (a row with no deliverable channel): `expected '2#jZWgdP#H2oKgGL' to have a length of 24 but got 16`. So `auto` takes the same path, now measured rather than read from code.\n  - ④ `maxPasswordLength: 14`: the row failed (`created: 0`), because better-auth refused the 16-character password.\n  - ③ default range: 16, green before and after.\n- **Green after the fix**: ① and ② answer 24-character passwords and `sign-in/email` answers `200` with each; ④ answers 14 characters and signs in; ③ stays 16.\n- New unit pin in `admin-import-users.test.ts`: a context read that throws is refused `500 INTERNAL_ERROR` with `createUser` and the engine update never called.\n- **Ablation** (`scripts/ablation-replace.mjs`, anchor `generateTemporaryPassword(temporaryLength)` to `generateTemporaryPassword()`, 1 hit, blob `a7809b32` to `e056f1db`): ①, ② and ④ red, ③ green; restored, blob equals HEAD and `git diff HEAD` empty. The tests import `src`, so no build leg.\n- `pnpm --filter @objectstack/plugin-auth exec vitest run`: 196 files, 3726 passed, 10 skipped, lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/plugin-auth typecheck` (after building the package, which the examples program reads): exit 0, `check:test-typecheck` OK.\n- `eslint --no-inline-config packages/plugins/plugin-auth`: exit 0.\n- Derived gates (`dispatch-gates --commands` at `425cc7db`, 73 commands): 72 exit 0, `dispatch-gates --ran` reconciles 73 derived, 72 run, 1 NOT MEASURED. The one is `check:dual-build-cjs-loads`, PREREQUISITE NOT MET (exit 3: it reads every package's `dist`, and this worktree built only the plugin-auth and dogfood closures); CI's `Lint & Repo Gates` runs it. Three first-pass reds were prerequisites, re-run green: `check-plugin-teardown-shape --self-test` (shallow clone, fixed by fetching its pinned fixture commit), `check:dts-closure` (a concurrent closure build was rewriting `dist`) and `check:type-check-debt` (lock queue timeout, then exit 0 under the lock).\n- Full dogfood at `425cc7db` (title carries `!`): 295 of 296 files pass, 2522 tests pass. The one red is `authz-probe-blind-spot.test.ts` on `packages/runtime/src/domains/i18n.ts` (control `handleI18nRequest`: expected 3, got 4). This diff does not touch `packages/runtime`; the file already holds 4 occurrences at the base `05f7758f`, since `69fa23d6` (#25956), so it is red on `main`'s own dogfood battery and is reported to the seat rather than changed here.\n\n## Acceptance notes\n\n- `IdentityImportDeps.getAuthContext` is required rather than optional. An optional member would need a fallback when absent, and that fallback is the 16-character defect for any host that forgets it; a required one makes the compiler name every such host.\n- `#25824` (create-user and set-user-password) is landed by PR #25927; this PR does not touch those doors beyond moving the shared sizing function.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01A5wzhKHa98KsGQNHM9Z3Tq)_\n"
+}

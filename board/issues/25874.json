@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:08:34Z",
-  "updated_at": "2026-10-26T01:59:39Z",
+  "updated_at": "2026-10-26T10:04:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25874",
   "body": "Filing gate **① a user-visible defect with a named landing site**. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0)\n\n新建线索 → 创建 with nothing filled: four fields get the red outline and a message under each (「名不能为空」「姓不能为空」「公司不能为空」「邮箱不能为空」), and at the same moment a red banner 「请检查表单中标记的字段:名、姓、公司...」 is drawn over the dialog's title row, truncating its own list with 「...」. The banner repeats what the fields already say, hides 「新建线索」, and the truncated list is less information than the fields below it. [71-new-lead-empty-submit.png](``https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/71-new-lead-empty-submit.png);`` the dialog before submit: [70-new-lead-form.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/70-new-lead-form.png).\n\n`reach:` the public UI, measured once; every record dialog with required fields shows it on an empty submit.\n\n## Expected\n\nPer-field messages carry the detail; the summary, if kept, is one short line inside the dialog body (above the first section, not over the title) saying how many fields need attention and focusing the first one — or a toast placed clear of the header, the rule objectui#13340 set for Setup forms.\n\n## Dedupe\n\nMCP `search_issues` objectui \"form validation error summary banner duplicates per-field messages and covers the dialog title\" → 6 hits; nearest is objectstack-ai/objectui#13340 (closed: Setup forms' duplicate toasts covering header buttons), which fixed the Setup toast stack and not the record dialog's banner. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §4.4."

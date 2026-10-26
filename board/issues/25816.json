@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/l",
     "skip-changeset"
   ],
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T15:28:23Z",
-  "updated_at": "2026-10-26T06:44:52Z",
+  "updated_at": "2026-10-26T10:28:03Z",
   "closed_at": "2026-10-26T06:44:51Z",
   "closed_by": {
     "login": "os-zhuang",

@@ -1,0 +1,33 @@
+{
+  "number": 26172,
+  "kind": "issue",
+  "title": "Record create/update success toasts name the record by its title, not only the object (ruling C on #25849)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:44:26Z",
+  "updated_at": "2026-10-26T14:51:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26172",
+  "body": "Filing gate: ② a maintainer ruling. Ruling-ref: 6417978207 (#25849, batch #399 item 1, letter **C**, maintainer 「同意」 at 14:04Z on 2026-10-26). Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`, the seat that holds #25849 and owes this card under the ruling's \"Execution\" line. ⛔ Not a claim.\n\n**Business reason.** A user entering several tasks in a row sees \"Task created successfully\" after each save and cannot tell which record was just written. The ruled clause (`ux-conventions.write-feedback` acceptance[1], reworded by the devx ledger PR for #25849) now reads: a record-level write names the record (its title) or the count; a singleton page (settings) and a named automation (`Flow \"X\" completed`) are their own subject. This card makes the console meet that clause.\n\n**Reader who acts.** The `domain:ui` seat owning `ui/packages/app-shell/src/console/AppContent.tsx` and the `form.*` strings in `ui/packages/i18n`.\n\n## Wanted\n\n- The create and update success toasts for a record carry the record's display name (ADR-0079, `docs/adr/0079-record-display-name.md`), e.g. `Task \"Quarterly review\" created`.\n- When the object declares no title (no display name resolves), the toast falls back to today's object-label string. That fallback is part of this card.\n- Settings saves and flow-completion toasts are out of scope: the ruling counts them as passing.\n\n## Premises (re-read on `origin/main` before dispatch)\n\n- P1: `ui/packages/i18n/src/locales/en.ts:325`–`326`: `createSuccess: '{{object}} created successfully'`, `updateSuccess: '{{object}} updated successfully'` (object label only).\n- P2: call sites `ui/packages/app-shell/src/console/AppContent.tsx:816`–`817` (`handleCrudSuccess`) and `:842`–`843` (child-form task path) pass `{ object: label }` and nothing about the record.\n- P3: `handleRecordFormSuccess(saved)` already receives the saved record, so the title is in hand on that path; `handleCrudSuccess` has `editingRecord` for edits but not the created record.\n\n## Serial note\n\nChanging the strings in `ui/packages/i18n/src` touches a registry closure package, so the PR re-records that package's sdui manifest source and serialises behind any open PR on `ui/packages/i18n` (per-package rule since #26120). Changing only `app-shell` does not.\n\n## Acceptance\n\n- Creating and editing a record that has a title shows a toast naming that title; a record without one shows the object-label toast.\n- Every locale that carries `form.createSuccess` / `form.updateSuccess` gets the new key or interpolation, with no machine names shown.\n- Tests cover both branches (title present, title absent) on the main path and the child-form path.\n\nRelated: #25849 (ledger clause), QA run #25817 (finding), #25807 (18.2.0 wave anchor)."
+}

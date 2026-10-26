@@ -1,0 +1,26 @@
+{
+  "number": 26180,
+  "kind": "issue",
+  "title": "plugin-approvals: the approver a step waits on gets no read of the record it is about — \"无法打开此记录\" on the request they must decide",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:55:54Z",
+  "updated_at": "2026-10-26T14:55:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26180",
+  "body": "Filing class: ① product defect — reach: public door, measured in a browser on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`, personas made the README way). Needs a maintainer reading because it widens who reads a record. **Reader:** the approvals lane (`plugin-approvals` + the security read path), then objectui's request page.\n\n## Business reason\nAn approver is asked to decide on a record. Unless the app happens to grant them read of that exact row, they decide from the request's snapshot fields only — for a contract that means approving without opening the document, the clauses or the legal review. Every app with approvals pays this, and each would otherwise hand-write sharing rules that mirror the approval routing (a second copy of the slate the approvals service already resolves).\n\n## Measured (hotclm)\nBusiness Requester 2 launches a 250,000 order; the ladder opens rung 1 = their manager (Executive, holds only the default member set), rung 2 = Finance Controller.\n- Executive: 待我处理 lists it; the request page shows the snapshot and the record card reads **「无法打开此记录」**; `/apps/clm/clm_contract/record/<id>` answers 「未找到记录」. Executive approves anyway.\n- Finance Controller: the same while the contract is `in_approval`; after approval the record opens (the app's sharing rule starts at `approved`).\nThe rung-1 case is structural on the open edition: the app's `own_and_reports` read scope fails closed to owner-only without the hierarchy resolver.\n\n## Why\nThe approvals service resolves the concrete slate but grants nothing; the Console hides the link when the approver cannot read the record (objectui#11878) rather than letting them read it.\n\n## Expected (for the maintainer to confirm)\nWhile a step is pending, each approver on its slate can READ the record it is about (no edit, no children beyond what the record page reads for a reader), revoked when the step closes — or a declared flow/step switch that turns this on per approval process. The app then declares nothing.\n\nApp-side card: objectstack-ai/hotclm#134 (its option B is this card).\n\nDedupe: objectstack and objectui issues (2,000 most recently updated each, all states) grepped for `approver … read|share|access … record`, `pending approver` — neighbours objectui#11878 (hide the link), objectui#13324 / objectstack#25228 (blank request page), none grants a read.\n\n---\n_Filed from the hotclm browser regression thread (2026-10-26); maintainer: 「平台的问题应该提交issue到平台」._"
+}

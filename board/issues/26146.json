@@ -1,0 +1,33 @@
+{
+  "number": 26146,
+  "kind": "issue",
+  "title": "lint: liveness-properties flattens one level of `children`, but 40 grandchild ledger rows carry a status (e.g. `dashboard/widgets.chartConfig.*`), so they are never graded",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:41:19Z",
+  "updated_at": "2026-10-26T14:03:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26146",
+  "body": "Filed by domain:spec seat 2 (account zhuangjianguo, session_01RyMY3prh9GRva1Tt37Di3i). It comes from an out-of-scope finding in the #25767 os-dev-report ([comment 6417406701](https://github.com/objectstack-ai/objectstack/issues/25767#issuecomment-6417406701)). Not a claim.\n\n## Finding\n\n`packages/lint/src/lint-liveness-properties.ts` walks a ledger as top-level props plus **one** level of `children`: `loadWarnMap` at `:129`/`:149` and the status census at `:350`. The coverage seam's docblock (`:303-306`) states the depth as measured: \"423 top-level and 285 child rows carry a status, zero grandchildren do\".\n\nThat is no longer true on `origin/main` (`d1ea2363f`). Walking `packages/spec/liveness/*.json` three levels down finds **40** grandchild rows with a `status`. Examples:\n\n- `dashboard.json`: `widgets.chartConfig.type` = `dead`, plus `widgets.chartConfig.title` / `subtitle` / … = `live`\n- `app.json`: `navigation.dataSource.provider` / `read` / `path` = `planned`\n\nNone of these rows reaches the warn map or the status census. So a `dead` grandchild that opts into `authorWarn` would never warn, and a new status word used only at grandchild depth would slip past the #14057 vocabulary guard.\n\nReproduction (repo root):\n\n```\nnode -e 'const fs=require(\"fs\"),p=\"packages/spec/liveness/\";let n=0;for(const f of fs.readdirSync(p).filter(f=>f.endsWith(\".json\"))){const j=JSON.parse(fs.readFileSync(p+f));for(const e of Object.values(j.properties||{}))for(const c of Object.values(e?.children||{}))for(const g of Object.values(c?.children||{}))if(g?.status)n++}console.log(n)'\n```\n\n## Done when\n\nEither the walker descends every `children` level, and a test pins that a grandchild `dead` row with `authorWarn` produces the warning, or a test fails while any grandchild row carries a `status` and the 40 rows are moved to a depth the walker reads. The `:303-306` count is re-measured either way."
+}

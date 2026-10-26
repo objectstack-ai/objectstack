@@ -1,0 +1,37 @@
+{
+  "number": 26008,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): translate the System Overview's dataset labels in every shipped locale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:58:35Z",
+  "updated_at": "2026-10-26T09:59:54Z",
+  "closed_at": "2026-10-26T09:59:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T09:59:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26008",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XP8DobbubFMFKnhjbM8aP2g)_\n\nFixes #25893\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## What was wrong\n\nUnder zh-CN the System Overview drew a translated title on every KPI tile and the English measure label under it: Users, Sessions, Events (and Organizations, Installations where those tiles show). The event-volume table and the audit charts were headed Action and User the same way.\n\nThose strings are the board's **dataset** member labels (`packages/platform-objects/src/apps/dashboards/system.datasets.ts`), not dashboard copy. The runtime already localizes them: `POST .../analytics/dataset/query` runs the saved definition through `translateMetaItem` (`translateDataset`) before compiling it (`packages/rest/src/analytics-routes.ts`), and the analytics service copies the translated `label` onto `fields[].label`. The Setup bundle simply had no `datasets` block, so there was nothing to apply. No runtime or spec change was needed.\n\n## The change\n\n- `en`, `zh-CN`, `ja-JP`, `es-ES`: a `datasets` block with `datasets.NAME.measures.M.label` for the five measures the board draws and `datasets.NAME.dimensions.D.label` for the two audit dimensions it draws (`action`, `user_id`). `en` copies the source verbatim.\n- `HAND_AUTHORED_SECTIONS` (`source-hash.ts`, exported from `@objectstack/platform-objects/apps`) gains `datasets`, and the three translated tables record the seven digests. Without this the new hand-authored section would sit outside the staleness seam: an edited measure label would keep serving the old translation under a green build. The CLI test that pins the list is updated.\n- Ride-alongs (ruled on the card): the Audit Log `IP` column header reads `console.system.auditLog.ipAddress` (an existing key in all ten packs, \"IP 地址\" in zh); a Beta settings page's title text gets a space before the badge, so its text reads \"Feature Flags Beta\" rather than \"Feature FlagsBeta\".\n\n**Bounded in-place addition, declared:** the two dimension labels go beyond the ruling's `measures` wording. Same defect class (dataset copy on this board drawn in English), same four files, same test, no new gate family.\n\n## Evidence\n\n- **Red first.** New `system-overview-dataset-translations.test.ts` resolves every member the board draws through `translateDataset` and the served `SetupAppTranslations`, per locale. At base `05f7758f`: 4 failed (zh-CN, ja-JP, es-ES each list 7 English labels; the en-parity case finds no `datasets` entries). At head: green.\n- **Runtime, booted** (`pnpm dev:crm -- --fresh`, signed in as the dev admin, `Accept-Language: zh-CN`): `sys_user_metrics` answers `fields[].label` = 用户, `sys_session_metrics` 会话, `sys_audit_log_metrics` 事件, dimension `action` 操作; `en` answers Users / Sessions / Events. **Ablation:** the zh-CN pack restored to base, `@objectstack/platform-objects` rebuilt, server rebooted: the same three zh-CN queries answer Users / Sessions / Events. Restored from HEAD, rebuilt, and the dist bundle reads 用户 again. (The CRM example declares only en and zh-CN, so ja-JP / es-ES fall back to English for the whole board there, dashboard title included; those two locales are verified by the unit test.)\n- **Browser:** the built console at `/_console/apps/setup/dashboard/system_overview` under zh-CN shows 用户总数 / 用户, 活跃会话 / 会话, 登录事件 / 事件, 配置变更 / 事件.\n- **Ride-alongs:** both pinned tests go red against the base sources (`git restore --source=05f7758f` of the two `.tsx` files, restored from HEAD with a hash check) and green at head. Measured in Chromium (CDP `Accessibility.getFullAXTree`): for the inline-flex title Chromium's own accessible name already inserted the space; the DOM text did not, and the text node fixes the text for every consumer that reads it.\n\n## Tests and gates (head `1c52019c`)\n\n- `pnpm --filter @objectstack/platform-objects test`: 96 files, 1361 tests passed. `typecheck` and `build` exit 0.\n- `pnpm --filter @objectstack/cli exec vitest run --project unit test/i18n-extract-generated-apps-leaf-provenance.test.ts`: 7 passed.\n- Console (from `ui/`): `consolePagesLocale-secondPass-13460.test.tsx` + `SettingsView.pageHeader-12553.test.tsx`: 14 passed.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 71 derived families, all run, all exit 0; `--ran` reconciliation: 71 run, 0 NOT-MEASURED, 0 UNRUN. (`check-plugin-teardown-shape.mjs --self-test` first exited 3 on the shallow clone; it passed after fetching its pinned fixture commit.)\n- eslint on the touched files: 0 errors; 5 pre-existing warnings (`no-explicit-any` ×4, one `react-hooks/set-state-in-effect`), none on a changed line.\n\n## Acceptance notes\n\n- `datasets.NAME.label` (the dataset's own label, e.g. \"User Metrics\") is not translated here: it is not drawn on the board. The extract config (`packages/platform-objects/scripts/i18n-extract.config.ts`) still declares no `datasets`, so the coverage ratchet does not count these keys; the new test is their presence gate.\n- No changes to `packages/spec`.\n\nChangeset: `.changeset/25893-system-overview-dataset-labels.md` (`patch` for `@objectstack/platform-objects` and `@objectstack/console`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HQYoXtTNzTmw6byyQ1xFpE)_\n"
+}

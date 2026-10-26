@@ -2,8 +2,8 @@
   "number": 25906,
   "kind": "issue",
   "title": "analytics: a filtered dataset measure asked on the cube door as `CUBE.MEASURE`, the name `GET /analytics/meta` lists, answers the unfiltered aggregate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T03:33:29Z",
-  "updated_at": "2026-10-26T08:11:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T11:08:03Z",
+  "closed_at": "2026-10-26T11:05:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25906",
   "body": "Filing gate: ① product defect, a silent wrong number at a named location.\nReader: domain:spec / analytics seat, the next PR touching `packages/services/service-analytics/src/strategies/native-sql-strategy.ts` (`compileClauses`, the per-measure `measureFilters` lookup) and `analytics-service.ts` (`namedQueryFields`, same lookup).\nDedupe (open AND closed): \"analytics cube query measure named with cube prefix drops its dataset measure filter, unfiltered sum\" → 10 shown of 31, none on this; \"measureFilters lookup qualified member name cube.measure native SQL strategy\" → 10 shown of 13, none on this.\nBusiness reason: a dashboard or API caller that uses the member name `GET /analytics/meta` lists for a filtered measure (say won revenue) is shown the total of every row under that name, with no error, and makes decisions on a wrong number. If nothing is done, every client that copies names from `/meta` keeps getting it.\nreach: measured at `AnalyticsService.query`, the handler `POST /analytics/query` calls (`packages/runtime/src/domains/analytics.ts`), on the native-SQL strategy (SQLite dialect), at main and at the branch of PR #25903 (#25778). In-process at the service, not over HTTP.\ntype: Bug\n\n## What happens\n\nA registered dataset with a filtered measure:\n\n```ts\n{ name: 'sales', object: 'deal',\n  measures: [{ name: 'won_amount', aggregate: 'sum', field: 'amount', filter: { stage: 'won' } }] }\n```\n\n`getMeta('sales')` lists the measure as `sales.won_amount`, the `CUBE.MEASURE` spelling every cube member is listed under. Querying the cube door with each spelling:\n\n| `measures` | statement run |\n|---|---|\n| `['won_amount']` | `SELECT SUM(CASE WHEN stage = $1 THEN amount END) AS \"won_amount\" FROM \"deal\"` |\n| `['sales.won_amount']` | `SELECT SUM(amount) AS \"sales.won_amount\" FROM \"deal\"` |\n\nThe second answers the total of every deal under the name of the won-deals measure. Nothing is refused and nothing says the filter was dropped.\n\n## Why\n\nThe member resolves through `lookupMember` / `declaredMemberEntry`, which strip the `CUBE.` prefix, but the measure's scoped filter is read as `datasetScope.measureFilters[measure]` with the spelling as asked, so the prefixed key misses. The read gate (`namedQueryFields`) uses the same key, so it does not judge the filter's fields either. That is not a bypass: the filter is not applied, so its fields are not read.\n\n## Expected\n\nThe prefixed spelling answers what the bare one does, the filter included, or is refused. #25778's duration measures already resolve the filter by the bare key (`durationMeasureKey` in `duration-measure-sql.ts`). Ordinary measures need the same resolution at both lookups. The `DatasetExecutor` path is unaffected, because it builds bare names.\n\nFound by the independent review of PR #25903 (dataset duration measure). It is outside that card's scope."

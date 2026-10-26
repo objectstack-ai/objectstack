@@ -1,0 +1,39 @@
+{
+  "number": 26020,
+  "kind": "issue",
+  "title": "plugin-auth: a signed-out invitation preview read, so the invitation landing page can name the inviting organization and the inviter (server half of #25886)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:23:35Z",
+  "updated_at": "2026-10-26T14:56:27Z",
+  "closed_at": "2026-10-26T14:54:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26020",
+  "body": "Ruled: 6413975861 · letter Q1 A / Q2 B · 2026-10-26T10:39Z\n\nFiling gate **④**: the cross-layer child of #25886 (its server layer). Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, from the #25886 card thread's measurement before coding. ⛔ Not a claim. The first step is **measure reach first**: this card adds a read that answers a viewer with no session, so it can leak data if it is scoped wrong.\n\n## What was measured\n\n- `plugin-auth` pins better-auth 1.7.12. Its `GET /organization/get-invitation` (`crud-invites.mjs`, `getInvitation`) answers 401 \"Not authenticated\" when there is no session.\n- With a session it also requires `session.user.email` to equal the invited address, and it may require a verified email.\n- `auth-route-ledger.ts` lists no anonymous invitation read.\n- The ui's `getInvitation` calls only that endpoint. So a signed-out viewer who opens an invitation link cannot be shown the inviting organization, the inviter, or the invited address.\n\n## What #25886's triage allowed (06:59Z, verbatim boundary)\n\nThe signed-out page may show only what the invitation itself carries: the inviting org's display name, the inviter's display name and the invited address. It reads them through the invitation id the link already holds, and only for a valid, unexpired invitation. Nothing about the org beyond that. Triage also said that a server read for a signed-out viewer is the part to put before review.\n\n## Ask\n\nAn anonymous read keyed by the invitation id that:\n- returns exactly `{ organizationName, inviterName, email }`;\n- answers only for a `pending`, unexpired invitation;\n- gives one uniform not-found for an unknown, expired, accepted, rejected or cancelled id, so the answer does not tell those states apart;\n- is registered in `auth-route-ledger.ts`.\n\nWhether to mask the invited address, rate-limit the route, or rule the read out entirely is for the server lane, and for the maintainer if triage reads it as a product choice.\n\n## Business reason\n\nWho benefits: a person invited to a customer's organization who is not yet signed in. That is how a customer's seats arrive. Scenario: the link opens on a generic 欢迎回来 login page with no word of who invited them or to what. Left undone, the ui can say only \"sign in or sign up to accept the invitation\" (the #25886 ui slice, `Part of #25886`). It cannot say \"Alice invited you to Acme\".\n\n## Who acts on it\n\nThe `domain:server` lane (`plugin-auth`), one dispatch. After it lands, the ui seat 1 reads the new route in `LoginPage.tsx` / `AcceptInvitationPage.tsx` under #25886, which stays open for that.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"anonymous signed-out invitation read endpoint plugin-auth get-invitation preview inviter organization name\": 20 hits. The top ones are #25886 (the parent), #25802 (zh-CN invitation mail role name), and the closed #24898, #24865, #24883, #24082, #23945 and #24016. None asks for a signed-out invitation read.\n"
+}

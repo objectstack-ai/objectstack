@@ -1,0 +1,36 @@
+{
+  "number": 26056,
+  "kind": "pull_request",
+  "title": "fix(app-shell): no drafts-ledger read for a member, no published read for a new draft",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:30:26Z",
+  "updated_at": "2026-10-26T12:51:27Z",
+  "closed_at": "2026-10-26T12:51:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:51:25Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26056",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9DThgomJbGpJoLcoasFJSw1)_\n\nFixes #25894\n\nClause-②: no (gating internal reads; no exported type change)\nMetadata-protocol: none\n\n## What the card saw, and where each request came from\n\nBoth requests were located on `origin/main` before any change.\n\n1. **`GET /api/v1/meta/_drafts` → 403 for a member.** The only env-wide reader of the ledger a member reaches is Home's \"My work\" drafts row (`usePendingDraftsRow` in `console/home/HomePage.tsx`, which called `usePendingDrafts({})` for whoever opened Home). The approvals inbox the card walked from lives on Home. No record-page component reads the ledger on main: the other readers (`DraftPreviewBar` in preview mode, the chat's package-bound `PendingDraftsBar`, Studio, the metadata editors through `MetadataClient.getDraft`) are authoring surfaces.\n2. **`GET /api/v1/meta/object/NAME?package=PKG` → 404 for a draft-only object.** That exact URL shape (a by-name read with `package=` and no `state=draft`) has one producer in `ui/`: `fetchItemBody` in `preview/DraftChangesPanel.tsx`, the published-side read of a row's drill-in (`EntryDetail`). Studio's Publish opens the sheet in the confirm posture, where every row is expanded as the list arrives, so the drill-in read the published body before the per-type new-vs-update read had answered. A NEW item has no published body, so that read could only answer 404.\n\n## The change\n\n- `hooks/useCanAuthorMetadata.ts`: new `PENDING_DRAFTS_CAPABILITIES` (`studio.access`, `setup.access`, `manage_metadata`) and `useCanReadPendingDrafts()`, \"holds any one of them\", unknown fails open (the module's existing doctrine). The cohort is the door's own: `GET /meta/_drafts` asks `mayReadPendingDrafts`, which is `isObjectSchemaMaskExempt`, the ADR-0106 D4 cohort. It is deliberately not `manage_metadata` alone (the Studio entry's gate), which would have taken the row away from a `setup.access` admin the door admits.\n- `console/home/HomePage.tsx`: the drafts row reads with `usePendingDrafts({ enabled: canReadDrafts })`. Held, the row is `null`, as with nothing to publish.\n- `preview/DraftChangesPanel.tsx`: the panel tracks whether the latest load's classification reads are in flight (`classifying`, keyed by load generation). A drill-in waits while its entry is unclassified and they are pending, and a `kind: 'new'` entry is not asked for its published body. An entry whose classification read failed stays unclassified once they settle and is read both ways, as before.\n- Four existing Home tests mock `../../../hooks/useCanAuthorMetadata` with an explicit factory; each gains `useCanReadPendingDrafts: () => true`, which keeps them on their previous behaviour.\n\n## Tests\n\nBoth new files drive the real code path: the Home test mounts the real `MePermissionsProvider` over a `/me/permissions` payload, and the panel test runs the real panel against a recording `fetch`.\n\n- `HomePage.draftsReadGate-25894.test.tsx`: a member with a reported set holding none of the three gets no `_drafts` read and no row; a reported empty set gets no read; CONTROLS: each of `setup.access`, `studio.access`, `manage_metadata` alone reads once and renders the row; an unreported set fails open and reads.\n- `DraftChangesPanel.newEntryNoPublishedRead-25894.test.tsx`: in the confirm posture a NEW entry sends only its draft read; CONTROL: an UPDATE entry still reads its published body (with `package=`); while the published-list read is held, no drill-in sends a published read; CONTROL: a failed classification read leaves both entries read both ways.\n\nRun, under the shared verify lock, from `ui/`: `vitest run --maxWorkers=2 packages/app-shell/src/preview/__tests__/DraftChangesPanel packages/app-shell/src/console/home/__tests__/HomePage`. Result: 29 files, 186 tests, all pass. This covers every `DraftChangesPanel` and `HomePage` test file. The full app-shell package is left to CI `Test Core`, a declared narrowing.\n\nAblation: both fixed files were set back to `origin/main` (the hook left in place), and the two new files were re-run. The 4 headline cases went red: no-published-read, held-classification, member-no-read, empty-set-no-read. The 5 controls stayed green. The files were then restored with `git checkout HEAD`, and `git diff HEAD` was empty afterwards. The tests import app-shell source directly, so no dist rebuild sits between the mutation and the run.\n\n## Derived gates\n\n`pnpm --filter @object-ui/app-shell type-check` (both `tsc --noEmit` and `tsc -p tsconfig.test.json`), after `pnpm --filter '@object-ui/app-shell^...' build`: exit 0, zero errors, at head e32db465.\n\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 commands. All exited 0, `node scripts/check-sdui-manifest.mjs` included. `--ran` reconciliation: 34 derived families accounted for, 34 run, 0 NOT-MEASURED, each with an exit code.\n\n`node scripts/gen-sdui-manifest-node.mjs` was re-run. The registry sources hash is unchanged, because app-shell is not one of the 27 registry packages, so `scripts/sdui-manifest.record.json` needs no change and is not in this diff.\n\n## Acceptance notes\n\n- `@objectstack/client`'s `meta.listDrafts` and `MetadataClient.getDraft`'s ledger probe also send an unfiltered `GET /meta/_drafts`. Every caller of either on main sits behind an authoring surface, so neither is gated here.\n- `DraftChangesPanel`'s per-member classification (`email_template` members) still reads the by-name door with `?member=` and gets a 404 for a new member. That read is how the sheet learns the member is new, so it stays. Its drill-in is now spared the second 404.\n- #25984 (card #25890) also edits `DraftChangesPanel.tsx`, in `computeChangeDetail` and the drill-in's render, not the load effect or the panel state this PR touches. Its `isNew = published === null` reads the same answer when the published read is skipped. This branch merges `origin/main` once #25984 lands.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011fs46jjQVe98Y5YTfDTixa\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011fs46jjQVe98Y5YTfDTixa)_\n"
+}

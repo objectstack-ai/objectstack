@@ -1,0 +1,37 @@
+{
+  "number": 26051,
+  "kind": "issue",
+  "title": "devx(sdui): split scripts/sdui-manifest.record.json into one record per ui registry package, so ui PRs that touch different packages stop conflicting in the merge queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:09:45Z",
+  "updated_at": "2026-10-26T13:52:46Z",
+  "closed_at": "2026-10-26T13:49:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26051",
+  "body": "Filing gate **③**: a task the maintainer assigned directly. Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`. ⛔ Not a claim.\n\n## Maintainer's word (2026-10-26T10:08Z, project chat, verbatim)\n\n> 同意\n\nThat word answers the project coordinator's proposal in the same chat. The proposal, verbatim, in part:\n\n> **拆分后：** 总文件改成每个包一个小文件，比如表格包一个、表单包一个。只改表格的 PR 只动表格那个文件，和改表单的 PR 互不冲突。生成时也可以只重算改过的包，会快很多。\n> **要核实的一点：** 如果一个包的哈希也算进了它依赖的包，改底层包时仍会动很多文件，收益会变小。\n> **做法：** 只改生成和检查这两个脚本，不动 CI，现在就能做。\n\nIt also answers the same question on the ui seat's decision card (\"file a card to remove the ui PRs' mutual conflict on the manifest hash\").\n\n## The cost today (measured by the ui seat, 2026-10-26)\n\n- `scripts/sdui-manifest.record.json` carries a single `inTree.registrySourcesSha256`: one digest over the `src/` blobs (`git ls-files -s`) of all 27 registry packages that `registrySourceDigest` reaches from the registry seeds through `dependencies` / `peerDependencies` / `optionalDependencies` (`scripts/check-sdui-manifest.mjs:560`).\n- Any `src/` edit in any of those 27 packages changes that one line. `check-sdui-manifest` is RED until the PR re-records it with `node scripts/gen-sdui-manifest-node.mjs`, which takes about 8 minutes because it builds the registry packages.\n- So any two ui PRs that touch registry packages conflict on that line. #25977 merged at 08:35Z. Within the next half hour #25978, #25984 and #25987 were dequeued with MERGE_CONFLICT, and #25998 went dirty. #25984 (for #25890) had to re-merge `origin/main` and regenerate twice.\n- The ui lane now lands those PRs one at a time: #25984 → #25987 → #25998 → #26040 → #26045. Each one costs one more regenerate plus a CI round of about 25 minutes. In practice the lane's concurrency of 10 collapses to 1 at the landing step.\n- PRs that touch only non-registry packages (for example `app-shell` or `plugin-chatbot`, as in #26037) do not move the digest and land freely.\n\n## Ask\n\n1. One record per registry package: a per-package file, or per-package entries laid out so that git never sees two packages' entries on adjacent lines. A separate file per package is the plainest way to guarantee that. Each record digests **only that package's own `src/`**. The reached package set stays recorded where `check-sdui-manifest` can compare it, so a new package or a dependency edge is still caught.\n2. `check-sdui-manifest.mjs` checks each package's record against its own digest, and names the stale package and the regenerate command when one is RED.\n3. `gen-sdui-manifest-node.mjs` can re-record only the packages whose digest moved. When the public component manifest (`sdui.manifest.json`, `sha256`, `components`) is unchanged, it should not need the full 8-minute build. If it does, say why in the PR.\n4. ⛔ No CI edit. `ui/.github/**` and the root `ci.yml` are still off-limits (the ui-merge `pm:epic` subtree under #25677, #25869 and #25902). `lint.yml` calls `node scripts/check-sdui-manifest.mjs --self-test && node scripts/check-sdui-manifest.mjs`, and that command line must keep working unchanged.\n\n**Check first, and report the result in the PR.** The current digest is one hash over the whole reached set, so a per-package record need not include its dependencies. That is the seat's reading of `registrySourceDigest`. If the dev finds a reason the manifest's freshness needs dependency-inclusive digests, editing a low-level package (`core`, `types`, `react`) would again touch many records and the gain shrinks. In that case, measure how many records such an edit would touch, and report the number before building.\n\nThe shared header fields (`generatedAt`, `sha256`, `components`, `objectuiWorkspaceVersion`) are their own conflict line. Only a change to the public manifest should move `sha256` / `components`. If `generatedAt` moves on every regenerate, it should not; say in the PR how it is handled.\n\n## Business reason\n\nWho benefits: every ui card thread and both ui seats. Scenario: ten ui fixes are green and approved, but they reach main one at a time, each waiting about 25 minutes for a re-merge, a regenerate and a CI round after the one before it lands. Left undone, the ui lane's landing throughput stays at one PR per CI round however many card threads run, and every extra card adds a regenerate.\n\n## Who acts on it\n\nThe lane that owns the root `scripts/` gate tools (`domain:devx` by the lane files: \"the gate scripts under `scripts/`\"). Routing is triage's; the ui seat does not route. One dispatch: `scripts/check-sdui-manifest.mjs`, `scripts/gen-sdui-manifest-node.mjs`, their self-tests, and the record file or files. After it lands, ui card threads re-record only their own package.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"sdui-manifest.record.json registrySourcesSha256 merge conflict per-package record split\": 15 hits. The closest are #10447 (a queue-flake anchor for `gen-sdui-manifest-collision.test.ts`, closed), #16797 (`gen:sdui-lockstep` pin stamping, closed) and #8360 (`migrations/registry.ts` text-merge conflicts, closed, a different file). None asks for a per-package record."
+}

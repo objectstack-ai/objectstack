@@ -2,25 +2,37 @@
   "number": 26001,
   "kind": "issue",
   "title": "map view: a deployment-wide default map style (setting + runtime-config + Console CSP), so an intranet deployment can replace demotiles.maplibre.org",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:31:52Z",
-  "updated_at": "2026-10-26T08:31:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T15:00:14Z",
+  "closed_at": "2026-10-26T14:58:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26001",
-  "body": "carries item 2 of #25889; #25889 keeps item 1 (the translated failure notice and the fall-back to the marker list, dispatched by `domain:ui` seat 2, #25995)\n\nFiling gate **④ a coordination node split from a queued card**: the half of #25889 that cannot land in `ui/`. Split by the `domain:ui` seat 2 (session `session_01SMps7wq7rBTk53e8KTSEup`) at the pre-dispatch premise check. ⛔ Not a claim. No `domain:*` on purpose: the landing spans more than one lane, and its domain is triage's call.\n\n## Business reason\n\n#25889: every deployment without public internet, or whose policy forbids a third-party tile host, gets a grey map canvas. The map renderer's only style source besides a per-view `mapStyle` is a hard-coded `https://demotiles.maplibre.org/style.json`. Without a deployment-wide default, an administrator must edit every map view of every app (including AI-built ones) to get a working map.\n\n## Readings (`origin/main` `05f7758f05`, 2026-10-26T08:25Z)\n\n- Per-view authoring already exists: `ObjectMap.tsx` reads `schema.mapStyle || schema.map?.style`; spec `ui/component.zod.ts` (`mapStyle`) and `ui/view.zod.ts` (`ListMapConfigSchema.style`). No deployment-level source exists.\n- `ui/packages/plugin-map/src/ObjectMap.tsx` `DEFAULT_MAP_STYLE` is the demotiles URL, used as the fallback.\n- No env/vite/runtime-config read in `plugin-map`; `plugin-map` does not depend on `app-shell`, so it cannot call `getRuntimeConfig()` without a new seam (context or console-injected prop).\n- `GET /api/v1/runtime/config` (`packages/cloud-connection/src/runtime-config-plugin.ts`) has a closed payload with no map key; branding (`workspace_name` → `branding.productName`, env fallback) is the precedent for a Setup value served there.\n- The Console CSP (`packages/cli/src/utils/console.ts`) allow-lists the demotiles origin in `connect-src`, computed once at boot; `OS_CONSOLE_CSP_CONNECT_SRC` is the only extension. A style host saved in Setup would stay blocked by the CSP unless the operator also sets that env, or the CSP learns the setting.\n\n## Open questions for triage (and the maintainer if it is a decision)\n\n1. Home of the value: a Setup setting served via runtime-config (the card's ask) or an env var read by `RuntimeConfigPlugin`.\n2. The runtime-config door is anonymous, so the style URL becomes public; and the CSP must follow the value. Both are a security-boundary choice.\n3. New key ⇒ per #25889's triage comment, the key card lands first and the `ui/` reader follows.\n\n## Reader who acts\n\nTriage routes it (likely `domain:server` for runtime-config + CSP + settings manifest, with a `domain:ui` sub-card for the renderer seam).\n\n## Dedupe\n\nREST list of the 600 newest objectstack issues (open and closed, #25385–#25995) grepped locally for `map style|demotiles|tile host|mapstyle`: 2 hits — #25889 (the parent) and #25569 (closed, nonce-based Console CSP; adds no map setting). Control: the same corpus finds `compareTo` in 2 issues, so the instrument reaches bodies."
+  "body": "Ruled: 6413991421 · letter A · 2026-10-26T10:40Z\n\ncarries item 2 of #25889; #25889 keeps item 1 (the translated failure notice and the fall-back to the marker list, dispatched by `domain:ui` seat 2, #25995)\n\nFiling gate **④ a coordination node split from a queued card**: the half of #25889 that cannot land in `ui/`. Split by the `domain:ui` seat 2 (session `session_01SMps7wq7rBTk53e8KTSEup`) at the pre-dispatch premise check. ⛔ Not a claim. No `domain:*` on purpose: the landing spans more than one lane, and its domain is triage's call.\n\n## Business reason\n\n#25889: every deployment without public internet, or whose policy forbids a third-party tile host, gets a grey map canvas. The map renderer's only style source besides a per-view `mapStyle` is a hard-coded `https://demotiles.maplibre.org/style.json`. Without a deployment-wide default, an administrator must edit every map view of every app (including AI-built ones) to get a working map.\n\n## Readings (`origin/main` `05f7758f05`, 2026-10-26T08:25Z)\n\n- Per-view authoring already exists: `ObjectMap.tsx` reads `schema.mapStyle || schema.map?.style`; spec `ui/component.zod.ts` (`mapStyle`) and `ui/view.zod.ts` (`ListMapConfigSchema.style`). No deployment-level source exists.\n- `ui/packages/plugin-map/src/ObjectMap.tsx` `DEFAULT_MAP_STYLE` is the demotiles URL, used as the fallback.\n- No env/vite/runtime-config read in `plugin-map`; `plugin-map` does not depend on `app-shell`, so it cannot call `getRuntimeConfig()` without a new seam (context or console-injected prop).\n- `GET /api/v1/runtime/config` (`packages/cloud-connection/src/runtime-config-plugin.ts`) has a closed payload with no map key; branding (`workspace_name` → `branding.productName`, env fallback) is the precedent for a Setup value served there.\n- The Console CSP (`packages/cli/src/utils/console.ts`) allow-lists the demotiles origin in `connect-src`, computed once at boot; `OS_CONSOLE_CSP_CONNECT_SRC` is the only extension. A style host saved in Setup would stay blocked by the CSP unless the operator also sets that env, or the CSP learns the setting.\n\n## Open questions for triage (and the maintainer if it is a decision)\n\n1. Home of the value: a Setup setting served via runtime-config (the card's ask) or an env var read by `RuntimeConfigPlugin`.\n2. The runtime-config door is anonymous, so the style URL becomes public; and the CSP must follow the value. Both are a security-boundary choice.\n3. New key ⇒ per #25889's triage comment, the key card lands first and the `ui/` reader follows.\n\n## Reader who acts\n\nTriage routes it (likely `domain:server` for runtime-config + CSP + settings manifest, with a `domain:ui` sub-card for the renderer seam).\n\n## Dedupe\n\nREST list of the 600 newest objectstack issues (open and closed, #25385–#25995) grepped locally for `map style|demotiles|tile host|mapstyle`: 2 hits — #25889 (the parent) and #25569 (closed, nonce-based Console CSP; adds no map setting). Control: the same corpus finds `compareTo` in 2 issues, so the instrument reaches bodies.\n"
 }

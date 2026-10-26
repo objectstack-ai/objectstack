@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T10:59:04Z",
-  "updated_at": "2026-10-26T08:34:12Z",
+  "updated_at": "2026-10-26T10:17:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25889",
   "body": "Filing gate **① a user-visible defect with a named landing site** (the message itself says production needs a setting that does not exist). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's; the setting half may be an objectstack Setup card.\n\n## What is seen (`@objectstack/console` 18.1.0, outbound network blocked)\n\nHotCRM → 客户 → 客户地图: the markers render on a grey canvas; above it, in English on a zh-CN console:\n\n> Map failed to load (AJAXError: Failed to fetch (0): https://demotiles.maplibre.org/style.json). Markers below are still listed in the search box; configure a custom map style for production use.\n\nplus 「1 record with missing or invalid coordinates excluded from the map.」, also English. [92-account-map.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/92-account-map.png).\n\n`reach:` the public UI, measured once; every deployment without public internet, and every one whose policy forbids a third-party tile host, meets it.\n\n## Expected\n\n- A deployment-level map style setting (Setup → 配置, next to File Storage / AI), read by the map renderer; the demotiles URL stays the development default.\n- When the style fails to load, the view degrades to the marker list with a translated one-line message, and the two notices go through the bundle.\n\n## Dedupe\n\nMCP `search_issues` objectui \"map view tiles demotiles maplibre style configurable offline failed to load\" → 2 hits: objectstack-ai/objectui#11819 (closed, WebGL2 crash instead of the fallback) and objectstack-ai/objectui#3297 (closed, worker 404); neither adds a style setting or translates the notices. Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.11."

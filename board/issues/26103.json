@@ -1,0 +1,36 @@
+{
+  "number": 26103,
+  "kind": "pull_request",
+  "title": "feat(layout): a collapsed sidebar nav group shows its reachable child count",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:11:15Z",
+  "updated_at": "2026-10-26T12:39:52Z",
+  "closed_at": "2026-10-26T12:39:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:39:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26103",
+  "body": "Fixes #25876\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nA collapsed sidebar navigation group now shows how many entries it holds, as a small count badge between its label and its chevron (`ui/packages/layout/src/NavigationRenderer.tsx`). Before, a closed group drew a label and a chevron and nothing else, so a closed group holding one entry looked exactly like one holding ten.\n\n- **What is counted.** The entries that opening the group would reveal: every leaf that passes `passesNavItemGuards` (the `visible` expression, `requiredPermissions`, the `requiresObject` / `requiresService` capability gates, a `doc` entry's readability check), counted through nested groups. Separators and the groups themselves are not entries, and an `action` entry counts only when the host wires `onAction`.\n- **One walk, not a copy.** The walk that `hasVisibleNavigationItems` ran is now a module-local generator, `visibleNavigationEntries`. `hasVisibleNavigationItems` takes its first entry (still stopping at the first hit) and the new module-local `countVisibleNavigationItems` counts them all. The count therefore cannot disagree with whether the group renders, or with what it shows once opened. No export is added or changed.\n- **When it shows.** Only while the group is collapsed (`!isOpen`). An open group's entries are in view. A group holding the current route is forced open, so it never shows a count.\n- **Accessibility.** The badge is the already-imported `Badge` with `aria-hidden=\"true\"`, so the disclosure's accessible name stays the group label (`NavigationRenderer.groupDefaultOpen-13336.test.tsx` uses exact button names and passes unmodified). The disclosure already announces collapsed or expanded.\n- **Icon rail.** The badge carries `HIDDEN_ICON_LABEL_NO_POINTER` and `HIDDEN_ICON_LABEL_NOT_FOCUSABLE`, the same classes the group label carries. The chevron's `ml-auto` moves to the badge while it shows, so the badge and chevron sit together at the right edge.\n- No new i18n key. No navigation key or value changes.\n\n## The card's second bullet is void\n\nThe card also asked that \"when the console replaces a report group's children with one index link, draw the group as that single entry\". The seat's claim voided this bullet after checking `origin/main`: the console never folds a group's children. 「全部报表」 is a static sibling `SidebarGroup` at `UnifiedSidebar.tsx:595-619`. Flattening single-child groups would be a new product rule for every app, and the card does not ask for one. This PR adds only the count badge. No single-child flattening is implemented.\n\n## Tests\n\nNew: `ui/packages/layout/src/__tests__/NavigationRenderer.groupChildCount-25876.test.tsx`, 6 cases.\n\n- Red first against `main`'s renderer (commit 3e21743f, the test alone): **4 failed, 2 passed**. The failures were the guarded count, the collapse/expand toggle, the nested group's own count, and the icon-mode classes. The two that passed are preservation pins: the accessible name is unchanged, and a group holding the route is forced open and shows no count.\n- The guarded count fixture holds seven nodes and four reachable entries. A `visible`-hidden entry, a permission-denied entry, a separator, an `action` with no dispatcher, a nested `visible`-hidden entry and the nested group itself are not counted. The two nested leaves are.\n- Ablation, one-off and not kept: `node scripts/ablation-replace.mjs` replaced `countVisibleNavigationItems(children, guardOptions)` with `countVisibleNavigationItems(children, { hasActionHandler: !!onAction })`, which drops the visibility and permission guards. The anchor went 1 → 0 and the blob went 71eca7a7 → c44ada02. Result: **3 failed / 3 passed**. The restore was verified as blob == HEAD (71eca7a7) with `git diff HEAD` empty. The tests import `../NavigationRenderer` from `src`, so there is no `dist` leg.\n\nRun at head `279ce1d9` (after merging `origin/main`), under the verify lock:\n\n- `pnpm --filter @object-ui/layout test`: Test Files 46 passed (46), Tests 384 passed (384).\n- `pnpm --filter @object-ui/layout type-check`: exit 0.\n- `vitest run packages/app-shell/src/layout/__tests__/UnifiedSidebar` (from `ui/`): Test Files 16 passed (16), Tests 70 passed (70). This includes `UnifiedSidebar.iconModeLabelFocus-12795`. `NavigationRenderer.iconModeLabelHitTest-12744` is in the layout run above.\n- `node scripts/check-sdui-manifest.mjs`: exit 0. The record is untouched, as expected: `@object-ui/layout` is outside the registry closure.\n\nGates, local subset, at head `279ce1d9`: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 commands. All 34 ran, and each exited 0 (`:: exit 0`, captured before any pipe). `dispatch-gates --ran` reported: \"34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED (a DERIVED zero — all 34 recorded an exit code and none of them is 3)\". ESLint on the three touched files found 0 errors; its 21 warnings were already there. Every other family is left to CI.\n\n## Acceptance notes\n\n- **File-surface breach, declared.** One existing test outside the dispatched surface needed a one-line lookup change: `ui/packages/layout/src/__tests__/AppSchemaRenderer.mobileTabOrder-11395.test.tsx`, case \"`expanded: false` … a collapsed group's children stay tabs\". It found the sidebar group trigger by `el.textContent === 'Sales'`. A closed trigger now also contains the aria-hidden count, so its text is `Sales2`. The lookup now matches a closed trigger (`aria-expanded=\"false\"`) whose first child, the label text node, reads `Sales`. The assertion still checks the same things: the trigger exists outside the bar, and the bar's tabs are `Deals`, `Leads`. Only the test changed. `AppSchemaRenderer.tsx` itself is untouched. The change is in its own commit (c809cd21, together with the changeset) and is easy to drop if the seat prefers another route.\n- The count badge uses `variant=\"secondary\"`, so it reads as information, not as the `default` (primary) colour that an authored leaf `badge` takes by default.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

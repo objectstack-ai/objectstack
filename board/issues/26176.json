@@ -1,0 +1,32 @@
+{
+  "number": 26176,
+  "kind": "pull_request",
+  "title": "fix(cli): keep the git-ignored tmp/ out of the vitest tier walk",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T14:48:27Z",
+  "updated_at": "2026-10-26T14:50:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26176",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XXGRhrTgBTUdVdiNGgqkTdj)_\n\nFixes #26047\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\nThe merge queue ejected three independent PRs (#25979, #26007, #26026) on the same line: `hook-timeout-override-refusal.test.ts` › ⭐ CONTROL, `AssertionError: expected 1 to be +0`. The `vitest list` child exited 1. Load was not the cause.\n\n`packages/cli/vitest.config.ts` builds its tier populations at config load through `packages/cli/vitest-tiers.ts`. `testFilesOnDisk` walked the whole package, including `packages/cli/tmp/`, which is git-ignored scratch. Sibling tests in the same slice render whole scaffolds into `tmp/` and delete them mid-run (`init-template-comments-self-contained`, `scaffold-manifest-schema`). Those scaffolds hold real test files such as `package.test.ts` and `src/index.test.ts`. When a delete landed inside the walk, the config load threw `ENOENT` (scandir or open), so the child exited 1. Two other effects of the same walk: a scaffold's test files joined the `unit` population while they existed, and the outer `vitest run` config load could die the same way.\n\n## Change\n\n- `packages/cli/vitest-tiers.ts`: `tmp` added to `SKIP_DIRS`, with a comment saying why. This is the seat's ruling A, recorded as a claim amendment on #26047.\n- `packages/cli/test/hook-timeout-override-refusal.test.ts`:\n  - Every status assertion now carries the child's exit status and the first 2000 characters of its output. The next red says why.\n  - The no-override control plants `planted.test.ts` under a fresh `tmp/` directory and asserts the listing does not name it. That is the red-first pin.\n  - No timeout raised, no skip, no retry. The #18788 verdicts are unchanged: `--hookTimeout` and `--teardownTimeout` refuse, `--testTimeout` passes, and the no-override control passes and says nothing.\n\n## Evidence\n\nAll runs on a shared 4-core container, with the `@objectstack/cli` dependency closure built.\n\n| Reading | `main` 0a6948210c | this PR 358e11b89 |\n|---|---|---|\n| The control's exact child (`vitest list --filesOnly`, no override) looped beside the real scaffold-rendering tests | **3 of 132 exit 1**, each `failed to load config … ENOENT … packages/cli/tmp/manifest-init-plugin-…/package.test.ts` or `…/render-create-plugin-…/src/index.test.ts` | **0 of 216** (120 + 96) |\n| Test file under synthetic `tmp/` churn | red on the first run (`vitest list exited 1; its output began: failed to load config … ENOENT … scandir …`) | 0 of 8 red |\n| Test file alone beside 8 busy loops (load, no churn), 5 runs | 5 of 5 green; file 27.5–31.3 s, control case 6.7–7.7 s | 5 of 5 green; file 27.6–30.9 s, control case 6.4–7.6 s |\n| Population (`vitest list --filesOnly`) | 506 files | 506 files |\n| Red-first pin against `main`'s walk | `× ⭐ CONTROL …`: the listing named `[unit] tmp/hook-timeout-control-Btvz04/planted.test.ts` | green |\n\nThe load-only row rules out the time hypothesis: the control child takes about 7 s against its 27 s budget. A directory watcher across all three CI slices (`OS_TEST_SHARD` k/3) recorded that the only directories appearing or vanishing in the package tree were under `tmp/`. The slice holding this test churned 25 of them. CI job logs are not readable from this container, so the queue's own stderr was not seen. The new message makes the next queue red carry it.\n\n## Tests and gates (head 358e11b89)\n\n- `pnpm --filter @objectstack/cli exec vitest run --project unit`: 333 files / 4854 tests passed. The `integration` tier is left to CI, because this diff touches no spawn entry.\n- `pnpm --filter @objectstack/cli run typecheck`: exit 0.\n- `eslint packages/cli --no-inline-config`: exit 0.\n- `dispatch-gates --commands`: 55 derived, 54 run with exit 0, 1 NOT MEASURED (`check:dual-build-cjs-loads`, which needs a full build and exited 3). `--ran` reconciles: 0 unrun. This includes `check:tier-file-adoption` and `check:cross-package-test-inputs`, both green, and neither reads the cli `SKIP_DIRS`. `check-plugin-teardown-shape --self-test` was rerun green after fetching its positive-control commit. Its first attempt overlapped my synthetic `tmp/` churn and refused on an unreadable `tmp/` file, which is the same walk class (see Acceptance notes).\n\n## Changeset\n\n`skip-changeset`: `@objectstack/cli` publishes `files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`, and neither touched file is in it or built into `dist`.\n\n## Acceptance notes\n\n- Same walk shape, not changed here, not measured as a failure in CI: `packages/qa/vitest-filter-preflight/src/index.ts` `testFilesUnder` (filtered runs only), `scripts/nightly-tiers.mjs` `tierPackages`, and `check-plugin-teardown-shape` all descend into `packages/cli/tmp/`. A churn in `tmp/` during one of them can refuse on a vanished file. Carrier: none.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REwoooZ6nXESkVCEtsbeRC\n"
+}

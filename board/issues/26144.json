@@ -1,0 +1,37 @@
+{
+  "number": 26144,
+  "kind": "pull_request",
+  "title": "fix(storage)!: a file its record lets go keeps that record's read rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:40:13Z",
+  "updated_at": "2026-10-26T14:29:24Z",
+  "closed_at": "2026-10-26T14:29:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T14:29:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26144",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XGuJWm35AkoM8dcbRg59uXx)_\n\nFixes #26046\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## What this changes\n\nADR-0104 D3 promises one file, one owning record and one access rule. This makes the rule hold after the owning record lets the file go. Until a writer who may read that record claims the file again, or the platform collects it, the file is read by that record's rule.\n\n- **Release keeps the record** (`file-reference-lifecycle.ts`). `sys_file` gains two nullable bookkeeping fields, `released_ref_object` and `released_ref_id`, naming the record that last owned the file. Every release writes them, whether or not it tombstones. A claim clears them, because the claiming record's rule replaces the old one.\n- **One verdict reads them** (`judgeFileRead` in `storage-service-plugin.ts`). Such a file is judged by that record's read access, through `readableFieldOwners`, the function the field-owned arm already asks (so a `fileAccessDelegate` decides here too). The download door and the claim path (#25692) share this verdict, so both follow it. A record that no longer exists is read by nobody, so only the uploader reads its released files.\n- **Unchanged.** A file no record has owned is read within its organization (#25693). The uploader always reads their own file. `public_read`, attachments-scope files, #25692's write rule and #26036's anonymous-write rule are untouched. The reap guard still reads only the ownership columns, so the new fields never hold a file back from collection. #26043's path is not touched.\n- **ADR-0104**: one line in the 2026-10-26 addendum's list of who the verdict admits. It changes D3's text, so this PR is Tier H and stays draft for the maintainer.\n\nThe measurements and the exact path are with the server seat, not here.\n\n## Declarations\n\n- `Clause-②: no (narrowing)`, measured on this diff: a file read that the owning record's rule refuses is now refused after the record lets the file go. Nothing refused becomes accepted. The claim wrote `Clause-②: no` and named this arm as expected.\n- `Metadata-protocol: none`: nothing a metadata author writes changes. The two fields are platform-managed bookkeeping on a platform object.\n- One `patch` changeset on `@objectstack/service-storage`, `fix(storage)!:`, with the BREAKING section and the ADR-0087 disposition `not-required (no-migration-prescription)`.\n- Existing rows: schema sync adds the two columns, existing rows read NULL, and a NULL row is judged exactly as before. No migration is needed for the shape.\n\n## Tests\n\nHEAD `7cc88889e`.\n\n- New `file-reference-release-read-rule.integration.test.ts`: one real `ObjectQL` + sqlite engine with `StorageServicePlugin` booted as shipped, asked through the download door and the claim path, for every way a file leaves its slot, under both collection settings. On base `0a6948210` it is red (13 failed, 8 passed); on this branch 21/21 pass.\n- Ablation: the new verdict arm disabled through `scripts/ablation-replace.mjs` (anchor 1 to 0, blob `24540c7fe6b3` to `12afcb53c051`) turns the same 13 red; restored, blob equals HEAD and `git diff HEAD` is empty.\n- `pnpm --filter @objectstack/service-storage test`: 66 files, 1218 tests passed. `typecheck` (including `check:test-typecheck`) passed. eslint on `packages/services/service-storage` with `--no-inline-config`: clean.\n- Full dogfood battery at HEAD: `pnpm --filter @objectstack/dogfood test` under the verify lock, VERDICT command-exit 0, Test Files 296 passed | 3 skipped (299), Tests 2523 passed | 18 skipped (2541).\n\n## Gates\n\nLocal subset at HEAD `7cc88889e`: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 80 families from this diff; all 80 ran with exit 0 (each code captured before any pipe), and `--ran` reconciles 80 run, 0 NOT MEASURED. Before the full build, `check:i18n` and `check:dual-build-cjs-loads` answered exit 3 (prerequisite not met) and `check-plugin-teardown-shape --self-test` exit 3 (shallow clone); after `pnpm build` and fetching the self-test's control commit all three are 0, and `check:i18n` drove the translation-bundle commit. `node scripts/check-platform-checklist.mjs --changed-from origin/main`: OK, 4 anchors judged, 0 lost. Every other family is CI's; this PR's check-runs are the record.\n\n## Acceptance notes\n\n- **Rows that predate this change.** One residual about them is reported to the server seat with the measurements, for the maintainer to weigh. No follow-up card is filed by this PR.\n- **Signed-URL lifetime.** The download door still mints a released file's URL with the presigned TTL of an unowned file, not the shorter TTL of a record-governed one (`authorizeDownload`'s `gated` test reads the ownership columns only). That decides how long an already-issued URL lives, not who gets one.\n- `#26043 remains open`; its path is not touched.\n\n## 维护者速读(草稿)\n\n**改了什么**:记录放手一个文件后,这个文件继续按原记录的读权限判定,直到有能读原记录的人重新认领它,或它被平台回收。`sys_file` 加了两个平台自管的空值字段记住\"原记录\";ADR-0104 的 2026-10-26 补记里改了一行。\n\n**为什么改**:ADR-0104 承诺\"一个文件、一个所属记录、一条访问规则\"。实测发现这条规则在记录放手文件之后不成立(细节只在席位线程)。合同、证件、HR 附件这类私密记录里的文件,替换或删除后也要保持原来的访问范围。\n\n**风险与代价(含回滚)**:这是收窄:以前能读到的这类文件,现在不能读原记录的成员读不到了(上传者本人始终能读)。修复前已有的数据有一处遗留,详情在席位线程。回滚即 revert 本 PR;两个新列留在库里无害。\n\n**席位意见**:\n\n**你要做的**:审阅 ADR 那一行与修复,批准后合并(Tier H,保持 draft 等你)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018e5yJf1ptbMURVgWb3LrF6)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018e5yJf1ptbMURVgWb3LrF6\n"
+}

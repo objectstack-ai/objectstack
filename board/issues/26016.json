@@ -1,0 +1,35 @@
+{
+  "number": 26016,
+  "kind": "pull_request",
+  "title": "fix(pm): a claim its own session later yielded is not the card's claim",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:13:14Z",
+  "updated_at": "2026-10-26T10:21:21Z",
+  "closed_at": "2026-10-26T10:21:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T10:21:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26016",
+  "body": "Fixes #25791\n\nClause-②: no\nMetadata-protocol: none\n\n## What this changes\n\nA `Claim:` comment that its own session later yielded is no longer read as a claim of the card. This applies in both claim readers in `scripts/pm/check-half-states.mjs`, and through them in the closing-target guard (`scripts/check-closing-target-claim.mjs`, check-run \"The card this PR closes must claim this branch\").\n\n- New export `yieldedClaimIndexes(commentRows)`, the only recogniser. It takes REST rows or bare bodies and returns the indexes of yielded claims. A claim counts as yielded only when all three of these hold:\n  1. a comment's first non-blank line reads the protocol's `already claimed — yielding` (`CLAIM_YIELD_MARKER`, read through the shipped `markerMatches` decoration reading; no dash or wording dialect);\n  2. that first line names exactly one distinct session id (`SEAT_SESSION_ID`);\n  3. the claim's own session (`claimSessionId`: the first session id on its `Session:` line) is that session, and the claim precedes the yield (`created_at` when both parse and differ, thread order otherwise, the same rule `claimGovernance` uses).\n- `claimGovernance` skips yielded claims for both of its readings (`governing` and the newest-claim `malformed` reading).\n- `h46ClaimNamesBranch` skips yielded claims, so H46 leg (b) and the guard's positive predicate agree with governance.\n- The guard imports the same predicate. It does not fork one. Its \"no claim at all\" failure sentence now says that a yielded claim does not count.\n\nWhat the card's \"Wanted\" section asked to keep, kept: a yield naming no session, a yield naming two sessions, a hyphen-written yield, a yield by another session, and a `Claim:` the yielding session posts after its yield all keep today's reading. Only the yield's first line is read. The measured yield names the winning claim and its session in its body, and reading the whole body would withdraw the winner's claim.\n\nThe yield spelling already in use was machine-readable enough, so `execution-duties.md` is not touched, and this PR changes no governed surface.\n\n## Mechanism, measured on PR #25780's thread (card #25729) at `origin/main` `05f7758f`\n\nReaders run over the live comment rows of #25729:\n\n| thread | `claimGovernance` before | after | `h46ClaimNamesBranch(loser branch)` before | after |\n|:--|:--|:--|:--|:--|\n| up to the yield (claim A on a card-thread branch, claim B, B yields) | governing = B's branch, `malformed` null, so the guard said UNCLAIMED (red, run 40183909709) | governing null, `malformed` = A, so UNDETERMINED (pass, warned) | true | false |\n| with the hand re-post of A | `malformed` = re-post (UNDETERMINED) | `malformed` = re-post (unchanged) | true | false |\n\nAll three PM hypotheses held. (1) `CLAIM_BRANCH_SHAPE` gives zero branches for `claude/project-thread-biervl`. (2) The `.some` counted the yielded claim. (3) `newest` included the yielded claim. With the yield skipped in both readers, the measured red goes away, and a PR on the yielded branch no longer passes on a claim whose session yielded it.\n\n## Tests\n\n- `node scripts/check-closing-target-claim.mjs --self-test`: 121 cases pass. New battery \"A claim its own session later YIELDED is not the card's claim\" (16 cases, pinned at 16; the roster floor goes 12 to 13). It covers the acceptance pair: claim A on a protocol branch, claim B, B yields. The guard is CLEAN for A (one comment page) and a FINDING for B, and the failure names A's branch. It also covers the card-thread winner (no red; UNDETERMINED, warned), the five today's-reading controls, and the no-fork pin: CLAIMED equals the shipped `h46ClaimNamesBranch` over every yield fixture.\n- `node scripts/pm/check-half-states.mjs --self-test`: 4962 cases pass. New battery \"Yielded claim reading\" with 21 cases (pinned at 19). It holds the measured #25729 race verbatim in the lines the readers read, a protocol-branch control, the decoration, precedence and bare-body cases, and the controls that must withdraw nothing. Every pre-existing case stays green.\n- No ablation: the diff is scripts only (os-dev: scripts are not ablated).\n\n## Gates (local, at `f32ecea4`)\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 43 families from the two changed paths. Each was run with its exit code captured before any pipe, and all 43 exited 0. That includes `pnpm check:closing-target-claim`, `pnpm check:pm-half-states` and `pnpm check:pm-dispatch-gates`, the last under `os-verify-lock`: \"VERDICT command-exit 0\", fast tier 1917 cases.\n- `--ran` reconciliation: \"✓ dispatch-gates --ran: 43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3).\"\n- Changeset: none. `scripts/pm/**` and `scripts/check-*` publish nothing, so the PR carries `skip-changeset`.\n\n## Acceptance notes\n\n- Out of scope and deliberately not changed: `CLAIM_BRANCH_SHAPE` parses only the `claude/issue-N-slug` shape. A claim naming a card-thread branch (`claude/project-thread-…`) therefore gives no branch, and every such PR reads UNDETERMINED in this guard. That includes this PR, whose card claim names `claude/project-thread-1r3slx`. On a race whose winner is on such a branch, the loser's PR also reads UNDETERMINED rather than red. The self-test pins that it is no longer CLAIMED, and nothing further. The guard header records why the branch reader is not widened here (the 2026-08-11 ruling; the repair direction is the write side). The report carries it as a finding for the seat.\n- A yield comment whose body happens to contain a line starting `Claim:` would still be read as a claim, as today. No such yield was measured. This is noted only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LqKsGyMNFwwnbF5FTAqyPn)_\n"
+}

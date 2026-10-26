@@ -1,0 +1,36 @@
+{
+  "number": 26052,
+  "kind": "pull_request",
+  "title": "docs: build the Console with pnpm console:build, not the retired objectui pin scripts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:12:32Z",
+  "updated_at": "2026-10-26T11:22:20Z",
+  "closed_at": "2026-10-26T11:22:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:22:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26052",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D5QXEJEkGv9hHj99t49Ab4t)_\n\nPart of #26035 (slice 2: ungoverned docs).\n\n## What changed\n\nThe retired pin flow (`pnpm objectui:build`, `.objectui-sha`, `scripts/build-console.sh`, the `os dev` stamp-vs-pin refusal) is replaced by the in-workspace flow in five files. Re-measured on main `39ca5878` with `git grep -nE \"objectui:(build|refresh|bump|clean)|build-console\\.sh|\\.objectui-sha\"` over the slice surface: 22 hits in 6 files before, 0 in the 5 edited files after.\n\n| File | Change |\n|:--|:--|\n| `README.md` | \"Hack on the framework\" runs `pnpm console:build`; the paragraph says what it does (builds `ui/apps/console`, copies to `packages/console/dist`, nothing cloned or pinned, `pnpm build` builds the Console but does not copy it). Timing row re-measured (below). |\n| `content/docs/getting-started/examples.mdx` | Callout names `pnpm console:build`. |\n| `docs/screenshots/render-readme-demo.mjs` | Prerequisite comment names `pnpm console:build`. |\n| `docs/qa/platform-checklist/RUNNER.md` | Cold-tree trap, one-tree-at-a-time trap (the `OBJECTUI_DEPS_BUILD_CMD` override is gone; the fix is `pnpm console:build --concurrency=2`), the `stale-console-bundle` counter, and the run record (the `objectuiPin` env field is dropped: the console builds from the `framework` SHA). Trap names unchanged, so `check:platform-checklist` vocabulary holds. |\n| `docs/qa/studio-benchmark/SCENARIO.md` | The console row and the \"record both SHAs\" step: one SHA now, plus `pnpm console:build` before booting. |\n\n## Verified, not recalled\n\n- `pnpm console:build` = `turbo run build:dist --filter=@objectstack/console`; `@objectstack/console#build:dist` depends on `@object-ui/console#build` (`turbo.json`), and `packages/console/build-dist.sh` copies `ui/apps/console/dist` to `packages/console/dist`.\n- Ran on a fresh worktree after `pnpm install` only: `NODE_OPTIONS=--max-old-space-size=6144 pnpm console:build --concurrency=2` → 72 tasks, 0 cached, 12 m 16 s, exit 0, `✓ @objectstack/console dist ready (80724 KB) from ui/apps/console`. Re-run: 72/72 cached, ~1 s. These are the README row's numbers.\n\n## Left alone, and why\n\n- **ADR-0082 L198** is not edited. It sits in the \"Where the line lives\" list under the maintainer's 2026-08-07 decision, so it is part of a decision record, and `docs/adr/**` is governed surface: editing it would make this PR Tier H. The neighbouring L197 (`scripts/bump-objectui.sh`) is equally stale. Both belong with the governed slice.\n- **README `pnpm build` row** (6 m 54 s, 72 tasks) predates the ui/ import; `pnpm build` now builds the ui tree too, so that row is likely low. Not re-measured here (out of this slice's prescription surface); flagged for whoever next refreshes the table.\n- The pin-specific drift guard in `packages/cli/src/utils/console.ts` is slice 3.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --ran`: 42 derived, 42 run, 0 NOT-MEASURED, all exit 0 (`check:skill-examples` after building `@objectstack/client-react...`). No `docs:check-links` script exists on main. `skip-changeset`: repo-root docs, and `content/docs` ships only in the private `@objectstack/docs` app.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JrWb13NvNX4Nnw76uBX95H\n"
+}

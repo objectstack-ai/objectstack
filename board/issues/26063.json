@@ -1,0 +1,37 @@
+{
+  "number": 26063,
+  "kind": "pull_request",
+  "title": "fix(cli): the Console drift remedy names `pnpm console:build`, not the retired `objectui:build`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:40:50Z",
+  "updated_at": "2026-10-26T12:18:46Z",
+  "closed_at": "2026-10-26T12:18:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:18:44Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26063",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DBj9PuBdWNyyNdW8Wq2GYFd)_\n\nPart of #26035 (slice 3 only: the CLI stamp-drift remedy). Slice 2, the ungoverned docs, runs on its own branch; slice 1, the governed text, waits for the maintainer.\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThe Console drift warning (`os serve`), the `os dev` drift refusal and the `503` body at `/_console/` that the refusal mounts told the reader to run `pnpm objectui:build`, and the refusal also mentioned `pnpm objectui:refresh`. Both scripts retired with the objectui pin in #25745. All three texts now name `pnpm console:build`, the root script that builds `@objectstack/console` from `ui/apps/console`. The refresh line is dropped. The SHAs, `OS_ALLOW_CONSOLE_DRIFT` and the status codes are unchanged.\n\n- `packages/cli/src/utils/console.ts`: the remedy text in `formatConsoleShaDriftWarning` and `describeConsoleShaDrift`; the docblocks of the drift guard, `formatConsoleShaDriftRefusal` and `decideConsoleMount`, and the header's resolution note, stop describing the pin, `scripts/build-console.sh` and `pnpm check:console-sha` as current.\n- `packages/cli/src/utils/console.sha-drift.test.ts` and `packages/cli/test/console-resolve.test.ts`: the pinned remedy strings move with the code in the same commit. The drift-message case now also asserts that neither message names any `objectui:(build|refresh|bump|clean)` script. No assertion is removed.\n- `packages/cli/src/commands/serve.ts` (comment only) and `packages/cli/src/console.ts` (the L66 reading record, comment only): the pin is described as retired; the dated reading keeps its sha.\n- `.changeset/26035-console-drift-remedy-console-build.md`: `@objectstack/cli` patch, written for the reader of the message.\n\n## Re-measure on `main` (`39ca58787`)\n\n- **Is the drift path reachable?** Not in this repository. `findObjectuiPin` walks up from the resolved console package for a `.objectui-sha`; the repo has none since #25745. `packages/console/build-dist.sh` writes no `dist/.objectui-sha` stamp and replaces the whole dist (`rm -rf` then copy), so `detectConsoleShaDrift` returns `null` for every framework checkout built with `pnpm console:build`. A published install carries no pin either.\n- **Why it is kept, not removed.** The header of `console.ts` names an objectos/cloud Docker overlay that carries its own `cloud/.objectui-sha` above the console package, and the published `@objectstack/console@18.1.0` dist still ships a `dist/.objectui-sha` stamp (#25745's tarball comparison). Such a tree still reaches the guard. That overlay is **NOT MEASURED**: the `cloud` repository is not readable from this seat (the public `src/console.ts` docblock records the same gap). Removing the guard would also change the published `resolveConsolePath` options type (`onDrift`, pinned by `test/published-subpath-console.pin.test.ts`), which is beyond this slice.\n- **`scripts/check-console-sha.mjs` / `check:console-sha`.** Already deleted by #25745, with the root alias and the `pnpm dev*` wiring; no workflow or dev chain runs it. Nothing to change.\n- **Known remedy limit.** In an overlay tree that has no `console:build` script, the named remedy is the framework's script, not that tree's. The dispatch order set the remedy to `pnpm console:build`; the tree that would see it is the unmeasured one above.\n\n## File surface\n\nThe claim's surface plus `packages/cli/test/console-resolve.test.ts` (one line), added to the claim by the seat at 10:02Z: it pins the same warning string this PR re-points.\n\n## Verification\n\nAll on head `9aefb25e8`, local, under the verify lock.\n\n- Closure: `pnpm turbo run build --filter='@objectstack/cli^...' --concurrency=2` → VERDICT command-exit 0 (60/60 tasks).\n- The two touched files: `pnpm --filter @objectstack/cli exec vitest run --project unit src/utils/console.sha-drift.test.ts test/console-resolve.test.ts` → Test Files 2 passed, Tests 29 passed.\n- CLI unit layer: `pnpm --filter @objectstack/cli exec vitest run --project unit` → 331 files passed, 4825 tests passed, 29 skipped; 2 files failed only on their prerequisite (`packages/cli is not built (./dist/index.js is absent)`). After `pnpm --filter @objectstack/cli build`, those two (`test/published-subpath-console.pin.test.ts`, `test/published-subpath-hook-body.pin.test.ts`) → 2 passed, 29 tests passed. The integration layer is declared to CI (no spawn entry or integration file in the diff).\n- `pnpm --filter @objectstack/cli typecheck` → exit 0 (`check:test-typecheck: OK`).\n- Derived gates (`dispatch-gates --commands`, 71 families): 70 exit 0, `check:dual-build-cjs-loads` exit 3 = NOT MEASURED (needs every package's dist; CI owns it). The three `check:i18n*` families first exited 3 and were re-run green after the prerequisite build they print. `dispatch-gates --ran` → `71 derived famil(ies) accounted for — 70 run, 1 NOT-MEASURED`.\n- `check:commit-card-trailers --range origin/main..HEAD` ✓; `check-nul-bytes` exit 0.\n- No ablation: the diff changes message text that the tests pin by string, not a tested behaviour.\n\n## Acceptance notes\n\n- Slice acceptance: after this PR, `git grep -nE \"objectui:(build|refresh|bump|clean)\" -- packages/cli ':!*CHANGELOG.md'` finds nothing.\n- Outside this slice and not named in the card's slicing: `scripts/check-dev-prereqs.mjs`, `scripts/check-pnpm-flag-spellings.mjs`, `scripts/check-sdui-manifest.mjs`, `scripts/gen-sdui-manifest-node.mjs`, `packages/client/src/envelope-caller-census.test.ts` and `packages/qa/dogfood/test/print-service-render.dogfood.test.ts` still name an `objectui:*` script (comments, or the pinned-mode branch of the SDUI manifest tools). Carrier: none; noted here for the seat. #26035 remains open for slices 1, 2 and 4.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CBGRCbYq9F1ceLwZ2YCbWE)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CBGRCbYq9F1ceLwZ2YCbWE\n"
+}

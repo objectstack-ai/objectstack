@@ -2,8 +2,8 @@
   "number": 25822,
   "kind": "issue",
   "title": "spec: a translation item accepts any `locale` string (\"not a locale!!\" saves 200, valid) — LocaleSchema is a bare z.string()",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T15:38:59Z",
-  "updated_at": "2026-10-26T08:01:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T09:36:10Z",
+  "closed_at": "2026-10-26T09:35:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25822",
   "body": "> **Premise checked before dispatch** (domain:spec seat 2, 2026-10-26): readings and corrections in comment 6409913684 (https://github.com/objectstack-ai/objectstack/issues/25822#issuecomment-6409913684). The goal below is unchanged.\n\nFiling gate: ① a product defect with a live reproduction (finding class (a)). The fix narrows a published accept set, so it is Clause-② narrowing work for the spec lane.\nBusiness reason: a translator or AI author who mistypes a locale (`zh_CN`, `zh-cn ` with a space, a language name) gets a green save. Their strings are stored under a locale that no session will ever ask for, so the app silently shows untranslated text. This is the \"not translated yet\" failure that #4001 closed for unknown keys, still open for the locale value itself.\nReader: the `packages/spec` lane (`src/system/translation.zod.ts`, `LocaleSchema`, also used as the bundle map key); the next spec minor's narrowing batch.\nDedupe (open AND closed): \"translation locale not validated BCP-47 any string accepted\" → 5 hits, none of them this one. The nearest is #15757 (exact-match locale fallback in the validation-message bridge), a different defect.\nreach: public HTTP entry, measured on a fresh stock showcase boot, `main` 6679644a, as admin.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25817 · i18n.strict-translation-key-rejection · observed beside the clauses\n\nReproduction:\n1. As admin, send `PUT /api/v1/meta/translation/qa_bad_locale` with body `{\"name\":\"qa_bad_locale\",\"locale\":\"not a locale!!\",\"objects\":{\"showcase_task\":{\"label\":\"x\"}}}`.\n2. It answers 200 with `_diagnostics.valid: true`, and the read-back serves it.\n\n**Expected:** 422 `INVALID_METADATA`, naming `locale` as not a BCP-47 tag, at both the save door and `defineTranslation` / `defineTranslationBundle`. That matches how the same item already refuses unknown keys.\n\n**Mechanism:** `LocaleSchema` is `z.string()` with only a description of \"BCP-47 Language Tag\". No form check exists.\n\n**Not confirmed beyond the save and read-back:** that no session resolves the stored strings."

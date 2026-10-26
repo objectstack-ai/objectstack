@@ -1,0 +1,32 @@
+{
+  "number": 26084,
+  "kind": "issue",
+  "title": "ci: Test UI always starts 16 shard runners and Test Core 8, even when the affected set is one package, and an empty shard still pays checkout + install + closure build before learning it has nothing to run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:24:14Z",
+  "updated_at": "2026-10-26T12:16:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26084",
+  "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one PR, Tier H. Dedupe: REST list (439 issues), grep `shard` → 11 hits, all closed except #25870 (open, dispatched: the two slowest Test Core shards set the 28-min wall; rebalance weights / cli slices). #25870 is about the long shards; this card is about the short and empty ones. Serialize behind #25870 if both touch the partition step. **New.**\n\n**谁付代价（业务筛）:** a PR that touches one UI test file still occupies 16 runners, each doing checkout, install, an artifact download and a dependency build; those runners come out of the same pool every other PR and the merge queue wait on. Core PRs pay the same shape at 8.\n\n## Measured (HEAD 0d83ee8f77)\n\n- `ci.yml:3549` `name: Test UI (${{ matrix.shard }}/16)`; the matrix at `ci.yml:3559` is the literal list 1–16; the run step (`ci.yml:3694-3696`) is `vitest run --shard=${{ matrix.shard }}/16 … \"${filters[@]}\"` in affected mode. `ui/vitest.config.mts:472` `passWithNoTests` lets empty shards pass.\n- `ci.yml:564` `name: Test Core (${{ matrix.shard }}/8)`; install runs at `ci.yml:697` before the partition (about 700–794); a shard with no packages prints \"no packages on this shard\" (`ci.yml:1367`) after paying full setup.\n- Required contexts: `Test Core` is the aggregated `test-gate` (`ci.yml:1589`); `Test UI` shards are aggregated the same way — read `scripts/check-required-contexts.mjs:388-470` before changing any job name.\n\n## Wanted\n\n1. Compute the shard count in the `filter` job (or a small planning job) from the affected set and emit it as a JSON matrix (`fromJSON`); cap at today's 16 / 8; a one-package affected set runs one shard.\n2. Move the install / closure build after the partition decision so an empty shard exits in seconds — or never exists because the matrix was sized.\n3. Keep the aggregator job names that the required set binds to; the matrix members are not required contexts (verify, and say so in the PR body with the reading).\n4. ⛔ No test skipped; `passWithNoTests` stays only as the guard it is today.\n\n## Acceptance\n\n- Three `pull_request` runs touching one `ui/` test file show ≤ 2 Test UI shard jobs; three runs touching one core package show ≤ 2 Test Core shard jobs; a run touching `packages/spec` still shows the full count.\n- `scripts/check-required-contexts.mjs` and `required-set-patrol.yml` green; the `test-gate` verdict unchanged for a run with a real failure (the dev demonstrates one on a throwaway branch).\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none. **Tier:** H.\n\n## Related\n\n#25870 (open, dispatched), #25376 (closed: 6→8 shards), #25869 (closed)."
+}

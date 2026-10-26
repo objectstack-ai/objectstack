@@ -1,0 +1,34 @@
+{
+  "number": 26133,
+  "kind": "issue",
+  "title": "/import upsert: two rows of one file with the same matchFields key both insert, so the file writes a duplicate and every later run answers AMBIGUOUS_MATCH",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:18:29Z",
+  "updated_at": "2026-10-26T14:49:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26133",
+  "body": "Filing gate: ① product defect with reach (REST `/import`, measured on 18.1.0 with `@objectstack/verify`, sqlite).\n\n**Business reason.** Legacy spreadsheets routinely carry the same certificate (or contact) twice — once typed `ISO 9001`, once `ISO9001`, or simply pasted twice. An upsert import keyed on `matchFields` is supposed to make re-running a file safe, but when the duplicate is inside the file itself both rows are inserted. The object now holds two rows with the same business key, and from then on every import of that key fails with `AMBIGUOUS_MATCH` until someone finds and deletes the extra row by hand. Found while re-pinning hotsrm's messy-ledger import trial on 18.1.0: 18.1.0 now accepts `ISO9001` as the option value `iso9001` (good), which turned a refused row into a silent duplicate.\n\n**Who acts.** The seat owning the REST `/import` upsert path (row matching against `matchFields`).\n\n## Repro (18.1.0)\n\nObject with no unique index over the match key (here a certificate: `supplier` lookup, `cert_type` select, `cert_no` text).\n\n```\nPOST /api/v1/data/srm_supplier_certificate/import\n{ \"format\": \"csv\", \"writeMode\": \"upsert\", \"matchFields\": [\"supplier\", \"cert_type\", \"cert_no\"], \"csv\": <file below>, \"mapping\": {...} }\n```\n\n| file | results | rows in the object afterwards |\n|---|---|---|\n| two identical rows `ISO 9001, A-1` | `created`, `created` | 2 × (`iso9001`, `A-1`) |\n| `ISO 14001, B-1` then `ISO14001, B-1` | `created`, `created` | 2 × (`iso14001`, `B-1`) |\n| re-run a file with one row `ISO 14001, B-1` | `failed: AMBIGUOUS_MATCH` | unchanged |\n\nExpected: the second row with an already-seen match key either updates the row the first one created (as a re-run would) or fails with a per-row code that names the earlier row (e.g. `DUPLICATE_MATCH_KEY_IN_FILE`), so an upsert import never creates two rows with one key.\n\nObjects with a unique index over the key are not affected (the second row gets `UNIQUE_VIOLATION`), so this hits the common case of a business key that is unique only by convention.\n\n## Dedupe\n\nSearched objectstack-ai/objectstack issues (open + closed) for \"import upsert two rows in the same file with the same match key both inserted duplicate\" (13 hits, none about in-file duplicates: #25475/#25577 create-only columns, #25476/#25578 alternative match keys, driver upsert re-key findings) and \"/import matchFields rows earlier in the same import not matched, second row creates a duplicate record\" (8 hits, none relevant). Related but different: #25477 (conditional unique / same-batch guards on summary fields).\n\nSession: https://claude.ai/code/session_01KujqgJqce4ZoaGLyrh8Tp7 (hotsrm v0.6 U0, upgrade to 18.1.0)."
+}

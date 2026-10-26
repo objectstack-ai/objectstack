@@ -1,0 +1,37 @@
+{
+  "number": 26079,
+  "kind": "issue",
+  "title": "[Decision] @objectstack/spec publishes a 10.3 MB CHANGELOG.md in its npm tarball and 83 package CHANGELOGs weigh 72 MB in git, mostly prerelease sections copied again under the stable release",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:15:51Z",
+  "updated_at": "2026-10-26T14:39:31Z",
+  "closed_at": "2026-10-26T14:38:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26079",
+  "body": "Ruled: 6417011624 · letter A′ · 2026-10-26T13:20Z\n\nFiling gate ②: a maintainer-only decision. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). Reader: the director seat presents this card in a decision batch; after the ruling the lane named under \"After the ruling\" dispatches. ⛔ Not a claim. Dedupe: REST list (439 issues), grep `CHANGELOG` → 3 hits: #25638 (closed: 18.1.0 entries attributed to one commit), #25806 (closed: the 18-1 release page caution), #25321 (closed: tree-wide git grep pins read CHANGELOGs). None is about tarball contents or prerelease duplication. **New.**\n\n## 维护者速读\n\n`packages/spec/CHANGELOG.md` 10.3 MB、约 10.5 万行；`spec`、`cli`、`objectql`、`runtime` 四个包的 `files` 字段都列了 `CHANGELOG.md`，所以它随 npm 发出去——每个 `npm install @objectstack/spec` 多下 10 MB。83 份包级 CHANGELOG 在 git 里共 72 MB。体积来自重复：预发布条目 `18.0.0-next.0..5` 在 `18.0.0` 下被整段再抄一遍（`service-job/CHANGELOG.md` 第 107 行与 622 行逐字相同；spec 有 4,076 条重复长行）。改发布包内容是对外可见动作，请裁：**A** 从四个包的 `files` 里去掉 `CHANGELOG.md`（npm 页面与仓库仍有），并让 `scripts/changeset-changelog.mjs` 把预发布小节并入稳定版小节而不是复制；存量 CHANGELOG 不横扫；**B** 只做前半（去掉 `files` 条目），生成器不动；**C** 保持现状。选 A / B / C？\n\n## Governing text\n\n- `packages/spec/package.json` `files`: `[dist, json-schema, liveness, prompts, llms.txt, README.md, src/**/*.zod.ts, CHANGELOG.md, api-surface, spec-changes.json, protocol-upgrade-guide.md]`; the same entry in cli, objectql, runtime.\n- `scripts/changeset-changelog.mjs` — the changelog generator the release lane runs (`docs/releases-maintenance.md`).\n- `RELEASE_NOTES.md:3-8` / `CHANGELOG.md:9-22`: the canonical narrative is `content/docs/releases/` + per-package CHANGELOGs — the per-package files stay; only their duplication and their shipping change.\n- Prime Directive 15: the release act is the maintainer's; this card changes what a future release emits, not any release.\n- #25919 ruling A 「存量不横扫」 — existing CHANGELOG text is not rewritten.\n\n## Premises\n\n- P1 — `ls -la packages/spec/CHANGELOG.md` → 10,325,107 bytes; `du -ch $(git ls-files | grep 'CHANGELOG.md$') | tail -1` → 72M.\n- P2 — `node -e 'console.log(require(\"./packages/spec/package.json\").files)'` lists `CHANGELOG.md`; repeat for cli, objectql, runtime.\n- P3 — duplication: `sed -n 107p packages/services/service-job/CHANGELOG.md` equals `sed -n 622p …`; `sort packages/spec/CHANGELOG.md | uniq -d | awk 'length>80' | wc -l` → about 4,076.\n- P4 — `npm view @objectstack/spec@18.1.0 dist.unpackedSize` (the dev reads the published number; a seat container may be refused).\n\n## One-sentence problem\n\nEvery consumer of the protocol package downloads ten megabytes of release history it will never open, and the history itself says each prerelease change twice.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | Drop `CHANGELOG.md` from the four `files` arrays; teach the generator to fold `X.Y.Z-next.N` sections into `X.Y.Z` on the stable cut. | Smaller tarballs from the next release; future CHANGELOGs grow at half the rate; existing text untouched. The npm \"Changelog\" tab still renders from the repository link. | devx (release tooling) · 1 PR · precedent: #25638's generator fix (closed; read its +/− before sizing) |\n| B | `files` only. | Tarballs shrink; the git weight keeps growing. | 1 PR, S |\n| C | Nothing. | 10 MB per install of spec; 72 MB and rising in every clone. | 0 |\n\n## Business meaning\n\n- A: ship the protocol, not its diary; write the diary once.\n- B: stop shipping the diary.\n- C: keep paying bandwidth on every install.\n\n## 四维分析\n\n- **实际业务需求**：每个 `npm create objectstack` 都装 spec；10 MB 是北极星「一条命令起一个项目」路上的真实延迟，且 CI 里 `tree-wide git grep` 已经因为读 CHANGELOG 撞过 60 秒预算（#25321）。\n- **项目长远合理性**：发布叙事的唯一真源是 `content/docs/releases/`；包级 CHANGELOG 是 changeset 的副产物，保留但不发行、不重复，是与那条规则一致的形态。\n- **防 AI 犯错**：生成器改动的风险是把稳定版小节也折叠掉；派发令要求在 `scripts/changeset-changelog.mjs` 的 `--self-test` 里加「预发布折叠、稳定版保留」两条用例。错误形态是一次发布的 CHANGELOG 缺条目，发布前 `check:release-notes` 能看到。\n- **创业阶段不扩散**：减体积、不加门禁；存量不横扫。\n\n## Recommendation\n\n**A.** 只看①选 A；②③④ 是否翻转：否。\n\nConfidence gaps: whether any downstream tooling (hotcrm, cloud) reads the CHANGELOG from the installed package rather than the repository; the dev greps those repositories' scripts for `node_modules/@objectstack/*/CHANGELOG`.\n\n## After the ruling\n\n- A / B: devx execution seat, one os-dev; file surface `packages/{spec,cli,objectql,runtime}/package.json`, `scripts/changeset-changelog.mjs` and its self-test; no governed path. Clause-②: no (no metadata contract change). Metadata-protocol: none.\n- C: close not planned.\n\nos-decision-facets\n① 项目长远合理性：包级 CHANGELOG 留作副产物，不发行、不重复，与「唯一真源在 content/docs/releases」一致。\n② 实际业务拉动：每次安装 spec 多 10 MB；CI 的 git grep 已因读它撞过预算（#25321）。\n③ 防 AI 犯错：生成器折叠逻辑进 --self-test，缺条目会在发布前的 release-notes 检查里响亮。\n④ 创业阶段不扩散：减体积零新门禁，存量不横扫。\nPrior rulings read: changelog,files field,tarball,prerelease → 2 hits (#25638, #25806); none; thread: none; repo: objectstack-ai/objectstack\n\n## Related\n\n#25638 (closed), #25806 (closed), #25321 (closed), #25919 (open, ruled A).\n"
+}

@@ -2,8 +2,8 @@
   "number": 25887,
   "kind": "issue",
   "title": "AI build chat: a replayed whole-app apply_blueprint (every 开始搭建 click) draws no result card — no 打开应用, no checklist, no 接下来可以说 — live or after reload",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:39:02Z",
-  "updated_at": "2026-10-26T07:04:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T11:22:01Z",
+  "closed_at": "2026-10-26T11:10:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25887",
   "body": "Filing gate **① a reproduced defect** (class a, public door: the AI build chat). `reach:` local stack, objectui pin `6f629a7` (cloud `main` `36b07fdf`, framework pin `888d686`), zh-CN, 2026-10-25. A first whole-app build confirmed with 「开始搭建」 finished and auto-published, and the chat showed **no result card**: no 「打开应用」, no 核对通过 chip, no 「接下来可以说」. The reply was a plain bullet list ending in 「已在启动台列出，可直接打开」. Reloading the conversation showed none either. Unchanged on objectui `main` `be64bf67c`.\n\nBatch-of: 10 · 2026-10-25 desktop E2E (signup · magic flow · invite), filed at the maintainer's request in session: 「必要的合理的建议都可以立卡」.\n\n**Business reason.** This card is the first thing a new customer sees after the magic moment. objectui#12724 specified it so that one click opens the app they just built. Without it the customer is told the app is \"in the launcher\" and must find it alone; it is the one step between \"built\" and \"using it\". Every first build goes through this path, because the 开始搭建 button is what everyone clicks.\n\n**Reader who acts.** The `repo:objectui` ui seat: `packages/plugin-chatbot/src/mapMessages.ts` and `ChatbotEnhanced.tsx`. The cloud half, live progress frames for the replay, is objectstack-ai/cloud#3274.\n\n## Why it never renders\n- The 开始搭建 click sends `planApproveMessage` 「确认，开始搭建。」 (`packages/i18n/src/locales/zh.ts:2042`; en 「Looks good — build it as proposed.」). Both match cloud's `PROPOSAL_APPROVAL_RE` (`service-ai-studio/src/tools/confirm-gate.ts:108`). So the build runs as a **proposal replay** (`AIService.runApprovedProposalReplay`). objectos.log: `proposal-replay applied approved changes … [\"apply_blueprint\"]`; the tool call id is `replay_BFpdNra4mJHv5BMH_0`.\n- A replay emits no `data-build-progress` frames, so `buildProgress` is undefined. `BuildProgressPanel` is the result card: 打开应用 · checklist · nextSteps, at `ChatbotEnhanced.tsx:4129-4150`. It never mounts, and `buildChecklist` is gated on `buildProgress?.phase === 'done'` (:4065).\n- On reload, `mapMessages.ts:1163-1164` suppresses `draftReview` for a `replay_*` tool call, so `buildProgressFromDraftReview` (:1078/:1417) gets nothing. `replayOutcomeByProposalId` (:2697ff) only correlates replays to `proposedChanges` cards, so a replayed `apply_blueprint` result is drawn nowhere.\n- The persisted envelope **does** carry `checklist` and `nextSteps` (status `drafted`, `packageId: app.z1a4`, published in-turn). The data is there and the reader drops it.\n\n## Expected\nA replayed whole-app `apply_blueprint` result (`kind !== 'edit'`, an `app` in `drafted[]`) draws the same result card as a model-driven one, live and on reload: synthesize a `phase: 'done'` progress from the envelope instead of suppressing it.\n\n## Dedupe\n`gh api search/issues`, repos cloud / objectui / objectstack, incl. closed:\n- `打开应用 结果卡`: 1 / 2 / 0, unrelated (objectui#7478 confirm-card English, objectstack-ai/objectui#8218 Studio panel).\n- `result card \"Open app\" build`: 71 / 271 / 163. Nearest is objectui#12724 (closed 2026-10-25), which specified the card; its tests mount it from a non-replay fixture, so the replay path was never covered. objectui#12968 (closed) is the Preview button. None reports the card missing."

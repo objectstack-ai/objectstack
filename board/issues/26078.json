@@ -1,0 +1,37 @@
+{
+  "number": 26078,
+  "kind": "pull_request",
+  "title": "refactor(core)!: ResolveLocalizationInput takes organizationId; the tenantId key is retired",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T11:15:42Z",
+  "updated_at": "2026-10-26T12:39:12Z",
+  "closed_at": "2026-10-26T12:39:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T12:39:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26078",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XUMfNCBcFEpzSy2vfiLtxwL)_\n\nFixes #25555\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\n## What changes\n\n`ResolveLocalizationInput.tenantId` (`@objectstack/core`) is renamed `organizationId`. The rename is immediate: there is no alias and no dual spelling. The key always meant the organization id: the settings service stores `localization` under the organization (ADR-0131 D8), and the direct `sys_setting` fallback reads that organization's rows. An environment id passed under the old name type-checked, matched no organization, and resolved every non-UTC organization as `UTC`. Under the new name the mistake cannot be spelled. The old key is an excess-property error at every object-literal call, and the resolver reads no alias at run time.\n\n- `packages/core/src/security/resolve-authz-context.ts`: the interface key, with a doc comment saying it takes an organization id and never an environment id. The two internal readers (the cached entry point and the uncached resolve) and `localizationFallbackReach` read `organizationId`. The cache-key docs follow the rename.\n- The four in-repo callers are migrated: `core/security/request-execution-context.ts`, `mcp/src/plugin.ts`, `plugin-audit/src/audit-plugin.ts` and `plugin-hono-server/src/current-user-endpoints.ts`. A re-grep of `origin/main` at `bbf70614` (including `ui/`) found no others. hotcrm has none either.\n- The core localization tests are migrated: 100 call sites across 4 files, all mechanical key renames.\n- New pin `packages/core/src/security/resolve-localization-organization-id.pin.test.ts` has two halves:\n  - Type: a `@ts-expect-error` on `tenantId`. `tsconfig.test.json` compiles this file, and the reverse check below shows it is live.\n  - Runtime: the organization's timezone resolves through `organizationId` on both legs, the settings service and the direct fallback. A `tenantId` smuggled past the compiler reaches neither leg and resolves `UTC`.\n- A changeset: patch for core, mcp, plugin-audit and plugin-hono-server, with a BREAKING banner, the FROM / TO line, and ADR-0087 `not-required (runtime-export-retired @objectstack/core#ResolveLocalizationInput.tenantId)`. The gate verifies it.\n\n## Not moved\n\nThe settings service's own scope argument, `{ tenantId, userId }` on `get` / `getMany`, keeps its spelling. It is a separate public surface with its own callers across services, and renaming it is outside this card's acceptance, which is about the localization input. The resolver passes the organization id there unchanged, and the new pin asserts the scope it receives.\n\n## External caller\n\nobjectstack-ai/cloud is the named external caller: cloud#3150 repaired its three AI entry points. This session cannot read that repository, so its `@objectstack/core` pin is NOT MEASURED. The card says the callers pass an object literal. If that holds, the rename turns red at cloud's next core bump as a TS2353 excess-property error, and the fix is one key per call site. It does not fail silently. A non-literal call would drop the key without an error, so the changeset tells callers to grep for `tenantId` beside `resolveLocalizationContext`.\n\n## Verification (head `bcf5c8adf`; source change at `4c667539`)\n\n- `pnpm --filter PKG typecheck` exit 0 for core, mcp, plugin-audit and plugin-hono-server. This includes core's test layer: `check:test-typecheck` OK, ledger unchanged at 4 files / 4 errors.\n- `pnpm --filter PKG test` exit 0: core 120 files / 2772 tests, mcp 43 / 538, plugin-audit 60 / 993, plugin-hono-server 35 / 448.\n- Reverse check of the type pin: with `tenantId?: string` added back to the interface (`git hash-object` of the restored file equals the HEAD blob), `check-test-typecheck` exits 1. It names exactly the new pin file with 1 error, the unused `@ts-expect-error`.\n- `eslint --no-inline-config` over the four packages' `src`: exit 0.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main`: OK, 8 anchors judged, 0 lost.\n- Derived gates (`dispatch-gates.mjs --commands`, 76 commands): the non-zero exits are listed in the report on the card. `check:objectql-double-limit` caught the first version of the pin's engine double, which is fixed in `bcf5c8adf`. `check:dts-closure` and `check:dual-build-cjs-loads` need a full build and are NOT MEASURED locally; CI runs both.\n- Full dogfood battery (owed by the narrowing arm): result is in the report on the card.\n\n## Acceptance notes\n\n- The card's acceptance: the name states it takes an organization id; an environment-shaped value cannot be spelled under the old key; in-repo callers are migrated; the changeset declares both lines.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014xf92fjdDKjycyVbyxMKm8)_\n"
+}

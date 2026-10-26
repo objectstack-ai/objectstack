@@ -1,0 +1,33 @@
+{
+  "number": 26003,
+  "kind": "pull_request",
+  "title": "ci(ui-coverage): run objectui's coverage lane nightly from the root, thresholds unchanged",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T08:41:53Z",
+  "updated_at": "2026-10-26T15:09:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26003",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D15ZXd9H65VV7icrwS78oFd)_\n\nPart of #25924 (item 2 of the card's Recommendation: the coverage lane on a schedule, thresholds unchanged). Part of #25677 (roster row 7 of #25697, \"Test (coverage shard n/8) · Test (coverage)\": kept, follow-up port).\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 新增根 workflow `ui-coverage-nightly.yml`(名为 `UI Coverage`),把 objectui 的覆盖率车道(8 个分片 + 1 个合并任务)搬回根目录,只在每晚 06:13 UTC 定时跑,也可以手动触发。阈值不变(lines 40、functions 33、branches 30、statements 40),仍由合并任务在完整报告上检查。\n- **为什么:** 卡上说的「每次 push 都跑」在合并后的仓库里已经不成立:ui/ 合并时这条车道没有移植,`ui/.github/` 里那份 GitHub 不会执行,所以从合并那天起这四个阈值没有任何地方在检查。现在按卡的建议以定时方式补回,不回到每次 push。\n- **谁会发现红:** `scheduled-full-run-card.yml` 现在也监听 `UI Coverage`,定时运行红了就开或刷新一张卡 `nightly full run: red on main (UI Coverage)`。\n- **不变的:** 不进必需检查,不进发版门(`RELEASE_GATE_WORKFLOWS` 仍只有 `CI` 和 `Lint & Type Check`),PR 和合并队列都不跑它。\n- **代价:** 覆盖率掉到阈值以下要到第二天早上才报出来(卡上已接受);每晚约 8×22 分钟 runner。\n- **卡上的另一项(install 重试)没有在本 PR 里做**,原因见下文,交席位定。\n- **受管面:** `.github/workflows/**`,Tier H,需要 GOVERNED_APPROVERS 批准。\n\n## What changed\n\n| File | Change |\n|---|---|\n| `.github/workflows/ui-coverage-nightly.yml` | New. `ui-coverage` (`Test UI (coverage shard n/8)`, 8 shards, 40 min): install, the seven-package build ci.yml's ui jobs use, then `pnpm --dir ui run test:coverage` with `--reporter=blob --reporter=default --reporter=github-actions --shard=n/8 --testTimeout=60000` and the thresholds zeroed on the legs; uploads `ui/.vitest-reports/*`. `ui-coverage-report` (`Test UI (coverage)`): refuses a partial blob set, merges with `--merge-reports` (where the configured thresholds are enforced), publishes `ui/coverage/`, prints the shard headroom (report-only) and states whether the gate ran. Triggers: `schedule` `13 6 * * *` and `workflow_dispatch`. Caches are restore-only (Build UI Deps' turbo seed, the pnpm store). |\n| `.github/workflows/scheduled-full-run-card.yml` | Watches `UI Coverage` too. |\n| `scripts/ci/scheduled-full-run.mjs` | `CARD_CADENCES['UI Coverage'] = 'nightly'` (the `nightly` wording already existed). Self-test +4 cases: the nightly identity, the nightly body, the workflow's single daily cron, and the watcher list and the cadence map naming the same workflows. Battery floor 42 → 46. |\n| `ui/scripts/__tests__/coverage-shard-width.test.ts`, `coverage-shard-reporter-readability.test.ts` | Restored from before #25879 (they retired with the lane), now reading the new file through `helpers/root-ci.ts`. |\n| `ui/scripts/__tests__/shard-headroom.test.ts` | The coverage half of the retired wiring pin comes back against `ui-coverage-report`; the `test-aggregate` half stays retired (no root job). |\n| `ui/scripts/__tests__/helpers/root-ci.ts`, `ui/scripts/shard-headroom.mjs` | `UI_COVERAGE` (file + job keys); header prose. |\n\n## Measurements\n\n- **The coverage lane's trigger on the merged repo:** no root workflow runs `test:coverage` for `ui/` (`grep -rn 'test:coverage' .github/workflows/` → only `coverage-nightly.yml`, which is spec's). objectui's `test-coverage` / `coverage-report` jobs exist only in `ui/.github/workflows/ci.yml`, which GitHub does not run. The ui coverage thresholds have had no reader since the cutover.\n- **Readers checked before adding the lane:** required contexts (branch ruleset and classic protection: none of the new names, and none is added); `RELEASE_GATE_WORKFLOWS` (unchanged); `check-ci-filter-parity` (reads ci.yml only, which this PR does not touch); the aggregator roster (no ci.yml aggregator involved); `merge-queue-triage.yml` (`workflows: [CI]`, unchanged). The one reader added is the red-run card filer.\n- **Install retry (card item 4), not done here:** the card's landing spot `scripts/ci-setup-pnpm.sh` is now `ui/scripts/ci-setup-pnpm.sh`, and no workflow GitHub runs calls it (only `ui/.github/workflows/*`); it also never ran the install, only Corepack. The root's pnpm acquisition (`.github/actions/setup-pnpm`) already retries. `pnpm install --frozen-lockfile` is spelled at ~40 sites in 25 root workflows. Actions API, failed runs created since 2026-10-19 (632 runs): exactly 1 job failed at an install step, run 39316437234 `Type Check · debt ledger`, `node-gyp` headers download ECONNRESET from nodejs.org. The choice of landing (a shared install action at every site, an inline retry, or no change) goes to the devx seat on the card.\n\n## Verification\n\n- `node scripts/ci/scheduled-full-run.mjs --self-test`: OK (battery 46 cases).\n- Both changed workflows parse; the new one declares exactly the two jobs and the two triggers above.\n- The derived dispatch gates and the three ui pins: see the report on #25924 (local install is slow in this container; CI's `Lint & Repo Gates` and `Test UI` run them on this PR too).\n- The new workflow cannot run on a pull request (schedule and dispatch only). The first real reading is a `workflow_dispatch` on `main` after merge, or the first night.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WKpunbiE8c9w2i9FsEvQas\n"
+}

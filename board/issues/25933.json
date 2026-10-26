@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T16:31:24Z",
-  "updated_at": "2026-10-26T07:01:20Z",
+  "updated_at": "2026-10-26T09:53:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25933",
   "body": "Filing-gate: ① product defect · reach: the showcase task edit form and the Task Board, as admin; the server's `task_status_flow` refusal arrives as designed\nReader: objectui triage seat → the lane that owns the record form's select field and `plugin-kanban`; the input is the object's `state_machine` validation (`field`, `transitions`), which the object metadata already serves\nDuplicate search: semantic search \"state machine status select dropdown offers transitions not allowed invalid transition only shown after submit\" in objectui, incl. closed → 0 hits.\n\nMeasured during an exploratory showcase walkthrough on 2026-10-23: objectstack `main` b9c7a8f (`PORT=3000 pnpm dev`, stock showcase), objectui `main` 6fb31dc console (Vite dev, :5180), locale zh-CN.\n\n## What happens\n\n`showcase_task.status` is governed by an error-severity `state_machine` rule. For example, `backlog → [todo]` and `in_review → [done, in_progress]`.\n\n- **Edit form:** on a `backlog` task, the Status select lists all five values. If you pick 已完成 and save, the form answers **请检查表单中标记的字段:状态** / **任务状态流转无效。** It does not say which states are allowed, so the user has to guess again.\n- **Board:** a `backlog` card can be dragged onto any column. The drop is refused by the server and rolled back with a toast, which works correctly. Nothing during the drag marks the columns the card cannot enter.\n\nThe server side is right. The cost falls on the client: an invalid choice is offered first and refused afterwards.\n\n## Expected\n\nWhen the object declares an error-severity `state_machine` on the field, the form's select offers the current value plus the declared next states (or shows the others disabled, with the reason). The board marks the non-target columns while a card is dragged. A `severity: 'warning'` machine, such as `project_health_progression`, keeps every option.\n\nSession: https://claude.ai/code/session_01A48x1XYLTmiM2pgQxsgeKJ\n"

@@ -1,0 +1,32 @@
+{
+  "number": 26066,
+  "kind": "issue",
+  "title": "Governed queue guard: an enqueue by an authorized account is the human review, so a Tier H PR the maintainer sends to the queue lands without a separate Approve",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T10:52:11Z",
+  "updated_at": "2026-10-26T12:16:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26066",
+  "body": "Filing gate: ③ a task ordered directly by the maintainer, quoted verbatim below.\nReader: `domain:skills` seat (governed-surface enforcement file), next PR on `scripts/pm/check-governed-queue-guard.mjs` (the `merge_group` leg's predicate) and the one sentence of AGENTS.md Prime Directive 14 that names the two landings.\nDedupe (open AND closed, the 158 newest issues by title, local grep for enqueue / merge when ready / 入队 / approver / GOVERNED_APPROVERS / queue guard / auto_merge / enabled_by / bypass): 1 hit, #25967, unrelated (a permission-set description). `/search` is refused by the egress proxy, so the dedupe is title-only over that window.\n\n## The order\n\nWarren, 2026-10-26, in the Claude Code project \"objectstack\" (seat thread \"Dispatch the skills lane\"), verbatim and untranslated:\n\n> 也就是说推送到我的手机上，以前都是需要我点一下核准，然后再点合并，以后我可以直接点合并是吗 (10:43:55Z)\n>\n> 我要解决的是这个问题：如果按钮只是「Merge when ready」(入队),那它只是把 PR 送进队列,队列守卫还要看有没有授权账号的 Approve,所以还得先核准。而且只认 os-zhuang 和 hotlong 的核准。 (10:49:47Z; the quoted sentence inside is the seat's own description of today's guard)\n>\n> 大部分我还是希望入队，但是我想省掉 Approve (10:50:03Z)\n\nRead as: on a Tier H (governed-surface) PR, the maintainer's click on \"Merge when ready\" from an authorized account is the human review. The guard's `merge_group` leg accepts it as such, so no separate APPROVED review is owed first. The bypass-rules direct merge stays the other landing, unchanged.\n\n## Why this is consistent with the rulings on record\n\n- The 2026-08-18 ruling that founded the regime already says so, verbatim in `check-governed-merges.mjs`'s header: 「人工合并即人工审核:governed PR 的审核记录 = 你按下合并/入队那个动作本身」. The enqueue click was the review record from the start; the queue guard, written later, can only see the review record because it was keyed on it on purpose (its header: \"never on who pushed or merged\", after the 2026-08-12 retraction 「不要指定具体的人」).\n- The identity concern behind that retraction (agent seats also operate the authorized accounts) was answered for the Approve leg normatively: ⛔ no agent seat submits an approving review on a governed PR, under any account. The enqueue leg already has the stronger counterpart, as a 红线 and as AGENTS.md Prime Directive 14: ⛔ no agent seat flips ready, enqueues or arms auto-merge on an unapproved governed PR. So a governed PR that arrives in the queue enqueued by an account in `GOVERNED_APPROVERS` can only have got there by the human's click, exactly as an APPROVED review from that account can only have been the human's. The two legs rest on the same normative floor; this card asks the guard to read the second one.\n\n## What to change\n\n1. **Predicate.** The `merge_group` leg passes a governed PR iff EITHER an account in `GOVERNED_APPROVERS` holds a latest-decisive APPROVED review (today's rule, unchanged) OR the account that enqueued it is in `GOVERNED_APPROVERS`. The approver set stays the single constant; nothing copies the names.\n2. **Reading the enqueuer, measured not recalled.** Two candidate readings, the dev measures both on a live queued PR during a `merge_group` run and keeps the one that answers: the PR object's `auto_merge.enabled_by.login` (the account that armed \"Merge when ready\"), and the actor of the newest `added_to_merge_queue` timeline event. An unreadable enqueuer is UNDETERMINED for this leg, never a pass; the approval leg still decides on its own. The platform-readings table gains the measured facts.\n3. **Log line.** The queue log names which leg passed and the account, so the post-merge audit (`check-governed-merges.mjs`, \"does the maintainer recognise every entry\") reads the same fact.\n4. **Prose.** AGENTS.md Prime Directive 14's landing sentence (\"by the maintainer's hand or by an authorized approval\") gains the enqueue by an authorized account as part of \"the maintainer's hand\" in the same PR, so `check:pm-governed-prose` and the register stay in step; the guard header records this ruling with its date beside the 2026-08-27 and 2026-09-04 ones. The size limb (over 3000 changed lines) follows the same predicate, since AGENTS.md ties it to \"the way a Tier H surface does\".\n5. **Self-test.** Fixtures: enqueued by an authorized account with no review (pass, names the leg); enqueued by a seat account with no review (refused, today's text); enqueued by a seat account with an authorized APPROVED review (pass, today's leg); enqueuer unreadable with no review (refused, UNDETERMINED named). Battery names pinned per AGENTS.md \"Writing a --self-test\".\n\n## Open input for the maintainer\n\nThe account the maintainer clicks from on the phone must be in `GOVERNED_APPROVERS` (today `os-zhuang`, `hotlong`). If it is another login, name it on this card and the same PR adds it to the constant and to the CODEOWNERS mirror (`codeownersMirrorVerdict` reds otherwise).\n\n## Boundary\n\n- Not in scope: the bypass-rules direct merge (already the other landing), Tier S landings, the seat-side prohibitions (unchanged, they are what makes the new leg sound), fork PRs (no approval and no enqueue lifts a fork).\n- Governed: `.github/workflows/governed-surface-guard.yml` is untouched unless the measured reading needs a new permission; AGENTS.md is Tier H, so the PR waits for the maintainer's hand, which under this very card can be the enqueue click once the guard change is in `main` (chicken-and-egg: this first PR still needs today's path, an APPROVED review or a bypass merge).\n\nSession: `session_01LqKsGyMNFwwnbF5FTAqyPn` (`domain:skills#2`, seat post #19287)"
+}

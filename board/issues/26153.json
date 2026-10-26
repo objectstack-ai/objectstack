@@ -1,0 +1,32 @@
+{
+  "number": 26153,
+  "kind": "issue",
+  "title": "runtime: an app hook's intentional business refusal is logged as ERROR with a stack trace, twice per refused action",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T13:59:29Z",
+  "updated_at": "2026-10-26T14:58:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26153",
+  "body": "Filing class: ① product defect (operator-visible) — reach: public door, measured on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`); the two log calls are unchanged on objectstack `main`. **Reader:** the runtime lane (`packages/runtime/src/sandbox/body-runner.ts`).\n\n## Symptom\nA user presses an action the app's state machine refuses on purpose — e.g. hotclm's 发起签署 without a clean version, answered `422 INVALID_STATE \"A current clean version is required before signing.\"`. The server log gets two ERROR lines with full stacks for that one ordinary refusal:\n\n```\nERROR [BodyRunner] sandboxed hook threw {\"hook\":\"contract_state_machine\",\"error\":{\"message\":\"hook 'contract_state_machine' threw: Error: A current clean version is required before signing.\",\"stack\":\"SandboxError: …\nERROR [BodyRunner] sandboxed action threw {\"action\":\"start_signing\",\"error\":{\"message\":\"action 'start_signing' threw: SandboxError: hook 'contract_state_machine' threw: …\",\"stack\":\"…\n```\n\nIn one 40-minute browser pass, 6 of the server's ERROR lines were these; none was a fault. An operator watching for ERROR cannot tell a refused click from a crashed hook.\n\n## Why\n`body-runner.ts:454` and `:562` log every throw from a sandboxed hook/action at `error` and rethrow; the HTTP layer already maps the same throw to a 4xx business refusal. The action-level line repeats the hook-level one.\n\n## Expected\nA throw the dispatcher answers as a 4xx (a business refusal) logs once, at `info`/`warn` without a stack; a throw that becomes a 5xx keeps `error` with its stack.\n\nDedupe: objectstack issues (2,000 most recently updated, all states) grepped for `BodyRunner`, `sandboxed (hook|action) threw`, `business refusal … log` — hits #25952, #24561, #24423, none about the log level.\n\n---\n_Filed from the hotclm browser regression pass (2026-10-26)._"
+}

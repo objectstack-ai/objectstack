@@ -1,0 +1,37 @@
+{
+  "number": 26037,
+  "kind": "pull_request",
+  "title": "fix(plugin-chatbot): a replayed whole-app apply_blueprint draws its result card, live and after reload",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T09:59:18Z",
+  "updated_at": "2026-10-26T11:10:06Z",
+  "closed_at": "2026-10-26T11:10:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T11:10:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26037",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9J8tgLQVZLAHtoMVkdK58j2)_\n\nFixes #25887\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\nApproving a proposed plan sends the approval sentence, and the runtime replays the approved `apply_blueprint` under a synthetic `replay_` tool-call id. Two things then dropped the build on the floor:\n\n- every reader of a `replay_` result treated it as the verdict of a confirm card and suppressed its draft review (the guard that keeps a live Publish off a rolled-back confirm card), and a whole-app build has no confirm card, so the verdict was drawn nowhere;\n- a replay streams no `data-build-progress` frames, so the only tree the result card could get was the one synthesized from the draft review, which was gone.\n\n## Measurement first (as triage asked)\n\nThe stored and live shapes both reach the mapper whole. Live: the tool part's `output` is the envelope object. Reload: the server's tool row is merged onto the call part as `output` (a `json` or `text` wrapper, both peeled by `parseResultEnvelope`), mapped by `hydratedMessagesToChatMessages`, rebuilt by `useObjectChat`'s `toSdkToolPart` with `output: tool.result`, and mapped again by `uiMessageToChatMessage`. `tool.result` keeps `drafted[]`, `packageId`, `checklist` and `nextSteps` all the way; the readers dropped it. The cache fallback was the one path that lost the data itself: `replayOutcomeToCachedResult` keeps only the verdict.\n\nNot measured here: the producer's replay envelope (the cloud repository is not readable from this session, and the published `@objectstack/service-ai` 10.3.0 predates the replay). The fix covers both postures the replay is documented to answer: `drafted` and `published`.\n\n## The fix\n\n- `ui/packages/plugin-chatbot/src/mapMessages.ts`: `replayedBuildReview` keeps the draft review of exactly one replay, a drafted whole-app build (`detectBuiltAppPackage`: an `app` in `drafted[]`, no `kind: 'edit'`). A failed publish and an incremental edit keep the suppression. New `detectPublishedBuildReview` reads an auto-publish environment's `published` build envelope, and the tree fallback uses it when there is no draft review.\n- `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx`: the result card's next steps come from the published envelope when the build has no draft review.\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx`: the hydrated mapper mirrors the same exception, so a reloaded thread binds to the package the replay built (`deriveBoundPackageId`).\n- `ui/packages/app-shell/src/hooks/useChatConversation.ts`: the cache keeps the draft envelope of a replay that carries a draft review; re-detected under the same `replay_` id it still reads as a drafted replay, so the verdict survives too.\n\nNo exported type changes and no new package-root export (`detectPublishedBuildReview` is module-internal to plugin-chatbot).\n\n## Tests\n\nAt head `fdb944f6`, from `ui/`, under the verify lock:\n\n- `pnpm exec vitest run` over the two new files plus six neighbours (`ChatbotEnhanced.replayedBuild-25887`, `useChatConversation.replayedBuild-25887`, `mapMessages.replayOutcome`, `ChatbotEnhanced.replayOutcome`, `ChatbotEnhanced.buildCardsV2-12724`, `ChatbotEnhanced.buildChat-12724`, `useChatConversation.editKindRoundTrip-10109`, `AiChatPage.hydration`): Test Files 8 passed (8), Tests 76 passed (76), at `fdb944f6`.\n- Ablation: the four source files restored to the base `a3e5bfa6` with the new tests kept: Test Files 2 failed (2), Tests 8 failed, 6 passed (14). The 6 that stay green are the controls (rolled-back publish, edit replay, non-build replay). Restored with `git checkout HEAD`, `git diff HEAD` empty. plugin-chatbot is aliased to `src` in the ui vitest config, so no rebuild was involved.\n- `pnpm --filter @object-ui/plugin-chatbot type-check` exit 0, `pnpm --filter @object-ui/app-shell type-check` exit 0 (each exit captured separately).\n- `node scripts/gen-sdui-manifest-node.mjs`: re-recorded with no change (the touched files are not registry sources); `node scripts/check-sdui-manifest.mjs` exit 0.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `fdb944f6`: 35 commands, each run with its exit captured before any pipe, all 35 exit 0; `--ran` answered 35 derived, 35 run, 0 NOT-MEASURED (a derived zero). Also `node scripts/check-changeset-fixed.mjs` exit 0 (its roster is under `.changeset/`). The type-check lanes, the artifact rosters and the wide-population families are left to CI.\n\n## Acceptance notes\n\n- A whole-app replay whose in-turn publish rolled back still draws nothing: no result card (correct, the build did not land) and no confirm card to say so, because there is none to carry the verdict. Not reproduced here; noted, not filed.\n- In the cache-fallback path, a published build (replayed or model-driven) still loses its card: the cache keeps no published envelope. Unchanged by this PR and the same for both, so the replay now matches the model-driven build.\n- `hydratedMessagesToChatMessages` synthesizes `buildProgress` from the unsuppressed review, a failed replay included; the rendered tree is re-derived by the live mapper, so nothing reads it. Left as it was.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JsKQmHsMxFHEWfqrDfuvuD)_\n"
+}

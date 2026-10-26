@@ -1,0 +1,35 @@
+{
+  "number": 26113,
+  "kind": "pull_request",
+  "title": "docs(qa): cli ledger — 12 accuracy edits from the 18.2.0 sweep, Console build named as `pnpm console:build`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T12:43:48Z",
+  "updated_at": "2026-10-26T13:15:25Z",
+  "closed_at": "2026-10-26T13:15:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T13:15:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26113",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9SWpenhE6uBahQFFdGbVJ7h)_\nFixes #25841\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nOne file: `docs/qa/platform-checklist/areas/cli.json`. Each of the card's 12 lines was re-read against `origin/main` at `9753d163` before editing. All 12 are stale ledger text; none turned out to be a product defect. Every touched item gets a `revision` bump and a `history` entry citing its run record (QA runs #25812, #25815, #25817; wave anchor #25807, which stays open).\n\n| Item | Rev | Lines | Edit |\n|:--|:--|:--|:--|\n| `cli.organization-ownership-ceremony` | 4 → 5 | #25812 (5 points), #25815 a1–a4 | steps[0] boots the v17 copy once before the plan (a plan drawn first leaves the apply blocked at `rewrite`; the 18.0 upgrade notes give the same order). steps[1] runs the ceremony with `OS_AUTH_SECRET` or `--dev`, else it blocks at `authored-conversion`. steps[3] runs the reactions conversion first, because `apply.ts` checks the comment-reactions gate before the ownership gate. steps[4] gains `--yes`. acceptance[0] uses `--maxWorkers=1`, as RUNNER's environment facts say. New knownGaps[1] records what each pin reaches (a pin run scores acceptance[1]–[4] and negative[0] partial at most). New knownGaps[2] says a published pre-release CLI cannot stand in for acceptance[5]'s database. |\n| `cli.dev-automigrate-policy` | 6 → 7 | #25815 a4/n2, a4, a2 | The bare-composite tightening is gone since ADR-0131 D1. The ref named two cases that no longer exist; `sql-driver-unique-tenancy.test.ts` now asserts zero drift. acceptance[4], negative[2], the title, variants[5], steps[6], knownGaps[0], automated.ref and source are rewritten around the duplicate pre-flight that still blocks a unique `create_index` (`sql-driver-25031-blocked-unique-apply-limit.test.ts`). That pin never boots a safe driver, so the \"never auto-applied under safe\" half stays a hand-staged leg. The a2 line needed no edit: revision 6's automated.ref already says the remedy is unasserted. |\n| `cli.meta-package-flags-and-explain` | 2 → 3 | #25815 a1 | acceptance[1].verify reads the PUT's `?package=` instead of a server log. |\n| `cli.migrate-meta-write-stored-and-all` | 2 → 3 | #25815 a4 | New knownGaps[0]: the pins hold the TODO sink at library level only, and no pin reads the printed `--stored` TODO lines. |\n| `cli.scaffold-first-run` | 5 → 6 | #25815 | New knownGaps[1]: the ref is a CI workflow, so a Tier 1 pin run collects nothing for this item. |\n| `cli.fresh-install-migrate-apply-first` | 1 → 2 | #25817 N1 | negative[1] states scope, not an outcome, so it moves to knownGaps[3]. This follows the precedent of the write-door item's revision 3. |\n\n**The same file's retired objectui pin wording** (#26035, which leaves the area JSON to these ledger cards; its docs slice is #26052) now names the in-workspace build, `pnpm console:build`. The affected lines are `cli.dev-boot-contract` fixtures.requires[2] (7 → 8), `cli.qa-suite-execution` fixtures.requires[0] (9 → 10, where the root `dev` chain no longer runs `check:console-sha`), and `cli.scaffold-console-first-paint` knownGaps[2] (5 → 6). History rows that quote the old wording are records and were left unchanged. Outside `history`, the file now has 0 hits for `objectui:(build|refresh|bump|clean)`, `build-console.sh`, `.objectui-sha` and `check-console-sha`.\n\n## Gates\n\nAt head `6b69cb76`, `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 13 families from 1 path. All 13 ran locally and exited 0. `--ran` reconciliation: `13 derived, 13 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero, since every family recorded an exit code). `pnpm check:platform-checklist`: `OK — 16 areas, 329 items (324 active, 1 planned)`. On the first run `check:doc-formula-expressions` exited 3 (a prerequisite was not built). After `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it exited 0.\n\n`skip-changeset`: the diff touches only `docs/qa/**`, which no package ships.\n\n## Acceptance notes\n\n- Line count: 74 insertions and 39 deletions, all in one file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01823ttjfkpGPQoMkyMifZPo)_\n"
+}

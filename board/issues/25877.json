@@ -14,18 +14,20 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T14:06:58Z",
-  "updated_at": "2026-10-26T02:02:22Z",
+  "updated_at": "2026-10-26T10:15:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25877",
   "body": "Filing gate **① a user-visible defect with a named landing site** (placement only; no change to who may override). Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (second batch, 8 cards). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0, dev admin)\n\nOpening an opportunity whose large-deal approval is pending, the first row of the page, above the record title, is a bar of five buttons: three amber-outlined 「管理员代为通过」「管理员代为拒绝」「管理员代为转签」, then 「撤回」「回复」. Below it the title, the real actions (生成报价单 / 克隆商机 / 记录通话 / 编辑), and, in the 明细 tab, a second strip 「审批中已锁定 · 撤回审批」. [51-opportunity-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/51-opportunity-tall.png). For the actual approver the same slot shows 「通过 / 拒绝 / 转签 / 退回修改 / 退回补充 / 回复」, which is the right content for that person: [g3-mgr-request-detail.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/g3-mgr-request-detail.png).\n\nFor an administrator who is not the approver, \"act in the approver's place\" is the exception path; drawn as the most prominent row on the page it invites the click, and the bar pushes the record title below the fold on a phone ([m5-opp-detail.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/m5-opp-detail.png): the title starts at 200 px). 撤回 appears both in the bar and in the 明细 strip.\n\n`reach:` the public UI, measured once as the dev admin and once as the approver.\n\n## Expected\n\n- For the approver: keep the bar (it is their task).\n- For an administrator who is not the approver: a status strip 「审批中 · 等待 sales.manager」 with one 「…」 menu holding the three override actions and 撤回; 回复 stays visible.\n- 撤回 in one place; the 明细 strip keeps the lock badge only.\n- Behaviour (who may override, what is recorded) unchanged; this is layout.\n\n## Dedupe\n\nMCP `search_issues` objectui \"approval banner admin override approve reject reassign buttons shown above record title too prominent\" → 23 hits, none about placement (#12816 inbox columns, objectstack-ai/objectui#13225 Recall wording, objectstack-ai/objectui#12489 reference states, objectstack-ai/objectui#12751 print …). Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §3.5."
