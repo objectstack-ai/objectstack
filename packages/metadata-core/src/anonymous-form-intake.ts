@@ -53,16 +53,10 @@ export {
     anonymousFormIntakeCandidates,
     anonymousFormIntakeSlug,
     anonymousFormIntakeSlugs,
+    anonymousFormObjectName,
     publicFormSlug,
 } from '@objectstack/spec/ui';
 export type { AnonymousFormIntakeCandidate } from '@objectstack/spec/ui';
-
-/** The object an open form candidate submits into: the form's own `data.object`, else the view's. */
-export function anonymousFormObjectName(view: unknown, form: unknown): string | undefined {
-    const v = (view && typeof view === 'object' ? view : {}) as Record<string, any>;
-    const f = (form && typeof form === 'object' ? form : {}) as Record<string, any>;
-    return f.data?.object ?? v.list?.data?.object ?? v.form?.data?.object ?? v.object;
-}
 
 /**
  * Where a candidate's `sharing` sits in the `view` body — `form.sharing`,
