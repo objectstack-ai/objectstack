@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 
 // Plain-JS CI helper; its types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
@@ -93,34 +92,12 @@ describe('⛔ not a gate', () => {
   });
 });
 
-describe('ci.yml wires it as a reading of the right matrix and the right cap', () => {
-  interface Step { name?: string; run?: unknown; if?: string; 'continue-on-error'?: boolean }
-  interface Job { name?: string; 'timeout-minutes'?: number; steps?: Step[]; strategy?: { matrix?: { shard?: unknown[] } } }
-  const workflow = parseYaml(fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')) as { jobs: Record<string, Job> };
-
-  // aggregator -> the matrix job whose shards it reads
-  const wiring = [
-    { aggregator: 'test-aggregate', matrix: 'test' },
-    { aggregator: 'coverage-report', matrix: 'test-coverage' },
-  ];
-
-  for (const { aggregator, matrix } of wiring) {
-    it(`${aggregator} reads ${matrix}: its job name, its width and its timeout-minutes`, () => {
-      const steps = (workflow.jobs[aggregator]?.steps ?? []).filter(
-        (s) => typeof s.run === 'string' && s.run.includes('scripts/shard-headroom.mjs'),
-      );
-      expect(steps, `${aggregator} must run the headroom reading exactly once`).toHaveLength(1);
-      const [step] = steps;
-      const run = step.run as string;
-      const target = workflow.jobs[matrix];
-      const width = (target.strategy?.matrix?.shard ?? []).length;
-      expect(run).toContain(`--job '${String(target.name).replace('${{ matrix.shard }}', '{n}')}'`);
-      expect(run).toContain(`--shards ${width} `);
-      expect(run).toContain(`--cap-minutes ${target['timeout-minutes']} `);
-      // ⛔ Not a gate: it runs whatever happened above it, and nothing it
-      // does can change the aggregator's conclusion.
-      expect(step.if).toBe('always()');
-      expect(step['continue-on-error']).toBe(true);
-    });
-  }
-});
+// `ci.yml wires it as a reading of the right matrix and the right cap` retired
+// with objectstack#25712. It held the headroom step's `--job`, `--shards` and
+// `--cap-minutes` to the two objectui ci.yml aggregators that ran it,
+// `test-aggregate` (over `test`) and `coverage-report` (over `test-coverage`),
+// and that file runs nowhere under the monorepo. Both are row 7 of the
+// objectstack#25697 workflow roster: `Test (the shard aggregate)`, "dropped
+// until cutover", and `Test (coverage shard n/8) · Test (coverage)`, "kept,
+// follow-up port". No root job runs this reading until one of them is ported;
+// the port brings the wiring pin back against its job (`helpers/root-ci.ts`).

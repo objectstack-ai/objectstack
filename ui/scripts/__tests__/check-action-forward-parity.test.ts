@@ -22,6 +22,17 @@ import {
   SURFACES,
   RUNTIME_CONSUMERS,
 } from '../check-action-forward-parity.mjs';
+import {
+  globMatches,
+  jobBlock,
+  repoPath,
+  rootCi,
+  triggerBlock,
+  uiFilterGlobs,
+  uiRun,
+  UI_JOBS,
+  withoutComments,
+} from './helpers/root-ci';
 
 /**
  * objectui#4050 — the behaviour test for `scripts/check-action-forward-parity.mjs`.
@@ -723,60 +734,47 @@ describe('the gate is wired to run', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
   };
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+  // The workflow GitHub runs: objectstack's root ci.yml, whose `type-check-ui`
+  // job is objectui's `Type Check` (objectstack#25697). objectui's own ci.yml
+  // under `ui/.github/` runs nowhere (objectstack#25712).
+  const ci = rootCi();
+  const job = jobBlock(ci, UI_JOBS.typeCheck);
 
   it('package.json exposes it as a named script', () => {
     expect(pkg.scripts['check:action-forward-parity']).toBe('node scripts/check-action-forward-parity.mjs');
   });
 
   it('ci.yml runs it after the install it needs (it resolves @objectstack/spec)', () => {
-    const install = ci.indexOf('pnpm install --frozen-lockfile');
-    const step = ci.indexOf('run: pnpm check:action-forward-parity');
-    expect(step, 'ci.yml does not run `pnpm check:action-forward-parity`').toBeGreaterThan(-1);
+    const install = job.indexOf('pnpm install --frozen-lockfile');
+    const step = job.indexOf(`run: ${uiRun('check:action-forward-parity')}`);
+    expect(step, '`type-check-ui` does not run `pnpm --dir ui run check:action-forward-parity`').toBeGreaterThan(-1);
+    expect(install, '`type-check-ui` no longer installs dependencies').toBeGreaterThan(-1);
     expect(step, 'the check runs before dependencies are installed').toBeGreaterThan(install);
   });
 
   it('is not hidden from the renderers by ci.yml path filters', () => {
-    // ci.yml `paths-ignore`s markdown, content/, docs/, apps/site/ and
-    // .changeset/ on its `push` trigger — since objectui#3523 step 2 the only
-    // trigger that still carries the filter (ci.yml:6; lint.yml:32 is the twin),
-    // and the only thing the assertion below can see, since it slices the `on:`
-    // block. None can match `packages/components/src/renderers/**`, so a push
-    // that edits a forward whitelist always starts this workflow.
-    //
-    // For a PULL REQUEST the conclusion holds for a second and stronger reason.
-    // This lead-in used to state it in a bare present tense that read as if the
-    // filter still applied there; objectui#4384 qualified it, together with its
-    // near-verbatim twin in `check-i18n-en-drift.test.ts`, closing the #3857 /
-    // #4369 / #4381 family (PRs #4371 / #4380 / #4382). No `paths-ignore`
-    // survives on `pull_request` at all, so such a PR starts this workflow a
-    // fortiori — measured there: PR #3856, one markdown file, 16 checks. What
-    // decides a pull request now is the in-job `Decide whether this change needs
-    // a full run` step, whose exclusion list is that `push` filter unchanged,
-    // held identical to it by `scripts/__tests__/merge-queue-reporting.test.ts`
-    // — so the patterns pinned below are also what keeps the expensive steps
-    // running on a renderer PR.
-    const ignored = (ci.slice(0, ci.indexOf('jobs:')).match(/^\s+- '.*'$/gm) ?? []).map((line) =>
-      line.trim().replace(/^- '/, '').replace(/'$/, ''),
+    // The root ci.yml carries no `paths-ignore` on any trigger: it starts on
+    // every pull_request, every queue build, every push to main and the hourly
+    // schedule. What decides whether `type-check-ui` then runs is the `filter`
+    // job's `ui:` paths filter, which the job's `if:` reads, so every renderer
+    // a forward whitelist lives in must match one of its globs or a pull
+    // request that edits one skips this gate. (Until objectstack#25712 this
+    // pinned objectui's own `push` `paths-ignore` list, in a file nothing runs.)
+    expect(withoutComments(triggerBlock(ci)), 'a trigger grew a path filter').not.toMatch(/^\s+paths(-ignore)?:/m);
+    expect(job, '`type-check-ui` no longer reads the `ui` filter output').toContain(
+      "needs.filter.outputs.ui != 'false'",
     );
-    expect(ignored.length, 'the paths-ignore parse found nothing — this pin would be vacuous').toBeGreaterThan(3);
 
-    /** `**` crosses separators, `*` does not — enough for the five patterns above. */
-    const matches = (glob: string, file: string): boolean =>
-      new RegExp(
-        `^${glob
-          .split('**')
-          .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
-          .join('.*')}$`,
-      ).test(file);
-
+    const globs = uiFilterGlobs(ci);
     for (const surface of SURFACES) {
-      for (const glob of ignored) {
-        expect(matches(glob, surface.file), `${glob} hides ${surface.file}`).toBe(false);
-      }
-      // The matcher itself must be able to say yes, or the loop above proves
-      // nothing — the vacuity trap this whole file is about.
-      expect(matches('**/*.md', 'content/docs/guide/ci-cd-pipeline.md')).toBe(true);
+      const file = repoPath(surface.file);
+      expect(
+        globs.some((glob) => globMatches(glob, file)),
+        `no \`ui:\` filter glob covers ${file}`,
+      ).toBe(true);
     }
+    // The matcher itself must be able to say no, or the loop above proves
+    // nothing — the vacuity trap this whole file is about.
+    expect(globs.some((glob) => globMatches(glob, 'packages/spec/src/index.ts'))).toBe(false);
   });
 });

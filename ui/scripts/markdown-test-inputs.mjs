@@ -722,14 +722,6 @@ export const ADJUDICATED = new Map([
   // opened were recorded, which is also how the three tests that ENUMERATE a
   // markdown population without opening it were caught.
   // ---------------------------------------------------------------------------
-  // Reads no markdown: the document literal is an ARGUMENT to a path-matcher assertion, never opened.
-  [
-    'scripts/__tests__/check-action-forward-parity.test.ts',
-    {
-      reads: [],
-      notRead: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
   // objectui#9727 -- the rebuilt polarity census. It walks TWO markdown trees:
   // the real pending corpus (through the script, for the controls and the
   // corpus-boundary pin) and its own fixture corpus (for every instrument pin).
@@ -1036,15 +1028,6 @@ export const ADJUDICATED = new Map([
     {
       reads: ['content/docs/**', 'packages/**', 'skills/objectui/**'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: reads workspace manifests and turbo inputs; the `README.md` literal is a declared-input fixture.
-  [
-    'scripts/__tests__/docs-build-trigger.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-      walker: 'not-markdown: workspace `package.json` manifests and turbo input globs',
     },
   ],
   // `./*` for the same reason as `check-doc-links.test.ts` above, reached by a

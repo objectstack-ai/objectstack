@@ -19,7 +19,7 @@ import {
   selectAffectedTests,
   trackedFiles,
 } from '../select-affected-tests.mjs';
-import { workspaceRoot } from '../workspace-root.mjs';
+import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
  * objectui#12214 — the affected-test selector behind the two-speed `Test` lane.
@@ -416,19 +416,15 @@ describe('select-affected-tests — the live tree', () => {
   });
 });
 
+// objectui ci.yml's `test` job wired this selector; objectstack#25712 retired
+// these pins with that file, and objectstack#25868 wired the selector into the
+// root `test-ui` job that replaced it, so they read that job now.
 describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#12214, objectstack#25868)", () => {
-  // The workflow that runs this tree's suite is the monorepo root's; the
-  // objectui copy under `ui/.github/` runs nowhere.
-  const ci = fs.readFileSync(path.join(workspaceRoot(repoRoot), '.github/workflows/ci.yml'), 'utf8');
-  const code = ci
-    .split('\n')
-    .filter((l) => !/^\s*#/.test(l))
-    .join('\n');
-  const job = code.slice(code.indexOf('\n  test-ui:\n'), code.indexOf('\n  lint-ui:\n'));
+  const code = withoutComments(rootCi());
+  const job = jobBlock(code, UI_JOBS.test);
 
   it('runs the full battery hourly on main, beside push', () => {
-    expect(code).toMatch(/^ {2}schedule:\n {4}- cron: '[^']+'$/m);
-    expect(job).not.toBe('');
+    expect(triggerBlock(code)).toMatch(/^ {2}schedule:\n {4}- cron: '[^']+'$/m);
   });
 
   it('selects only on pull_request and merge_group, and treats every other event as full', () => {
@@ -453,7 +449,7 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
   it('keeps the matrix width and the full-suite command for the full battery', () => {
     const run = job.slice(job.indexOf('- name: Run the ui tests (shard ${{ matrix.shard }}/16)'));
     expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]');
-    expect(run).toContain('pnpm --dir ui run test --shard=${{ matrix.shard }}/16');
+    expect(run).toContain(`${uiRun('test')} --shard=` + '${{ matrix.shard }}/16');
     expect(run).toContain('pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"');
   });
 });
