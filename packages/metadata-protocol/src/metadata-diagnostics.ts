@@ -23,6 +23,7 @@
  * across the validate / write / read surfaces.
  */
 
+import { createHash } from 'node:crypto';
 import type { z } from 'zod';
 import { getMetadataTypeSchema, stripReadDecorations } from '@objectstack/spec/kernel';
 import type { MetadataValidationResult } from '@objectstack/spec/kernel';
@@ -42,6 +43,132 @@ import { redactMetadataItem } from './metadata-redaction.js';
  * package don't need to dual-import from `@objectstack/spec/kernel`.
  */
 export type MetadataDiagnostics = MetadataValidationResult;
+
+// ---------------------------------------------------------------------------
+// [#25783] The verdict memo
+// ---------------------------------------------------------------------------
+//
+// Every served metadata read decorates every item it answers, and the
+// decoration is a full `safeParse` of the item's type schema: measured at
+// 60 ms of an 86 ms `GET /meta/object` over 108 objects, re-run on every
+// read although the documents had not changed. So a verdict is remembered by
+// WHAT WAS PARSED, never by where the document came from:
+//
+//  - **The schema object.** One memo per schema, held weakly, so a
+//    `registerMetadataTypeSchema()` replacement starts from nothing and the
+//    verdicts of a schema nobody holds any more are collected with it.
+//  - **The document's content.** A SHA-256 of an encoding that tells apart
+//    everything the parse can tell apart. A plain JSON document (the stored
+//    rows, every HTTP body) is its `JSON.stringify`; one that holds
+//    `undefined` — a strict schema refuses an undeclared key whose value is
+//    `undefined`, and `JSON.stringify` drops that key — is spelled by
+//    {@link encodeWithUndefined}. A document holding anything else (a
+//    function, a class instance, a non-finite number, `-0`, a nesting
+//    deeper than {@link KEYABLE_DEPTH}) has no faithful key and is parsed
+//    every time, as before.
+//
+// Nothing else is an input: a schema's refinements read only the document
+// and the spec's own constants (the node-config contract maps are fixed at
+// first build), and no code path installs a global zod error map.
+//
+// ⛔ Not a cache of any read's ANSWER. The overlay cache's position in
+// `readActiveOverlayRows` explains why a merged answer is never cached; this
+// memo sits below every merge, on a pure function of its own input, so a
+// metadata change is a different document and a different key.
+//
+// The cached verdict never leaves this module: each caller gets its own copy
+// ({@link copyDiagnostics}), so a caller that edits the verdict it was handed
+// edits nobody else's. Bounded per schema ({@link VERDICTS_PER_SCHEMA},
+// least-recently-used first out); an evicted verdict is recomputed, never
+// served stale.
+
+/** How many verdicts one schema keeps before the least recently used goes. */
+const VERDICTS_PER_SCHEMA = 4096;
+/** Nesting past this depth is not keyed (a cycle would otherwise never end). */
+const KEYABLE_DEPTH = 256;
+
+const VERDICTS_BY_SCHEMA = new WeakMap<object, Map<string, MetadataDiagnostics>>();
+
+/** `json`: `JSON.stringify` is faithful · `undefined`: faithful once `undefined` is spelled · `none`: no key. */
+type KeyableShape = 'json' | 'undefined' | 'none';
+
+function keyableShape(value: unknown, depth: number): KeyableShape {
+    if (value === null) return 'json';
+    switch (typeof value) {
+        case 'string':
+        case 'boolean':
+            return 'json';
+        case 'number':
+            return Number.isFinite(value) && !Object.is(value, -0) ? 'json' : 'none';
+        case 'undefined':
+            return 'undefined';
+        case 'object':
+            break;
+        default:
+            return 'none';
+    }
+    if (depth >= KEYABLE_DEPTH) return 'none';
+    let shape: KeyableShape = 'json';
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+            const inner = keyableShape(value[i], depth + 1);
+            if (inner === 'none') return 'none';
+            if (inner === 'undefined') shape = 'undefined';
+        }
+        return shape;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return 'none';
+    for (const key in value as Record<string, unknown>) {
+        const inner = keyableShape((value as Record<string, unknown>)[key], depth + 1);
+        if (inner === 'none') return 'none';
+        if (inner === 'undefined') shape = 'undefined';
+    }
+    return shape;
+}
+
+/**
+ * The encoding of a document {@link keyableShape} answered `undefined` for:
+ * JSON's, with `undefined` spelled `u` wherever it stands, an array hole
+ * included (the parse reads a hole as `undefined`).
+ */
+function encodeWithUndefined(value: unknown): string {
+    if (value === undefined) return 'u';
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) {
+        let out = '[';
+        for (let i = 0; i < value.length; i++) out += (i ? ',' : '') + encodeWithUndefined(value[i]);
+        return out + ']';
+    }
+    let out = '{';
+    let first = true;
+    for (const key in value as Record<string, unknown>) {
+        out += (first ? '' : ',') + JSON.stringify(key) + ':' + encodeWithUndefined((value as Record<string, unknown>)[key]);
+        first = false;
+    }
+    return out + '}';
+}
+
+/** The memo key of a document, or `undefined` when it has no faithful one. */
+function contentKey(document: unknown): string | undefined {
+    const shape = keyableShape(document, 0);
+    if (shape === 'none') return undefined;
+    // The two encodings are told apart by their first character, so no
+    // document's JSON can be another document's `undefined` spelling.
+    const encoded = shape === 'json' ? `j${JSON.stringify(document)}` : `u${encodeWithUndefined(document)}`;
+    return createHash('sha256').update(encoded).digest('base64');
+}
+
+/**
+ * A caller's own copy of a verdict, key for key and in the same order: its
+ * lists are flat lists of flat entries, so copying each entry copies it all.
+ */
+function copyDiagnostics(verdict: MetadataDiagnostics): MetadataDiagnostics {
+    const copy: MetadataDiagnostics = { ...verdict };
+    if (verdict.errors) copy.errors = verdict.errors.map((entry) => ({ ...entry }));
+    if (verdict.warnings) copy.warnings = verdict.warnings.map((entry) => ({ ...entry }));
+    return copy;
+}
 
 /**
  * Compute spec diagnostics for a single metadata document.
@@ -94,6 +221,25 @@ export function computeMetadataDiagnostics(
     // whereas this one is read by the UI and belongs on the response.
     const candidate = stripReadDecorations(item);
 
+    // [#25783] A document parsed before against this same schema is answered
+    // from the memo — see "The verdict memo" above.
+    const key = contentKey(candidate);
+    if (key === undefined) return parseDiagnostics(schema, candidate);
+    let verdicts = VERDICTS_BY_SCHEMA.get(schema);
+    if (!verdicts) VERDICTS_BY_SCHEMA.set(schema, (verdicts = new Map()));
+    let verdict = verdicts.get(key);
+    if (verdict) {
+        verdicts.delete(key);
+    } else {
+        verdict = parseDiagnostics(schema, candidate);
+        if (verdicts.size >= VERDICTS_PER_SCHEMA) verdicts.delete(verdicts.keys().next().value as string);
+    }
+    verdicts.set(key, verdict);
+    return copyDiagnostics(verdict);
+}
+
+/** The parse {@link computeMetadataDiagnostics} answers with, uncached. */
+function parseDiagnostics(schema: z.ZodType, candidate: unknown): MetadataDiagnostics {
     const parsed = (schema as z.ZodTypeAny).safeParse(candidate);
     if (parsed.success) {
         return { valid: true };

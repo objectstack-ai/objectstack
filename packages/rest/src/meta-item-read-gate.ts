@@ -148,6 +148,10 @@ export interface MetaReadGateListSource {
      * this transport's protocol has no list read at all. A THROW is a fault,
      * ⛔ never an empty list: an empty book list is "no gated book anywhere" and
      * an empty doc corpus is "every doc unclaimed, so `org`" — both GRANT.
+     * [#25783] For `object` a transport hands in the protocol's execution face
+     * (`getMetaItemsForExecution`) where it has one: every reader of that list
+     * ({@link loadObjectItems}) reads an `enable` and serves nothing, so the
+     * served face's per-object diagnostic is pure cost there.
      */
     listMetaItems(type: 'book' | 'doc' | 'object'): Promise<unknown> | undefined;
     /**
