@@ -298,7 +298,6 @@ interface Swept {
 let stack: VerifyStack;
 let tempDir: string;
 let adminToken: string;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ql: any;
 
 let portRoutes: ReadonlyArray<{ method: string; pattern: string }>;

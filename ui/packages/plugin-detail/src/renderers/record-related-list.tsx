@@ -16,8 +16,10 @@ import React from 'react';
 import {
   ElementDataSourceGate,
   useActionTextLocalizer,
+  useFilterScope,
   useMetadataItem,
   useRecordContext,
+  useResolvedFilter,
   useSafeFieldLabel,
   useRelatedRecordActions,
   type ElementDataSourceMapping,
@@ -263,6 +265,11 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
       : ((ctx?.data as any)?.[relationshipValueField] ?? null);
 
   const relatedActions = useRelatedRecordActions();
+  // The list's own filter, resolved the way `RelatedList` resolves it for its
+  // query (same hook, same scope, at the same place in the tree), so the host
+  // scopes "View all" by the value the rows were read with (objectstack#25888).
+  const filterScope = useFilterScope();
+  const resolvedListFilter = useResolvedFilter(schema.filter, filterScope);
   const handlers = React.useMemo(
     () =>
       // The `objectName &&` gate is the objectui#8649 erasure repair surfacing a
@@ -285,9 +292,10 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
             objectName,
             relationshipField: schema.relationshipField,
             parentId: parentLinkValue,
+            filter: resolvedListFilter,
           }) ?? null)
         : null,
-    [relatedActions, objectName, schema.relationshipField, parentLinkValue],
+    [relatedActions, objectName, schema.relationshipField, parentLinkValue, resolvedListFilter],
   );
 
   /**

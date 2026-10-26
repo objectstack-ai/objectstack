@@ -206,7 +206,10 @@ describe('NEGATIVE CONTROL — the carry is a key-by-key pick, never a spread (o
       provider: 'gps',
       altitude: 5,
     });
-    expect(SPEC_KEYS).toEqual(['lat', 'lng', 'altitude', 'accuracy']);
+    // The derivation's non-vacuity half, by name (#26238): the keys this field
+    // writes are declared, and the retired pair is not.
+    for (const key of ['lat', 'lng', 'altitude']) expect(SPEC_KEYS).toContain(key);
+    for (const key of ['latitude', 'longitude']) expect(SPEC_KEYS).not.toContain(key);
     expect(Object.keys(emitted).filter((k) => !SPEC_KEYS.includes(k))).toEqual([]);
   });
 

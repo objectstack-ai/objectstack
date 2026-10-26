@@ -97,11 +97,23 @@ describe('resolveLandingPath', () => {
       // The declared landing is the escape hatch: an admin-console deployment
       // that genuinely wants Setup as its first screen says so with
       // `isDefault`, and rule 1 is deliberately untouched by this fix.
-      expect(resolveLandingPath([{ ...SETUP, isDefault: true }])).toBe('/apps/setup');
+      // On Setup's package id, its one address (objectstack-ai/objectstack#26183).
+      expect(resolveLandingPath([{ ...SETUP, isDefault: true }])).toBe('/apps/com.objectstack.setup');
     });
 
     it('CONTROL: a one-app PRODUCT deployment still lands in its app (#2027 rule 2 intact)', () => {
       expect(resolveLandingPath([{ name: 'crm' }])).toBe('/apps/crm');
+    });
+
+    it('lands on the package id, never the name alias (objectstack-ai/objectstack#26183)', () => {
+      // The name alias left the whole session on `/apps/<name>/…` while the
+      // sidebar built every entry on the package id.
+      expect(resolveLandingPath([{ name: 'clm', _packageId: 'app.objectstack.hotclm' }])).toBe(
+        '/apps/app.objectstack.hotclm',
+      );
+      expect(
+        resolveLandingPath([{ name: 'clm', _packageId: 'app.objectstack.hotclm', isDefault: true }, SETUP]),
+      ).toBe('/apps/app.objectstack.hotclm');
     });
 
     it('CONTROL: Setup alongside a product app is unchanged — this fix only reads the SINGLE-app case', () => {
@@ -122,7 +134,7 @@ describe('resolveLandingPath', () => {
       // not. Widening this to every platform app is a separate judgment call
       // that this card does not authorize.
       expect(resolveLandingPath([{ name: 'studio', _packageId: 'com.objectstack.studio' }])).toBe(
-        '/apps/studio',
+        '/apps/com.objectstack.studio',
       );
     });
   });

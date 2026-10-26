@@ -545,7 +545,7 @@ export const REQUIRED_CONTEXTS = [
  * registry EXACTLY, so the NEXT enrolment cannot land without following the
  * sentence. RESIDUALS, recorded rather than implied covered: paraphrase
  * drift (naming a context loosely, e.g. "Lint & Type Check" in
- * docs/launch-readiness.md) is invisible to both halves; and after a
+ * docs/launch-readiness.md as of commit df8aac41) is invisible to both halves; and after a
  * SHORTENING rename (new name a substring of the old), an old-literal mention
  * satisfies the new name's `mustName` by substring — the budget half still
  * tracks the old name, so staleness stays bounded; and the COUNT WORD that
@@ -639,7 +639,6 @@ export const INSTRUCTION_SURFACES = [
     mustName: [],
   },
   // Release/maintenance checklists that name individual contexts ⇒ scan-only.
-  { file: 'docs/launch-readiness.md', mustName: [] },
   { file: 'docs/releases-maintenance.md', mustName: [] },
 ];
 

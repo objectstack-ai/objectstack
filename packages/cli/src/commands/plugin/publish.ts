@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os plugin publish` — upload a signed `.osplugin` to ObjectStack Cloud
+ * `os plugin publish` — upload a signed `.osplugin` to ObjectOS Cloud
  * (ADR-0025 §3.4 step 3). Completes the build → sign → publish pipeline.
  *
  * Flow:
@@ -44,7 +44,7 @@ interface PostResult { ok: boolean; status: number; body: any; error?: string }
 
 export default class PluginPublish extends Command {
   static override description =
-    'Publish a signed .osplugin to ObjectStack Cloud (ADR-0025 §3.4)';
+    'Publish a signed .osplugin to ObjectOS Cloud (ADR-0025 §3.4)';
 
   static override examples = [
     '$ os plugin publish ./com.acme.stripe-1.0.0.osplugin --visibility marketplace --submit',
@@ -72,7 +72,7 @@ export default class PluginPublish extends Command {
       description:
         "Who can see / install this plugin's package. " +
         "Omit it to leave an existing package's visibility unchanged; a new package then gets " +
-        "the control plane's default ('org' on ObjectStack Cloud).",
+        "the control plane's default ('org' on ObjectOS Cloud).",
       options: ['private', 'org', 'marketplace'],
     }),
     org: Flags.string({ description: 'owner_org_id (service mode)', env: 'OS_ORG_ID' }),

@@ -134,6 +134,22 @@ export class SwappableStorageService implements IStorageService {
     return this.inner.getPresignedUpload(key, expiresIn, options);
   }
 
+  /**
+   * The origin the active adapter's presigned uploads are sent to, or
+   * `undefined` when the active adapter hands the browser no upload URL on
+   * another host (the local adapter's uploads go to this server). Read per call,
+   * so a settings change that swaps the adapter is followed at once.
+   *
+   * Not on `IStorageService`: the S3 adapter's
+   * `S3StorageAdapter.getPresignedUploadOrigin` is its one implementation, and
+   * the Console mount reads it off the kernel's `storage` service by name.
+   */
+  getPresignedUploadOrigin(): Promise<string | undefined> {
+    const inner = this.inner as unknown as { getPresignedUploadOrigin?: () => Promise<string | undefined> };
+    if (typeof inner.getPresignedUploadOrigin !== 'function') return Promise.resolve(undefined);
+    return inner.getPresignedUploadOrigin();
+  }
+
   getPresignedDownload(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<PresignedDownloadDescriptor> {
     if (typeof this.inner.getPresignedDownload !== 'function') {
       return Promise.reject(new Error('Active storage adapter does not support getPresignedDownload()'));

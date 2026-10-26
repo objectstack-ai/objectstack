@@ -4,7 +4,7 @@
 >
 > **维护约定**：此后每次开发模板/示例应用时，凡是发现"模板作者无法自行解决、需要平台修复"的问题，**都追加到本文档**，不要散落在各模板 README 中。
 >
-> 相关文档：`HARDENING.md`、`OBSERVABILITY.md`、`DX_ROADMAP.md`、`PLUGIN_ECOSYSTEM_MAP.md`。
+> 相关文档：`HARDENING.md`、`OBSERVABILITY.md`。
 
 ## TL;DR — 按严重程度排序
 

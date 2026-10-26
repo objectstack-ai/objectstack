@@ -26,7 +26,9 @@ import {
   candidateFrameworkPackagesDir,
   escapeRegExp,
   frameworkPackagesDir,
+  objectuiPackagesDir,
   workspaceChunkTests,
+  workspaceModuleMatcher,
 } from '../vite-objectstack-workspace.ts';
 import { isNestedWorkspace } from '../workspace-root.mjs';
 
@@ -169,5 +171,41 @@ describe('workspaceChunkTests (objectstack ruling D1)', () => {
     expect(config).toContain('const VENDOR_OBJECTSTACK_TEST = WORKSPACE_CHUNK_TESTS.vendor;');
     expect(config).toContain('const SPEC_MODULE_TEST = WORKSPACE_CHUNK_TESTS.spec;');
     expect(config).toContain('const LINT = WORKSPACE_CHUNK_TESTS.lint;');
+  });
+});
+
+describe('workspaceModuleMatcher (the chunk-membership attribution)', () => {
+  const matcher = workspaceModuleMatcher(objectuiPackagesDir(path.join(MONOREPO, 'ui/apps/console')));
+
+  it("locates objectui's own packages dir two levels above the console", () => {
+    expect(objectuiPackagesDir(path.join(MONOREPO, 'ui/apps/console'))).toBe(path.join(MONOREPO, 'ui/packages'));
+    expect(objectuiPackagesDir(consoleDir)).toBe(path.join(repoRoot, 'packages'));
+  });
+
+  it('attributes an objectui module to its package, with the package-relative rest', () => {
+    const hit = matcher.exec(`${MONOREPO}/ui/packages/core/src/actions/ActionRunner.ts`);
+    expect(hit?.[1]).toBe('core');
+    expect(hit?.[2]).toBe('src/actions/ActionRunner.ts');
+    expect(matcher.exec(`${MONOREPO}/ui/packages/types/src/zod/index.ts?inline`)?.[1]).toBe('types');
+  });
+
+  it('does not attribute a framework package that shares an objectui package name', () => {
+    // `@objectstack/core` resolves here in the monorepo; objectui has a `packages/core` too.
+    for (const name of ['core', 'types', 'cli', 'sdui-parser']) {
+      expect(matcher.test(`${MONOREPO}/packages/${name}/dist/index.js`)).toBe(false);
+    }
+    expect(matcher.test(`/elsewhere${MONOREPO}/ui/packages/core/src/index.ts`)).toBe(false);
+    expect(matcher.test(`${MONOREPO}/ui/packages-extra/core/src/index.ts`)).toBe(false);
+  });
+
+  it('escapes a directory with regex metacharacters so the prefix is matched literally', () => {
+    const odd = workspaceModuleMatcher('/w/ui (v1.0)/packages');
+    expect(odd.exec('/w/ui (v1.0)/packages/core/src/index.ts')?.[1]).toBe('core');
+    expect(odd.test('/w/uiX(v1A0)/packages/core/src/index.ts')).toBe(false);
+  });
+
+  it('is what the console config attributes membership with', () => {
+    const config = readFileSync(path.join(consoleDir, 'vite.config.ts'), 'utf8');
+    expect(config).toContain('const WORKSPACE_MODULE = workspaceModuleMatcher(objectuiPackagesDir(import.meta.dirname));');
   });
 });

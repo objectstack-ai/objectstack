@@ -90,7 +90,6 @@ describe('the resolved options reach the constructed plugin (#7001)', () => {
         if (name === 'manifest') return { register() {} };
         return undefined;
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     return services.get('security.fallbackPermissionSet');
   };

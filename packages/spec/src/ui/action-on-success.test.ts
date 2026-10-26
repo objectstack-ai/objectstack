@@ -3,14 +3,16 @@
 // action types, `navigate` (route/URL template whose scope gains `${result.*}`,
 // the server response) + `openIn: 'self' | 'newTab'` defaulting `'self'`.
 // These pins hold the ruled shape: the accept set, the materialized default,
-// the closed enum, the strict inner object, and the api/script type scope.
+// the closed enum, the strict inner object, and the type scope — api and
+// script, and flow, whose completed run answers with the flow's `isOutput`
+// variables under `output` (`action-on-success-executor.ts`).
 import { describe, it, expect } from 'vitest';
 import { ActionSchema, InlineActionSchema } from './action.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 const base = { name: 'copy_as_new_version', label: 'Copy as new version' };
 
-describe('ActionSchema.onSuccess — one closed post-success navigation key for api and script actions', () => {
+describe('ActionSchema.onSuccess — one closed post-success navigation key for api, script and flow actions', () => {
   describe('accept pins', () => {
     it('accepts the full shape on a type:api action', () => {
       const r = ActionSchema.safeParse({
@@ -32,6 +34,23 @@ describe('ActionSchema.onSuccess — one closed post-success navigation key for 
         onSuccess: { navigate: '/apps/mfg/task_version/${result.id}' },
       });
       expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    });
+
+    it('accepts a hop to the record a flow run produced, read off the run\'s `output`', () => {
+      // The run's answer is the `AutomationResult`; its `output` carries the
+      // flow's `isOutput` variables, so a `create_record` node writing an
+      // `isOutput` variable `renewal` is reached as `${result.output.renewal.id}`.
+      const r = ActionSchema.safeParse({
+        ...base,
+        name: 'start_renewal',
+        label: 'Start renewal',
+        type: 'flow',
+        target: 'renewal_start',
+        onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}' },
+      });
+      expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+      expect((r.data as { onSuccess: unknown }).onSuccess)
+        .toEqual({ navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}', openIn: 'self' });
     });
 
     it('reaches the same shape through the registered `action` metadata schema (the parsing door)', () => {
@@ -138,8 +157,8 @@ describe('ActionSchema.onSuccess — one closed post-success navigation key for 
     });
   });
 
-  describe('type scope — api and script only, refused on any other type, never silently ignored', () => {
-    it.each(['url', 'modal', 'flow', 'form'] as const)('refuses onSuccess on a type:%s action', (type) => {
+  describe('type scope — api, script and flow only, refused on any other type, never silently ignored', () => {
+    it.each(['url', 'modal', 'form'] as const)('refuses onSuccess on a type:%s action', (type) => {
       const r = ActionSchema.safeParse({
         ...base,
         type,
@@ -154,8 +173,9 @@ describe('ActionSchema.onSuccess — one closed post-success navigation key for 
       expect(issues[0].message.startsWith(`A \`type: '${type}'\` action's \`onSuccess\``)).toBe(true);
     });
 
-    it.each(['api', 'script'] as const)('NEGATIVE CONTROL: accepts onSuccess on a type:%s action', (type) => {
-      const r = ActionSchema.safeParse({ ...base, type, target: type === 'api' ? '/api/v1/x' : 'fn', onSuccess: { navigate: '/x' } });
+    it.each(['api', 'script', 'flow'] as const)('NEGATIVE CONTROL: accepts onSuccess on a type:%s action', (type) => {
+      const target = { api: '/api/v1/x', script: 'fn', flow: 'renewal_start' }[type];
+      const r = ActionSchema.safeParse({ ...base, type, target, onSuccess: { navigate: '/x' } });
       expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
     });
   });

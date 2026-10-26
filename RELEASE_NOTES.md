@@ -1,6 +1,6 @@
 # Release Notes
 
-> **📓 This file is historical.** Current, developer-facing release notes live in
+> **📓 This file is historical and frozen — nothing new is added to it.** Current, developer-facing release notes live in
 > the curated per-major pages under [`content/docs/releases/`](content/docs/releases)
 > — they lead with breaking changes + migration and cover backend **and** Console
 > (frontend) per platform version. For exhaustive per-package detail, see each
@@ -8,10 +8,10 @@
 > historical reference; see `docs/releases-maintenance.md` for how release history
 > is maintained.
 
-> **v5.0 (2026): `project` → `environment`.** The runtime concept formerly called *Project* (per-tenant business workspace; Org/Project/Branch hierarchy) is now called *Environment* throughout the codebase: CLI flags (`--environment`/`-e`), HTTP paths (`/api/v1/environments/:environmentId/...`), headers (`X-Environment-Id`), env vars (`OS_ENVIRONMENT_ID`), exported symbols (`createSystemEnvironmentPlugin`, `SYSTEM_ENVIRONMENT_ID`), DB columns (`environment_id`), and JSON schemas (`EnvironmentArtifact`) all use the new term with no aliases or deprecation shims. The word "project" elsewhere in this document still refers to the npm/monorepo sense (i.e., the framework as a software project). See `.changeset/v5-project-to-environment-rename.md` for the full breaking-change list and ADR-0006 for the rationale.
+> **v5.0 (2026): `project` → `environment`.** The runtime concept formerly called *Project* (per-tenant business workspace; Org/Project/Branch hierarchy) is now called *Environment* throughout the codebase: CLI flags (`--environment`/`-e`), HTTP paths (`/api/v1/environments/:environmentId/...`), headers (`X-Environment-Id`), env vars (`OS_ENVIRONMENT_ID`), exported symbols (`createSystemEnvironmentPlugin`, `SYSTEM_ENVIRONMENT_ID`), DB columns (`environment_id`), and JSON schemas (`EnvironmentArtifact`) all use the new term with no aliases or deprecation shims. The word "project" elsewhere in this document still refers to the npm/monorepo sense (i.e., the framework as a software project). See ADR-0006 for the rationale.
 
 
-## v4.0.4 — Release Readiness: Documentation Alignment _(in progress)_
+## v4.0.4 — Release Readiness: Documentation Alignment
 
 ### 🎯 Purpose
 
@@ -286,7 +286,7 @@ See individual CHANGELOG.md files in each package:
 - [packages/client/CHANGELOG.md](packages/client/CHANGELOG.md)
 - [packages/objectql/CHANGELOG.md](packages/objectql/CHANGELOG.md)
 - [packages/runtime/CHANGELOG.md](packages/runtime/CHANGELOG.md)
-- [packages/plugins/driver-memory/CHANGELOG.md](packages/plugins/driver-memory/CHANGELOG.md)
+- [packages/drivers/driver-memory/CHANGELOG.md](packages/drivers/driver-memory/CHANGELOG.md)
 - [packages/plugins/plugin-hono-server/CHANGELOG.md](packages/plugins/plugin-hono-server/CHANGELOG.md)
 - [packages/types/CHANGELOG.md](packages/types/CHANGELOG.md)
 
@@ -321,9 +321,7 @@ Version tag `v0.2.0` has been created for this release.
 ## 📚 Documentation
 
 Full documentation is available at:
-- Development Roadmap: [DEVELOPMENT_ROADMAP.md](internal/planning/DEVELOPMENT_ROADMAP.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Quick Start: [QUICK_START_IMPLEMENTATION.md](QUICK_START_IMPLEMENTATION.md)
 
 ## 🛠️ Build Status
 

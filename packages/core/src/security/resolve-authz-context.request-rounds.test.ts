@@ -94,6 +94,7 @@ describe('[#10757 leg 4] the Default Organization read and the activation ledger
     expect(grants).toEqual({
       positions: ['platform_admin', 'org_owner', 'everyone'],
       permissions: [ADMIN_FULL_ACCESS],
+      directPermissions: [ADMIN_FULL_ACCESS],
       systemPermissions: expect.any(Array),
       org_user_ids: ['usr_1'],
       accessible_org_ids: ['org_default'],

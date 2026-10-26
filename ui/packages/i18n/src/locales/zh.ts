@@ -222,6 +222,8 @@ const zh = {
     update: '更新',
     createSuccess: '{{object}}创建成功',
     updateSuccess: '{{object}}更新成功',
+    createdNamed: '{{object}}“{{title}}”已创建',
+    updatedNamed: '{{object}}“{{title}}”已更新',
     // objectui#11039 — plugin-form feedback chrome; see the `en` pack.
     created: '已创建',
     saved: '已保存',
@@ -1316,6 +1318,16 @@ const zh = {
     edited: '(已编辑)',
     via: '通过 {{source}}',
     viewSource: '查看来源',
+    // objectstack#25959 — a run of consecutive updates folded into one feed row.
+    foldedUpdates: '更新了 {{fields}}',
+    foldedUpdateCount: '{{count}} 次',
+    foldedUpdateCount_one: '{{count}} 次',
+    foldedUpdateCount_other: '{{count}} 次',
+    foldedMoreFields: '其他 {{count}} 项',
+    foldedMoreFields_one: '其他 {{count}} 项',
+    foldedMoreFields_other: '其他 {{count}} 项',
+    expandFolded: '展开每次更新',
+    collapseFolded: '收起更新',
     // Replies
     replyCount: '{{count}} 条回复',
     replyCount_one: '{{count}} 条回复',
@@ -2742,6 +2754,7 @@ const zh = {
     },
     shell: {
       tenantHostHint: '您正在登录本系统',
+      poweredBy: '由 ObjectStack 提供技术支持',
     },
     layout: {
       headline: '更快地构建强大的业务应用。',
@@ -3979,7 +3992,7 @@ const zh = {
       cancel: '取消',
     },
     bound: {
-      title: '已连接到 ObjectStack 云',
+      title: '已连接到 ObjectOS Cloud',
       runtime: '运行时',
       organization: '组织',
       approvedBy: '批准人',
@@ -4082,17 +4095,26 @@ const zh = {
       install: {
         dialogTitle: '安装 {{name}}',
         dialogDescCurrent: '安装到当前环境（{{host}}）。',
-        dialogDescPicker: '选择要将此应用安装到的环境。需要先登录 ObjectStack Cloud。',
+        dialogDescPicker: '选择要将此应用安装到的环境。需要先登录 ObjectOS Cloud。',
         environment: '环境',
         environmentPlaceholder: '选择一个环境',
         includeSampleData: '包含示例数据',
         noEnvs: '当前组织没有可用的环境。',
         noPermission: '你没有权限在任何环境中安装应用。仅组织所有者和管理员可以安装 — 请联系你的组织管理员。',
-        signInFirst: '请先登录 ObjectStack Cloud，然后点击下方"在云端打开"。',
+        signInFirst: '请先登录 ObjectOS Cloud，然后点击下方"在云端打开"。',
         success: '安装成功。打开环境即可看到新应用。',
         localSuccess: '已将 v{{version}} 安装到本运行时。"{{name}}" 应该已经出现在应用切换器中。',
         localLoadsAtRestart: '已将 v{{version}} 安装到本运行时。"{{name}}" 将在运行时下次重启时加载，在此之前不会出现在应用切换器中。',
         localManifestConflict: '{{message}}\n提示：本地已有应用占用此 manifest_id，请先从 objectstack.config.ts 中移除。',
+        // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+        dependencyMissing: {
+          heading: '安装被拒绝：此软件包声明的依赖在当前环境中未满足，未安装任何内容。',
+          absent: '请先安装 {{dependency}} {{range}}。',
+          outOfRange: '请先安装 {{dependency}} {{range}}（当前安装的是 {{installedVersion}}）。',
+          unreadableRange: '{{packageId}} 为 {{dependency}} 声明的版本范围 {{range}} 无法识别，请修改版本范围后重新发布软件包。',
+          unreadableVersion: '请安装 {{dependency}} 在 {{range}} 范围内的正式版本（当前安装的 {{installedVersion}} 不是“主版本.次版本.修订号”格式）。',
+          unreadableDeclaration: '{{packageId}} 的依赖声明格式无法识别，请写成“软件包 ID → 版本范围”的映射后重新发布软件包。',
+        },
         localUnauthorized: '请先登录本运行时再试。',
         localMarketplaceUnavailable: '本运行时未配置 OS_CLOUD_URL，无法访问应用市场目录。',
         updateTo: '更新 → v{{version}}',
@@ -4121,7 +4143,7 @@ const zh = {
       update: {
         dialogTitle: '更新 {{name}}',
         dialogDescCurrent: '更新当前环境（{{host}}）中已安装的应用。',
-        dialogDescPicker: '选择要更新已安装应用的环境。需要先登录 ObjectStack Cloud。',
+        dialogDescPicker: '选择要更新已安装应用的环境。需要先登录 ObjectOS Cloud。',
         majorNotice: '这是一次主版本更新（v{{fromMajor}} → v{{toMajor}}），可能包含不兼容的变更。',
         releaseNotes: '查看 v{{version}} 的版本说明',
         success: '已更新到 v{{version}}。',

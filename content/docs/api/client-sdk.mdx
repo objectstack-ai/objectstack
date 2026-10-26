@@ -577,7 +577,7 @@ The `find` method accepts an options object with **canonical** (recommended) fie
 | `expand` | `Record<string, any>` or `string[]` | Relation loading (JOIN) | `{ owner: {} }` |
 
 <Callout type="info">
-**Canonical names recommended:** `find()` accepts the canonical names above; the legacy aliases (`select`, `filter`/`filters`, `sort`, `top`, `skip`) still work for backward compatibility, but new code should use the canonical names. (`@objectstack/client-react`'s `useQuery`/`useInfiniteQuery` hooks are stricter — the legacy aliases were removed there in v11; see `docs/upgrading-to-11.md`.)
+**Canonical names recommended:** `find()` accepts the canonical names above; the legacy aliases (`select`, `filter`/`filters`, `sort`, `top`, `skip`) still work for backward compatibility, but new code should use the canonical names. (`@objectstack/client-react`'s `useQuery`/`useInfiniteQuery` hooks are stricter — the legacy aliases were removed there in v11.)
 </Callout>
 
 ### Batch Options

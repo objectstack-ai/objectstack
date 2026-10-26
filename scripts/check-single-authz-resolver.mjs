@@ -232,6 +232,8 @@ const DELEGATORS = new Map([
   ['packages/services/service-settings/src/settings-service-plugin.ts', 'resolveRequestExecutionContext'],
   ['packages/services/service-storage/src/storage-service-plugin.ts', 'resolveRequestExecutionContext'],
   ['packages/plugins/plugin-hono-server/src/current-user-endpoints.ts', 'resolveRequestExecutionContext'],
+  // [#26161] The own-row unreact door AuditPlugin mounts.
+  ['packages/plugins/plugin-audit/src/comment-reaction-routes.ts', 'resolveRequestExecutionContext'],
   ['packages/core/src/security/request-execution-context.ts', 'resolveAuthzContext'],
 ]);
 

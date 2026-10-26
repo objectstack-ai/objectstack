@@ -7,6 +7,7 @@ import {
   QueryFilterSchema,
   FieldOperatorsSchema,
   FieldReferenceSchema,
+  NowAnchorSchema,
   EqualityOperatorSchema,
   ComparisonOperatorSchema,
   SetOperatorSchema,
@@ -222,6 +223,92 @@ describe('ComparisonOperatorSchema', () => {
 // ============================================================================
 // 3.2 Set & Range Operators Tests
 // ============================================================================
+
+// ============================================================================
+// [#25808] NowAnchorSchema — { $now: true, addDays }
+// ============================================================================
+
+describe('[#25808] NowAnchorSchema — the now-anchored comparand', () => {
+  const GRACE = { $field: 'review_sla_days_offset' };
+
+  it('accepts the two offset arms: an integer literal of any sign, a { $field } reference', () => {
+    expect(NowAnchorSchema.safeParse({ $now: true, addDays: -30 }).success).toBe(true);
+    expect(NowAnchorSchema.safeParse({ $now: true, addDays: 0 }).success).toBe(true);
+    expect(NowAnchorSchema.safeParse({ $now: true, addDays: GRACE }).success).toBe(true);
+  });
+
+  it('addDays is REQUIRED — `{now}` is the spelling for the unshifted instant', () => {
+    const result = NowAnchorSchema.safeParse({ $now: true });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toContain('addDays');
+    expect(result.error?.issues[0]?.message).toContain('{now}');
+  });
+
+  it('$now is the literal true — false, a string, 1 are refused', () => {
+    for (const bad of [false, 'now', 1, null]) {
+      const result = NowAnchorSchema.safeParse({ $now: bad, addDays: 1 });
+      expect(result.success, String(bad)).toBe(false);
+      expect(result.error?.issues[0]?.message).toContain('literal true');
+    }
+  });
+
+  it('a malformed offset is refused in addDays\' own words — fractional, string, an object without $field', () => {
+    for (const bad of [1.5, '5', { days: 5 }, { $field: 42 }]) {
+      const result = NowAnchorSchema.safeParse({ $now: true, addDays: bad });
+      expect(result.success, JSON.stringify(bad)).toBe(false);
+      expect(result.error?.issues[0]?.message).toContain('addDays');
+    }
+  });
+
+  it('is closed: an extra key is refused — there is no subDays', () => {
+    expect(NowAnchorSchema.safeParse({ $now: true, addDays: 1, subDays: 1 }).success).toBe(false);
+    expect(NowAnchorSchema.safeParse({ $now: true, addDays: -1, note: 'x' }).success).toBe(false);
+  });
+
+  it('is legal exactly where a { $field } reference is: the six scalar comparisons', () => {
+    for (const op of ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']) {
+      const result = FilterConditionSchema.safeParse({ opened_at: { [op]: { $now: true, addDays: GRACE } } });
+      expect(result.success, op).toBe(true);
+    }
+  });
+
+  it('…and refused as an $in / $nin member and a $between endpoint by the operator schemas, as a reference is', () => {
+    expect(SetOperatorSchema.safeParse({ $in: [{ $now: true, addDays: 1 }] }).success).toBe(false);
+    expect(SetOperatorSchema.safeParse({ $nin: [{ $now: true, addDays: 1 }] }).success).toBe(false);
+    expect(RangeOperatorSchema.safeParse({ $between: [{ $now: true, addDays: -7 }, '2026-12-31'] }).success).toBe(false);
+    // The `FilterCondition` door's parity with `{ $field }`: both pass it in a
+    // list slot (it judges comparand TYPES, not positions) and every executor
+    // refuses the position by name — pinned on the drivers' conformance corpus.
+    expect(FilterConditionSchema.safeParse({ opened_at: { $in: [{ $field: 'other' }] } }).success).toBe(true);
+    expect(FilterConditionSchema.safeParse({ opened_at: { $in: [{ $now: true, addDays: 1 }] } }).success).toBe(true);
+  });
+
+  it('a malformed anchor in a comparison slot is refused in the anchor\'s own words, not as a plain object', () => {
+    const missing = ComparisonOperatorSchema.safeParse({ $lt: { $now: true } });
+    expect(missing.success).toBe(false);
+    expect(missing.error?.issues[0]?.message).toContain('addDays');
+    expect(missing.error?.issues[0]?.message).toContain('{now}');
+    const flag = ComparisonOperatorSchema.safeParse({ $lt: { $now: 'yes', addDays: 1 } });
+    expect(flag.success).toBe(false);
+    expect(flag.error?.issues[0]?.message).toContain('literal true');
+    // The `FilterCondition` door (the comparand-TYPE walk) refuses the same
+    // malformations in the anchor's words too, never as "a plain object".
+    const atDoor = FilterConditionSchema.safeParse({ opened_at: { $lt: { $now: true } } });
+    expect(atDoor.success).toBe(false);
+    expect(JSON.stringify(atDoor.error?.issues)).toContain('{now}');
+    const fractional = FilterConditionSchema.safeParse({ opened_at: { $lt: { $now: true, addDays: 1.5 } } });
+    expect(fractional.success).toBe(false);
+    expect(JSON.stringify(fractional.error?.issues)).toContain('neither an integer');
+  });
+
+  it('an equality triple with an anchored comparand lowers to the explicit $eq, as a reference does', () => {
+    const anchor = { $now: true, addDays: 0 };
+    for (const op of ['=', '==', 'equals', 'eq']) {
+      expect(parseFilterAST(['opened_on', op, anchor] as any), op).toEqual({ opened_on: { $eq: anchor } });
+    }
+    expect(parseFilterAST(['opened_on', '<', anchor] as any)).toEqual({ opened_on: { $lt: anchor } });
+  });
+});
 
 describe('SetOperatorSchema', () => {
   it('should accept $in operator with array', () => {

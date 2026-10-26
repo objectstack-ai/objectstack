@@ -1283,6 +1283,7 @@ export class ActionRunner {
   private paramCollectionHandler: ParamCollectionHandler | null;
   private resultDialogHandler: ResultDialogHandler | null;
   private translate: ((key: string, options: { defaultValue: string }) => string) | null;
+  private displayLocale: (() => string | undefined) | null;
 
   /**
    * Built-in dispatch, one entry per runnable action type.
@@ -1322,6 +1323,7 @@ export class ActionRunner {
     this.paramCollectionHandler = null;
     this.resultDialogHandler = null;
     this.translate = null;
+    this.displayLocale = null;
   }
 
   /**
@@ -1339,6 +1341,20 @@ export class ActionRunner {
    */
   setTranslator(translate: (key: string, options: { defaultValue: string }) => string): void {
     this.translate = translate;
+  }
+
+  /**
+   * Set where the runner reads the viewer's display locale (a BCP-47 tag) —
+   * the host's own, injected so this package resolves none. It is read when a
+   * copy template is filled, so a language switch reaches a runner built
+   * before it. The `template` formatters in `confirmText` and
+   * `successMessage` render in it (`{{ amount | currency }}`,
+   * `{{ due | date:long }}`), through the engine's reserved locale channel, so
+   * a root named `locale` never sets it (objectstack#26232). With none
+   * installed they format in `en-US`.
+   */
+  setDisplayLocale(displayLocale: () => string | undefined): void {
+    this.displayLocale = displayLocale;
   }
 
   /**
@@ -1811,7 +1827,11 @@ export class ActionRunner {
     const successCopy = actionCopySource(action.successMessage);
     if (successCopy !== undefined && successCopy.trim() !== '') {
       return hasTemplateHoles(successCopy)
-        ? fillTemplateHoles(successCopy, { result: payload, record: this.dispatchRecord(action) })
+        ? fillTemplateHoles(
+          successCopy,
+          { result: payload, record: this.dispatchRecord(action) },
+          this.displayLocale?.(),
+        )
         : successCopy;
     }
     return this.runnerText(RUNNER_TEXT.completedSuccessfully);
@@ -1846,7 +1866,11 @@ export class ActionRunner {
     const staticParams = params && typeof params === 'object' && !Array.isArray(params)
       ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_rowRecord'))
       : undefined;
-    return fillTemplateHoles(text, { record: this.dispatchRecord(action), params: staticParams });
+    return fillTemplateHoles(
+      text,
+      { record: this.dispatchRecord(action), params: staticParams },
+      this.displayLocale?.(),
+    );
   }
 
   /**
@@ -1960,7 +1984,15 @@ export class ActionRunner {
     // declares `onSuccess` as a CLOSED STRICT object
     // `{ navigate: string, openIn: 'self' | 'newTab' }`, refine-scoped to
     // `type: 'api'` and `type: 'script'` — the two types whose success event
-    // carries a server response for `${result.*}` to read.
+    // carries a server response for `${result.*}` to read — and to
+    // `type: 'flow'`, whose COMPLETED run answers with its `AutomationResult`
+    // (`${result.output.VAR}` reads one of the flow's `isOutput` variables).
+    //
+    // A `handedOff` success performs no hop: a flow run paused at a screen or
+    // ended refused opened a follow-up surface instead of completing
+    // (`judgeFlowLaunch`, app-shell `utils/flowResponse.ts`), so there is no
+    // result for the hop to follow, and navigating away would leave that
+    // screen or notice behind.
     //
     // That declared meaning is the key's ONLY meaning. The runner's older
     // chained-callback channel (`onSuccess?: ActionDef | ActionDef[]`,
@@ -1973,7 +2005,7 @@ export class ActionRunner {
     // discriminator: stored rows are rehydrated UNPARSED (objectstack-ai/objectstack#3903), so the value
     // is still read as data, and a shape the spec refuses gets no reading —
     // no navigation, no callback dispatch, no lenient fallback.
-    if (result.success && action.onSuccess) {
+    if (result.success && !result.handedOff && action.onSuccess) {
       const navigation = readOnSuccessNavigation(action.onSuccess);
       if (navigation) {
         this.navigateOnSuccess(navigation, action, result);
@@ -2909,9 +2941,9 @@ export class ActionRunner {
   /**
    * A one-shot runner for {@link ActionRunner.execute}'s `callContext`
    * (objectui#13063): this runner's context with `callContext` merged over it,
-   * and this runner's handlers, translator and registries, shared rather than
-   * copied, so the dispatch confirms, collects params, toasts and navigates
-   * exactly as this runner does.
+   * and this runner's handlers, translator, display locale and registries,
+   * shared rather than copied, so the dispatch confirms, collects params,
+   * toasts and navigates exactly as this runner does.
    *
    * Two keys follow the merge rather than the base:
    *
@@ -2953,6 +2985,7 @@ export class ActionRunner {
     scoped.paramCollectionHandler = this.paramCollectionHandler;
     scoped.resultDialogHandler = this.resultDialogHandler;
     scoped.translate = this.translate;
+    scoped.displayLocale = this.displayLocale;
     return scoped;
   }
 

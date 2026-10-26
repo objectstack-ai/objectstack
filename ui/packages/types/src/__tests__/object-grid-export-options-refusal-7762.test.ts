@@ -96,11 +96,12 @@ describe('ObjectGridSchema.exportOptions — the spec object arm, by reference (
     // Every identity assertion below reads through `specObjectArm`. A spec refactor that
     // moved the shape would otherwise turn each of them into a comparison against
     // `undefined`, and `toBe(undefined) === toBe(undefined)` would pass.
+    // Floors and named members, not the spec's arm and key counts (#26238):
+    // the identity case below compares the full key sets, derived on both sides.
     expect(specExportOptions).toBeDefined();
-    expect(specUnion.options).toHaveLength(2);
+    expect(specUnion.options?.length).toBeGreaterThan(0);
     expect(specObjectArm).toBeDefined();
-    expect(Object.keys(specObjectArm?.shape ?? {}).sort())
-      .toEqual(['fileNamePrefix', 'formats', 'includeHeaders', 'maxRecords', 'streaming']);
+    expect(Object.keys(specObjectArm?.shape ?? {})).toEqual(expect.arrayContaining(['formats', 'maxRecords']));
   });
 
   it('is a member of the mirror shape (membership cannot be read off acceptance under passthrough)', () => {
