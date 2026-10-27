@@ -296,29 +296,38 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('script refuses a retired email stub — it used to log a line and report success', async () => {
-    const engine = engineWith();
-    // `registerFlow` strips the retired keys on rehydration (#3903), so what
-    // reaches the parse is a node with nothing to run. Before #4343 this was a
-    // green step that delivered no mail. Since #20316 the flow parse behind
-    // that conversion refuses the stripped node itself — it names no
-    // `function` — so the flow no longer registers; the run below meets the
-    // same stripped shape past the doors.
-    expect(doorRefusal('script', {
+    // `registerFlow` used to strip the retired keys on rehydration (#3903), so
+    // what reached the parse was a node with nothing to run. Before #4343 this
+    // was a green step that delivered no mail; since #20316 the flow parse
+    // behind that conversion refused the stripped node for naming no
+    // `function`. [#25767] The `actionType` stubs were ≤16.x retirements, and a
+    // retirement kit lives one protocol major past the major it retired in:
+    // their conversion left the registry at 18, so nothing strips the keys any
+    // more — the strict script shape refuses them outright, naming each key
+    // and the protocol upgrade guide, and the flow no longer registers. Same
+    // verdict (no mail is ever sent silently), one door earlier again.
+    const refusal = doorRefusal('script', {
       actionType: 'email', template: 'task_done', recipients: ['{record.owner}'],
-    })).toContain("config leaves out `function`");
-    const result = await runStripped(engine, 'script', {
+    });
+    expect(refusal).toMatch(/Unrecognized key\(s\) on this script node config: `actionType`, `template`, `recipients`/);
+    expect(refusal).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    // Naming a callable beside the stub does not rescue it: the retired keys
+    // are refused, not stripped around `function`.
+    expect(doorRefusal('script', {
       function: 'send_mail', actionType: 'email', template: 'task_done', recipients: ['{record.owner}'],
-    }, ['function']);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('does not satisfy the script contract');
+    })).toMatch(/Unrecognized key\(s\) on this script node config: `actionType`, `template`, `recipients`/);
   });
 
   it('a script parse refusal is a guard — a fault edge does NOT route it', async () => {
     const engine = engineWith();
+    // [#25767] The retired `actionType` / `template` keys no longer ride along
+    // (they are refused at registration, above), so the guard is exercised on
+    // the bare contract: the registered node loses its `function` past the
+    // doors and the execute-time parse refuses it.
     const result = await runStripped(
       engine,
       'script',
-      { function: 'post_to_slack', actionType: 'slack', template: 't' },
+      { function: 'post_to_slack' },
       ['function'],
       {
         nodes: [{ id: 'recover', type: 'assignment', label: 'R', config: { recovered: true } }],

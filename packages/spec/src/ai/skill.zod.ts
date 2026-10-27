@@ -20,7 +20,6 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // whichever export happens to be declared first (#7113).
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-import { retiredKey } from '../shared/retired-key';
 
 /**
  * The trigger-condition operators whose `value` is a LIST rather than a scalar
@@ -373,24 +372,6 @@ export const SkillSchema = lazySchema(() => strictObject({
    * authoring time in both distributions (`ai-skill-tool-unresolved`).
    */
   tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime only'),
-
-  /**
-   * Natural language phrases that trigger skill activation.
-   * Used for intent matching and skill routing.
-   */
-  // `triggerPhrases` REMOVED (#3896 audit close-out): phrases were NEVER
-  // matched against the user's message — activation is `triggerConditions` ∩
-  // the agent's `skills[]` allowlist (+ explicit /skill-name pinning). The
-  // cloud API served the field back to clients, a dead-end projection that
-  // made the false capability look extra real.
-  triggerPhrases: retiredKey(
-    '`skill.triggerPhrases` was removed in @objectstack/spec 17.0.0 (audit close-out) ' +
-    "— phrases were never matched against the user's message; skill activation is " +
-    "`triggerConditions` (AND of context field/operator/value) intersected with the agent's " +
-    '`skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in ' +
-    '`triggerConditions`; describe intent in `description`/`instructions` for the LLM. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /**
    * Programmatic conditions for skill activation.

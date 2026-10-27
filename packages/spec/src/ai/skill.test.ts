@@ -193,15 +193,18 @@ describe('defineSkill', () => {
 });
 
 describe('retired `triggerPhrases` — phrases never routed a skill; triggerConditions do', () => {
-  it('REJECTS the retired key with the routing prescription', () => {
+  it('REFUSES the aged-out key as an unknown key naming the upgrade guide (#25767)', () => {
+    // The tombstone that carried the routing prescription was a 16.x kit and
+    // left the shape at 18; the strict refusal names the key and the guide.
     let message = '';
     try {
       SkillSchema.parse({ name: 'case_mgmt', label: 'Cases', triggerPhrases: ['open a ticket'] });
     } catch (e) {
       message = String((e as Error).message);
     }
-    expect(message).toMatch(/triggerConditions/);
-    expect(message).toMatch(/audit close-out/);
+    expect(message).toMatch(/unrecognized_keys/);
+    expect(message).toMatch(/`triggerPhrases`/);
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('does not offer the retired key as the fix for a near-miss of it', () => {

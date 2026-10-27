@@ -90,7 +90,7 @@ const TOMBSTONE_MARKER = '[REMOVED]';
  * The non-vacuity floor: about two thirds of the measured population, so retiring
  * a tombstoned key (ADR-0087's normal end of a window) does not red it (#26541).
  */
-const TOMBSTONE_FLOOR = 32; // measured 48 on 2026-10-27 (pinned at 40); floor = floor(48 × 2/3)
+const TOMBSTONE_FLOOR = 18; // measured 48 on main 2026-10-27, 28 once #25767 aged out the ≤16.x kits; floor = floor(28 × 2/3)
 
 function defOf(s: any): any {
   return s && (s._zod?.def ?? s._def);
@@ -188,12 +188,14 @@ describe('shipped ledgers — a tombstoned key is `dead`', () => {
     expect(writable).toEqual([]);
   });
 
-  it('`agent.tools` is the #18304 row: tombstoned in AgentSchema, `dead` in the ledger, with no `evidence` pointer', () => {
-    const shape = shapeOf(getMetadataTypeSchema('agent'))!;
-    expect(descOf(shape.tools)).toContain(TOMBSTONE_MARKER);
-    expect(defOf(unwrap(shape.tools))?.type).toBe('never');
+  // #18304's carrier was `agent.tools`; that ≤16.x kit aged out on #25767 and
+  // its row left the ledger, so a 17.x tombstone carries the same pin.
+  it('`action.aria` is the carrier row: tombstoned in ActionSchema, `dead` in the ledger, with no `evidence` pointer', () => {
+    const shape = shapeOf(getMetadataTypeSchema('action'))!;
+    expect(descOf(shape.aria)).toContain(TOMBSTONE_MARKER);
+    expect(defOf(unwrap(shape.aria))?.type).toBe('never');
 
-    const row = ledgerOf('agent').props.tools;
+    const row = ledgerOf('action').props.aria;
     expect(row.status).toBe('dead');
     // A `dead` row's pointer lives in `note` by the gate's own design
     // (EVIDENCE_UNSCANNED_STATUSES): an `evidence` string here would be a claim

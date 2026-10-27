@@ -186,9 +186,11 @@
  * ## The retired `compactLayout` alias
  *
  * `compactLayout` was renamed to `highlightFields` in `@objectstack/spec`
- * 11.7.0 (ADR-0085) and the `object-compactLayout-to-highlightFields`
- * conversion normalizes it before a parsed stack reaches any rule, so on the
- * parsed tier this alias cannot appear. It is read here anyway, at the same
+ * 11.7.0 (ADR-0085); the `object-compactLayout-to-highlightFields` conversion
+ * normalized it before a parsed stack reached any rule until #25767 retired it
+ * (a ≤16.x kit), and since then the strict parse refuses the alias with the
+ * rename prescription — so on the parsed tier this alias cannot appear either
+ * way. It is read here anyway, at the same
  * position, for one reason and not as a tolerance: the clause this rule takes
  * over from `validateSemanticRoles` read it, and the `lint` path carries raw
  * config that has not been through the conversion. Dropping the read would be

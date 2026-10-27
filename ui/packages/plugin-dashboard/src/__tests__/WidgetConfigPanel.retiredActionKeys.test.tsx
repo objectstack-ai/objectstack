@@ -11,9 +11,12 @@
  * action key (objectstack#7129).
  *
  * `actionUrl` / `actionType` / `actionIcon` were retired at the widget level in
- * @objectstack/spec 17.0.0-rc.3 (objectstack#5010, ADR-0049 D2). They are
- * `retiredKey` tombstones: `DashboardWidgetSchema` types them `never` and
- * REFUSES any value — including `''`. Until this pin, `WidgetConfigPanel`
+ * @objectstack/spec 17.0.0-rc.3 (objectstack#5010, ADR-0049 D2). Through 18.1
+ * they were `retiredKey` tombstones: `DashboardWidgetSchema` typed them `never`
+ * and refused any value — including `''` — at the key's own path. At 18.2 the
+ * tombstones aged out one major on (objectstack#25767): the strict container
+ * refuses each as an unknown key, at the widget's path, naming the key and the
+ * protocol upgrade guide. Either way the spec refuses. Until this pin, `WidgetConfigPanel`
  * offered a Behavior-group "Click-through URL" field bound to `actionUrl`, and
  * `DashboardWithConfig` seeded `actionUrl: widget.actionUrl ?? ''` into every
  * widget config it handed the panel — so every save from Studio persisted a
@@ -65,7 +68,17 @@ describe('the spec really does refuse these keys (premise check)', () => {
         const result = DashboardWidgetSchema.safeParse({ ...SPEC_VALID_WIDGET, [key]: value });
         expect(result.success, `'${key}': ${JSON.stringify(value)} must be refused`).toBe(false);
         if (!result.success) {
-          expect(result.error.issues.some((i) => i.path[0] === key)).toBe(true);
+          // The strict unknown-key refusal (objectstack#25767): one issue at the
+          // widget's own path (`[]`), naming the key and the upgrade guide. The
+          // tombstone it replaced reported at `[key]`; a pin on that path would
+          // read the age-out as "no longer refused", which is the opposite of
+          // what happened.
+          const refusal = result.error.issues.find(
+            (i) => i.path.length === 0 && i.message.includes(`\`${key}\``),
+          );
+          expect(refusal, `'${key}': refused by name at the widget's path`).toBeTruthy();
+          expect(refusal!.message).toMatch(/Unrecognized key\(s\)/);
+          expect(refusal!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
         }
       }
     }

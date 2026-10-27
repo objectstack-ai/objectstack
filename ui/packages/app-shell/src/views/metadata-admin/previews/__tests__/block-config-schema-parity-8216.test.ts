@@ -312,13 +312,16 @@ describe('BLOCK_CONFIG ↔ node-schema parity — the instruments (objectui#8216
     // The descent is derived, so its non-vacuity is measured on both sides: a
     // public-block arm resolves to its bag — the designer's `title` control is
     // a declared member there, and the bag still carries the spec's tombstone
-    // for `icon` — while a top-level arm is untouched by it.
+    // for `breadcrumb` (17.x) — while a top-level arm is untouched by it. The
+    // `icon` tombstone (17.0.0) aged out of the bag at spec 18.2
+    // (objectstack#25767), so the bag reads it as MISSING now.
     const header = NODE_ORACLES['page:header'];
     expect(header, 'no node arm resolved for page:header').toBeTruthy();
     expect(listedShapeKeys(header)).toContain('title');
     expect(listedShapeKeys(header), 'judged at the node, not at its bag').not.toContain('properties');
     expect(judge(header, 'title')).toBeUndefined();
-    expect(judge(header, 'icon')?.kind).toBe('RETIRED');
+    expect(judge(header, 'breadcrumb')?.kind).toBe('RETIRED');
+    expect(judge(header, 'icon')?.kind).toBe('MISSING');
     expect(listedShapeKeys(NODE_ORACLES['object-kanban'])).toContain('groupBy');
     expect(listedShapeKeys(NODE_ORACLES['object-kanban'])).toContain('type');
   });
@@ -329,11 +332,15 @@ describe('BLOCK_CONFIG ↔ node-schema parity — the instruments (objectui#8216
   });
 
   it('the RETIRED probe separates a tombstone from an ordinary member', () => {
-    // `PageHeaderProps.icon` is the canonical tombstone (objectui#3829): still a
-    // listed key, refused by name. Without this pair the retired direction could
-    // be reporting nothing at all and read identically.
-    expect(listedShapeKeys(SPEC_ORACLES['page:header'])).toContain('icon');
-    expect(judge(SPEC_ORACLES['page:header'], 'icon')?.kind).toBe('RETIRED');
+    // `PageHeaderProps.breadcrumb` is the tombstone the pin still carries
+    // (objectstack#20758, spec 17.x): a listed key, refused by name. Without
+    // this pair the retired direction could be reporting nothing at all and
+    // read identically. (`icon`, the canonical tombstone of objectui#3829, aged
+    // out at spec 18.2 — objectstack#25767 — and reads MISSING now.)
+    expect(listedShapeKeys(SPEC_ORACLES['page:header'])).toContain('breadcrumb');
+    expect(judge(SPEC_ORACLES['page:header'], 'breadcrumb')?.kind).toBe('RETIRED');
+    expect(listedShapeKeys(SPEC_ORACLES['page:header'])).not.toContain('icon');
+    expect(judge(SPEC_ORACLES['page:header'], 'icon')?.kind).toBe('MISSING');
     expect(shapeMemberTypeName(SPEC_ORACLES['page:header'], 'title')).toBeTruthy();
     // …and on the node face, where `retirementTombstone()` lives.
     expect(judge(NODE_ORACLES['object-kanban'], 'groupField')?.kind).toBe('RETIRED');

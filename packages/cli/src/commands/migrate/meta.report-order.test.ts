@@ -515,7 +515,9 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
     // No authored link crosses a hop yet, though `SemanticMigration.conversionIds`
     // allows one, so this pin adds it: a protocol-18 entry made to judge a
     // protocol-17 conversion. Everything else is the chain's own result.
-    const earlier = 'action-execute-to-target';
+    // (`action-execute-to-target`, the conversion this replayed until #25767,
+    // aged out with its 16.x kit; this one is a step-17 member that stays.)
+    const earlier = 'sharing-rule-access-level-full-to-edit';
     const conversion = ALL_CONVERSIONS.find((c) => c.id === earlier)!;
     const judgeId = DECISION_JUDGE;
     const { result, lines } = run(

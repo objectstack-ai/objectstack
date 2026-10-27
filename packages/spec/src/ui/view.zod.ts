@@ -3014,8 +3014,6 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  // `striped` / `bordered` — tombstoned at the bottom of this shape with
-  // `virtualScroll` (#7176, pass-through-only; see the retired block below).
   compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
 
   /** Selection */
@@ -3241,46 +3239,6 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the list view'),
 
-  // `responsive` / `performance` REMOVED (#3896 audit close-out): authorable
-  // and inert — no renderer in either repo read them (re-grepped 2026-07-16,
-  // objectui@fb35e48; ledger: dead).
-  responsive: retiredKey(
-    '`view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  performance: retiredKey(
-    '`view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
-    'Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
-  // enforce-or-remove; maintainer ruling 2026-08-10). Every measured reader was
-  // a forwarding copy — react spec-bridge → plugin-list → plugin-view/app-shell
-  // — and the chain ends at ObjectGrid, which never spells any of the three:
-  // copy-without-apply is dead in effect. Per the ruling, if objectui wants one
-  // of these as real behavior, that is an implementation card filed first, and
-  // the key stays retired pending it.
-  striped: retiredKey(
-    '`view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
-    'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  bordered: retiredKey(
-    '`view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
-    "is the renderer's own constant, not authorable). Delete the key. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  virtualScroll: retiredKey(
-    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
-    'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }));
 
 /**
@@ -4687,15 +4645,6 @@ export const FormViewSchema = lazySchema(() => strictObject({
     maxRows: z.number().optional(),
   })).optional().describe('Inline master-detail child collections'),
 
-  // `defaultSort` REMOVED (#3896 audit close-out): no reader in either repo —
-  // related lists sort by their OWN list view's sort, never by this.
-  defaultSort: retiredKey(
-    '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
-    'Delete the key and set the sort on the related list view instead. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
   /** Public form sharing configuration */
   sharing: SharingConfigSchema.optional().describe('Public sharing configuration for this form'),
 
@@ -4824,17 +4773,6 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaults: z.record(z.string(), z.unknown()).optional()
     .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;).'),
 
-  // `aria` REMOVED from the FORM view (#3896 audit close-out): no form
-  // renderer applied it (plugin-form/SchemaForm never read schema.aria) — an
-  // ACCESSIBILITY claim that is merely accepted is false compliance, the
-  // requiresConfirmation shape.
-  aria: retiredKey(
-    '`form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form ' +
-    'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
-    'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
-    'renderer issues rather than per-view attribute overrides. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would
   // be a silent no-op — the worst failure mode for authored (and especially

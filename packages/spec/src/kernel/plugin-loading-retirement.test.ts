@@ -18,11 +18,14 @@ import { ManifestSchema } from './manifest.zod';
 // vocabulary as proof the platform isolates plugins, wrote the config, and got a
 // clean parse and zero isolation.
 //
-// Route: `retiredKey()` tombstone, NOT plain deletion. `ManifestSchema` is not
-// `.strict()`, so deleting the key would make zod strip it in silence —
-// replacing an inert declaration with an invisible one (the #3726 / #3733 shape,
-// ADR-0104). The tombstone is audible in two channels: `tsc` (the key's input
-// type is `never`) and the parse below.
+// Route at the time: `retiredKey()` tombstone, NOT plain deletion — then
+// `ManifestSchema` was not `.strict()`, so deleting the key would have made zod
+// strip it in silence (the #3726 / #3733 shape, ADR-0104). The surface closed
+// since, and the tombstone — a 16.x retirement kit — aged out of the shape at
+// 18 (#25767, ADR-0087 amendment, D2 = A). What keeps the removal audible now
+// is the strict refusal itself: `tsc` (TS2353, the key does not exist on the
+// type) and the `unrecognized_keys` issue below, which names the key and the
+// protocol upgrade guide the prescription moved to.
 //
 // ⚠️ On the assertion set. The dispatch asked for the ADR-0112 rejection
 // envelope (`code` + `status`) as the floor for a rejection-class case. That
@@ -47,62 +50,48 @@ describe('manifest.loading retirement', () => {
     name: 'Example Plugin',
   } as const;
 
-  it('REJECTS an authored `loading` block, naming the key and carrying the fix', () => {
-    const result = ManifestSchema.safeParse({
-      ...baseManifest,
-      loading: { strategy: 'lazy' },
-    });
-
+  /** The one `unrecognized_keys` issue of a refused manifest, naming `loading`. */
+  const unknownKeyRefusal = (loading: Record<string, unknown>) => {
+    const result = ManifestSchema.safeParse({ ...baseManifest, loading });
     expect(result.success).toBe(false);
-    if (result.success) return; // narrowing; the assertion above already failed
+    if (result.success) return undefined;
+    const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys') as
+      | { code: string; keys: string[]; path: PropertyKey[]; message: string }
+      | undefined;
+    expect(issue, 'the refusal must be the strict unknown-key one').toBeDefined();
+    return issue!;
+  };
 
-    const issue = result.error.issues.find((i) => i.path[0] === 'loading');
-    expect(issue, 'the refusal must name `loading`').toBeDefined();
+  it('REFUSES an authored `loading` block as an unknown key, naming the key and the upgrade guide', () => {
+    const issue = unknownKeyRefusal({ strategy: 'lazy' })!;
     // The machine-readable half of the envelope this surface actually has.
-    expect(issue!.code).toBe('invalid_type');
-    expect(issue!.path).toEqual(['loading']);
-    // The prescription itself — this string IS the migration doc for whoever
-    // hits it, so it is contract, not commentary.
-    expect(issue!.message).toMatch(/`manifest\.loading`.*removed.*17\.0\.0/s);
-    expect(issue!.message).toMatch(/Delete the key/s);
+    expect(issue.keys).toEqual(['loading']);
+    expect(issue.path).toEqual([]);
+    // No tombstone issue beside it: the key is unknown now, not declared `never`.
+    expect(ManifestSchema.safeParse({ ...baseManifest, loading: { strategy: 'lazy' } }).error!.issues
+      .filter((i) => i.path[0] === 'loading')).toEqual([]);
+    // Where the prescription (sandboxing never isolated anything; the trust
+    // tier is `manifest.runtime`) now lives — the message says so.
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
-  it('REJECTS the sandboxing block specifically, since that is the dangerous one', () => {
-    const result = ManifestSchema.safeParse({
-      ...baseManifest,
-      loading: { sandboxing: { enabled: true, isolationLevel: 'process' } },
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) return;
-
-    const issue = result.error.issues.find((i) => i.path[0] === 'loading');
-    expect(issue!.code).toBe('invalid_type');
-    // The prescription must say plainly that no isolation was ever applied —
-    // an author who believed otherwise has a security decision to revisit, and
-    // silence here is what made the inert key dangerous in the first place.
-    expect(issue!.message).toMatch(/never isolated anything/s);
-    expect(issue!.message).toMatch(/manifest\.runtime/s);
+  it('REFUSES the sandboxing block the same way — the dangerous one is not stripped in silence', () => {
+    // An author who believed the block isolated anything has a security
+    // decision to revisit; a clean parse here is exactly what made the inert
+    // key dangerous, and the strict refusal is what forbids it.
+    const issue = unknownKeyRefusal({ sandboxing: { enabled: true, isolationLevel: 'process' } })!;
+    expect(issue.keys).toEqual(['loading']);
   });
 
-  it('REJECTS hotReload too, and points at the surviving vocabulary', () => {
-    const result = ManifestSchema.safeParse({
-      ...baseManifest,
-      loading: { hotReload: { enabled: true, strategy: 'state-preserve' } },
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.issues.find((i) => i.path[0] === 'loading')!.code).toBe('invalid_type');
+  it('REFUSES hotReload too', () => {
+    expect(unknownKeyRefusal({ hotReload: { enabled: true, strategy: 'state-preserve' } })!.keys).toEqual(['loading']);
   });
 
   it('parses cleanly once the key is deleted, and grows no `loading` property', () => {
     const parsed = ManifestSchema.parse({ ...baseManifest });
     expect(parsed.id).toBe('com.example.plugin');
-    // Absence must stay absence. `ManifestSchema` is closed now, so a plain
-    // deletion would no longer strip an authored `loading` in silence — it would
-    // refuse it with a bare unknown-key message, without the prescription; this
-    // pin plus the rejection above are what keep the tombstone honest.
+    // Absence must stay absence. `ManifestSchema` is closed, which is the whole
+    // reason the tombstone could age out without the key going silent again.
     expect(parsed).not.toHaveProperty('loading');
   });
 

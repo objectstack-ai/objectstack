@@ -136,16 +136,26 @@ describe('lintLivenessProperties', () => {
   // UNPARSED stack (`os lint` does not Zod-parse), grades them dead. Until
   // #16094 this pin asserted silence; the silence was the opt-in's, not the
   // tombstone's.
-  it('retired flow keys are graded dead when the rule is handed an unparsed stack', () => {
+  //
+  // #25767 (ADR-0087 D2 = A): these two were ≤16.x retirements, so their
+  // tombstones aged out and left the shape, and their `dead` rows left the
+  // ledger with them (a strict-removed key has no row — check:liveness calls a
+  // left-behind row an ORPHAN). The rule therefore has nothing to grade them
+  // by; the strict parse refuses them as unknown keys, with the protocol
+  // upgrade guide link in the refusal. Pinned the other way round now, with a
+  // still-`dead` row in the SAME call so a silent walk cannot pass it.
+  it('flow keys retired at or below 16.x are no longer graded — their rows left with their tombstones (#25767)', () => {
     const findings = lintLivenessProperties({
+      objects: [{ name: 'widget', externalSharingModel: 'read' }],
       flows: [{
         name: 'f1',
         errorHandling: { fallbackNodeId: 'n2' },
         nodes: [{ id: 'n2', outputSchema: { type: 'object' } }],
       }],
     });
-    expect(ruleOf(findings, 'errorHandling.fallbackNodeId')).toBe(LIVENESS_DEAD_PROPERTY);
-    expect(ruleOf(findings, 'nodes.outputSchema')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(findings.some((f) => f.message.includes('externalSharingModel'))).toBe(true);
+    expect(ruleOf(findings, 'errorHandling.fallbackNodeId')).toBeUndefined();
+    expect(ruleOf(findings, 'nodes.outputSchema')).toBeUndefined();
   });
 
   it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {
@@ -206,11 +216,17 @@ describe('lintLivenessProperties', () => {
   // above). form.data is the sweep's one CORRECTION: the removal attempt broke
   // the build — defineForm writes data.provider='schema' on every metadata
   // form — so its ledger entry flipped to live and it must stay silent.
-  it('retired view keys are graded dead; the corrected live key stays silent', () => {
+  //
+  // #25767: `list.responsive` / `form.defaultSort` were ≤16.x retirements, so
+  // the tombstones and their rows are gone and the rule no longer grades them
+  // (the strict parse refuses them as unknown keys). The 17.x list tombstones
+  // (`filterableFields`, `pageName`, `tabs`) still carry `dead` rows, so one of
+  // them is the positive this case keeps.
+  it('retired view keys are graded dead while their tombstone stands; the corrected live key stays silent', () => {
     const findings = lintLivenessProperties({
       views: [{
         object: 'task',
-        list: { type: 'grid', responsive: { breakpoint: 'md' } },
+        list: { type: 'grid', responsive: { breakpoint: 'md' }, filterableFields: ['title'] },
         form: {
           type: 'wizard',
           sections: [{ fields: ['title'] }],
@@ -219,8 +235,9 @@ describe('lintLivenessProperties', () => {
         },
       }],
     });
-    expect(ruleOf(findings, 'list.responsive')).toBe(LIVENESS_DEAD_PROPERTY);
-    expect(ruleOf(findings, 'form.defaultSort')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'list.filterableFields')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'list.responsive')).toBeUndefined();
+    expect(ruleOf(findings, 'form.defaultSort')).toBeUndefined();
     expect(paths(findings).some((m) => m.includes('form.data'))).toBe(false);
   });
 
@@ -230,15 +247,21 @@ describe('lintLivenessProperties', () => {
   // this rule silent until #16094 made the `dead` verdict warn on its own. At a
   // parsing door the tombstone's rejection still comes first; handed an
   // unparsed stack, the rule now grades them dead.
-  it('the #7176 pass-through-only list keys are graded dead when the rule is handed an unparsed stack', () => {
+  //
+  // #25767: the #7176 keys were 16.x retirements, so at 18 their tombstones
+  // aged out and their rows left the ledger. Handed an unparsed stack the rule
+  // now has no row for them; a parsing door refuses them as unknown keys. The
+  // 17.x `list.pageName` tombstone in the same call is the anti-vacuity.
+  it('the #7176 pass-through-only list keys are no longer graded — their rows left with their tombstones (#25767)', () => {
     const findings = lintLivenessProperties({
       views: [{
         object: 'task',
-        list: { type: 'grid', striped: true, bordered: true, virtualScroll: true },
+        list: { type: 'grid', striped: true, bordered: true, virtualScroll: true, pageName: 'tasks' },
       }],
     });
+    expect(ruleOf(findings, 'list.pageName')).toBe(LIVENESS_DEAD_PROPERTY);
     for (const key of ['list.striped', 'list.bordered', 'list.virtualScroll']) {
-      expect(ruleOf(findings, key), key).toBe(LIVENESS_DEAD_PROPERTY);
+      expect(ruleOf(findings, key), key).toBeUndefined();
     }
   });
 
@@ -609,12 +632,27 @@ describe('lintLivenessProperties', () => {
     // so the hint is the `dead` default, never the row's note (the #16094
     // author-facing block at the bottom of this file). Pinned per key, so a row
     // that leaves the ledger or changes verdict shows up by name.
+    //
+    // #25767: the four #5010 keys were ≤16.x retirements, so their tombstones
+    // aged out and their rows left the ledger — the rule grades nothing for
+    // them now, and the strict widget parse refuses them as unknown keys. No
+    // widget-level `dead` row remains one `children` level down (the depth the
+    // ledger read walks; the `chartConfig.*` rows sit two down and were never
+    // graded), so the per-key pin moves to the dashboard's own `refreshInterval`
+    // row — a 17.x tombstone still `dead` in the ledger; the four are pinned
+    // ABSENT below.
+    it('grades the retired dashboard `refreshInterval` dead when handed an unparsed stack (#16094)', () => {
+      const [dashboard] = dash({}).dashboards;
+      const findings = lintLivenessProperties({ dashboards: [{ ...dashboard, refreshInterval: 60 }] });
+      expect(ruleOf(findings, 'refreshInterval')).toBe(LIVENESS_DEAD_PROPERTY);
+    });
+
     it.each(['actionUrl', 'actionType', 'actionIcon', 'aria'])(
-      'grades the retired `%s` dead when handed an unparsed stack (#5010, #16094)',
+      'no longer grades `%s` — a ≤16.x retirement whose row left with its tombstone (#25767)',
       (key) => {
         const value = key === 'aria' ? { ariaLabel: 'Total pipeline' } : 'x';
         const findings = lintLivenessProperties(dash({ [key]: value }));
-        expect(ruleOf(findings, `widgets.${key}`)).toBe(LIVENESS_DEAD_PROPERTY);
+        expect(ruleOf(findings, `widgets.${key}`)).toBeUndefined();
       },
     );
 
@@ -631,23 +669,20 @@ describe('lintLivenessProperties', () => {
     // warning and not six.
     // Since #16094 the retired keys warn, so this one call also proves the
     // dashboard walk is registered and running: the `colorVariant` silence sits
-    // beside four findings from the same walk, same widget, same ledger load.
+    // beside the `refreshInterval` finding from the same walk, same dashboard,
+    // same ledger load (#25767: the widget-level retired keys aged out).
     it('the dashboard silence is a real verdict, not a lint that stopped loading ledgers', () => {
+      const [dashboard] = dash({
+        chartConfig: { type: 'bar', xAxis: 'region', yAxis: 'total', series: ['total'] },
+        colorVariant: 'teal',
+      }).dashboards;
       const findings = lintLivenessProperties({
         objects: [{ name: 'widget', externalSharingModel: 'read' }],
-        ...dash({
-          actionUrl: '/apps/sales/orders',
-          actionType: 'url',
-          actionIcon: 'plus',
-          aria: { ariaLabel: 'Total pipeline' },
-          colorVariant: 'teal',
-        }),
+        dashboards: [{ ...dashboard, refreshInterval: 60 }],
       });
       const messages = findings.map((f) => f.message);
       expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
-      for (const retired of ['actionUrl', 'actionType', 'actionIcon', 'aria']) {
-        expect(ruleOf(findings, `widgets.${retired}`), retired).toBe(LIVENESS_DEAD_PROPERTY);
-      }
+      expect(ruleOf(findings, 'refreshInterval')).toBe(LIVENESS_DEAD_PROPERTY);
       expect(messages.some((m) => m.includes('widgets.colorVariant'))).toBe(false);
     });
 
@@ -1666,16 +1701,17 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
   // either way, which is the point.
   it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
     // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
-    // when the server began resolving picklist references (`live`). What is
-    // left is `conditionalRequired`, a `retiredKey` tombstone whose `dead` row
-    // warns on its own since #16094 — but a parse refuses it first, so it is no
-    // subject for #11385 either. `mailAssociation` (#22870) opted in as
+    // when the server began resolving picklist references (`live`). The last
+    // `dead` row, `conditionalRequired`, warned on its own since #16094 — a
+    // parse refused it first, so it was no subject for #11385 either — and left
+    // on #25767 when its ≤16.x tombstone aged out of the shape (a strict-removed
+    // key keeps no row). `mailAssociation` (#22870) opted in as
     // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
     // field, declared ahead of the mailbox ingest that reads it — and left this
     // set when that reader landed and the row flipped `live` (#22871): a
     // verdict that moved, so it was never a stable subject either. The
     // synthetic slot below is warned by nothing shipped.
-    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
+    expect([...authorWarnedProperties('field')]).toEqual([]);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
@@ -1877,12 +1913,15 @@ describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () =
   // adds for such a key is the rule's verdict when it IS handed an unparsed
   // stack (the `#7176` pin above), not a second report at a parsing door.
   it('CONTROL: a tombstoned dead key is refused at parse by the shipped schema', () => {
+    // `filterableFields` (17.x, #20925) is the control since #25767: `striped`
+    // was the 16.x one and its tombstone has aged out — it is still refused,
+    // but as a strict unknown key on `list`, not at its own path.
     const parsed = ViewSchema.safeParse({
       object: 'fx_account',
-      list: { type: 'grid', striped: true, data: { provider: 'object', object: 'fx_account' }, columns: [{ field: 'name' }] },
+      list: { type: 'grid', filterableFields: ['name'], data: { provider: 'object', object: 'fx_account' }, columns: [{ field: 'name' }] },
     });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues.map((i) => i.path.join('.'))).toContain('list.striped');
+    expect(parsed.error?.issues.map((i) => i.path.join('.'))).toContain('list.filterableFields');
   });
 
   // `manifest.runtime` is the one `live-elsewhere` row. The verdict now admits

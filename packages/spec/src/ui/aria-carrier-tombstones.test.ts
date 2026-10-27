@@ -37,6 +37,15 @@ import { ObjectSchema } from '../data/object.zod';
  * class. `retiredKey()` is a Zod `never` whose issue carries the guidance as
  * its `message`, so here the wording IS the whole contract (#5240).
  *
+ * [#25767] The two tombstones this file was written for — `dashboard.widgets[].aria`
+ * and `App.aria`, both 17.0.0 — were 16.x retirement kits and aged out of
+ * their shapes at 18 (ADR-0087 amendment, D2 = A). Each key is a strict
+ * unknown key now, refused with the protocol upgrade guide the prescriptions
+ * moved to, so there is no enumeration left on either to go stale at the
+ * other; the first case below pins that shape. The ground-truth half and the
+ * third member of the family (`ChartConfig.aria`, 17.5.0, still in its
+ * window) carry on unchanged.
+ *
  * ⚠️ Two halves, two directions — stated up front because only one of them can
  * go red on the defect this file was written for:
  *
@@ -69,68 +78,21 @@ describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
     return result.error!.issues.map((i) => i.message).join('\n');
   };
 
-  it('the widget tombstone still fires, and points at surfaces that survived 17.0.0', () => {
-    const message = messageOf(DashboardWidgetSchema.safeParse(widgetWithAria));
-
-    // Anti-vacuity. Deleting the tombstone outright does not silence this file:
-    // `DashboardWidgetSchema` is a `strictObject`, so the key would still be
-    // refused — but as a generic unrecognized-key guidance that cannot contain
-    // the prescription's own opening clause. Wording drift fails the assertions
-    // below; DISAPPEARANCE fails this one.
-    expect(
-      message,
-      'the widget `aria` prescription must still be reachable through the parse',
-    ).toContain('`dashboard.widgets[].aria` was removed');
-
-    // Every surface that still declares `aria: AriaPropsSchema` and is graded
-    // `live` in the liveness ledger, spelled the way an author writes it. A
-    // prescription NARROWER than the truth is the #4964 defect.
-    for (const live of ['`page.aria`', '`page.components[].aria`', 'list view `aria`']) {
-      expect(message, `the prescription must still name ${live}`).toContain(live);
+  it('the two aged-out tombstones are strict unknown keys now, refused with the upgrade guide (#25767)', () => {
+    for (const [name, result] of [
+      ['`dashboard.widgets[].aria`', DashboardWidgetSchema.safeParse(widgetWithAria)],
+      ['`App.aria`', AppSchema.safeParse(appWithAria)],
+    ] as const) {
+      const message = messageOf(result);
+      // The refusal names the key and where its prescription lives — and
+      // carries no enumeration of carriers, so the #6756 loop cannot re-form.
+      expect(message, name).toContain('`aria`');
+      expect(message, name).toContain('https://objectstack.ai/docs/protocol-upgrade');
+      expect(message, name).not.toContain('was removed');
     }
-
-    // ...and nothing retired. WIDER than the truth is the #6756 defect itself:
-    // `app.aria` is `dead` in `liveness/app.json` and stripped by the
-    // protocol-17 `app-dead-authoring-keys-removed` conversion, so naming it
-    // sent the author to a door that does not exist. Matched by idiom (any
-    // mention at all), not by the exact sentence that used to carry it.
-    expect(
-      message,
-      'the prescription must not point at `app.aria`, retired in this same major',
-    ).not.toMatch(/app\.aria/i);
-
-    // None of the above may be bought by weakening the prescription itself.
-    expect(message).toContain('author a `title`');
-    // The conversion STRIPS this key (`stripKeys(..., [... 'aria'])`). The
-    // key's fate is the body's job ("Delete the key."), asserted above; the
-    // `os migrate meta` sentence states what the TOOL does and is the house
-    // sentence (#6856 route D — superseding the #6854 `to remove it` pin,
-    // an accepted cost of that ruling). Class-wide shape enforcement lives in
-    // `shared/retired-key-migrate-sentence.test.ts`; this pin holds the one
-    // site that already flipped once.
-    expect(message).toContain('Delete the key.');
-    expect(message).toContain('os migrate meta --from 16');
-    expect(message).toMatch(/to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/);
-  });
-
-  it('the App.aria tombstone points at a page component, not at the retired widget surface', () => {
-    const message = messageOf(AppSchema.safeParse(appWithAria));
-
-    // Anti-vacuity, same shape as above.
-    expect(
-      message,
-      'the `App.aria` prescription must still be reachable through the parse',
-    ).toContain('`App.aria` was removed');
-
-    expect(message, 'the prescription must name the surviving carrier').toContain('`page.components[].aria`');
-
-    // The reciprocal half of the loop. "component/widget" read as an
-    // instruction sends half its readers at `dashboard.widgets[].aria`, which
-    // #5010 retired in this same 17.0.0.
-    expect(
-      message,
-      'the prescription must not send the author to a dashboard widget',
-    ).not.toMatch(/widget/i);
+    // The widget refusal must not point the author at `app.aria` either — the
+    // suggester offers no rename onto a key the shell no longer declares.
+    expect(messageOf(DashboardWidgetSchema.safeParse(widgetWithAria))).not.toMatch(/app\.aria/i);
   });
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -361,6 +361,13 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
     // The `os lint` twin of that pin: `os lint` never parses, so the lint
     // rule reports the key by name, and this file authors it to assert that.
     'packages/lint/src/list-view-filterable-fields-retired.test.ts',
+    // [#25767] The view union's prescription pin authors the key at the
+    // container and overlay doors to assert the branch-typed refusal names this
+    // kit's prescription, and the liveness advisory's witnesses author it on an
+    // UNPARSED intake to prove the ledger's `dead` verdict still warns there —
+    // both took this key over from `striped` when its 16.x tombstone aged out.
+    'packages/spec/src/ui/view-union-retirement-prescription.test.ts',
+    'packages/lint/src/lint-liveness-properties.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement payload on purpose.

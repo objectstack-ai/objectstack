@@ -95,10 +95,12 @@ const RUN_TIMEOUT = 120_000;
 const SHAPES = [
   {
     from: 16,
-    member: "views: [{ object: 'rg_item', list: { type: 'grid', columns: ['title'], striped: true } }]",
-    converted: ['view-list-passthrough-keys-removed'],
-    before: ', striped: true',
-    after: '',
+    // A step-17 conversion that survives the 16.x kits' age-out (#25767): the
+    // row used to ride `view-list-passthrough-keys-removed`, which left with them.
+    member: "sharingRules: [{ name: 'rg_share', type: 'criteria', object: 'rg_item', accessLevel: 'full', condition: 'record.title != null', sharedWith: { type: 'business_unit', value: 'bu_sales' } }]",
+    converted: ['sharing-rule-access-level-full-to-edit'],
+    before: "accessLevel: 'full'",
+    after: "accessLevel: 'edit'",
   },
   { from: 17, member: "dashboards: [{ name: 'ops', label: 'Ops', widgets: [], refreshInterval: 300 }]", converted: ['dashboard-refresh-interval-to-refresh-interval-seconds'], before: 'refreshInterval: 300', after: 'refreshIntervalSeconds: 300' },
 ];

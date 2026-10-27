@@ -315,9 +315,12 @@ describe('the contract walk can fail, at every depth it judges (objectui#11968)'
     expect(violationsOf('wait', [field(['waitEventConfig', 'bogusKey'])])).toEqual([
       "wait writes waitEventConfig.bogusKey: 'bogusKey' is not declared in FlowNodeSchema",
     ]);
-    // `script.template` survives in the shape only as a `[REMOVED]` tombstone.
+    // `script.template` survived in the shape as a `[REMOVED]` tombstone through
+    // spec 18.1; at 18.2 the tombstone aged out one major on (objectstack#25767),
+    // so the walk reads the key as undeclared — the same verdict as a stray key,
+    // which is the contract's verdict now too (a strict unknown-key refusal).
     expect(violationsOf('script', [field(['config', 'template'])])).toEqual([
-      "script (node type 'script') writes config.template: 'template' is a retired tombstone in its config contract",
+      "script (node type 'script') writes config.template: 'template' is not declared in its config contract",
     ]);
   });
 

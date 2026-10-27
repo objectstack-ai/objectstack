@@ -293,10 +293,13 @@ function decisionModeWithConditionsRefusal(mode: unknown): string {
  *    spelling of `function`, and the `invoke_function` marker named nothing on
  *    its own.
  *
- * All five keys are tombstoned below; the ADR-0087 D2 conversion
- * `flow-node-script-branch-keys-removed` rewrites stored metadata rows (moving
- * a shorthand `actionType` into `function`, where that is what it meant) and is
- * what `os migrate meta` lists as a mechanical edit for authored sources.
+ * All five keys are refused below as strict unknown keys: their tombstones
+ * were a ≤16.x retirement kit and aged out on #25767 (ADR-0087 D2 = A), together
+ * with the `flow-node-script-branch-keys-removed` conversion that rewrote stored
+ * metadata rows (moving a shorthand `actionType` into `function`, where that is
+ * what it meant). A stored row still carrying one of them is canonicalized on a
+ * release that carries the step (`os migrate meta --stored --apply` on 18.1 or
+ * earlier); the refusal's trailing sentence names the protocol upgrade guide.
  */
 export const ScriptConfigSchema = lazySchema(() => strictObject({
   surface: 'this script node config',
@@ -333,54 +336,6 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
   outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
     .describe("Flow variable the function's return value is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
 
-  // The four retired dispatch branches (#4343). Each tombstone carries its own
-  // prescription because the three replacements are different mechanisms, not
-  // one rename: real messaging is `notify`, Slack is a connector, and inline
-  // logic belongs in a registered function.
-  actionType: retiredKey(
-    '`script.config.actionType` was removed in @objectstack/spec 17 — none of its values '
-    + 'did what it said. The two built-ins were logger-backed stubs that recorded the intent and '
-    + 'delivered nothing under any configuration, and every other value was a second spelling of '
-    + '`config.function`. Replace it per branch: for `email` use a `notify` node (it delivers '
-    + 'through the messaging service — the in-app inbox by default, real email once '
-    + '`@objectstack/plugin-email` is installed); for `slack` use a `connector_action` node with '
-    + 'the Slack connector, or an `http` node posting to a webhook; for anything else, move the '
-    + 'name into `config.function`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for the shorthand '
-    + 'case into `config.function`; `--write` applies the ones it can prove, and the stub and '
-    + 'marker values are removed.',
-  ),
-  template: retiredKey(
-    '`script.config.template` was removed in @objectstack/spec 17 — it fed only the '
-    + 'logger-backed `email`/`slack` stubs, which never rendered or sent a message, so no template '
-    + 'id was ever resolved. Delete the key. For templated content use a `notify` node and name an '
-    + 'email template (`email_template`) in its own `template` key, with `templateData` filling its '
-    + 'placeholders: the email and in-app inbox channels render that template in each recipient\'s '
-    + 'locale. Otherwise the node carries inline `title`/`message`. The messaging service\'s '
-    + '`sys_notification_template` rows are read only by the `email` and `sms` channels, `email` '
-    + 'only when the node names no template. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  recipients: retiredKey(
-    '`script.config.recipients` was removed in @objectstack/spec 17 — the addresses were '
-    + 'logged, never messaged: the `email`/`slack` branches it fed delivered nothing. Use a '
-    + '`notify` node, whose `recipients` (user ids, field refs or addresses) reach the messaging '
-    + 'service for real. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  variables: retiredKey(
-    '`script.config.variables` was removed in @objectstack/spec 17 — it injected values '
-    + 'into a template no side effect ever rendered. Delete the key. A `notify` node carries '
-    + 'structured data in `payload`; a registered function takes it in `config.inputs`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  script: retiredKey(
-    '`script.config.script` was removed in @objectstack/spec 17 — the built-in runtime has '
-    + 'no server-side JS sandbox, so an inline body was recognized and never executed: the node '
-    + 'warned and completed as a no-op. Move the logic into a registered function '
-    + '(`defineStack({ functions })`) and name it in `config.function`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }));
 
 export type ScriptConfig = z.input<typeof ScriptConfigSchema>;

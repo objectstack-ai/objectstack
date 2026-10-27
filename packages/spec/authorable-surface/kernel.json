@@ -272,7 +272,6 @@
     "kernel/Manifest:id",
     "kernel/Manifest:installModes",
     "kernel/Manifest:integrity",
-    "kernel/Manifest:loading [RETIRED]",
     "kernel/Manifest:main",
     "kernel/Manifest:name",
     "kernel/Manifest:namespace",
