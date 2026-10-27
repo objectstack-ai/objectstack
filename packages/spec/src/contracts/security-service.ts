@@ -728,8 +728,8 @@ export interface ISecurityService {
    * get?" from the enforcement path rather than from a second copy of it.
    *
    * Answers one {@link PositionGrantSummary} per name, in input order. A name
-   * that names no position is described like any other: no holders, and only
-   * what the position-name fold would grant a holder of that name.
+   * that names no position is described like any other: no holders and no
+   * permission sets.
    *
    * **THROWS on a read failure** — a holder count or a grant that could not be
    * read is never reported as `0` or as none.
