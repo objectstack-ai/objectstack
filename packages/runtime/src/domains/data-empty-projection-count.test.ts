@@ -112,7 +112,6 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
         ['GET list ?$select=, (the card)', 'GET', '/data/inquiry', { $select: ',' }, undefined, '$select', 'names no field'],
         ['GET list ?select= (the card)', 'GET', '/data/inquiry', { select: '' }, undefined, 'select', 'names no field'],
         ['GET list ?$count=maybe (the card)', 'GET', '/data/inquiry', { $top: '2', $count: 'maybe' }, undefined, '$count', 'must be true or false'],
-        ['POST query {"select":""}', 'POST', '/data/inquiry/query', {}, { select: '' }, 'select', 'names no field'],
         ['POST query {"fields":[]}', 'POST', '/data/inquiry/query', {}, { fields: [] }, 'fields', 'names no field'],
         ['GET by id ?select=', 'GET', '/data/inquiry/r1', { select: '' }, undefined, 'select', 'names no field'],
         ['GET by id ?select=,', 'GET', '/data/inquiry/r1', { select: ',' }, undefined, 'select', 'names no field'],
@@ -124,6 +123,28 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
         expect(answer.status, JSON.stringify(answer)).toBe(400);
         expect(answer.code).toBe('VALIDATION_ERROR');
         expect(answer.message).toContain(`Query parameter '${param}' ${sentence}`);
+        expect(reads.n - before, 'no read of the object — the refusal precedes the driver').toBe(0);
+    });
+
+    // [#26909] The body's published schema (`FindDataRequestSchema`) now
+    // declares the projection the normalizer enforces, so `select` / `$select`
+    // naming no field is refused where every other malformed body is: at the
+    // schema, `400 VALIDATION_FAILED` naming `query.<key>` (the #25269
+    // precedent for the page window). Still a 400, still before any read.
+    it.each<[string, Record<string, unknown>, string]>([
+        ['{"select":""}', { select: '' }, 'query.select'],
+        ['{"$select":","}', { $select: ',' }, 'query.$select'],
+        ['{"select":[]}', { select: [] }, 'query.select'],
+        ['{"select":["name",""]}', { select: ['name', ''] }, 'query.select'],
+    ])('POST query %s: 400 VALIDATION_FAILED naming the body key at the schema — no read', async (_name, body, field) => {
+        const before = reads.n;
+
+        const answer = await ask('POST', '/data/inquiry/query', {}, body);
+
+        expect(answer.status, JSON.stringify(answer)).toBe(400);
+        expect(answer.code).toBe('VALIDATION_FAILED');
+        const fields = (answer.body?.error?.details?.fields ?? []).map((f: { field: string }) => f.field);
+        expect(fields).toEqual([field]);
         expect(reads.n - before, 'no read of the object — the refusal precedes the driver').toBe(0);
     });
 
