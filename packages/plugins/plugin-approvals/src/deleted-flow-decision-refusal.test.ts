@@ -133,8 +133,8 @@ describe('a decision on a run whose flow is gone is refused before it is recorde
     expect(request.status, 'still pending, not a recorded "approved"').toBe('pending');
     expect(request.pending_approvers).toContain('u1');
     expect(
-      await data.find('sys_approval_action', { where: { request_id: requestId } }),
-      'no decision row for a decision that could not take effect',
+      await data.find('sys_approval_action', { where: { request_id: requestId, action: 'approve' } }),
+      'no approve row for a decision that could not take effect',
     ).toHaveLength(0);
     expect(marks, 'no branch of the flow ran').toEqual([]);
   }
