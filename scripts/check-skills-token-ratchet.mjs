@@ -580,7 +580,17 @@ export const CEILINGS = new Map([
 
   // objectstack-query
   ['skills/objectstack-query/rules/aggregation.md', 2357],
-  ['skills/objectstack-query/rules/filters.md', 2149],
+  // 2149 -> 2482: the now-anchored comparand `{ $now: true, addDays }` — the
+  // shape, the one example (overdue by each record's own grace days, the
+  // offset column holding negative days), where it is accepted (the six scalar
+  // comparisons on a date / datetime field) and what is refused — which the
+  // file did not teach, so an author reached for a stored formula field and a
+  // hook. +334 tokens on a landed 2148, 1 absorbed by headroom, ceiling +333.
+  // Nothing duplicated in the file to cut first (measured: no passage of the
+  // file restates another). Maintainer ruling 2026-10-27 on the decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-query/rules/filters.md', 2482],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-automation
@@ -690,7 +700,13 @@ export const CEILINGS = new Map([
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
   ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],
   ['skills/objectstack-platform/evals/config-plugins-ops.json', 1211],
-  ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
+  // 955 -> 1175: one regression case for the now-anchored comparand (the
+  // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
+  // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored
+  // formula field or `subDays`. +220 tokens, zero headroom to absorb any of
+  // it, ceiling +220; nothing duplicated in the file to cut first. Same ruling
+  // as the `rules/filters.md` row above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  ['skills/objectstack-query/evals/filters-pagination-search.json', 1175],
   ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1505],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
