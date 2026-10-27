@@ -91,10 +91,13 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: state.isAdmin, isResolved: true }),
 }));
 
-// No AI agent: the greeting row holds the builder chips alone.
+// One custom agent and no ask or build agent: AI is on here, so the build chip
+// keeps its "Build an app" form (objectstack#26614 gives the agent-less
+// deployment its own, `HomePage.noAgentsBuildChip-26614.test.tsx`), and no AI
+// CTA joins the greeting row, which holds the builder chips alone.
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [] }),
+  useAgents: () => ({ agents: [{ name: 'custom_helper' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => false,
 }));

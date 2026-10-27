@@ -535,6 +535,7 @@
     "RenderOperationMessageOptions": "src/system/operation-message.ts#RenderOperationMessageOptions (interface)",
     "RenderValidationMessageInput": "src/system/validation-message.ts#RenderValidationMessageInput (interface)",
     "RenderValidationMessageOptions": "src/system/validation-message.ts#RenderValidationMessageOptions (interface)",
+    "ReportBlockLike": "src/system/i18n-resolver.ts#ReportBlockLike (interface)",
     "ReportLike": "src/system/i18n-resolver.ts#ReportLike (interface)",
     "ResolveOptions": "src/system/i18n-resolver.ts#ResolveOptions (interface)",
     "ResolvedBook": "src/system/book.zod.ts#ResolvedBook (interface)",

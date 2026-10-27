@@ -69,6 +69,7 @@ const SHARED_SHOWCASE = [
   'test/showcase-anonymous-deny.dogfood.test.ts',
   'test/showcase-anonymous-deny-surfaces.dogfood.test.ts',
   'test/showcase-declarative-rbac-seeding.dogfood.test.ts',
+  'test/showcase-invoice-line-contributor-pair.dogfood.test.ts',
   'test/showcase-permission-zoo.dogfood.test.ts',
   'test/showcase-private-owd.dogfood.test.ts',
   'test/showcase-public-read-owd.dogfood.test.ts',

@@ -1,8 +1,10 @@
 {
   "$comment": [
     "Accepted exceptions for scripts/check-startup-registry-verdict.mjs (#4777).",
-    "SHRINK-ONLY and hand-edited under review: the checker fails on a stale entry, so a",
-    "site that gets fixed must have its entry deleted in the same PR. There is deliberately",
+    "SHRINK-ONLY and hand-edited under review: the checker reports a stale entry (it passes",
+    "since #26586), so a site that gets fixed is named for deletion on every run; a stale row",
+    "re-licenses its key until it is deleted. An entry whose file is still on disk but was not",
+    "read by the scan is refused, so a dead scan stays red. There is deliberately",
     "no `--fix`/`--update` flag — a generator would let a new violation be admitted by",
     "'just run the update command', which is precisely how a gate stops meaning anything.",
     "Every entry must name WHY it is still here and WHAT closes it.",

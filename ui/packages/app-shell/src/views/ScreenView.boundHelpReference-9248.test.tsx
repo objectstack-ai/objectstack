@@ -54,10 +54,10 @@ describe('objectui#9248 — `min` / `max` land on the numeric input', () => {
     expect(input).not.toHaveAttribute('max');
   });
 
-  it('a bound declared on a non-numeric input is not written onto it (a date input would read it as a date)', () => {
-    const { container } = renderScreen([{ name: 'due', label: 'Due', type: 'date', min: 1, max: 10 }]);
-    const input = container.querySelector('#ff-due');
-    expect(input).toHaveAttribute('type', 'date');
+  it('a bound declared on a non-numeric input is not written onto it (the date picker reads no numeric bound)', async () => {
+    renderScreen([{ name: 'due', label: 'Due', type: 'date', min: 1, max: 10 }]);
+    const input = await screen.findByRole('textbox', { name: 'Due' });
+    expect(input).toHaveAttribute('id', 'ff-due');
     expect(input).not.toHaveAttribute('min');
     expect(input).not.toHaveAttribute('max');
   });
@@ -123,7 +123,7 @@ describe('objectui#9248 — `inlineHelpText` is drawn under the control and desc
     expect(screen.getByText('Shown below')).toBeVisible();
   });
 
-  it('describes every control arm, not only the text input', () => {
+  it('describes every control arm, not only the text input', async () => {
     renderScreen([
       { name: 'body', label: 'Body', type: 'textarea', inlineHelpText: 'Body help' },
       { name: 'agree', label: 'Agree', type: 'boolean', inlineHelpText: 'Agree help' },
@@ -131,7 +131,7 @@ describe('objectui#9248 — `inlineHelpText` is drawn under the control and desc
       { name: 'qty', label: 'Qty', type: 'number', inlineHelpText: 'Qty help' },
     ]);
     expect(screen.getByRole('textbox', { name: 'Body' })).toHaveAccessibleDescription('Body help');
-    expect(screen.getByRole('checkbox', { name: 'Agree' })).toHaveAccessibleDescription('Agree help');
+    expect(await screen.findByRole('checkbox', { name: 'Agree' })).toHaveAccessibleDescription('Agree help');
     expect(screen.getByRole('combobox', { name: 'Kind' })).toHaveAccessibleDescription('Kind help');
     expect(screen.getByRole('spinbutton', { name: 'Qty' })).toHaveAccessibleDescription('Qty help');
   });
@@ -185,7 +185,7 @@ describe('objectui#9248 — a `type: \'lookup\'` field resolves its picker from 
 });
 
 describe('objectui#9248 — CONTROL: a field declaring none of the keys renders as before', () => {
-  it('no bound, no description, no help element, no picker', () => {
+  it('no bound, no description, no help element, no picker', async () => {
     const { container } = renderScreen([
       { name: 'qty', label: 'Qty', type: 'number' },
       { name: 'title', label: 'Title', type: 'text', placeholder: 'Type here' },
@@ -193,19 +193,21 @@ describe('objectui#9248 — CONTROL: a field declaring none of the keys renders 
       { name: 'acct', label: 'Account', type: 'text' },
     ]);
     const qty = screen.getByRole('spinbutton', { name: 'Qty' });
+    const agree = await screen.findByRole('checkbox', { name: 'Agree' });
     expect(qty).not.toHaveAttribute('min');
     expect(qty).not.toHaveAttribute('max');
     for (const control of [
       qty,
       screen.getByRole('textbox', { name: 'Title' }),
-      screen.getByRole('checkbox', { name: 'Agree' }),
+      agree,
       screen.getByRole('textbox', { name: 'Account' }),
     ]) {
       expect(control).not.toHaveAttribute('aria-describedby');
     }
     expect(container.querySelector('[id$="-help"]')).toBeNull();
     expect(container.querySelector('[data-testid^="lookup-trigger"]')).toBeNull();
-    // Each field is still exactly a label and its control.
+    // Each stacked field is still exactly a label and its control (the
+    // boolean is the inline row since objectstack#26579).
     for (const block of container.querySelectorAll('.space-y-1\\.5')) {
       expect(block.children).toHaveLength(2);
     }

@@ -52,6 +52,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, '..');
 const HELPER = 'cellRendererResolution.ts';
 const GRID = 'ObjectGrid.tsx';
+const GENERATE_COLUMNS = 'objectGridGenerateColumns.tsx';
 
 /**
  * Every non-test source file under `packages/plugin-grid/src`, as repo-relative
@@ -144,7 +145,7 @@ describe('objectui#8920 — one owner for the grid\'s cell-renderer resolution',
   it('⭐ ObjectGrid.tsx makes no direct resolver call', () => {
     // The card's own subject: six sites in this one file, three conventions.
     expect(
-      directCalls(read(GRID)),
+      directCalls([GRID, GENERATE_COLUMNS].map(read).join('\n')),
       'ObjectGrid.tsx called a published resolver directly. That is how a ' +
         '`format`-hinted textual column lost its renderer in four of six ' +
         'sites (objectui#8920): `getCellRenderer(field.type)` type-checks and ' +

@@ -12,7 +12,9 @@
  * stages render as upcoming.
  *
  * When `stages` is absent, the stages come from `statusField`'s picklist on
- * the record's object (objectui#11106) — see the `rawStages` read below.
+ * the record's object (objectui#11106) — see the `rawStages` read below. A
+ * stage whose option's `visibleWhen` rules this record out is not drawn at all
+ * (objectstack#26581) — see `stagesThisRecordWalks`.
  *
  * ── This surface is a READOUT, and it must look like one (objectui#5768) ──
  *
@@ -60,6 +62,7 @@ import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import type { RecordPathComponentProps } from '@object-ui/types';
 import { cn } from '@object-ui/components';
+import { evalFieldPredicate, type FieldRulePredicate } from '@object-ui/core';
 import { useDetailTranslation } from '../useDetailTranslation';
 import { declaredStageKinds, deriveStages, stageTerminalOfKind } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
@@ -68,6 +71,24 @@ const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
   return { designer: { 'data-obj-id': id, 'data-obj-type': type, style }, rest };
 };
+
+/**
+ * Dev mode, in this repository's established spelling for it — the build's
+ * `NODE_ENV`, read per call — the guard `record-related-list.tsx`,
+ * `plugin-gantt` and `plugin-map` put on their authoring diagnostics. The
+ * spelling-guess warning below is feedback for whoever wrote the picklist; a
+ * production bundle does not pay for it.
+ */
+const isDevBuild = (): boolean =>
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NODE_ENV !== 'production';
+
+/**
+ * The (object, field, guessed stages) triples already warned about, so a path
+ * re-rendering with the same picklist warns once, while a new guess on the
+ * same field (an option added) is reported afresh.
+ */
+const warnedSpellingGuesses = new Set<string>();
 
 /**
  * The label of a terminal stage on the desktop row: centred, and WRAPPING
@@ -126,6 +147,70 @@ function localizeStageLabels(stages: unknown, language: string): PathStage[] {
     out[idx] = { ...stage, label: pickLocalized(label, language) };
   }
   return out ?? (stages as PathStage[]);
+}
+
+/**
+ * The roots that name the ACTING USER, the list the server's option gate reads
+ * a predicate's roots against (`USER_SCOPE_ROOTS`, objectql
+ * `validation/rule-validator.ts`).
+ */
+const ACTING_USER_ROOT = /(^|[^.\w$])(current_user|user|ctx|os)(?![\w$])/;
+
+/**
+ * Does this predicate read the acting user? Read off the source with its
+ * string literals blanked, so a quoted `'user'` never counts. Its only error
+ * is an over-match, and an over-match keeps a stage, never hides one.
+ */
+function readsActingUser(pred: FieldRulePredicate): boolean {
+  const source = typeof pred === 'string' ? pred : typeof pred?.source === 'string' ? pred.source : '';
+  return ACTING_USER_ROOT.test(source.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''"));
+}
+
+/**
+ * The stages THIS record can walk (objectstack#26581): every stage, less those
+ * whose status-field option declares a `visibleWhen` that is FALSE for the
+ * record.
+ *
+ * The path used to show every option, so a stage the record's own columns rule
+ * out read as passed once the record was beyond it: hotclm's order contracts
+ * skip legal review by type, and their path ticked 「审查中 ✓」 anyway. The
+ * option already says which records it applies to: `visibleWhen` is "offered
+ * only when TRUE (else omitted)" (`SelectOptionSchema`, spec `data/field.zod.ts`),
+ * and the server refuses a write of a value whose predicate is false, so the
+ * record could not have stood on such a stage. Ruling: objectstack#26581
+ * comment 6442747364, letter A with its guardrail.
+ *
+ *   • Stages match options by VALUE, as `declaredStageKinds` reads `kind`, so
+ *     authored `stages[]` are filtered too.
+ *   • A predicate that reads the acting user hides nothing: it answers "who may
+ *     pick this value", not "does this record walk this stage".
+ *   • A predicate that cannot be evaluated keeps its stage: the render side
+ *     stays fail-open (ADR-0137 D3), as an option list does.
+ *   • The stage the record stands on is always kept: it is where the record is.
+ *
+ * No read is added: the record and its object definition are the ones the
+ * record context already holds.
+ */
+function stagesThisRecordWalks(
+  stages: PathStage[],
+  options: unknown,
+  record: Record<string, unknown> | undefined,
+  current: unknown,
+): PathStage[] {
+  if (!record || !Array.isArray(options)) return stages;
+  const gates = new Map<unknown, FieldRulePredicate>();
+  for (const o of options) {
+    if (o?.visibleWhen != null && !readsActingUser(o.visibleWhen)) gates.set(o.value, o.visibleWhen);
+  }
+  if (gates.size === 0) return stages;
+  const kept = stages.filter((s) => {
+    const gate = gates.get(s.value);
+    if (gate === undefined || s.value === current) return true;
+    return evalFieldPredicate(gate, record, true, undefined, undefined, {
+      context: `record:path stage '${String(s.value)}' (option visibleWhen)`,
+    });
+  });
+  return kept.length === stages.length ? stages : kept;
 }
 
 export interface RecordPathRendererProps {
@@ -220,7 +305,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
   // record context knows which object owns the field. Falls back to the
   // schema's own labels (already English in synth, possibly authored in
   // any language for full Lightning pages) when no translation is found.
-  const stages: PathStage[] = React.useMemo(() => {
+  const localizedStages: PathStage[] = React.useMemo(() => {
     if (rawStages.length === 0 || !statusField || !ctx?.objectName) return rawStages;
     const translated = translateOptions(ctx.objectName, statusField, rawStages as any);
     if (Array.isArray(translated) && translated.length === rawStages.length) {
@@ -229,6 +314,13 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
     return rawStages;
   }, [rawStages, statusField, ctx?.objectName, translateOptions]);
   const current = statusField && ctx?.data ? (ctx.data as any)[statusField] : undefined;
+  // Less the stages this record's own columns rule out (objectstack#26581) —
+  // see `stagesThisRecordWalks`. Both rows below read this one list.
+  const statusOptions = statusField ? (objectSchema as any)?.fields?.[statusField]?.options : undefined;
+  const stages: PathStage[] = React.useMemo(
+    () => stagesThisRecordWalks(localizedStages, statusOptions, ctx?.data as Record<string, unknown> | undefined, current),
+    [localizedStages, statusOptions, ctx?.data, current],
+  );
 
   // The lifecycle `kind` the status field's options declare (objectui#12907),
   // read off the same `objectSchema` the derivation above reads.
@@ -243,28 +335,74 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
   //      — `open` included, which is how a declared open stage spelled like a
   //      terminal stays a middle step: the spec's strict `stages[]` row can
   //      carry `won` / `lost`, so step 1 cannot say "open";
-  //   3. only for options that declare no kind, a spelling heuristic, so CRM
-  //      examples / Salesforce-style picklists ("closed_won", "closed_lost",
-  //      "失败", "流失") get the right treatment without a migration.
+  //   3. only when the status field declares NO kind on any of its options, a
+  //      spelling heuristic, so CRM examples / Salesforce-style picklists
+  //      ("closed_won", "closed_lost", "失败", "流失") get the right treatment
+  //      without a migration — with a dev-build warning naming the field, so
+  //      the author learns the layout is a guess (objectstack#26612).
+  //
+  // Once the field declares a kind, an option that declares none reads as
+  // `open` — the spec's own rule for an absent kind ("Absent reads as 'open'",
+  // `SelectOption.kind`) — and is never guessed from its spelling: a declared
+  // vocabulary with a guess filling its gaps would be two contracts at once.
   const LOST_TOKENS = /(^|[_-\s])(closed_)?(lost|failed?|cancell?ed|失败|流失|丢单|败)([_-\s]|$)/i;
   const WON_TOKENS = /(^|[_-\s])(closed_)?(won|success|成交|赢|完成)([_-\s]|$)/i;
-  const classify = (s: { value: any; label?: string; terminal?: 'won' | 'lost' }): 'won' | 'lost' | undefined => {
-    if (s.terminal) return s.terminal;
-    const declared = declaredKinds?.get(s.value);
-    if (declared !== undefined) return stageTerminalOfKind(declared);
+  const guessTerminal = (s: { value: any; label?: string }): 'won' | 'lost' | undefined => {
     const probe = `${String(s.value ?? '')} ${String(s.label ?? '')}`;
     if (LOST_TOKENS.test(probe)) return 'lost';
     if (WON_TOKENS.test(probe)) return 'won';
     return undefined;
   };
-  const stageKinds = stages.map(classify);
+  const classify = (s: { value: any; label?: string; terminal?: 'won' | 'lost' }): 'won' | 'lost' | undefined => {
+    if (s.terminal) return s.terminal;
+    if (declaredKinds) return stageTerminalOfKind(declaredKinds.get(s.value));
+    return guessTerminal(s);
+  };
+
+  // The stages the spelling heuristic classified — what the dev-build warning
+  // below names. Always empty once the field declares a kind.
+  const guessedStages: string[] = declaredKinds
+    ? []
+    : stages.filter((s) => !s.terminal && guessTerminal(s) !== undefined).map((s) => String(s.value));
+  const guessWarningKey = guessedStages.length > 0
+    ? JSON.stringify([ctx?.objectName ?? null, statusField ?? null, guessedStages])
+    : null;
+  React.useEffect(() => {
+    if (guessWarningKey === null || !isDevBuild() || warnedSpellingGuesses.has(guessWarningKey)) return;
+    warnedSpellingGuesses.add(guessWarningKey);
+    const [objectName, field, guessed] = JSON.parse(guessWarningKey) as [string | null, string | null, string[]];
+    const subject = field
+      ? `field "${field}"${objectName ? ` of object "${objectName}"` : ''} declares no option \`kind\``
+      : 'the authored stages name no field that declares an option `kind`';
+    console.warn(
+      `record:path — ${subject}, so stage(s) ${guessed.map((v) => `"${v}"`).join(', ')} ` +
+        `were classified won/lost from their spelling. Declare \`kind: 'open' | 'won' | 'lost'\` ` +
+        'on every option of the field to lay the path out by lifecycle instead of by name.',
+    );
+  }, [guessWarningKey]);
+
+  // WHERE each stage sits. A field that declares kinds is laid out BY kind:
+  // its open options as the steps, in their authored order, then its won
+  // option(s) as the forward terminus, then its lost option(s) in the
+  // separated group — so a lost option authored mid-list never reads as step
+  // N, and a won option authored after a lost one never lands in the lost
+  // group (objectstack#26612). The sort is stable, so each class keeps its
+  // authored order. Without declared kinds the layout stays POSITIONAL, as
+  // the spelling fallback has always drawn it.
+  const KIND_RANK = { open: 0, won: 1, lost: 2 } as const;
+  const classified = stages.map((stage) => ({ stage, kind: classify(stage) }));
+  const placed = declaredKinds
+    ? [...classified].sort((a, b) => KIND_RANK[a.kind ?? 'open'] - KIND_RANK[b.kind ?? 'open'])
+    : classified;
+  const pathStages: PathStage[] = placed.map((p) => p.stage);
+  const stageKinds = placed.map((p) => p.kind);
   // Find the index of the FIRST lost-class stage so we can render it
   // (and any subsequent lost terminals) as a visually separated alt
   // group. Won-class stages stay inside the forward path — they're the
   // successful terminus.
   const firstLostIdx = stageKinds.findIndex((k) => k === 'lost');
-  const forwardStages = firstLostIdx === -1 ? stages : stages.slice(0, firstLostIdx);
-  const lostStages = firstLostIdx === -1 ? [] : stages.slice(firstLostIdx);
+  const forwardStages = firstLostIdx === -1 ? pathStages : pathStages.slice(0, firstLostIdx);
+  const lostStages = firstLostIdx === -1 ? [] : pathStages.slice(firstLostIdx);
   // ── ONE classification, computed once, read by BOTH rows (objectui#5998) ──
   //
   // The desktop and the mobile row below render the same `stages[]`, and each
@@ -293,16 +431,21 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
   // Conservative on both axes: this can only ever STOP marking a stage as a
   // terminus, never start. No stage gains a `terminal` on either row that it
   // did not already carry on that row.
+  //
+  // The `idx === last` restriction guards the SPELLING guess (`完成` mid-path).
+  // A declared `won` is no guess, and the by-kind layout above has already put
+  // every won option at the forward tail, so each one is a terminus
+  // (objectstack#26612).
   const lastForwardIdx = forwardStages.length - 1;
   const stageTerminals: Array<'won' | 'lost' | undefined> = stageKinds.map((kind, idx) =>
-    kind === 'won' ? (idx === lastForwardIdx ? 'won' : undefined) : kind,
+    kind === 'won' ? (declaredKinds || idx === lastForwardIdx ? 'won' : undefined) : kind,
   );
 
-  let currentIdx = stages.findIndex((s) => s.value === current);
+  let currentIdx = pathStages.findIndex((s) => s.value === current);
   if (currentIdx < 0) currentIdx = -1;
   const currentInLost = firstLostIdx !== -1 && currentIdx >= firstLostIdx;
 
-  if (stages.length === 0) {
+  if (pathStages.length === 0) {
     // Names the field when the derivation had an object definition to read
     // and found no picklist options on `statusField` (objectui#11106): the
     // author learns which field to fix, or that `stages` must be authored.
@@ -508,7 +651,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
         className="flex sm:hidden w-full items-start gap-2 overflow-x-auto pb-1 -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         {...railAria}
       >
-        {stages.map((stage, idx) => {
+        {pathStages.map((stage, idx) => {
           const terminal = stageTerminals[idx];
           const isLost = terminal === 'lost';
           const isCompleted = !isLost && !currentInLost && currentIdx >= 0 && idx < currentIdx;

@@ -66,7 +66,7 @@
 - 之二,解锁扫描反演 = 逐仓 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,命中走双查。
 - 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
 - 裸卡数例外:标签缺席无计数可读,取本轮析取①的枚举,⛔ 不另发查询。
-- 每日层(当日首 fire)= 两仓全量对账 + 归集本就日频的职责。
+- 每日层(当日首 fire)= 全量对账 + 归集本就日频的职责。
 - 日频职责 = finding 集中轮;`Restart-when:` 批扫归车道巡查,决策箱回填归总监席。
 - 成本靶:干活轮 ≤50k token,空转轮守既有探针预算。
 - 每条枚举比对返回数与 `totalCount`;分页只治当次,一个谓词,⛔ 不加第二条代码路径。
@@ -86,7 +86,7 @@
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
 - 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
 - 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。
-- 两仓 title 不同、由 action 配置:objectui `chore: release packages`、objectstack `chore: version packages`。
+- title 由 action 配置,本仓为 `chore: version packages`。
 - 上膛与否不足:真判据是本卡 changeset 已否折进该 head `CHANGELOG.md`,即「离永久还有多远」。
 - 卡上 re-check 命令两条硬线:① 每条 grep 自带阳性对照。
 - 对照取同文件里确定存在、且 ⛔ 绝不是被测词子串的一个词。

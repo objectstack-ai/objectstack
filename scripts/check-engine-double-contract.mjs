@@ -174,10 +174,18 @@
 //               from `@objectstack/objectql` (which re-exports it from the
 //               original path) -- or its file carries a measured baseline entry
 //               for that verb.
-//   RECONCILED  in both directions. A baseline entry for a file with no
+//   RECONCILED  one-sided (#26586). A baseline entry for a file with no
 //               unguarded doubles left, for a file that no longer exists, or
-//               whose count is now lower, is an error. A ratchet that can only
-//               accrete rots into a list nobody trusts.
+//               whose count is now lower, PASSES and is reported with the edit
+//               that ratchets it down -- deleting or fixing a test file must not
+//               red a PR that never touched this gate. Until that edit lands
+//               the old count stays the file's ceiling, and the report says so.
+//               Growth is PINNED's, and still fails.
+//   UNREAD      the dead-scan half RECONCILED going one-sided needs. An entry
+//               whose file is still on disk but was not among the test files
+//               the walk read is an error, not a decrease: a walk that lost part
+//               of the tree used to red through RECONCILED, and would otherwise
+//               pass as a list of shrunken entries.
 //   DECLARED    every baseline entry names a `verb` this script actually
 //               scans. Without it a typo'd or retired verb makes an entry
 //               unreachable -- it would reconcile against nothing, forever,
@@ -189,14 +197,17 @@
 //
 // ## RETAINED, and why the pinned set is enumerated rather than counted (#9680)
 //
-// The four invariants above ratchet the LEDGERED population in both directions
-// -- measured on this branch, deleting a DEBT-ledgered double's member reddens
-// (`RECONCILED: baseline entry for … declares no engine double with a delete
-// any more`), and so does dropping one of the five doubles behind the EXEMPT
-// entry (`down to 4 … from the baseline's 5`). The PINNED population had no
-// such ratchet, and that asymmetry is the whole of #9680: DISCOVERED fires at
-// zero, never at one-fewer-than-yesterday, and PINNED iterates the discovered
-// set, so a pinned double that stops declaring the member simply LEAVES.
+// When #9680 landed, the invariants above ratcheted the LEDGERED population in
+// both directions -- measured on that branch, deleting a DEBT-ledgered double's
+// member reddened (`RECONCILED: baseline entry for … declares no engine double
+// with a delete any more`), and so did dropping one of the five doubles behind
+// the EXEMPT entry (`down to 4 … from the baseline's 5`). Since #26586 both are
+// passing reports instead: the DEBT ledger records looseness, so its shrinking
+// is the goal, and RETAINED below is what still reds on a PINNED loss. Before
+// #9680 the PINNED population had no ratchet at all, and that asymmetry is the
+// whole of #9680: DISCOVERED fires at zero, never at one-fewer-than-yesterday,
+// and PINNED iterates the discovered set, so a pinned double that stops
+// declaring the member simply LEAVES.
 //
 // Discovery requires the member to exist, so absence is invisible by
 // construction. Measured, two directions, on `packages/core/src/utils/
@@ -633,8 +644,8 @@ function mentionsVerb(text, verb) {
  * `delete: vi.fn(async (o, opts) => …)` is a CallExpression, so the two
  * initializer branches of `implOf` below used to answer `null` for it —
  * `consider()` then returned before the sibling and shape tests ever ran, and
- * the double was discovered by NEITHER side of a ledger that reconciles in both
- * directions. Not "declared out of scope": absent. That is the DISCOVERED
+ * the double was discovered by NEITHER side of a ledger that then reconciled in
+ * both directions. Not "declared out of scope": absent. That is the DISCOVERED
  * invariant's blind half, one layer down — `DISCOVERED != 0` catches a scan
  * that breaks entirely and cannot catch a scan that quietly skips one spelling,
  * and `vi.fn` is the spelling a test reaches for precisely when it wants to
@@ -3157,14 +3168,103 @@ function refusePopulationFloor(population, what) {
   process.exit(EXIT_POPULATION_REFUSED);
 }
 
+/**
+ * The DEBT ledger against ONE slice's discovered set -- PINNED and RECONCILED,
+ * pure so the self-test drives both directions with no tree (#26586).
+ *
+ * ONE-SIDED. An unguarded double with no entry, or more of them than the entry
+ * records, is an error. A (file, verb) whose count fell, or that has nothing
+ * unguarded left, or whose double is gone (file deleted, fake removed, shape
+ * changed), PASSES and lands in `down` with the edit that ratchets it -- so
+ * deleting or fixing a test file reds no PR that never touched this gate. Until
+ * that edit lands, the old count stays the file's ceiling.
+ *
+ * UNREAD is the dead-scan half the one-sided ledger needs. While a vanished
+ * entry was an error, a walk that lost part of the tree redded through it; now
+ * it would pass as a decrease, so an entry whose file is still ON DISK but is
+ * not in `read` (the test files the walk offered) is refused instead. A deleted
+ * file is not on disk and a pinned or swept file was read, so both still pass.
+ * `exists` is injected for the self-test.
+ *
+ * @returns {{errors: string[], down: string[]}}
+ */
+function reconcileDebtLedger(slice, found, entries, read, exists = (f) => existsSync(join(ROOT, f))) {
+  const errors = [];
+  const down = [];
+  const mine = entries.filter((e) => e.verb === slice.verb);
+  const byFile = new Map(mine.map((e) => [e.file, e]));
+  const seen = new Set();
+  for (const { file, doubles } of found) {
+    const unguarded = doubles.filter((d) => !d.pinned);
+    const entry = byFile.get(file);
+    if (entry) seen.add(file);
+
+    if (unguarded.length === 0) {
+      if (entry) {
+        down.push(
+          `RECONCILED [${slice.verb}]: ${file} has no unguarded engine double left; the baseline `
+            + `still records ${entry.unguarded}. Passing; delete the entry -- until then it licenses `
+            + `${entry.unguarded} unguarded double(s) in that file.`,
+        );
+      }
+      continue;
+    }
+    if (!entry) {
+      errors.push(pinnedMessage(slice, file, unguarded));
+      continue;
+    }
+    if (unguarded.length > entry.unguarded) {
+      errors.push(
+        `PINNED [${slice.verb}]: ${file} now has ${unguarded.length} unguarded engine double(s), `
+          + `baseline records ${entry.unguarded}. The baseline is shrink-only — pin the new one `
+          + 'rather than raising it.'
+          + INHERITANCE_NOTE(slice.verb),
+      );
+    } else if (unguarded.length < entry.unguarded) {
+      down.push(
+        `RECONCILED [${slice.verb}]: ${file} is down to ${unguarded.length} unguarded engine `
+          + `double(s) from the baseline's ${entry.unguarded}. Passing; lower the number to `
+          + `${unguarded.length} -- until then ${entry.unguarded} stays this file's ceiling.`,
+      );
+    }
+  }
+
+  for (const entry of mine) {
+    if (seen.has(entry.file)) continue;
+    if (exists(entry.file) && !read.has(entry.file)) {
+      errors.push(
+        `UNREAD [${slice.verb}]: baseline entry for ${entry.file} names a file still on disk that `
+          + 'the discovery walk never read. The walk lost part of its population, and since the '
+          + 'ledger went one-sided (#26586) this entry would otherwise pass as a decrease -- fix the '
+          + 'walk, not the ledger. (If the file was moved out of the scan roots or renamed off the '
+          + 'test-file pattern on purpose, delete the entry.)',
+      );
+      continue;
+    }
+    down.push(
+      `RECONCILED [${slice.verb}]: baseline entry for ${entry.file}, which declares no engine `
+        + `double with a ${slice.verb} any more (file deleted, fake removed, or the shape `
+        + `changed). Passing; delete the entry -- until then it licenses ${entry.unguarded} `
+        + 'unguarded double(s) at that path.',
+    );
+  }
+  return { errors, down };
+}
+
 function audit() {
   const baseline = readBaseline();
   const errors = [];
+  // The DEBT ledger's decrease direction (#26586): reported, never an error.
+  const down = [];
   const slices = [];
   // The two walks, counted once here rather than inferred from what survived
   // them. `scanSlice` and `scanAllSeams` each re-walk internally; these are the
-  // same functions, so the counts are the sets those scans were offered.
-  const testFileCount = testFiles().length;
+  // same functions, so the counts are the sets those scans were offered -- and
+  // `read` is the test-file set every slice read, which the ledger's UNREAD
+  // refusal asks.
+  const walked = testFiles();
+  const testFileCount = walked.length;
+  const read = new Set(walked.map((abs) => relative(ROOT, abs).split(sep).join('/')));
   const productionFileCount = productionFiles().length;
 
   // DECLARED — before anything reconciles, every entry must name a verb this
@@ -3182,9 +3282,6 @@ function audit() {
 
   for (const slice of SLICES) {
     const found = scanSlice(slice);
-    const byFile = new Map(
-      baseline.entries.filter((e) => e.verb === slice.verb).map((e) => [e.file, e]),
-    );
     slices.push({ slice, found });
 
     // DISCOVERED
@@ -3197,50 +3294,11 @@ function audit() {
       );
     }
 
-    const seen = new Set();
-    for (const { file, doubles } of found) {
-      const unguarded = doubles.filter((d) => !d.pinned);
-      const entry = byFile.get(file);
-      if (entry) seen.add(file);
-
-      if (unguarded.length === 0) {
-        if (entry) {
-          errors.push(
-            `RECONCILED [${slice.verb}]: ${file} has no unguarded engine double left, but the `
-              + `baseline still records ${entry.unguarded}. Delete the entry in the same PR that `
-              + 'fixed it.',
-          );
-        }
-        continue;
-      }
-      if (!entry) {
-        errors.push(pinnedMessage(slice, file, unguarded));
-        continue;
-      }
-      if (unguarded.length > entry.unguarded) {
-        errors.push(
-          `PINNED [${slice.verb}]: ${file} now has ${unguarded.length} unguarded engine double(s), `
-            + `baseline records ${entry.unguarded}. The baseline is shrink-only — pin the new one `
-            + 'rather than raising it.'
-            + INHERITANCE_NOTE(slice.verb),
-        );
-      } else if (unguarded.length < entry.unguarded) {
-        errors.push(
-          `RECONCILED [${slice.verb}]: ${file} is down to ${unguarded.length} unguarded engine `
-            + `double(s) from the baseline's ${entry.unguarded}. Lower the number in the same PR, so `
-            + 'the ratchet holds.',
-        );
-      }
-    }
-
-    for (const entry of baseline.entries) {
-      if (entry.verb !== slice.verb || seen.has(entry.file)) continue;
-      errors.push(
-        `RECONCILED [${slice.verb}]: baseline entry for ${entry.file}, which declares no engine `
-          + `double with a ${slice.verb} any more (file deleted, fake removed, or the shape `
-          + 'changed). Delete the entry.',
-      );
-    }
+    // PINNED and RECONCILED — one-sided since #26586: growth fails, a decrease
+    // is reported, and an entry whose file the walk never read is refused.
+    const ledger = reconcileDebtLedger(slice, found, baseline.entries, read);
+    errors.push(...ledger.errors);
+    down.push(...ledger.down);
   }
 
   // ── RETAINED (#9680) — the pinned population is enumerated, not counted ───
@@ -3318,7 +3376,7 @@ function audit() {
   ));
 
   return {
-    slices, baseline, errors, seamFiles, seamCount, seamCensus, census, pinnedLedger,
+    slices, baseline, errors, down, seamFiles, seamCount, seamCensus, census, pinnedLedger,
     // The population floors' subjects (#13014). Two walk counts taken above and
     // two reader counts derived from what this run actually parsed -- never
     // from a ledger's size, which is shrink-only by design.
@@ -3449,7 +3507,7 @@ function writeSeamLedger(seamFiles) {
 }
 
 function report() {
-  const { slices, baseline, errors, seamFiles, seamCount, seamCensus, census, population } = audit();
+  const { slices, baseline, errors, down, seamFiles, seamCount, seamCensus, census, population } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -3527,6 +3585,14 @@ function report() {
   // because "nothing was measured" outranks "here are findings", and the
   // findings would be drawn from the same collapsed set (#13014).
   refusePopulationFloor(population, 'No verdict was reached and no exit code below is a reading.');
+
+  // The DEBT ledger's decrease direction (#26586): printed on every run, red or
+  // green, and never a finding -- each line is the hand edit that ratchets it.
+  if (down.length) {
+    console.log(`DEBT ledger: ${down.length} (file, verb) entr(ies) fell (passing, reported):`);
+    for (const d of down) console.log(`  ↓ ${d}`);
+    console.log('');
+  }
 
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
@@ -3636,11 +3702,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#11626: the DECLARED single-verb double': 14,
   'The POPULATION FLOORS (#13014)': 23,
   'Every branch that SCANS routes through the floor (#17117)': 6,
+  'The DEBT ledger is ONE-SIDED (#26586)': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 33;
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -5287,6 +5354,49 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
   expect('ROUTING — a refused write says nothing was written',
     bodyOfFunction('writeLedger').includes('NOTHING WAS WRITTEN'));
 
+  // ── The DEBT ledger is ONE-SIDED (#26586) ──────────────────────────────────
+  //
+  // Driven through `reconcileDebtLedger`, the comparison `audit()` runs per
+  // slice: growth and a new unguarded double fail, every decrease passes and is
+  // reported, and an entry whose file is on disk but unread is refused -- so a
+  // walk that lost part of the tree cannot pass as a list of shrunken entries.
+  battery('The DEBT ledger is ONE-SIDED (#26586)');
+  {
+    const del = SLICES.find((s) => s.verb === 'delete');
+    const dbl = (pinned, line = 1) => ({ pinned, line });
+    const row = (file, unguarded, verb = 'delete') => ({ file, verb, unguarded, kind: 'DEBT' });
+    const onDisk = () => true;
+    const run = (found, entries, read = new Set(found.map((f) => f.file)), exists = onDisk) => {
+      const r = reconcileDebtLedger(del, found, entries, read, exists);
+      return `${r.errors.length}/${r.down.length}`;
+    };
+    expect('LEDGER — a matching entry neither fails nor reports',
+      run([{ file: 'a.test.ts', doubles: [dbl(false)] }], [row('a.test.ts', 1)]) === '0/0');
+    expect('LEDGER — a GROWN count still fails (PINNED), and is no decrease',
+      run([{ file: 'a.test.ts', doubles: [dbl(false), dbl(false, 2)] }], [row('a.test.ts', 1)]) === '1/0');
+    expect('LEDGER — an unguarded double with NO entry still fails',
+      run([{ file: 'n.test.ts', doubles: [dbl(false)] }], []) === '1/0');
+    const fell = reconcileDebtLedger(del, [{ file: 'a.test.ts', doubles: [dbl(false)] }],
+      [row('a.test.ts', 2)], new Set(['a.test.ts']), onDisk);
+    expect('LEDGER — a FALLEN count passes and is reported once',
+      fell.errors.length === 0 && fell.down.length === 1);
+    expect('LEDGER — ...and the report names the old count as the ceiling it leaves',
+      fell.down[0]?.includes('2 stays'));
+    expect('LEDGER — a file whose doubles are all PINNED now passes and is reported',
+      run([{ file: 'a.test.ts', doubles: [dbl(true)] }], [row('a.test.ts', 1)]) === '0/1');
+    expect('LEDGER — a DELETED file passes and is reported (not on disk, so not refused)',
+      run([], [row('gone.test.ts', 1)], new Set(), () => false) === '0/1');
+    expect('LEDGER — a file the walk READ whose fake is gone passes and is reported',
+      run([], [row('a.test.ts', 1)], new Set(['a.test.ts'])) === '0/1');
+    const unread = reconcileDebtLedger(del, [], [row('a.test.ts', 1)], new Set(), onDisk);
+    expect('LEDGER — a file still ON DISK that the walk never read is refused, not reported',
+      unread.errors.length === 1 && unread.down.length === 0 && unread.errors[0].startsWith('UNREAD [delete]'));
+    expect('LEDGER — an EMPTY walk with every entry still on disk refuses every one',
+      run([], [row('a.test.ts', 1), row('b.test.ts', 3)], new Set()) === '2/0');
+    expect('LEDGER — an entry on ANOTHER verb is not this slice\'s to judge',
+      run([], [row('a.test.ts', 1, 'update')], new Set()) === '0/0');
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -5376,7 +5486,9 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
       + 'argument and a driver-shaped verb, and moving discovery and the census together; and '
       + 'holds EVERY branch that scans to the POPULATION FLOOR (#17117) -- `--write` refuses '
       + 'before it writes either ledger, the reporting run refuses before it reports, and exactly '
-      + 'one place in this file turns a fallen floor into an exit.',
+      + 'one place in this file turns a fallen floor into an exit; and reconciles the DEBT ledger '
+      + 'ONE-SIDED (#26586) -- growth and a new unguarded double fail, every decrease passes and '
+      + 'is reported, and an entry whose file is on disk but unread is refused.',
   );
 
   return SELF_TEST_VERDICT;

@@ -88,6 +88,29 @@ export type {
   MailLogBodyMigrationOptions,
   MailLogBodyMigrationReport,
 } from './mail-log-body-migration.js';
+// The key-material columns no ledger copy carries, the one helper the writer
+// and the at-rest rewrite of older copies both apply, and that rewrite's pure
+// planners and runners (hot tables and the archive datasource).
+export {
+  KEY_MATERIAL_COPY_COLUMNS,
+  KEY_MATERIAL_COPY_OBJECTS,
+  keyMaterialColumnsOf,
+  omitKeyMaterialFromCopy,
+} from './key-material-copy.js';
+export {
+  migrateKeyMaterialCopies,
+  migrateArchivedKeyMaterialCopies,
+  planKeyMaterialAuditRowPatch,
+  planKeyMaterialActivityRowPatch,
+  KEY_MATERIAL_COPY_TABLES,
+} from './key-material-copy-migration.js';
+export type {
+  KeyMaterialArchiveDriver,
+  KeyMaterialCopyTable,
+  KeyMaterialMigrationEngine,
+  KeyMaterialMigrationOptions,
+  KeyMaterialMigrationReport,
+} from './key-material-copy-migration.js';
 // [ADR-0139 E6] The stored-row backfill of `sys_activity`'s two writer-stamped
 // read-rule columns, and the one planner it, the CRUD mirror and the
 // before-insert hook stamp by. The CLI command

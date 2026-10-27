@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -83,7 +83,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "`objectstack verify --rls` (packages/verify/src/rls.ts runRlsProofs) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts. packages/verify/src/rls.ts is a source file, not a test: acceptance[4] scores from a run that executes the command over the showcase, and no pin does — rls-fixture.dogfood.test.ts and rls-multitenant.dogfood.test.ts run runRlsProofs on purpose-built fixtures only. The showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read acceptance[2] and negative[0] require is pinned for a fixture object in packages/qa/dogfood/test/rls-fixture.dogfood.test.ts, not for showcase_private_note, so on the showcase that re-read is hand-driven"
+        "ref": "`objectstack verify --rls` (packages/verify/src/rls.ts runRlsProofs) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts. packages/verify/src/rls.ts is a source file, not a test: acceptance[4] scores from a run that executes the command over the showcase, and no pin does — rls-fixture.dogfood.test.ts and rls-multitenant.dogfood.test.ts run runRlsProofs on purpose-built fixtures only. The showcase pin drives acceptance[0]–[3] and negative[0] on showcase_private_note through the in-process HTTP stack: each member's list (presence and absence), the foreign by-id read answering non-2xx, the foreign PATCH answering >= 400 with the admin's re-read of the row unchanged ('a refused foreign PATCH leaves the row byte-identical on the admin re-read'), and the admin's filtered list carrying every note the file created, both owners' ('the admin (platform posture) lists every note this file created'). acceptance[5], negative[1] and negative[2] stay with the run: they are procedural (the per-skip explanation is a reading of the verify report; the record-once and naming rules govern a run record), and the D11 spot-check needs the private write-up (knownGaps[0])"
       },
       "source": [
         "packages/verify/src/rls.ts",
@@ -136,6 +136,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4: automated.ref named packages/verify/src/rls.ts, a source file; no pin runs runRlsProofs over the showcase (rls-fixture / rls-multitenant run it on purpose-built fixtures), so the ref now names the command and says the clause scores from a run of it. a2/n0: the showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read is pinned for a fixture object in rls-fixture.dogfood.test.ts, which the ref now says. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[2], acceptance[3] and negative[0] are now pinned at their oracle's layer (api, in-process HTTP) in showcase-private-owd.dogfood.test.ts: the admin re-read proving the refused foreign PATCH changed nothing, and the admin's list of every row the file created. automated.ref names both cases and says why acceptance[5], negative[1] and negative[2] stay with the run. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -144,7 +150,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -218,7 +224,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts); negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine over a recording / fake driver and their own test objects, not showcase_contact's lead_score — they score the one engine function negative[1] names, and the showcase field is not observed. What the dogfood pins do not assert: acceptance[0]'s droppedFields on the INSERT strip (showcase-static-readonly asserts the stripped value, not the advertisement); acceptance[4] and acceptance[6] — owner-anchor-and-bulk-writes' bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation; acceptance[5]'s mixed updateMany (results[i].droppedFields) and the line's product field — showcase-readonly-when-parent pins the single-row PATCH strip and the X-ObjectStack-Dropped-Fields header only. Those legs are hand-driven"
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts + showcase-static-readonly.dogfood.test.ts + showcase-readonly-when-parent.dogfood.test.ts, all through the in-process HTTP stack; negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine over a recording / fake driver and their own test objects, not showcase_contact's lead_score — they score the one engine function negative[1] names, and the showcase field is not observed. Per clause: acceptance[0] and [1] — showcase-static-readonly: a member's forged lead_score is stripped on INSERT and on UPDATE, and the INSERT strip is advertised ('the INSERT strip is ADVERTISED': body droppedFields and the X-ObjectStack-Dropped-Fields header name lead_score with reason readonly); acceptance[2], [3] and negative[0] — owner-anchor-and-bulk-writes: the member's forge, transfer and disown refused with the owner unchanged, the self-owner insert passing, and the platform admin's forge-insert, transfer and disown passing ('a privileged caller CAN …'); acceptance[4] — owner-anchor-and-bulk-writes: a member's REST createMany of three rows with no owner_id reads back owner_id == the caller on every row (its older bulk cases are engine-direct ql.update / ql.delete owner scoping, #2982); acceptance[5] — showcase-readonly-when-parent, as the admin: the paid invoice's tax_rate and its line's quantity, unit_price and product survive a PATCH, and a mixed updateMany is judged per row — the locked row's results[i].droppedFields names quantity with reason readonly_when while the open row in the same batch lands; acceptance[6] — showcase-readonly-when-parent: updateMany with options.continueOnError true over [compliant, quantity below min 0, compliant] lines answers total 3 / succeeded 2 / failed 1, the violating row VALIDATION_FAILED and unchanged, both neighbours applied; the default stop (rows before applied, the tail NOT_ATTEMPTED and unchanged) is pinned beside it as the contrast"
       },
       "traps": [
         "wrong-persona"
@@ -273,6 +279,12 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4/a6: automated.ref named owner-anchor-and-bulk-writes for bulk writes, but its bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation. a5: showcase-readonly-when-parent pins the single-row PATCH strip and the header; the mixed updateMany leg and the product field are unpinned. a0: showcase-static-readonly asserts no droppedFields on the INSERT strip. n1: the two objectql pins run a recording / fake driver on their own objects, not showcase lead_score. The ref names each. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s droppedFields advertisement on the INSERT strip (showcase-static-readonly); acceptance[4]'s createMany owner stamping and negative[0]'s admin forge-insert and disown (owner-anchor-and-bulk-writes); acceptance[5]'s mixed updateMany per-row droppedFields and the line's product field, and acceptance[6]'s per-row validation under continueOnError with the default-stop contrast (showcase-readonly-when-parent). automated.ref now maps every clause to its case. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -481,7 +493,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -573,7 +585,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "`objectstack verify --rls` (packages/verify/src/verify.ts runCrudVerification + packages/verify/src/rls.ts runRlsProofs) for the OBJECT-level CRUD and cross-owner RLS half — a CLI proof a runner invokes, not a test file: no pin in this ref drives it over the showcase (rls-fixture and rls-multitenant dogfood run runRlsProofs on purpose-built fixtures only), so that half scores only from a run that executes the command (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2 and 4 for those rows; clause 3 only on showcase_private_note (the auditor's viewAllRecords reads of showcase_inquiry, showcase_invoice and showcase_invoice_line are not asserted — drive them by hand); clause 6 only for the 41 showcase_* rows (the pin excludes the 4 sys_* rows by name, so clause 6 cannot be pinned whole); every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 4 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200 — the organization's user directory, not only its own row — though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins ON THE VERIFY HARNESS — its in-subtree assignment asserts a 2xx and its out-of-subtree create asserts only a non-2xx, not the 403 PERMISSION_DENIED named below, so the code is a hand-scored answer — a raw cell verdict there would be false in one direction or the other. That pin runs on the verify harness, so drive those cells by hand on the dev boot and score them against the live answer: since #21057 closed (2026-10-08) the seeded business units carry organization_id and the delegate's in-subtree sys_user_position create answers 201 while the out-of-subtree create (bu_hq_finance) answers 403 PERMISSION_DENIED 'outside the delegated subtree'; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
+        "ref": "`objectstack verify --rls` (packages/verify/src/verify.ts runCrudVerification + packages/verify/src/rls.ts runRlsProofs) for the OBJECT-level CRUD and cross-owner RLS half — a CLI proof a runner invokes, not a test file: no pin in this ref drives it over the showcase (rls-fixture and rls-multitenant dogfood run runRlsProofs on purpose-built fixtures only), so that half scores only from a run that executes the command (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells, through the in-process HTTP stack. The sweep drives every showcase_* row of access-matrix.json (41 at revision 4) over all four verbs with one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline; every denial is checked to be 403 PERMISSION_DENIED, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. That reaches clauses 0, 1, 2 and 4 for those rows. The same file carries: clause 3 on all four objects the auditor's viewAllRecords names — showcase_private_note, showcase_inquiry, showcase_invoice and showcase_invoice_line, by id and in a filtered list, against a showcase_contributor member that holds read without the bit and gets none of the foreign rows (private OWD, owner RLS and the master-derived scope respectively); negative[0] — the first denied cell of every set, re-run as the admin, answers 2xx; and the 4 showcase_field_ops_delegate × sys_* rows as one case ('the 16 showcase_field_ops_delegate × sys_* cells answer the matrix'): a member holding exactly that set reads sys_business_unit, sys_business_unit_member and sys_user (200), is refused their withheld verbs 403 PERMISSION_DENIED, meets 405 OBJECT_API_METHOD_NOT_ALLOWED on sys_user create and delete (the admin control answers 405 too: sys_user declares apiMethods ['get','list','update','bulk']), and runs sys_user_position's four verbs 2xx on a row it made inside its Field Operations subtree (the out-of-subtree side of that ADR-0090 D12 gate is showcase-permission-zoo.dogfood.test.ts's, which asserts 403 DELEGATION_SCOPE_VIOLATION). So clause 6 is pinned over the whole table: 45 rows × 4 verbs. STILL MANUAL: clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane (knownGaps[2] records it blocked(fixture))"
       },
       "traps": [
         "wrong-persona",
@@ -628,6 +640,12 @@
           "date": "2026-10-26",
           "change": "Six checklist-accuracy findings of the 18.2.0 sweep, re-read on main b4199c96. From P0 record #25812: knownGaps[1] said a plain member reads /data/sys_user self-scoped; member_default's sys_user_org_members policy (id in current_user.org_user_ids) serves the organization's whole directory, so the gap and automated.ref now say so. From Tier 1 record #25815: automated.ref no longer reads `objectstack verify --rls` as a pin (it is a CLI proof no test here drives over the showcase); it no longer claims clauses 3 and 6 whole (the viewAllRecords case probes showcase_private_note only, and the pin excludes the 4 sys_* rows by name); it says the zoo's out-of-subtree case asserts a non-2xx, not 403 PERMISSION_DENIED; acceptance[6].verify says which 164 cells the pin judges and which 16 are hand-driven. The pin header comment's '6 delegate × sys_* rows' is in the test file, outside this ledger: the ledger already says 4. No status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). showcase-crud-persona-matrix.dogfood.test.ts gains three cases at the api oracle's layer (in-process HTTP): the auditor's viewAllRecords over the foreign inquiry, invoice and line with a contributor as the contrast (acceptance[3] on all four named objects); one denied cell per set re-run as the admin (negative[0]); and the 16 showcase_field_ops_delegate × sys_* cells, sys_user create and delete scored 405 OBJECT_API_METHOD_NOT_ALLOWED for the delegate and the admin (acceptance[0], [1] and [6] over the whole table). acceptance[5] stays blocked(fixture) as knownGaps[2] says. automated.ref restated; it no longer calls the delegate rows hand-driven. acceptance[6].verify and steps[6] still describe those 16 cells as hand-driven, outside this revision's edit surface. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -636,7 +654,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -719,7 +737,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + controlled-by-parent.dogfood.test.ts + showcase-invoice-cbp.dogfood.test.ts. Not every model is pinned, and the ones that are fall short of their clauses in named ways: acceptance[0] — showcase-private-owd asserts the denied PATCH's status only (no admin re-read of the row) and the by-id GET as not-200 rather than non-2xx; acceptance[2] (modifyAllRecords crossing the owner-writes baseline), acceptance[3] (public_read_write) and acceptance[5] (the auditor's viewAllRecords over derived lines) have no pin; acceptance[4] — showcase-invoice-cbp boots a test-local fallback set (showcase_cbp_member), not the C1/C2 contributor personas, and asserts by-id read and write but no list exclusion, while controlled-by-parent.dogfood.test.ts runs a synthetic cbp_account / cbp_note fixture, not showcase_invoice_line. Those legs are hand-driven"
+        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + showcase-invoice-line-contributor-pair.dogfood.test.ts + showcase-crud-persona-matrix.dogfood.test.ts, all through the in-process HTTP stack, with controlled-by-parent.dogfood.test.ts (a synthetic cbp_account / cbp_note fixture) and showcase-invoice-cbp.dogfood.test.ts (a test-local fallback set) pinning the ADR-0055 derivation beneath. Per clause: acceptance[0] — showcase-private-owd: the member's list excludes the foreign note, the by-id GET answers non-2xx, the PATCH >= 400 with the admin's re-read of the row unchanged, the owner's own read and write 2xx; acceptance[1] — showcase-public-read-owd: the non-owner reads the announcement by id and in the list, and the non-owner PATCH answers >= 400 with the admin re-read unchanged; acceptance[2] — showcase-crud-persona-matrix's modifyAllRecords case: showcase_ops PATCHes the admin's announcement 2xx and the re-read shows it, the plain member's identical PATCH 403 with the row untouched; acceptance[3] — the same file's sweep cells: showcase_contributor × showcase_project edit (2xx and persisted on the admin's project, a set that cannot create edits the admin's row) and showcase_member_default × showcase_project edit (403 PERMISSION_DENIED, unchanged); acceptance[4] and [5] — showcase-invoice-line-contributor-pair on the STOCK grants: two showcase_contributor members C1/C2, C1's invoice (owner = C1's email) and line made over REST, C2's filtered list excludes the line while C1's identical list carries it, C2's by-id GET non-2xx and PATCH >= 400 with the row unchanged, C1 reads and edits it by id, and a showcase_auditor member's list and by-id read carry it (viewAllRecords over the derived scope). acceptance[6] is procedural: run-record completeness over the four models"
       },
       "traps": [
         "wrong-persona"
@@ -761,6 +779,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96; automated.ref read as if all four OWD models were pinned. a0: the private pin asserts the denied PATCH by status with no admin re-read, and the by-id GET as not-200. a2/a3/a5: no pin covers the modifyAllRecords bypass, public_read_write or the auditor's VAMA over derived lines. a4: showcase-invoice-cbp uses a test-local fallback set and no list exclusion, and controlled-by-parent.dogfood.test.ts is a synthetic fixture. The ref names each gap. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s admin re-read of the refused PATCH and its non-2xx by-id read (showcase-private-owd); acceptance[1]'s >= 400 non-owner PATCH with the admin re-read (showcase-public-read-owd); acceptance[4] on the stock C1/C2 contributors with C2's list exclusion, and acceptance[5]'s auditor listing of derived lines (new showcase-invoice-line-contributor-pair). automated.ref also names the existing showcase-crud-persona-matrix cases that already pin acceptance[2] and acceptance[3], which revision 5 recorded as unpinned. acceptance[6] stays procedural. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -769,7 +793,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -840,7 +864,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — WRITE half: the showcase's own readable:true/editable:false grant) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin; (a2) clause 2, the admin's budget write on the other side of the lock, is asserted by neither pin; (a0) clause 0's re-read leg — the zoo FLS case asserts the contributor's name PATCH status (< 300) only, never a re-read showing the name changed; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget cases — WRITE half: the showcase's own readable:true/editable:false grant; the contributor's name PATCH re-reads changed, the budget PATCH is refused with the stored value unchanged, and the admin's budget PATCH on the same project lands and re-reads changed — acceptance[0], [1] and [2], api, in-process HTTP) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin and stay a run's browser leg: the dogfood suite boots the in-process HTTP stack and drives no browser, and the card that upgraded these pins (#26571) adds no CI lane; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
       },
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (contributor FLS)",
@@ -883,6 +907,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-permission-zoo.dogfood.test.ts and showcase-fls-read-mask-strip.dogfood.test.ts: acceptance[2]'s admin-side budget write is asserted by neither pin, and acceptance[0]'s re-read leg is unpinned (the zoo asserts the name PATCH status only). automated.ref's STILL MANUAL list names both. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[0]'s re-read of the contributor's name edit and acceptance[2]'s admin budget write with its re-read are now pinned in showcase-permission-zoo.dogfood.test.ts at the api oracle's layer (in-process HTTP). acceptance[3] and the UI half of acceptance[4] stay a live browser leg; automated.ref says why (no browser in the dogfood suite, no new CI lane). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },

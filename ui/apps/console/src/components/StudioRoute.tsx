@@ -128,10 +128,10 @@ export function RequireStudioAccess({
    * DECLARED landing (objectui#7373), which is the environment launcher
    * wherever no app declares one; an explicit value still wins.
    *
-   * It was `redirectTo` while a non-holder was redirected there, the posture of
-   * `RequireAiSurface`, which still redirects: a runtime that serves no agent
-   * has nothing to refuse, and what reaches it is a stale link. A non-holder
-   * here is refused a capability, and is now told so (objectui#12035).
+   * It was `redirectTo` while a non-holder was redirected there. A non-holder
+   * here is refused a capability, and is now told so (objectui#12035);
+   * `RequireAiSurface` later took the same posture for a runtime that serves
+   * no agent (objectstack#26614).
    */
   homeTo?: string;
 }) {

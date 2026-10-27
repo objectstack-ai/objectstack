@@ -786,6 +786,9 @@ const de = {
     addRecord: "Datensatz hinzufügen",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Alle anzeigen",
+    viewAllCount: "Alle {{count}} Datensätze anzeigen",
+    viewAllCount_one: "{{count}} Datensatz anzeigen",
+    viewAllCount_other: "Alle {{count}} Datensätze anzeigen",
     tabs: "Tabs",
     allRecords: "Alle Datensätze",
     userFilters: {
@@ -2888,6 +2891,7 @@ const de = {
     build: {
       title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
+      inStudio: "Neu in Studio",
     },
     template: {
       title: "Mit einer Vorlage starten",
@@ -3102,6 +3106,8 @@ const de = {
     recordAccessDeniedDescription: "Sie haben keine Berechtigung, Datensätze dieses Typs anzuzeigen. Wenden Sie sich an Ihren Administrator, wenn Sie Zugriff benötigen.",
     recordLoadFailed: "Dieser Datensatz konnte nicht geladen werden",
     recordLoadFailedDescription: "Beim Laden ist etwas schiefgelaufen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    recordAccessEnded: "Entscheidung erfasst",
+    recordAccessEndedDescription: "Ihr Genehmigungsschritt ist abgeschlossen, damit endet Ihr Zugriff auf diesen Datensatz.",
   },
   actionDialog: {
     title: "Aktionsparameter",

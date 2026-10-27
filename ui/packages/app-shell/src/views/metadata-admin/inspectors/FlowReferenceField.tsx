@@ -18,7 +18,7 @@
  * `position`) render a record lookup against the data API (with a manual-entry
  * escape hatch, so the never-trap rule still holds), `org-membership-level` is
  * a strict select over a closed enum, `manager` is auto-resolved (disabled
- * cell), and `queue` warns that the runtime doesn't resolve it. A kind whose
+ * cell), and `queue` is free text naming the queue (ADR-0142 D6). A kind whose
  * published binding is the REGISTRY instead (`{ source: 'registry', type }`,
  * objectstack#22710 — `position` on a server carrying it) renders a select over
  * that metadata type's items and commits the item's name (objectui#7611 Q3b),
@@ -793,8 +793,8 @@ export interface ReferenceComboboxProps {
  * directory-backed kinds render a record lookup ({@link RecordLookupCell}),
  * registry-bound kinds a select over the registry ({@link RegistryPickCell}),
  * `org-membership-level` a strict select (closed enum), `manager` a disabled
- * auto-resolved cell, and `queue` free text with a not-supported warning
- * (objectstack-ai/objectstack#3508). Hooks are called unconditionally (kind-gated args) so the
+ * auto-resolved cell, and `queue` free text naming the queue (ADR-0142 D6).
+ * Hooks are called unconditionally (kind-gated args) so the
  * component is safe to use in a repeater where the kind changes per row.
  */
 export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect, disabled, placeholder, context, showHint = true, ariaLabel }: ReferenceComboboxProps) {
@@ -961,10 +961,10 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
     );
   }
 
-  // Declared-but-unenforced (objectstack-ai/objectstack#3508): the runtime has no queue
-  // resolution, so a stored value keeps its free-text cell but carries a
-  // warning — rendered regardless of `showHint` because the slot silently
-  // routes to nobody. New rows can no longer choose this type.
+  // [ADR-0142 D6] A queue approver resolves to the queue's members when the
+  // step opens. Its value is a queue machine name with TWO sources — a declared
+  // queue and an organization's own `sys_queue` row — so the cell stays free
+  // text until the console's two-source queue picker lands.
   if (kind === 'queue') {
     return (
       <div className="w-full space-y-1">
@@ -976,9 +976,11 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
           disabled={disabled}
           className="h-8 text-sm"
         />
-        <p className="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
-          {t('engine.inspector.reference.queueUnsupported', locale)}
-        </p>
+        {showHint && (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {t('engine.inspector.reference.queueHint', locale)}
+          </p>
+        )}
       </div>
     );
   }

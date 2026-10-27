@@ -13,7 +13,8 @@
  * it was byte-equivalent to `edit`. An admin picking "Full Access" in Setup was
  * told they had granted delete rights and had not — declared-but-unenforced
  * metadata, the exact authoring trap ADR-0078 / ADR-0049 ban, and the reason
- * `recipient_type: 'queue'` was removed before it.
+ * `recipient_type: 'queue'` was off the authoring surface until ADR-0142 D7
+ * gave it an evaluator.
  *
  * It is not coming back as an enum member. Record sharing widens **which rows**
  * a principal reaches, never **which verbs** they may use — the same split

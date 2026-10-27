@@ -68,11 +68,11 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
-import type { AuthoredRowWriteOperation } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, type AuthoredRowWriteOperation, type IOwnershipQueueService } from '@objectstack/spec/contracts';
 import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
 import { absentUnderCallerRead, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
-import { PermissionDeniedError } from './errors.js';
+import { ExplainUserNotFoundError, PermissionDeniedError } from './errors.js';
 import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
@@ -80,6 +80,7 @@ import {
   delegatedOrganizationRefusal,
   explainAccessForAsker,
   intersectDelegatedScope,
+  readSysUserRow,
   resolveDelegatorContext,
 } from './explain-engine.js';
 
@@ -109,6 +110,7 @@ export interface ExplainAccessHost {
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
   resolveSharingReadFilter: SecurityPlugin['resolveSharingReadFilter'];
+  resolveSharingWriteVerdict: SecurityPlugin['resolveSharingWriteVerdict'];
   resolveWriteScopeForSharing: SecurityPlugin['resolveWriteScopeForSharing'];
 }
 
@@ -121,7 +123,7 @@ type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRls
 
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
-  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
+  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
   request: { object: string; operation: string; userId?: string; recordId?: string },
   callerContext?: any,
 ): Promise<ExplainDecision> {
@@ -162,6 +164,15 @@ export async function explainAccessForCaller(
           );
         }
       }
+    }
+    // [#26641] ...and only a user who exists is explained. The resolver
+    // synthesises the baseline anchor and sets for ANY id, so an id no
+    // `sys_user` row has was explained as a baseline member, `allowed: true`.
+    // Asked here, after the caller is admitted and never before, so a caller
+    // who may not explain others learns nothing about which ids exist; read
+    // through the delegator path's own existence read (`readSysUserRow`).
+    if (!(await readSysUserRow(this.ql, request.userId))) {
+      throw new ExplainUserNotFoundError(request.userId);
     }
     // [#20515] Resolved in the CALLER's organization — the one the explain
     // right above was checked in. Grants scoped to any other organization do
@@ -220,6 +231,11 @@ export async function explainAccessForCaller(
   // sharing attribution. Resolved lazily; absent (no plugin-sharing) → the
   // record path still works, the sharing layer simply reports not_evaluated.
   const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
+  // [ADR-0142 D3] The ownership-queue service, for the record's queue story.
+  const queueSvc = recordId
+    ? (this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as Pick<IOwnershipQueueService, 'isMember'> | undefined)
+    : undefined;
+  const ownershipQueues = queueSvc && typeof queueSvc.isMember === 'function' ? queueSvc : undefined;
 
   // [#19963] A record-grained WRITE verdict is computed from the by-id write
   // path's own inputs, so `record.visible` for `update` / `delete` is the
@@ -462,6 +478,12 @@ export async function explainAccessForCaller(
       // above: the two go together.
       checkControlledByParentWrite: (o: string, rid: string, c: any) =>
         this.checkControlledByParentWrite(o, rid, c),
+      // [ADR-0142 D3/D4] The queue story's two questions, asked of the same
+      // authorities the doors ask: the queue service's holder check (the
+      // access path's queue basis), and the tri-state sharing write verdict
+      // the ownership gate's claim admission reads.
+      ...(ownershipQueues ? { queueMember: (u: string, q: string, org: string | null) => ownershipQueues.isMember(u, q, org) } : {}),
+      claimVerdict: (o: string, rid: string, c: any) => this.resolveSharingWriteVerdict('update', o, rid, c),
     },
     { object, operation, context: targetContext, recordId },
     // The asker: the caller, whose read of the record decides whether this

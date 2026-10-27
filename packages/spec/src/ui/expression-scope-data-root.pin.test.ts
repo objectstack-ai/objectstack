@@ -191,7 +191,7 @@ describe('a page component `visibleWhen` names no `data` root but the `api` data
       const s = sentenceAt(doc, 'The one `data` this surface has');
       expect(s).toContain("provider: 'api'");
       expect(s).toContain('`useElementApiDataSource`');
-      expect(s).toContain('objectui: packages/react/src/SchemaRenderer.tsx');
+      expect(s).toContain('ui/packages/react/src/SchemaRenderer.tsx');
     });
   });
 

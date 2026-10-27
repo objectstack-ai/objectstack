@@ -96,6 +96,11 @@ rule:
   `adminScope` whose business-unit subtree covers that user (ADR-0090 D12):
   an administrator who can rewire a user's grants may read why they resolve
   the way they do — and *only* a covering administrator. Anything else → 403.
+- **A `userId` no user has** — once the caller may explain that user, an id
+  with no `sys_user` record is refused `404 RECORD_NOT_FOUND`, naming the id,
+  instead of being explained as a baseline member. The 403 above comes first,
+  so a caller who may not explain others cannot use explain to learn which ids
+  exist.
 
 A deployment without `@objectstack/plugin-security` answers 501.
 

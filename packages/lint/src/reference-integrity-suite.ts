@@ -109,6 +109,7 @@ import { validateActionDispatchContract } from './validate-action-dispatch-contr
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
+import { validateReportDateRange } from './validate-report-date-range.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateMappingTargetFields } from './validate-mapping-target-fields.js';
 import { validateNavAccess } from './validate-nav-access.js';
@@ -438,6 +439,23 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // crossing: 9 reports (showcase 4, todo 5), 8 of them binding a real dataset
   // with `rows`/`values` — 0 findings, with a lit synthetic probe refused.
   { name: 'validateChartBindings', runtimeTypes: ['flow', 'report'], run: validateChartBindings },
+  // [#26548] The same report, one key on: `dateRange.dimension` resolved
+  // against the bound dataset's `type: 'date'` dimensions (named, or the ONE
+  // candidate when omitted). Directly after its sibling because the two read
+  // the same `stack.reports` against the same `stack.datasets`, and this one
+  // skips a dataset that resolves to nothing — the sibling's
+  // `chart-dataset-unknown` reports that typo once.
+  //
+  // `report` joins the `['flow']` default for the sibling's reason, unchanged:
+  // `stack.datasets` is the one collection it resolves into and the per-write
+  // report snapshot carries it, so there is no missing-collection
+  // false-positive channel. The publish door is the only door a Studio or
+  // MCP/AI author has, and a window the renderer cannot apply should be
+  // refused there, not stored. A refusal widening on a NEW key only: MEASURED
+  // over the shipped report corpus (showcase 4, todo 5) before crossing — no
+  // report declares `dateRange`, so 0 findings by construction, and the door
+  // test's lit probes are refused (`runtime-gate.inert-type-writes.test.ts`).
+  { name: 'validateReportDateRange', runtimeTypes: ['flow', 'report'], run: validateReportDateRange },
   // [#14105] One level BELOW the two members above it. `validateChartBindings`
   // and `validateWidgetBindings` resolve a presentation's binding against the
   // dataset (#7529/#8902); this one resolves the DATASET's own references —

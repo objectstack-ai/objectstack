@@ -148,6 +148,11 @@ Each operation becomes an action keyed by its `operationId` (or a
 `method_path` slug when the document omits one) — so `getInvoice` in the
 document is `actionId: 'getInvoice'` in your flow.
 
+The document must be **OpenAPI 3.x**. A Swagger 2.0 document — or one with no
+`openapi` version field — is refused at boot with an error naming the inline
+document, URL or file it came from: convert it to OpenAPI 3.x offline and point
+`spec` at the converted document. The runtime never converts.
+
 ### `provider: 'mcp'` — one action per tool
 
 Config: **`transport`** (required) and **`include`** (optional tool-name
@@ -177,7 +182,13 @@ export const SearchToolsConnector = defineConnector({
 ```
 
 At materialization the provider connects, calls `tools/list`, and maps each
-tool to an action — the MCP server's tool names are your `actionId`s.
+tool to an action — the MCP server's tool names are your `actionId`s. A
+paginated tool list is followed through every page (`nextCursor`), up to 100
+pages; a server still paging after that fails discovery instead of yielding a
+truncated tool list. A server that is unreachable or failing degrades the
+instance, which is retried. A credential the server rejects (HTTP 401 / 403 on
+connect, handshake or `tools/list`) is a configuration fault instead: it fails
+the boot and is not retried — fix the credential and reload.
 
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one

@@ -55,6 +55,24 @@ export type EvalPermissions = Readonly<Record<string, EffectiveObjectPermission>
 export type EvalSystemPermissions = ReadonlyArray<string>;
 
 /**
+ * The option labels a reader reads, per field and per stored value — the
+ * {@link EvalContext.optionLabels} payload, and the only input `label()` reads.
+ *
+ * Field name → (stored option value, as text → the label to show). One entry
+ * per field of the record's object that declares options, already resolved in
+ * the reader's locale by the caller. The caller resolves them the way the
+ * object's metadata is served to that reader — its declared `options` with the
+ * translation bundle laid over them (`translateObject`, `@objectstack/spec/system`)
+ * — so a label here is the label the select control shows the same reader.
+ *
+ * **A pure DATA map, never a resolver**, for the reason {@link EvalPermissions}
+ * gives: the stdlib may read pinned data and nothing else, so it is never
+ * handed a translator. The locale decision is the caller's, made once, before
+ * evaluation.
+ */
+export type EvalOptionLabels = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+/**
  * Runtime context for evaluating an expression.
  *
  * Every field is optional — call sites populate only what they have. The CEL
@@ -93,6 +111,11 @@ export interface EvalContext {
    * a root named `locale` is just a value a hole can print — it used to also
    * set the formatter locale of the whole sentence (objectstack#26232). The
    * caller that knows the viewer's display locale passes it here.
+   *
+   * The `cel` dialect reads no locale. Its one locale-dependent function,
+   * `label()`, reads {@link optionLabels}, which the caller resolved in the
+   * reader's locale before evaluating — the stdlib holds data, never a
+   * translator.
    */
   locale?: string;
   /**
@@ -159,6 +182,22 @@ export interface EvalContext {
    * real answer (this subject holds no capability) and evaluates to `false`.
    */
   systemPermissions?: EvalSystemPermissions;
+  /**
+   * The option labels of the record's object, in the reader's locale — see
+   * {@link EvalOptionLabels} for the shape and where it comes from.
+   *
+   * Read by exactly one binding, `label(record.<field>)`, which turns a select
+   * field's stored value into the label a reader reads. ⛔ NOT mounted as a
+   * CEL variable, on the terms {@link permissions} is.
+   *
+   * **Absent ≠ empty.** With no map at all `label()` THROWS
+   * (`ok: false, kind: 'runtime'`): a context that was never given labels
+   * cannot answer, and printing the stored value instead (`clean` where the
+   * reader should read `清稿`) is the quiet wrong answer this function exists
+   * to remove. A map that lacks the field means the field declares no
+   * options, and `label()` throws for that too.
+   */
+  optionLabels?: EvalOptionLabels;
   /** Free-form bag for niche call sites; merged onto the variable scope. */
   extra?: Record<string, unknown>;
 }

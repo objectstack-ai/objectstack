@@ -964,6 +964,9 @@ importers:
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      validate-npm-package-name:
+        specifier: ^7.0.2
+        version: 7.0.2
     devDependencies:
       '@objectstack/spec':
         specifier: workspace:*
@@ -971,6 +974,9 @@ importers:
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
+      '@types/validate-npm-package-name':
+        specifier: ^4.0.2
+        version: 4.0.2
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.3))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
