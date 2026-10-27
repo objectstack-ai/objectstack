@@ -12,5 +12,6 @@ The permission-set editor listed Create, Read, Edit, Delete, Transfer, View All 
 
 - **Export is a column** (`E`, "Export records"; Chinese: 导出记录) between Delete and Transfer, the order the position summary uses, on the Setup page and in Studio's Access Objects tab. It shows a stored grant and toggles it like Transfer.
 - **The bulk buttons leave Export as it is.** Export is an opt-in, high-privilege grant, so R, CRUD and All neither set nor clear it, and the All button's tooltip says so. None still empties the whole row.
-- **Assigned Users scrolls with the grid**, after it and the advanced facets, so the grid keeps the page's height at every width. The filter bar wraps on a phone.
+- **Assigned Users scrolls with the grid**, after it and the advanced facets, so the grid keeps the page's height. Measured on the Setup page at 1440×900: 9 object rows on screen.
+- **On a phone the page scrolls as one.** Below the `md` width the chrome above the grid (header, notices, capabilities, filter, legend) is taller than the screen, so the page body scrolls everything together instead of leaving the grid a box about 120px tall; at 390×844, 12 rows fit once the grid is scrolled up. The filter bar wraps there too.
 - No key is declared anywhere, and nothing a set already stores changes.

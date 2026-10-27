@@ -2143,7 +2143,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         </>
       }
     >
-      <div className="flex flex-col h-full overflow-hidden">
+      {/* From `md` up the matrix scrolls inside the page and the chrome above
+          it stays put. On a phone the chrome alone is taller than the screen
+          (objectstack#26885: the grid's own box was ~120px tall at 390×844),
+          so there the column takes its content's height and the page body
+          (`PageShell`) scrolls it as one. */}
+      <div className="flex flex-col md:h-full md:overflow-hidden">
         {noticesEl}
 
         {/* Identity summary — collapsible (objectui#2600 B1). Name/label change
