@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 60 — spawns the real producer once per single-cause fixture: five CLI spawns in one beforeAll, each a distinct triple (`os build`, `os lint`, `os lint --strict` over the flip fixture; `os build`, `os lint` over the single-package control); slowest CI reading 43.77 s (run 40392443783), taken with nine spawns before the repeats were shared of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * #18778, the BEHAVIOURAL half — `os lint` and `os build` report the same
