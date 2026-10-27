@@ -4222,7 +4222,7 @@
       "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4280,7 +4280,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts. Layers (RUNNER rule 6): tenant-wall-organization-removal.test.ts and the two engine master-detail-header tests are in-process — a real engine and SecurityPlugin over SQL drivers, the answer read off the thrown statusCode or through resolveThrownHttpError — so acceptance[1], acceptance[2] and negative[0] (api oracle) score partial from them: no pin here drives those doors over HTTP. The 18.0 sweep's PASS for them at revision 4 (#24840) predates the layer rule; it is not a precedent for scoring them pass from these pins"
+        "ref": "packages/qa/dogfood/test/parent-and-organization-write-guards.dogfood.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts. Per clause, at the api oracle's layer (in-process HTTP): acceptance[1] — parent-and-organization-write-guards' walled describe boots the showcase with multiTenant 'posture-only' (a real isolated posture: the tenancy service reports the Layer 0 wall active and not degraded, asserted); an organization owner who is not the platform administrator PATCHes their own showcase_private_note with organization_id null and is refused 403 PERMISSION_DENIED, the row keeping its organization (the same caller's PATCH that leaves the column alone is admitted, the control), and inserts sending organization_id null and '' are stamped with the caller's active organization. acceptance[2] and negative[0] — the same file: a member holding a scratch task-writer set whose row policy selects no showcase_project POSTs a showcase_task naming a seeded project it cannot read (asserted) and one naming a project id that exists nowhere; both answer 400 carrying reference_not_found, the two bodies equal field by field once the named id is normalised, and nothing lands (the admin's identical POST lands, the control). On the controlled_by_parent detail (showcase_invoice_line: a stock contributor naming another contributor's invoice, and a missing one) the ADR-0055 §3 master-edit gate answers before the reference check: both are the one 403 PERMISSION_DENIED body, so negative[0] holds there too; that code is the gate's by design (engine-unreadable-master-detail-header.test.ts's controls keep a controlled_by_parent detail unchanged). acceptance[3] — cbp-parent-attachment-comment-gates and cbp-explain-master-write. The plugin-security and objectql files are engine pins beneath (a real engine and SecurityPlugin over SQL drivers). acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin",
@@ -4324,6 +4324,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (a1/a2/n0), re-read on main b4199c96: the walled organization-removal refusal and the unreadable-header parity are pinned only in-process (engine + SecurityPlugin over SQL drivers, thrown statusCode / resolveThrownHttpError), with no HTTP pin for the api-oracle legs; #24840 scored them PASS at revision 4 before the layer rule. automated.ref names the layer and the precedent. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned over the REST data door: acceptance[1] on a posture-only walled showcase boot (the organization-emptying PATCH refused 403 PERMISSION_DENIED, empty-org inserts stamped); acceptance[2] and negative[0] as the unreadable/nonexistent master comparison, field by field, on a plain master_detail detail, and the same parity on the controlled_by_parent line, where the master-edit gate's 403 answers first (new parent-and-organization-write-guards). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -4332,7 +4338,7 @@
       "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4375,8 +4381,8 @@
         "wrong-persona"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts (sys_job, sys_job_queue, sys_job_run, sys_migration, sys_migration_journal) + packages/services/service-automation/src/sys-flow-dispatch.object.test.ts (sys_flow_dispatch) + packages/services/service-realtime/src/objects/sys-presence.object.test.ts (sys_presence) — object-declaration pins (no tenant column, requiredPermissions manage_platform_settings); they score acceptance[0] only. No pin drives either door over HTTP: acceptance[1] (org admin 403, platform admin 200) and acceptance[2] (400 INVALID_FIELD on an organization_id filter) stay live-run clauses"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/deployment-tables-platform-only.dogfood.test.ts + packages/platform-objects/src/deployment-level-no-tenant-column.test.ts (sys_job, sys_job_queue, sys_job_run, sys_migration, sys_migration_journal) + packages/services/service-automation/src/sys-flow-dispatch.object.test.ts (sys_flow_dispatch) + packages/services/service-realtime/src/objects/sys-presence.object.test.ts (sys_presence). Per clause, at the api oracle's layer (in-process HTTP): acceptance[1] — deployment-tables-platform-only signs up a member of the Default Organization and promotes its sys_member role to admin (guarded: it resolves an organization_admin permission set, holds no manage_platform_settings and is not the platform administrator), then reads GET /api/v1/data/TABLE for each of the seven tables: the org admin is refused 403 PERMISSION_DENIED on every one, and the platform administrator is served 200. acceptance[2] — the platform administrator's GET with the URL-encoded filter [[\"organization_id\",\"=\",\"x\"]] answers 400 INVALID_FIELD on each of the seven. The three object-declaration pins (no tenant column, requiredPermissions manage_platform_settings) are beneath it. acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/platform-objects/src/audit/sys-job.object.ts",
@@ -4401,6 +4407,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a0: automated.ref named packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts, which pins SecurityPlugin's boot refusal when sys_user / sys_member / sys_organization are not registered — nothing about the seven deployment tables or manage_platform_settings — so it left the ref. a1/a2: the ref now says no pin drives either door over HTTP and both clauses stay live-run. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL: no pin drove either door over HTTP). Pinned over the REST data door: acceptance[1]'s org admin 403 PERMISSION_DENIED and platform admin 200 on all seven tables, and acceptance[2]'s 400 INVALID_FIELD on an organization_id filter (new deployment-tables-platform-only). automated.kind unit -> dogfood, since the ref now leads with the dogfood pin. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -4409,7 +4421,7 @@
       "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages opens exactly where /resolve opens",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4458,8 +4470,8 @@
         "a password-correct anonymous caller reading link A is an authorization FAIL — carve-out applies"
       ],
       "automated": {
-        "kind": "conformance",
-        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts + packages/runtime/src/domains/share-links-messages-audience.test.ts (acceptance[3]: `/messages` opens for a caller exactly when `/resolve` opens the same link, on both mounts) + packages/runtime/src/domains/share-links-refusal-order.test.ts (acceptance[1] and acceptance[2]: the anonymous no-password-oracle row and the email-audience identical-refusal rows). Layers (RUNNER rule 6): the two runtime files are in-process — the domain's route entries kept by a minimal IHttpServer stand-in over a real engine, no Hono and no HTTP — so they score acceptance[0] only; acceptance[1] to acceptance[3] (api oracle) score partial from them, and their live legs are driven over HTTP"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/share-link-combined-gates.dogfood.test.ts + packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts + packages/runtime/src/domains/share-links-messages-audience.test.ts + packages/runtime/src/domains/share-links-refusal-order.test.ts. Per clause, at the api oracle's layer (in-process HTTP): the dogfood file mints two links through POST /api/v1/share-links on the seeded published client brief and drives the public token routes anonymously. acceptance[1] and negative[0] — link A (audience signed_in + password) resolved with no password, a wrong one and the right one in the UTF-8 header form answers 401 SIGN_IN_REQUIRED, the three bodies byte-identical. acceptance[2] — link B (audience email + password): no email and no password, the right password with no email, an off-list email with the right password, and the allowlisted email with a wrong password and with none all answer 404 INVALID_OR_EXPIRED, byte-identical with an unknown token's body; the allowlisted email with the right password resolves 200 (the control). acceptance[3] — the same eight calls paired with /messages: 404 NOT_FOUND on every call /resolve refused, and 400 UNSUPPORTED (a brief is no ai_conversations record) on the one call /resolve passed. The plugin-sharing and runtime files are beneath (the route entries over a real engine, no HTTP). acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes",
@@ -4490,6 +4502,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1/a2: packages/runtime/src/domains/share-links-refusal-order.test.ts asserts the anonymous no-password-oracle and email-audience identical-refusal rows but was not in the ref; it joins it. a3: share-links-messages-audience.test.ts drives in-process route entries (no Hono, no HTTP), so it scores acceptance[0], not the api oracle of acceptance[3]. automated.ref names the layer of both. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL: the runtime pins drive the route entries with no HTTP). Pinned over HTTP on anonymous calls: acceptance[1] and negative[0]'s byte-identical 401 SIGN_IN_REQUIRED across the password variants, acceptance[2]'s byte-identical 404 INVALID_OR_EXPIRED across the non-entitled variants and the unknown token with the allowlisted 200 control, and acceptance[3]'s resolve/messages pairing (new share-link-combined-gates). automated.kind conformance -> dogfood, since the ref now leads with the dogfood pin. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
