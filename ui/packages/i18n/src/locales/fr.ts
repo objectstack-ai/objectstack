@@ -2938,6 +2938,7 @@ const fr = {
     build: {
       title: "Créer une application",
       noCapability: "La création d'applications n'est pas disponible dans ce système : elle requiert l'autorisation « Gérer les métadonnées », que votre compte ne possède pas.",
+      inStudio: "Nouveau dans Studio",
     },
     template: {
       title: "Partir d'un modèle",

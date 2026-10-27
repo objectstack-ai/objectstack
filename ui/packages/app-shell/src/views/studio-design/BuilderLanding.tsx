@@ -19,7 +19,7 @@
  */
 
 import * as React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowUpRight, Boxes, Building2, Clock, Hammer, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
@@ -30,6 +30,7 @@ import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
+import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
 import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 
 /**
@@ -69,6 +70,26 @@ export function BuilderLanding(): React.ReactElement {
   const [pkgs, setPkgs] = React.useState<PkgEntry[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
+
+  // The new-package deep link (`studioNewPackage.ts`): Home's and the `/ai`
+  // screen's "New in Studio" land here with the create dialog open. Consumed
+  // once and dropped from the address with a replace, so a refresh or Back
+  // does not open the dialog a second time. Keyed on the param's value, the
+  // primitive this reads (ui/AGENTS.md #10).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const newParam = searchParams.get(STUDIO_NEW_PARAM);
+  React.useEffect(() => {
+    if (newParam !== STUDIO_NEW_PACKAGE_VALUE) return;
+    setCreateOpen(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(STUDIO_NEW_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [newParam, setSearchParams]);
 
   React.useEffect(() => {
     let cancelled = false;

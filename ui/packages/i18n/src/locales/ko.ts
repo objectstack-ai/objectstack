@@ -2888,6 +2888,7 @@ const ko = {
     build: {
       title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
+      inStudio: "Studio에서 새로 만들기",
     },
     template: {
       title: "템플릿으로 시작",

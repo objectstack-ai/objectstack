@@ -2937,6 +2937,7 @@ const pt = {
     build: {
       title: "Criar um aplicativo",
       noCapability: "A criação de aplicativos não está disponível neste sistema — ela exige a permissão “Gerenciar metadados”, que sua conta não possui.",
+      inStudio: "Novo no Studio",
     },
     template: {
       title: "Comece com um modelo",

@@ -2890,6 +2890,7 @@ const ja = {
     build: {
       title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
+      inStudio: "Studio で新規作成",
     },
     template: {
       title: "テンプレートから始める",
