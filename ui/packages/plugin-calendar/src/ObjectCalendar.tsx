@@ -1470,8 +1470,9 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
    * `plugin-view`'s `ObjectView` — and app-shell reaches the first from two
    * faces, `ObjectView` (the object-view door) and `InterfaceListPage` (the
    * interface-page door). Every one of them hands this component the same
-   * shape: the shared `baseProps` bag plus whichever of `startDateField` /
-   * `endDateField` / `titleField` the author declared. NOTHING on the node
+   * shape: the shared `baseProps` bag plus a `calendar` block carrying whichever
+   * of `startDateField` / `endDateField` / `titleField` the author declared
+   * (flat on the node until objectstack#25923). NOTHING on the node
    * names the door, so there is nothing to infer from, and a door PROP would
    * have to be declared on the node's published schema and threaded through
    * four packages.

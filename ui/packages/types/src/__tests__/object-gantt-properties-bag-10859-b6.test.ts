@@ -33,7 +33,7 @@
  * ## What is particular to this node
  *
  *   - The flat mirror also declared the whole `GanttConfig` vocabulary flat on
- *     the node (`startDateField`, `viewMode`, …, the flatten product
+ *     the node (`startDateField`, `viewMode`, …, the flat spelling
  *     `getGanttConfig` reads when there is no `gantt` block) and the legacy
  *     `dependencyField` alias. Each is refused by name and pointed at the
  *     bag's `gantt` block, the home the row gives them.

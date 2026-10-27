@@ -315,8 +315,10 @@ export type GanttConfig = SpecGanttConfig & {
   // The nine members below were declared ONLY in `plugin-gantt`'s package-private
   // `GanttConfigEx` intersection — the type `getGanttConfig` casts the `gantt`
   // block to. `ObjectGantt` honours every one of them on BOTH authoring faces
-  // (the `gantt: { … }` block AND the flattened top-level spelling declared on
-  // `ObjectGanttSchema`), and a type that lives inside the plugin can be
+  // (the `gantt: { … }` block AND the flattened top-level spelling, declared
+  // since objectstack#25923 on `plugin-gantt`'s own hand-off type
+  // `ObjectGanttFlatFields`, not on `ObjectGanttSchema`), and a type that lives
+  // inside the plugin can be
   // referenced by neither declaration — so the vocabulary is lifted here rather
   // than restated, and the two faces derive from ONE source that cannot fork.
   //

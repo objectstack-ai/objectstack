@@ -583,7 +583,7 @@ const warnedShadowedFlatGanttKeys = new Set<string>();
  * Silence is what the precedence rule costs if it is not diagnosed: two
  * spellings of ONE vocabulary (objectui#6051 proved they are one — both derive
  * from `GanttConfig`) in a single schema, one of them inert. The ruling picks
- * the author's block over the flatten product deliberately — maintainer on
+ * the author's block over the flat spelling deliberately — maintainer on
  * objectui#5018 (2026-08-17) for `plugin-map`, inherited here by objectui#6469 —
  * so the diagnostic names what was dropped instead of leaving the author to
  * infer it from a chart that renders the other spelling's values.

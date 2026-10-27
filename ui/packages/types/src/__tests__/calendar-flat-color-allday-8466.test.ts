@@ -29,6 +29,12 @@
  * renderer READS the flat spelling, not that an author should write it. The
  * README row below pins the new teaching.
  *
+ * ⚠️ Dated note, objectstack#25923 — superseded in part. The producers now hand
+ * the binding off in the `calendar` block, the flat spelling is only a
+ * stored-document fallback the renderer still reads, and the five flat
+ * declarations DID move: off `ObjectCalendarSchema`, onto `plugin-calendar`'s
+ * own hand-off type. This file now pins their absence.
+ *
  * ⚠️ Dated note — objectstack#25923. The declarations this file pinned DID move
  * after all: the five left both published faces of `ObjectCalendarSchema`
  * (they are `plugin-calendar`'s package-local hand-off type now, where the one
@@ -141,8 +147,9 @@ const CALENDAR_REGISTRATION = 'packages/plugin-calendar/src/index.tsx';
 const CALENDAR_README = 'packages/plugin-calendar/README.md';
 
 /**
- * The five field-name keys `getCalendarConfig` reads off the node FLAT (the
- * runtime handoff), and that the README authors inside the `calendar` block.
+ * The five field-name keys `getCalendarConfig` reads off the node FLAT (a
+ * stored-document fallback since objectstack#25923, when the producers moved to
+ * the block), and that the README authors inside the `calendar` block.
  */
 const FLAT_KEYS = ['titleField', 'startDateField', 'endDateField', 'allDayField', 'colorField'] as const;
 /** The three that were already declared — the precedent the two new ones join. */
@@ -469,10 +476,12 @@ describe('objectui#8466 — the renderer reads these keys, which is what the dec
   it('the README authors the five INSIDE the `calendar` block on `object-calendar`, never flat (objectui#8831)', () => {
     // This row used to pin the opposite — that the README taught the five flat,
     // "which is what makes them authorable". objectui#8831 ruled that spelling
-    // the runtime handoff: `ComponentPropsMap['object-calendar']` refuses it and
+    // the runtime handoff (since objectstack#25923 only a stored-document
+    // fallback): `ComponentPropsMap['object-calendar']` refuses it and
     // its diagnostic prescribes the `calendar` block. So the README teaches the
-    // block, and the declarations this file pins stay because the renderer
-    // READS the flat spelling, not because an author should write it.
+    // block. Since objectstack#25923 `ObjectCalendarSchema` no longer declares
+    // the five flat at all: the renderer still READS the flat spelling, typed on
+    // `plugin-calendar`'s own hand-off type, and no author should write it.
     //
     // Read off the authored nodes by brace matching, never by line or indent,
     // so a re-wrap or re-indent cannot move the verdict (objectui#8832).

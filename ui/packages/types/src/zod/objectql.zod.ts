@@ -1866,8 +1866,10 @@ const CALENDAR_DATE_ALIAS_STEM =
 /**
  * WHERE THE AUTHORED VALUE LANDS, which is what decides the consequence clause.
  *
- *   - `'binding'` — the value reaches `ObjectCalendar` as a FLAT member of the
- *     node. Every producer-fed surface is this: the view-level `calendar` block
+ *   - `'binding'` — the value reaches `ObjectCalendar` through a producer's
+ *     hand-off (since objectstack#25923 in the node's own `calendar` block,
+ *     before that as a FLAT member of the node). Every producer-fed surface is
+ *     this: the view-level `calendar` block
  *     and its legacy `options.calendar` twin, a named view's two nestings, and
  *     the flat node face itself.
  *   - `'container'` — the `object-calendar` element's OWN `calendar` container,
