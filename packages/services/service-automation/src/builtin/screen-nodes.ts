@@ -2,7 +2,8 @@
 
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, isExpressionEnvelopeShaped, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
-import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
+import type { FlowEdgeParsed, FlowNodeParsed, FlowParsed, ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
+import type { ScreenProgressSpec } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { flowScreenCopyKey, type FlowScreenCopyKey } from '@objectstack/spec/system';
 import { renderTextSlot } from './template.js';
@@ -81,6 +82,201 @@ function valueKindOf(value: unknown): string {
     if (Array.isArray(value)) return 'a list';
     if (typeof value === 'object') return 'a map';
     return `a ${typeof value} (\`${String(value)}\`)`;
+}
+
+/**
+ * How one node of a flow's top-level graph counts toward the screens a run
+ * serves, for {@link readScreenProgress} (#26657):
+ *
+ * - `'screen'` — a `screen` node that pauses whenever the run reaches it.
+ * - `'maybe-screen'` — a `screen` node the run's caller may already have
+ *   answered (`judgeHeadlessScreen`), so whether it pauses depends on values.
+ * - `'subflow'` — a node that may serve screens of its CHILD run, any number
+ *   of them or none (`subflow-node.ts` forwards the child's `screen`), and
+ *   whose pause may end the stretch of screens.
+ * - `'pause'` — any other node that can pause. It serves no screen (only a
+ *   `screen` node sets `NodeExecutionResult.screen`, and `subflow` forwards
+ *   it), so the stretch of screens may end there.
+ * - `'plain'` — everything else, a `screen` that never pauses included.
+ */
+export type ScreenProgressRole = 'screen' | 'maybe-screen' | 'subflow' | 'pause' | 'plain';
+
+/**
+ * A paused screen's place in its run, read off the flow's top-level graph
+ * (#26657) — the {@link ScreenProgressSpec} served on `ScreenSpec.progress`.
+ * `undefined` only when the graph does not hold the node.
+ *
+ * Every out-edge is a way the run may go: the engine does not evaluate a
+ * condition ahead of time, so a branch it cannot see past answers
+ * `'possible'`, and a count that differs between paths is left out rather
+ * than guessed. Region bodies (`loop` / `try_catch` / `parallel`) are not
+ * walked: a pause inside one is refused (`region-suspension-refusal.ts`), so
+ * no screen there is served.
+ */
+export function readScreenProgress(
+    flow: Pick<FlowParsed, 'nodes' | 'edges'>,
+    nodeId: string,
+    roleOf: (node: FlowNodeParsed) => ScreenProgressRole,
+): ScreenProgressSpec | undefined {
+    const nodes = new Map(flow.nodes.map((n) => [n.id, n] as const));
+    if (!nodes.has(nodeId)) return undefined;
+    const roles = new Map([...nodes.values()].map((n) => [n.id, roleOf(n)] as const));
+    const outEdges = new Map<string, FlowEdgeParsed[]>([...nodes.keys()].map((id) => [id, []]));
+    for (const edge of flow.edges ?? []) {
+        if (nodes.has(edge.source) && nodes.has(edge.target)) outEdges.get(edge.source)!.push(edge);
+    }
+    const successors = (id: string): string[] => outEdges.get(id)!.map((e) => e.target);
+    const servesScreen = (id: string): boolean => {
+        const role = roles.get(id);
+        return role === 'screen' || role === 'maybe-screen' || role === 'subflow';
+    };
+
+    // How one visit of a node continues, read the way `traverseNext` walks:
+    // the conditional out-edges that hold run (on an exclusive `decision`
+    // only the first), a default edge only when none held, the unconditional
+    // ones always, and a fault edge only when the node fails. A visit may
+    // STOP when nothing is sure to follow, or when the node may pause without
+    // a screen; it FANS OUT when it may continue into several successors.
+    const visitShape = (id: string): { mayStop: boolean; fansOut: boolean } => {
+        const node = nodes.get(id)!;
+        const role = roles.get(id)!;
+        const edges = outEdges.get(id)!;
+        const onSuccess = edges.filter((e) => e.type !== 'fault');
+        const conditional = onSuccess.filter((e) => e.condition).length;
+        const fallback = onSuccess.filter((e) => !e.condition && e.isDefault).length;
+        const always = onSuccess.length - conditional - fallback;
+        const exclusive = node.type === 'decision'
+            && (node.config as { mode?: unknown } | undefined)?.mode !== 'inclusive';
+        const fansOut = edges.length - onSuccess.length > 1
+            || always + fallback > 1
+            || (exclusive ? always > 0 && conditional > 0 : always + conditional > 1);
+        return { mayStop: role === 'subflow' || role === 'pause' || (always === 0 && fallback === 0), fansOut };
+    };
+    const shapes = new Map([...nodes.keys()].map((id) => [id, visitShape(id)] as const));
+
+    // `nextScreen`. "Another screen can follow" is plain reachability, a loop
+    // back to this very screen included. "Certain" is the fewest screens any
+    // path from here pauses on before it may stop (a 0-1 BFS, entering a
+    // screen costs 1), where only a `screen` that surely pauses counts.
+    const seen = new Set<string>();
+    const queue = [...successors(nodeId)];
+    let reachesScreen = false;
+    while (queue.length > 0) {
+        const id = queue.shift()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (servesScreen(id)) reachesScreen = true;
+        queue.push(...successors(id));
+    }
+    const fewest = new Map<string, number>([[nodeId, 0]]);
+    const deque: string[] = [nodeId];
+    let fewestToStop = shapes.get(nodeId)!.mayStop ? 0 : Infinity;
+    while (deque.length > 0) {
+        const id = deque.shift()!;
+        const here = fewest.get(id)!;
+        for (const next of successors(id)) {
+            const cost = here + (roles.get(next) === 'screen' ? 1 : 0);
+            if (cost >= (fewest.get(next) ?? Infinity)) continue;
+            fewest.set(next, cost);
+            if (shapes.get(next)!.mayStop) fewestToStop = Math.min(fewestToStop, cost);
+            if (cost === here) deque.unshift(next); else deque.push(next);
+        }
+    }
+    const nextScreen: ScreenProgressSpec['nextScreen'] = !reachesScreen
+        ? 'none'
+        : fewestToStop >= 1 ? 'certain' : 'possible';
+
+    // `step` / `stepCount` — exact counts over the strongly connected
+    // components (Tarjan), so a loop collapses to one unit. Each count is the
+    // SET of screen totals the paths give; it is exact when the set has one
+    // member, and `null` stands for "varies": a loop holding a screen, a
+    // `subflow`, a maybe-screen. A fan-out anywhere the start reaches makes a
+    // run take several paths at once, so no count is exact then either.
+    const start = flow.nodes.find((n) => n.type === 'start');
+    if (!start) return { nextScreen };
+    const component = new Map<string, number>();
+    const members: string[][] = [];
+    const index = new Map<string, number>();
+    const low = new Map<string, number>();
+    const stack: string[] = [];
+    const onStack = new Set<string>();
+    const visit = (id: string): void => {
+        index.set(id, index.size);
+        low.set(id, index.get(id)!);
+        stack.push(id);
+        onStack.add(id);
+        for (const next of successors(id)) {
+            if (!index.has(next)) {
+                visit(next);
+                low.set(id, Math.min(low.get(id)!, low.get(next)!));
+            } else if (onStack.has(next)) {
+                low.set(id, Math.min(low.get(id)!, index.get(next)!));
+            }
+        }
+        if (low.get(id) !== index.get(id)) return;
+        const group: string[] = [];
+        let popped: string;
+        do {
+            popped = stack.pop()!;
+            onStack.delete(popped);
+            component.set(popped, members.length);
+            group.push(popped);
+        } while (popped !== id);
+        members.push(group);
+    };
+    for (const id of nodes.keys()) if (!index.has(id)) visit(id);
+
+    // Tarjan closes a component only after every component it reaches, so
+    // `members` runs sinks first (reverse topological order).
+    const loops = (c: number): boolean =>
+        members[c].length > 1 || successors(members[c][0]).includes(members[c][0]);
+    const weight = (c: number): number | null => {
+        if (loops(c)) return members[c].some(servesScreen) ? null : 0;
+        const role = roles.get(members[c][0]);
+        return role === 'screen' ? 1 : role === 'plain' || role === 'pause' ? 0 : null;
+    };
+    const exits = (c: number): number[] =>
+        [...new Set(members[c].flatMap(successors).map((id) => component.get(id)!))].filter((d) => d !== c);
+    type Counts = Set<number> | null;
+    const shift = (counts: Counts, by: number | null): Counts =>
+        counts === null || by === null ? null : new Set([...counts].map((n) => n + by));
+    const union = (a: Counts, b: Counts): Counts => (a === null || b === null ? null : new Set([...a, ...b]));
+
+    // Screens strictly after a component, to wherever the run may stop.
+    const after = new Map<number, Counts>();
+    for (let c = 0; c < members.length; c += 1) {
+        let counts: Counts = members[c].some((id) => shapes.get(id)!.mayStop) ? new Set([0]) : new Set();
+        for (const d of exits(c)) counts = union(counts, shift(after.get(d)!, weight(d)));
+        after.set(c, counts);
+    }
+    // Screens strictly before a component, from the start.
+    const reached: number[] = [];
+    const before = new Map<number, Counts>([[component.get(start.id)!, new Set([0])]]);
+    for (let c = members.length - 1; c >= 0; c -= 1) {
+        const counts = before.get(c);
+        if (counts === undefined) continue;
+        reached.push(c);
+        for (const d of exits(c)) before.set(d, union(before.get(d) ?? new Set(), shift(counts, weight(c))));
+    }
+    const exact = (counts: Counts | undefined): number | undefined =>
+        counts && counts.size === 1 ? [...counts][0] : undefined;
+
+    const own = component.get(nodeId)!;
+    const fansOut = reached.some((c) => members[c].some((id) => shapes.get(id)!.fansOut));
+    if (fansOut || loops(own)) return { nextScreen };
+    const prior = exact(before.get(own));
+    if (prior === undefined) return { nextScreen };
+    const remaining = exact(after.get(own));
+    return {
+        nextScreen,
+        step: prior + 1,
+        ...(remaining !== undefined ? { stepCount: prior + 1 + remaining } : {}),
+    };
+}
+
+/** The `progress` member, spread in only when the graph answered — absent, never `undefined`. */
+function progressMember(progress: ScreenProgressSpec | undefined): { progress?: ScreenProgressSpec } {
+    return progress ? { progress } : {};
 }
 
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
@@ -231,6 +427,30 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             typeof cfg.description === 'string' && cfg.description.length > 0
                 ? screenText('description', cfg.description, 'the body text')
                 : undefined;
+        // [#26657] Where this screen sits among the run's screens, read off
+        // the graph of the flow this run executes (`readScreenProgress`), so
+        // the runner can say "Next" or "Submit" and count steps. Asked only
+        // once the screen pauses. A screen inside a CHILD run (a `subflow`)
+        // sees its own graph alone: "another screen follows" still holds
+        // there, but "none follows" and the counts do not, because the
+        // parent may continue with screens of its own — so those are left out.
+        const progress = async (): Promise<ScreenProgressSpec | undefined> => {
+            if (flowName === undefined) return undefined;
+            const flow = await engine.getFlow(flowName);
+            if (!flow?.nodes.some((n) => n.id === node.id && n.type === 'screen')) return undefined;
+            const read = readScreenProgress(flow, node.id, (n) => {
+                if (n.type === 'subflow') return 'subflow';
+                if (n.type !== 'screen') return engine.getActionDescriptor(n.type)?.supportsPause === true ? 'pause' : 'plain';
+                // The executor's own pause rule, below: an object form always
+                // pauses, `waitForInput` decides, else declared fields do.
+                const raw = (n.config ?? {}) as { objectName?: unknown; fields?: unknown; waitForInput?: unknown };
+                if ((typeof raw.objectName === 'string' && raw.objectName.trim()) || raw.waitForInput === true) return 'screen';
+                if (!Array.isArray(raw.fields) || raw.fields.length === 0 || raw.waitForInput === false) return 'plain';
+                return judgeHeadlessScreen(raw.fields, new Map(), context).supplied.length > 0 ? 'maybe-screen' : 'screen';
+            });
+            if (!read || (context as { $parentRunId?: unknown }).$parentRunId == null) return read;
+            return read.nextScreen === 'none' ? undefined : { nextScreen: read.nextScreen };
+        };
         // [#19939] The record an `edit` form opens. A literal is the contract's
         // string, served as written. An envelope must evaluate to the record's
         // id, a non-blank string: anything else — `null` included — fails the
@@ -280,6 +500,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
               defaults,
               idVariable,
               fields: [],
+              ...progressMember(await progress()),
             },
           };
         }
@@ -361,6 +582,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             title: heading() ?? node.label ?? 'Input',
             description: body(),
             fields,
+            ...progressMember(await progress()),
           },
         };
       },

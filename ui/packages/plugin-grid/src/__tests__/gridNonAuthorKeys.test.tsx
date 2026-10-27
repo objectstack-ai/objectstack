@@ -638,6 +638,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // packages/plugin-grid/src/__tests__ -> repo root
 const repoRoot = path.resolve(here, '../../../..');
 const GRID_SOURCE = path.join(repoRoot, 'packages/plugin-grid/src/ObjectGrid.tsx');
+const COLUMN_STATE_SOURCE = path.join(repoRoot, 'packages/plugin-grid/src/objectGridColumnState.ts');
 const TYPES_SOURCE = path.join(repoRoot, 'packages/types/src/objectql.ts');
 
 const gridLines = readFileSync(GRID_SOURCE, 'utf8').split('\n');
@@ -844,7 +845,7 @@ describe('`onNavigate` — the exemption is DOCUMENTED, which is what this card 
     // The control for the two cases above: they assert "a comment is present",
     // which would also pass if this file had quietly stopped being able to see
     // comments at all. The four older exemptions are the independent witness.
-    const gridSource = gridLines.join('\n');
+    const gridSource = [gridLines.join('\n'), readFileSync(COLUMN_STATE_SOURCE, 'utf8')].join('\n');
     for (const { key } of NON_AUTHOR_KEYS) {
       expect(
         gridSource,

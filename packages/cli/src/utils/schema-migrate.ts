@@ -1253,9 +1253,10 @@ export async function bootSchemaStack(
      * ({@link SchemaStack.drivers}). Set by `os migrate plan` and `os migrate
      * apply`, so the plan an operator reads and the apply that confirms it
      * cover the same datasources, by `os migrate unmapped-columns`, a
-     * filter over that plan's own findings, and by `os migrate
+     * filter over that plan's own findings, by `os migrate
      * audit-mail-bodies`, which masks the archive datasource a declaration
-     * names (#24899); by nothing else.
+     * names (#24899), and by its twin `os migrate audit-key-material`, which
+     * rewrites the same archive; by nothing else.
      *
      * Without it a `datasourceMapping` rule routing objects to a declared
      * datasource left them bound to no driver here, the declared DEFAULT's

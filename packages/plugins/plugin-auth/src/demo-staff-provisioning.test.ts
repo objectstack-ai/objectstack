@@ -31,6 +31,7 @@ import { SecurityPlugin } from '@objectstack/plugin-security';
 import { AuthPlugin, type DemoStaffingService } from './auth-plugin.js';
 import type { AuthManager } from './auth-manager.js';
 import type { DemoStaffOutcome, DemoStaffRefusal } from './demo-staff.js';
+import type { DemoStaffParsed } from '@objectstack/spec/system';
 
 const SYS = { isSystem: true } as const;
 const BASE = 'http://localhost:3000';
@@ -102,12 +103,12 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
     vi.restoreAllMocks();
   });
 
-  async function boot(options: { baseUrl?: string } = {}) {
+  async function boot(options: { baseUrl?: string; staff?: readonly DemoStaffParsed[] } = {}) {
     const step = vi.spyOn(
       AuthPlugin.prototype as unknown as { maybeProvisionDemoStaff(ctx: PluginContext): Promise<StaffingAnswer> },
       'maybeProvisionDemoStaff',
     );
-    const auth = new AuthPlugin({ secret: SECRET, baseUrl: options.baseUrl ?? BASE, demoStaff: STAFF });
+    const auth = new AuthPlugin({ secret: SECRET, baseUrl: options.baseUrl ?? BASE, demoStaff: options.staff ?? STAFF });
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(sqliteDriverPlugin());
     await kernel.use(new ObjectQLPlugin());
@@ -287,5 +288,43 @@ describe('the development boot provisions the stack`s demo accounts (#25777)', (
     expect(await rows('sys_user_permission_set', { permission_set: 'admin_full_access' })).toEqual([]);
     // On a development boot the developer loses the accounts: warned.
     expect((await rerun()).logs.map((l) => l.level)).toEqual(['warn']);
+  }, 30_000);
+  /**
+   * The managers: Paralegal 1 reports to Legal Counsel 1 (declared before it,
+   * named in another case), and Legal Counsel 1 to Legal Lead (declared after
+   * it), so both orders of the second pass are on the real composition.
+   */
+  const MANAGED_STAFF: DemoStaffParsed[] = [
+    { ...STAFF[0]!, manager: 'lead@legal.example' },
+    { ...STAFF[1]!, manager: 'COUNSEL1@legal.example' },
+    { name: 'Legal Lead', email: 'lead@legal.example' },
+  ];
+
+  it('8. a fresh dev database: every declared manager is sys_user.manager_id before the seed runs', async () => {
+    const { answer, rows, userId } = await boot({ staff: MANAGED_STAFF });
+    expect(answer).toMatchObject({ failed: [], managersLinked: 2, managersKept: [] });
+
+    const counsel = await userId('counsel1@legal.example');
+    const lead = await userId('lead@legal.example');
+    expect((await rows('sys_user', { id: counsel }))[0]!.manager_id).toBe(lead);
+    expect((await rows('sys_user', { id: await userId('para1@legal.example') }))[0]!.manager_id).toBe(counsel);
+    expect((await rows('sys_user', { id: lead }))[0]!.manager_id ?? null).toBeNull();
+  }, 30_000);
+
+  it('9. the next boot leaves a manager set by hand as it is, and writes a cleared one again', async () => {
+    const { ql, rows, userId, rerun } = await boot({ staff: MANAGED_STAFF });
+    const admin = await userId(SEED_EMAIL);
+    const counsel = await userId('counsel1@legal.example');
+    const para = await userId('para1@legal.example');
+    // An operator re-points Paralegal 1 to the admin and clears Legal Counsel 1's.
+    await ql.update('sys_user', { id: para, manager_id: admin }, { context: SYS } as never);
+    await ql.update('sys_user', { id: counsel, manager_id: null }, { context: SYS } as never);
+
+    const { answer, logs } = await rerun();
+    expect(answer).toMatchObject({ failed: [], managersLinked: 1, managersKept: ['para1@legal.example'] });
+    expect((await rows('sys_user', { id: para }))[0]!.manager_id).toBe(admin);
+    expect((await rows('sys_user', { id: counsel }))[0]!.manager_id).toBe(await userId('lead@legal.example'));
+    expect(logs.filter((l) => l.level === 'warn')).toEqual([]);
+    expect(logs.map((l) => l.message).join('\n')).toContain('para1@legal.example already had a manager');
   }, 30_000);
 });

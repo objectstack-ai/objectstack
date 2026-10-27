@@ -480,6 +480,8 @@ the protocol-18 step, which `os migrate meta --from 17` lists for your sources
 | v12.0.0 | [Upgrade checklist](/docs/releases/v12#upgrade-checklist) |
 | v9.0.0 | [Upgrade checklist](/docs/releases/v9#upgrade-checklist) |
 
+**Upgrading from 18.2.0 or earlier:** run [`os migrate audit-key-material`](/docs/deployment/cli#os-migrate-audit-key-material) once, a dry run first and then `--apply`; it removes the encrypted key-material columns from the audit-ledger copies those releases wrote.
+
 The v17 and v18 lines are broken out per release. Each v17 minor shipped
 breaking changes under the repo's launch-window convention — which ships a
 breaking change as `minor` rather than `major`, so the version number is not the

@@ -12,7 +12,9 @@
  * stages render as upcoming.
  *
  * When `stages` is absent, the stages come from `statusField`'s picklist on
- * the record's object (objectui#11106) — see the `rawStages` read below.
+ * the record's object (objectui#11106) — see the `rawStages` read below. A
+ * stage whose option's `visibleWhen` rules this record out is not drawn at all
+ * (objectstack#26581) — see `stagesThisRecordWalks`.
  *
  * ── This surface is a READOUT, and it must look like one (objectui#5768) ──
  *
@@ -60,6 +62,7 @@ import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import type { RecordPathComponentProps } from '@object-ui/types';
 import { cn } from '@object-ui/components';
+import { evalFieldPredicate, type FieldRulePredicate } from '@object-ui/core';
 import { useDetailTranslation } from '../useDetailTranslation';
 import { declaredStageKinds, deriveStages, stageTerminalOfKind } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
@@ -144,6 +147,70 @@ function localizeStageLabels(stages: unknown, language: string): PathStage[] {
     out[idx] = { ...stage, label: pickLocalized(label, language) };
   }
   return out ?? (stages as PathStage[]);
+}
+
+/**
+ * The roots that name the ACTING USER, the list the server's option gate reads
+ * a predicate's roots against (`USER_SCOPE_ROOTS`, objectql
+ * `validation/rule-validator.ts`).
+ */
+const ACTING_USER_ROOT = /(^|[^.\w$])(current_user|user|ctx|os)(?![\w$])/;
+
+/**
+ * Does this predicate read the acting user? Read off the source with its
+ * string literals blanked, so a quoted `'user'` never counts. Its only error
+ * is an over-match, and an over-match keeps a stage, never hides one.
+ */
+function readsActingUser(pred: FieldRulePredicate): boolean {
+  const source = typeof pred === 'string' ? pred : typeof pred?.source === 'string' ? pred.source : '';
+  return ACTING_USER_ROOT.test(source.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''"));
+}
+
+/**
+ * The stages THIS record can walk (objectstack#26581): every stage, less those
+ * whose status-field option declares a `visibleWhen` that is FALSE for the
+ * record.
+ *
+ * The path used to show every option, so a stage the record's own columns rule
+ * out read as passed once the record was beyond it: hotclm's order contracts
+ * skip legal review by type, and their path ticked 「审查中 ✓」 anyway. The
+ * option already says which records it applies to: `visibleWhen` is "offered
+ * only when TRUE (else omitted)" (`SelectOptionSchema`, spec `data/field.zod.ts`),
+ * and the server refuses a write of a value whose predicate is false, so the
+ * record could not have stood on such a stage. Ruling: objectstack#26581
+ * comment 6442747364, letter A with its guardrail.
+ *
+ *   • Stages match options by VALUE, as `declaredStageKinds` reads `kind`, so
+ *     authored `stages[]` are filtered too.
+ *   • A predicate that reads the acting user hides nothing: it answers "who may
+ *     pick this value", not "does this record walk this stage".
+ *   • A predicate that cannot be evaluated keeps its stage: the render side
+ *     stays fail-open (ADR-0137 D3), as an option list does.
+ *   • The stage the record stands on is always kept: it is where the record is.
+ *
+ * No read is added: the record and its object definition are the ones the
+ * record context already holds.
+ */
+function stagesThisRecordWalks(
+  stages: PathStage[],
+  options: unknown,
+  record: Record<string, unknown> | undefined,
+  current: unknown,
+): PathStage[] {
+  if (!record || !Array.isArray(options)) return stages;
+  const gates = new Map<unknown, FieldRulePredicate>();
+  for (const o of options) {
+    if (o?.visibleWhen != null && !readsActingUser(o.visibleWhen)) gates.set(o.value, o.visibleWhen);
+  }
+  if (gates.size === 0) return stages;
+  const kept = stages.filter((s) => {
+    const gate = gates.get(s.value);
+    if (gate === undefined || s.value === current) return true;
+    return evalFieldPredicate(gate, record, true, undefined, undefined, {
+      context: `record:path stage '${String(s.value)}' (option visibleWhen)`,
+    });
+  });
+  return kept.length === stages.length ? stages : kept;
 }
 
 export interface RecordPathRendererProps {
@@ -238,7 +305,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
   // record context knows which object owns the field. Falls back to the
   // schema's own labels (already English in synth, possibly authored in
   // any language for full Lightning pages) when no translation is found.
-  const stages: PathStage[] = React.useMemo(() => {
+  const localizedStages: PathStage[] = React.useMemo(() => {
     if (rawStages.length === 0 || !statusField || !ctx?.objectName) return rawStages;
     const translated = translateOptions(ctx.objectName, statusField, rawStages as any);
     if (Array.isArray(translated) && translated.length === rawStages.length) {
@@ -247,6 +314,13 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
     return rawStages;
   }, [rawStages, statusField, ctx?.objectName, translateOptions]);
   const current = statusField && ctx?.data ? (ctx.data as any)[statusField] : undefined;
+  // Less the stages this record's own columns rule out (objectstack#26581) —
+  // see `stagesThisRecordWalks`. Both rows below read this one list.
+  const statusOptions = statusField ? (objectSchema as any)?.fields?.[statusField]?.options : undefined;
+  const stages: PathStage[] = React.useMemo(
+    () => stagesThisRecordWalks(localizedStages, statusOptions, ctx?.data as Record<string, unknown> | undefined, current),
+    [localizedStages, statusOptions, ctx?.data, current],
+  );
 
   // The lifecycle `kind` the status field's options declare (objectui#12907),
   // read off the same `objectSchema` the derivation above reads.
