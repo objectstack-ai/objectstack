@@ -112,7 +112,8 @@ Runtime rule of thumb:
 | Control plane | Published JSON in metadata storage | Environment revisions, history, overlays |
 
 When generating `objectstack.config.ts`, keep object names short and
-`snake_case`; never set `tableName`.
+`snake_case`; never set `tableName`, and do not add `sys_metadata` objects to an
+environment runtime manifest.
 
 ---
 
