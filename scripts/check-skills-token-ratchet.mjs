@@ -381,7 +381,17 @@ export const CEILINGS = new Map([
   // row this PR itself lowered by 7,006, and the entry stays 448 lines).
   // 5785 -> 5780: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-automation/SKILL.md', 5780],
+  // 5780 -> 6004 (card #26298, audit #26184 rows A1/A3/A4): three teachings an
+  // author had no row for — the fourth `notify` recipient form `{ emailField }`
+  // (an envelope over an address no user holds now fails the node), flow-level
+  // `requiredPermissions` (who may START a flow), and the screen field typed
+  // `file` (the run resumes with the `sys_file` id). Paid down first: the CRM
+  // Blueprint's approval row restated the approvals reference's config table
+  // and branching section and was cut to a pointer (~17 tokens). Landed 5771 ->
+  // 6004: +233 net, 9 absorbed by headroom, ceiling +224. Maintainer ruling
+  // 2026-10-27 on the skills-lane decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6004],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -650,7 +660,13 @@ export const CEILINGS = new Map([
   // `evals/**` stays priced.
   ['skills/objectstack-ai/evals/skills-tools-knowledge.json', 1074],
   ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1042],
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1255],
+  // 1255 -> 1823 (card #26298): three eval prompts, one per new teaching — the
+  // applicant email over `{ emailField }`, `requiredPermissions` + `excludeSubmitter`
+  // on one approval, the screen `file` field written by a later `create_record`.
+  // +568 tokens, nothing in the file to delete, zero headroom, ceiling +568.
+  // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
+  // untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1823],
   ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 894],
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
@@ -672,7 +688,14 @@ export const CEILINGS = new Map([
   // because a split that arrives with budget is a raise wearing a new path.
   // The package deltas are the pointer lines and the four new file titles only.
   ['skills/objectstack-automation/references/examples-flows.md', 1436],
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5569],
+  // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
+  // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
+  // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
+  // section's "Conditional step" and "Roll back on reject" / "Hard reject"
+  // bullets and were deleted (~73 tokens). Landed 5555 -> 5587: +32 net, 14
+  // absorbed by headroom, ceiling +18. Same maintainer ruling as the SKILL.md
+  // row above (2026-10-27, verbatim and untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5587],
   ['skills/objectstack-data/references/examples-objects.md', 1779],
   ['skills/objectstack-data/references/lint-rules.md', 970],
   ['skills/objectstack-data/references/seeds.md', 1299],

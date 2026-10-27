@@ -88,7 +88,7 @@ Flows are built from **20 built-in node types** (plugins register more via
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only) |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen |
 
 #### Human Decision
 
@@ -104,7 +104,9 @@ undeclared key is a named parse error. **RAW** keys are read as written: a
 
 ```ts
 { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id
+    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
+    // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
+    // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
     message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
     topic: 'task',                     // RAW; default 'notify'
@@ -181,6 +183,13 @@ variables: [
 > trigger user, so nothing narrows the query: a scan or rollup with no
 > organization predicate reads and writes across every tenant. The tenant column
 > is platform-injected — filter on it, never re-declare it per object.
+
+> **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
+> D4) — every door that starts it by name (trigger route, action of type `flow`,
+> declared endpoint) refuses a non-system caller missing any named capability
+> with `403 PERMISSION_DENIED`; an action starting it inherits the list, a
+> `subflow` node is not a door. Gate an elevated `screen` / `api` flow here, never
+> on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
 > (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
@@ -399,7 +408,7 @@ in this CRM-style structure:
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|
 | Screen flow | `src/flows/*.flow.ts` | Use explicit `variables`, node graph (`nodes` + `edges`), and decision branches |
-| Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s); set `approvers` / `behavior` / `lockRecord` / `approvalStatusField` in node `config`, branch on `approve` / `reject` edges |
+| Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s) — config and branching in the approvals reference |
 | Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
 
 ---
