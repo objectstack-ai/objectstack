@@ -605,7 +605,6 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
-    conditionalRequired: keep,
     // A boolean facet of this date field: it declares the field a deadline
     // (#22227) and names no field.
     dueLike: keep,

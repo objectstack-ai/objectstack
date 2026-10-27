@@ -483,6 +483,17 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
 // not archaeology. Undated ⇒ undeletable, and the after-count is 0 of 97 by
 // design. The gate below is what that costs and what it buys.
 //
+// #25767 (ADR-0087 amendment, 2026-10-26) shortened the clock to ONE major and
+// added a second dating source that is not the registry: a line that was already
+// `[RETIRED]` on the authorable surface at the previous major's release tag
+// (`@objectstack/spec@<CURRENT_MAJOR - 1>.0.0`) was retired before that cut, so
+// its kit has lived its one major. That is what dates the historical rows the
+// table never named — not a backfill, a read of an immutable tag — and it is
+// what lets a region's rows leave the registry without the clock losing them.
+// The tag tests below create that tag inside this box; where the tag cannot be
+// read (this box has no remote), the gate falls back to the registry alone and
+// says so, which can only refuse more.
+//
 // This block needs its own sandbox because the aged-out branch is now a claim
 // about `src/migrations/registry.ts`, which the main sandbox symlinks.
 
@@ -493,6 +504,20 @@ const AGED_DECLARED_MAJOR = 11;
 const UNAGED_DECLARED_KEY = 'data/Object:zzDeclaredThisMajor5898';
 
 const UNAGED_DECLARED = `${UNAGED_DECLARED_KEY} [RETIRED]`;
+
+/** A leaf an OLD clause still ends in (`page.kind`, protocol 11), on a def that
+ *  does not carry it — the leaf-collision pin needs the collision to exist. */
+const COLLIDER_LEAF = 'kind';
+
+const DELETED_COLLIDER = `data/Object:${COLLIDER_LEAF} [RETIRED]`;
+
+/** The tag the gate dates an unregistered tombstone by (#25767). */
+const TOMBSTONE_DATING_TAG = `@objectstack/spec@${CURRENT_MAJOR - 1}.0.0`;
+
+/** A tombstone no table names, dated only by the tag. */
+const TAG_DATED_KEY = 'data/Object:zzRetiredBeforeTheCut25767';
+
+const TAG_DATED = `${TAG_DATED_KEY} [RETIRED]`;
 
 describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#5898)', () => {
   let box: string;
@@ -550,14 +575,15 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     // clause match — that is the whole point — so its leaf is checked to be
     // registered no earlier than the major we declare it at is irrelevant; what
     // matters is that the key is not already in the baseline or the real table.
-    for (const injected of [DELETED_AGED, UNAGED_DECLARED]) {
+    for (const injected of [DELETED_AGED, UNAGED_DECLARED, DELETED_COLLIDER, TAG_DATED]) {
       expect(
         pristineSurface.includes(injected) ||
           pristineSurface.includes(injected.replace(RETIRED_MARK, '')),
         `fixture ${injected} already exists in the committed baseline — pick another`,
       ).toBe(false);
     }
-    expect(CURRENT_MAJOR - AGED_DECLARED_MAJOR).toBeGreaterThanOrEqual(2);
+    // One major is the clock since #25767; the aged fixture is declared well past it.
+    expect(CURRENT_MAJOR - AGED_DECLARED_MAJOR).toBeGreaterThanOrEqual(1);
 
     box = fixtureTree('build-schemas-tombstone-age-');
     fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
@@ -601,10 +627,11 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     'a tombstone DECLARED at an aged major may have its baseline line deleted',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      // The surviving positive route. Note what supplies the major: the table,
-      // not the leaf — `compactLayout` happens to have an old clause too, so
-      // this case alone cannot tell the two mechanisms apart. The pin that can
-      // is in the main sandbox (`data/Object:type`) and in the last test here.
+      // The registry route. Note what supplies the major: the table, not the
+      // leaf (`compactLayout`'s own old clause left with its conversion on
+      // #25767, so nothing else could). The pin that tells the two mechanisms
+      // apart is in the main sandbox (`data/Object:type`) and in the collider
+      // test here.
       seedRetiredKeys({ [AGED_DECLARED_MAJOR]: [DELETED_AGED.replace(RETIRED_MARK, '')] });
       seedBoxBase(DELETED_AGED);
 
@@ -635,7 +662,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
       expect(output).toMatch(
         new RegExp(`${UNAGED_DECLARED_KEY} — .*tombstone registered at major ${CURRENT_MAJOR}`),
       );
-      expect(output).toMatch(/must age ≥ 2 majors/);
+      expect(output).toMatch(/must age ≥ 1 major before its line is deleted/);
     },
   );
 
@@ -643,22 +670,97 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     'the pin: with the table EMPTY, a leaf collision proves nothing — the deletion is refused',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      // `compactLayout` is registered at protocol 11 by an ADR-0087 clause, so
-      // the pre-#5898 matcher dated it there and allowed the deletion — exit 0,
-      // "tombstone aged out". With the declaration removed and nothing else
-      // changed, the only thing that can still supply major 11 is leaf matching.
-      expect(minRegisteredMajorForLeaf(DELETED_AGED_LEAF)).toBe(AGED_DECLARED_MAJOR);
+      // `page.kind` is registered at protocol 11 by an ADR-0087 clause, so the
+      // pre-#5898 matcher would date a `data/Object:kind` tombstone there and
+      // allow the deletion — exit 0, "tombstone aged out". With no declaration
+      // and (in this box, which has no remote) no readable release tag, the only
+      // thing that could still supply major 11 is leaf matching.
+      expect(minRegisteredMajorForLeaf(COLLIDER_LEAF)).toBe(AGED_DECLARED_MAJOR);
       seedRetiredKeys({});
-      seedBoxBase(DELETED_AGED);
+      seedBoxBase(DELETED_COLLIDER);
 
       const { status, output } = runBox(['--check']);
 
       expect(status).toBe(1);
       expect(output).toContain('deleted without proof (#4650)');
       expect(output).toMatch(
-        new RegExp(`data/Object:${DELETED_AGED_LEAF} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
+        new RegExp(`data/Object:${COLLIDER_LEAF} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
       );
+      // The second source was asked and could not answer here — said, not skipped.
+      expect(output).toContain(`release tag ${TOMBSTONE_DATING_TAG} could not be read here to date it`);
       expect(output).not.toContain('tombstone aged out');
+    },
+  );
+
+  /** Commit a surface carrying `lines` and name it the previous major's cut. */
+  const tagPreviousMajorCut = (...lines: string[]): string => {
+    writeSurfaceShards(boxSurfaceDir, [...pristineSurface, ...lines].sort());
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
+    boxGit('commit', '-q', '--allow-empty', '-m', `release ${TOMBSTONE_DATING_TAG}`);
+    boxGit('tag', TOMBSTONE_DATING_TAG);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    return boxGit('rev-parse', `refs/tags/${TOMBSTONE_DATING_TAG}^{commit}`);
+  };
+
+  it(
+    'a tombstone NO table names, but already [RETIRED] at the previous major\'s release tag, may have its line deleted (#25767)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The second dating source. The table is EMPTY — the registry rows for a
+      // region leave with it on the major after — and the only thing that dates
+      // this line is the release tag's surface, which already carried it marked.
+      seedRetiredKeys({});
+      const cut = tagPreviousMajorCut(TAG_DATED);
+      try {
+        seedBoxBase(TAG_DATED);
+
+        const { status, output } = runBox(['--check']);
+
+        expect(output).toContain('carry their own proof (#4650)');
+        expect(output).toMatch(
+          new RegExp(
+            `${TAG_DATED_KEY} — \\[RETIRED\\] at [0-9a-f]+ and already \\[RETIRED\\] at release tag ` +
+              `${TOMBSTONE_DATING_TAG.replace(/[.@/]/g, '\\$&')} \\(${cut.slice(0, 12)}`,
+          ),
+        );
+        expect(output).toContain('tombstone aged out');
+        expect(output).not.toContain('could not be read here');
+        expect(status).toBe(0);
+      } finally {
+        boxGit('tag', '-d', TOMBSTONE_DATING_TAG);
+      }
+    },
+  );
+
+  it(
+    'the tag dates by its MARK, not by its presence: a key still LIVE at the cut was retired after it, and is refused',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The negative half of the same source. The key existed at the previous
+      // major's cut — unmarked, i.e. still authorable — so its tombstone is a
+      // post-cut retirement: the current major's kit, which has not lived its
+      // one major. The tag is readable here; it just does not say what the
+      // deletion needs it to say.
+      seedRetiredKeys({});
+      const cut = tagPreviousMajorCut(TAG_DATED_KEY);
+      try {
+        seedBoxBase(TAG_DATED);
+
+        const { status, output } = runBox(['--check']);
+
+        expect(status).toBe(1);
+        expect(output).toContain('deleted without proof (#4650)');
+        expect(output).toMatch(
+          new RegExp(`${TAG_DATED_KEY} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
+        );
+        expect(output).toContain(
+          `it was not [RETIRED] at release tag ${TOMBSTONE_DATING_TAG} (${cut.slice(0, 12)})`,
+        );
+        expect(output).not.toContain('could not be read here');
+        expect(output).not.toContain('tombstone aged out');
+      } finally {
+        boxGit('tag', '-d', TOMBSTONE_DATING_TAG);
+      }
     },
   );
 });

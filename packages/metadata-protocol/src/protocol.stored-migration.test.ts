@@ -127,10 +127,14 @@ const historyRows = (tables: Map<string, Record<string, any>[]>) =>
     tables.get('sys_metadata_history') ?? [];
 
 /**
- * A protocol-≤16 object row: `conditionalRequired` was removed from the spec in
- * 17 (#3855) and its conversion is `retiredFromLoadPath` — the authored load
- * seam refuses it, the stored seam keeps lowering it, and this pass persists
- * the lowering.
+ * A protocol-17 object row: the field key `reference_to` was renamed to
+ * `reference` in 17 and its conversion (`field-reference-to-alias`, retired
+ * from the load path after 17.2.0) is `retiredFromLoadPath` — the authored
+ * load seam refuses it, the stored seam keeps lowering it, and this pass
+ * persists the lowering. (Until #25767 this row rode the ≤16.x
+ * `conditionalRequired` → `requiredWhen` kit; that kit aged out of the
+ * registry with the one-major rule, so the row rides a 17.x kit now — the
+ * seam under test is the same.)
  */
 const legacyObjectRow = {
     type: 'object',
@@ -140,7 +144,8 @@ const legacyObjectRow = {
         label: 'Invoice',
         fields: {
             status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
-            amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
+            amount: { type: 'currency', label: 'Amount' },
+            account_id: { type: 'lookup', label: 'Account', reference_to: 'crm_account' },
         },
     },
 };
@@ -159,11 +164,17 @@ const canonicalObjectRow = {
     },
 };
 
-/** A pre-17 standalone action row still carrying the removed `execute` alias. */
+/** The retired `aria` block the legacy action row still carries (`action-aria-removed`, 17.4.0). */
+const RETIRED_ACTION_ARIA = { label: 'Convert the invoice' };
+
+/** A protocol-17 standalone action row still carrying the removed `aria` block. */
 const legacyActionRow = {
     type: 'action',
     name: 'convert',
-    metadata: { name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', execute: 'convertHandler' },
+    metadata: {
+        name: 'convert', label: 'Convert', type: 'script', objectName: 'crm_invoice', target: 'convertHandler',
+        aria: RETIRED_ACTION_ARIA,
+    },
 };
 
 describe('migrateStoredMetadata — preview (#4327)', () => {
@@ -195,8 +206,8 @@ describe('migrateStoredMetadata — preview (#4327)', () => {
         const row = report.rows[0]!;
         expect(row).toMatchObject({ type: 'object', name: 'crm_invoice', outcome: 'pending', state: 'active' });
         expect(row.notices.length).toBeGreaterThan(0);
-        expect(row.notices[0]!.from).toBe('conditionalRequired');
-        expect(row.notices[0]!.to).toBe('requiredWhen');
+        expect(row.notices[0]!.from).toBe('reference_to');
+        expect(row.notices[0]!.to).toBe('reference');
         // An already-canonical row is counted, never itemised — otherwise a
         // healthy deployment's report is a wall of rows that need nothing.
         expect(report.rows.every((r) => r.outcome !== 'canonical')).toBe(true);
@@ -221,8 +232,8 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         expect(storedMigrationClean(report)).toBe(true);
 
         const stored = JSON.parse(metaRows(tables)[0]!.metadata);
-        expect(stored.fields.amount.requiredWhen).toBe("record.status == 'sent'");
-        expect('conditionalRequired' in stored.fields.amount).toBe(false);
+        expect(stored.fields.account_id.reference).toBe('crm_account');
+        expect('reference_to' in stored.fields.account_id).toBe(false);
     });
 
     it('goes through the normal write path — history row, fresh checksum, migrate-stored source', async () => {
@@ -316,7 +327,7 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
 
         // Non-destructive: the stored bytes are exactly as they were.
         const stored = metaRows(tables).find((r) => r.id === actionRow.id)!;
-        expect(JSON.parse(stored.metadata).execute).toBe('convertHandler');
+        expect(JSON.parse(stored.metadata).aria).toEqual(RETIRED_ACTION_ARIA);
     });
 
     it('a driver seam that cannot answer refuses the pass before any row is written', async () => {
@@ -336,7 +347,7 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         const report = await protocol.migrateStoredMetadata({ apply: true });
 
         expect(report.scanned).toBe(0);
-        expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.amount.conditionalRequired).toBeDefined();
+        expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.account_id.reference_to).toBeDefined();
     });
 
     it('restricts to the requested types', async () => {
@@ -580,7 +591,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
                 metadata: {
                     name: 'corrupt_thing',
                     label: 'Corrupt',
-                    fields: { amount: { type: 'currency', conditionalRequired: 'x' } },
+                    fields: { account_id: { type: 'lookup', reference_to: 'x' } },
                     // an off-contract key the schema rejects and no conversion lowers
                     listViews: 42,
                 },
@@ -594,7 +605,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
         expect(report.rewritten).toBe(0);
         expect(report.rows[0]!.reason).toMatch(/failed spec validation/);
         expect(historyRows(tables)).toHaveLength(0);
-        expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.amount.conditionalRequired).toBe('x');
+        expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.account_id.reference_to).toBe('x');
     });
 
     it('marks a legacy row whose select has no option source `failed` and leaves its bytes alone', async () => {
@@ -620,7 +631,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
         expect(historyRows(tables)).toHaveLength(0);
         const stored = JSON.parse(metaRows(tables)[0]!.metadata);
         expect(stored.fields.status).toEqual({ type: 'select', label: 'Status' });
-        expect(stored.fields.amount.conditionalRequired).toBe("record.status == 'sent'");
+        expect(stored.fields.account_id.reference_to).toBe('crm_account');
     });
 
     it('does not clobber a row a concurrent writer moved — the optimistic lock is real', async () => {
@@ -673,7 +684,7 @@ describe('formatStoredMigrationReport (#4327)', () => {
         const protocol = new ObjectStackProtocolImplementation(engine);
         const text = formatStoredMigrationReport(await protocol.migrateStoredMetadata()).join('\n');
         expect(text).toMatch(/object\/crm_invoice \[env-wide\]/);
-        expect(text).toMatch(/conditionalRequired → requiredWhen/);
+        expect(text).toMatch(/reference_to → reference/);
     });
 });
 

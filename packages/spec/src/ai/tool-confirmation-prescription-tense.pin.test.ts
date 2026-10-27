@@ -4,17 +4,20 @@
  * [#17487] The shipped confirmation-gate prescriptions are held to the door
  * that actually runs — in BOTH directions.
  *
- * Three customer-facing prescriptions tell an author what
+ * One customer-facing prescription tells an author what
  * `action.ai.requiresConfirmation: true` does: the `requiresConfirmation` entry
  * of `TOOL_RETIRED_KEY_GUIDANCE` (reached as a parse error on the `.strict()`
  * `ToolSchema`, the one channel every consumer bumping `@objectstack/spec` is
- * guaranteed to hit) and the ADR-0087 D3 entry's `replacement` and
- * `acceptanceCriteria`, which are what `spec-changes.json`, the upgrade guide
- * and `os migrate meta` project to consumers.
+ * guaranteed to hit). The ADR-0087 D3 entry whose `replacement` and
+ * `acceptanceCriteria` carried the same sentence into `spec-changes.json`, the
+ * upgrade guide and `os migrate meta` was a 16.x retirement kit and aged out
+ * at 18 (#25767, ADR-0087 amendment); the guidance entry is an unknown-key
+ * prescription on the strict surface rather than a ledger tombstone, so it
+ * stays, and this pin now ties that one carrier to the door.
  *
  * ## Why this pin exists, and why it reads the RUNTIME
  *
- * All three used to carry a hedge — "the declaration is the contract, not yet
+ * All of them used to carry a hedge — "the declaration is the contract, not yet
  * the behaviour … until that door lands, such a call simply RUNS" — written
  * while the runtime door was a separate, unlanded card. The door landed. The
  * hedge then DENIED a door that exists, and denied it in the dangerous
@@ -66,7 +69,6 @@ import { describe, it, expect } from 'vitest';
 
 import { ToolSchema } from './tool.zod';
 import { ActionSchema } from '../ui/action.zod';
-import { entry as toolConfirmationEntry } from '../migrations/entries/semantic/17.tool-requires-confirmation-retired';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/spec/src/ai → repo root */
@@ -89,20 +91,19 @@ function toolRejectionMessage(): string {
 }
 
 /**
- * The three carriers, each named. A prescription reaching consumers through a
- * different projection is the same text, so one set of assertions covers all.
+ * The carriers, each named — one since #25767 (the D3 entry's two projections
+ * aged out with its kit). Kept as a list so a carrier that returns is added
+ * here and judged by the same assertions.
  */
 function shippedPrescriptions(): Array<[string, string]> {
   return [
     ['ToolSchema rejection (TOOL_RETIRED_KEY_GUIDANCE.requiresConfirmation)', toolRejectionMessage()],
-    ['ADR-0087 D3 entry — replacement', toolConfirmationEntry.replacement],
-    ['ADR-0087 D3 entry — acceptanceCriteria', toolConfirmationEntry.acceptanceCriteria],
   ];
 }
 
 /**
  * Claims that the refusal is not performed. A closed list, every member taken
- * verbatim from a sentence one of these three carriers really shipped — so the
+ * verbatim from a sentence one of the carriers really shipped — so the
  * predicate answers "did the retired shape come back", never "does this read
  * hedged to me".
  */
@@ -143,7 +144,7 @@ function aiDoorBody(): string {
 }
 
 describe('the confirmation-gate prescriptions match the door that runs', () => {
-  it('anchors on real text in all three carriers', () => {
+  it('anchors on real text in every carrier', () => {
     // Anti-vacuity for every assertion below: an empty carrier would pass
     // "carries no denial" by reading nothing.
     for (const [name, text] of shippedPrescriptions()) {
@@ -174,7 +175,7 @@ describe('the confirmation-gate prescriptions match the door that runs', () => {
     expect(
       aiDoorBody(),
       '`invokeBusinessAction` no longer calls `actionConfirmationRefusal` — the prescriptions '
-        + 'in `ai/tool.zod.ts` and the ADR-0087 D3 entry now describe a door that does not run',
+        + 'in `ai/tool.zod.ts` now describes a door that does not run',
     ).toMatch(/actionConfirmationRefusal\(/);
   });
 

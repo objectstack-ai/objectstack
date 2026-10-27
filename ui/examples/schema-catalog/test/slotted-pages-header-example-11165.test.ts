@@ -138,15 +138,18 @@ describe('slotted-pages "customize only the header" example (objectui#11165)', (
   });
 
   it('CONTROL: the node the page used to teach is refused on `eyebrow` and `icon`', () => {
+    // Both as unknown keys of the bag now: `icon`'s 17.0.0 tombstone aged out
+    // of the row at spec 18.2 (objectstack#25767), so it is refused the way
+    // `eyebrow` always was — by the strict row, naming the key.
     const old = {
       ...header(),
       properties: { ...header().properties, eyebrow: 'ACCOUNT', icon: 'building-2' },
     };
     expect(issuesOf(safeValidateSchema(old)).sort()).toEqual(
-      ['properties.icon: invalid_type', 'properties: unrecognized_keys eyebrow'].sort(),
+      ['properties: unrecognized_keys eyebrow,icon'].sort(),
     );
     expect(issuesOf(row.safeParse(old.properties)).sort()).toEqual(
-      ['icon: invalid_type', ': unrecognized_keys eyebrow'].sort(),
+      [': unrecognized_keys eyebrow,icon'].sort(),
     );
   });
 });

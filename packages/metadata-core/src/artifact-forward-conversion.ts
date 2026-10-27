@@ -415,8 +415,9 @@ export function resolveInstalledSpecVersion(): string | null {
  * is the door's own refusal, not a fact about the registry, and exporting it
  * would invite a second caller to inherit a judgement it has not made.
  *
- * - `app-hidden-to-unpublished` (#17885, #4829, ADR-0045 amended 2026-08-09):
- *   rewrites `app.hidden: true` into `app._unpublished: true`. `hidden` is a
+ * - `app-hidden-to-unpublished` (#17885, #4829, ADR-0045 amended 2026-08-09;
+ *   retired with the ≤16.x kits on #25767, kept here as the worked example):
+ *   rewrote `app.hidden: true` into `app._unpublished: true`. `hidden` is a
  *   LIVE authorable key — navigation presentation, *"never an access gate"*
  *   (`ui/app.zod.ts`) — while `_unpublished` is the machine-managed publish
  *   gate that `filterAppForUser` (`packages/rest/src/rest-server.ts`) drops
@@ -450,7 +451,10 @@ export function resolveInstalledSpecVersion(): string | null {
  *   `packages/services/service-automation/src/engine.ts`); this door does too.
  */
 const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
-  'app-hidden-to-unpublished',
+  // `app-hidden-to-unpublished` stood here until #25767 retired it with the
+  // ≤16.x kits (ADR-0087 D2 = A): the registry no longer carries it, so there is
+  // nothing for this door to refuse. The reasoning in the docblock above is kept
+  // because it is the reasoning the NEXT default flip is judged by.
   'flow-decision-mode-inclusive-explicit',
 ];
 

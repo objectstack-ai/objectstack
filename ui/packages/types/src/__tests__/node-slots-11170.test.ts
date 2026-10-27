@@ -182,6 +182,16 @@ describe('the `page:*` rows are the spec’s positions, by reference (objectui#1
       for (const type of row.types) expect(type.startsWith(PAGE_FAMILY_PREFIX), type).toBe(true);
       for (const s of row.slots) {
         const spec = bySpecPath.get(s.path);
+        if (s.retired === true && !spec) {
+          // A RETIRED row position the spec no longer declares at all: its
+          // tombstone aged out of the spec one major on (objectstack#25767 —
+          // `page:card`'s `body`), so the spec's list has no row for it, while
+          // the renderer still reads the stored spelling (see the module
+          // header). Only a `retired` position may be console-own this way; a
+          // live one the spec does not declare is still a red below.
+          expect(s.path, `\`${row.types[0]}.${s.path}\`: a retired position the spec dropped — only \`body\` is read this way`).toBe('body');
+          continue;
+        }
         expect(spec, `\`${row.types[0]}\` declares \`${s.path}\`, which the installed spec does not`).toBeDefined();
         expect(s.retired === true, `\`${row.types[0]}.${s.path}\`: retirement disagrees with the spec`).toBe(spec!.retired);
       }
@@ -192,7 +202,9 @@ describe('the `page:*` rows are the spec’s positions, by reference (objectui#1
     const declared = new Set(pageRows.flatMap((row) => row.slots.map((s) => s.path)));
     const unplaced = specPositions.map(asPath).filter((p) => p !== 'children' && !declared.has(p));
     expect(unplaced, 'the spec declares a page slot no `page:*` row places — measure which renderer reads it').toEqual([]);
-    // The reading has a population: the spec's list carries the known four.
-    expect(specPositions.map(asPath)).toEqual(expect.arrayContaining(['children', 'body', 'footer', 'items[].children']));
+    // The reading has a population: the spec's list carries the known three
+    // (`body` left it when its tombstone aged out, objectstack#25767).
+    expect(specPositions.map(asPath)).toEqual(expect.arrayContaining(['children', 'footer', 'items[].children']));
+    expect(specPositions.map(asPath)).not.toContain('body');
   });
 });

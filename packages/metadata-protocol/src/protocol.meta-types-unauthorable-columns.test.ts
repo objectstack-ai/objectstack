@@ -17,9 +17,16 @@
  * `saveMetaItem` then refuses.
  *
  * Measured on `origin/main` at 74eaab8614 over the whole served registry:
- * **80 tombstone nodes across 16 types**. Five of them are `dashboard.widgets[]`'s
+ * **80 tombstone nodes across 16 types**. Five of them were `dashboard.widgets[]`'s
  * `actionUrl`, `actionType`, `actionIcon`, `responsive` and `aria` — the row
- * this file pins, and the carrier the card was filed on. ⚠️ They are not the
+ * this file pinned, and the carrier the card was filed on. [#25767] Those five
+ * were ≤16.x retirements, and a retirement kit lives one protocol major past
+ * the major it retired in: at 18 they left the shape with their tombstones, so
+ * the widget row carries nothing to strip any more. The row pin moved to
+ * `page.regions[].components[]`, whose `visibility` (→ `visibleWhen`, 17.7.0)
+ * and `responsive` (removed, 17.2.0) tombstones are 17.x kits still on a
+ * repeater row; `dashboard` keeps the depth pin through `refreshInterval` and
+ * the five tombstones inside the widget's `chartConfig`. ⚠️ They are not the
  * whole reachable set: a repeater row in another type reaches an author the
  * same way, as does the flat schema-driven fallback for a layout-less type and
  * an inspector that grafts server-only properties into a "More fields" section.
@@ -212,10 +219,33 @@ function widgetRow(served: Record<string, unknown> | undefined): Record<string, 
     return (resolved?.properties ?? {}) as Record<string, unknown>;
 }
 
-/** The five columns the parse door refuses (`ui/dashboard.zod.ts` tombstones). */
-const RETIRED_WIDGET_COLUMNS = ['actionUrl', 'actionType', 'actionIcon', 'responsive', 'aria'] as const;
+/** `page.regions[].components[]`'s row shape, off the served document. */
+function componentRow(served: Record<string, unknown> | undefined): Record<string, unknown> {
+    const resolve = (node: any): any => (typeof node?.$ref === 'string'
+        ? (served as any)?.$defs?.[String(node.$ref).replace('#/$defs/', '')]
+        : node);
+    const regions = resolve((served?.properties as any)?.regions);
+    const region = resolve(regions?.items);
+    const components = resolve(region?.properties?.components);
+    const component = resolve(components?.items);
+    return (component?.properties ?? {}) as Record<string, unknown>;
+}
 
-/** The live columns that must survive beside them — the lit control. */
+/**
+ * The two columns the parse door refuses on the pinned repeater row
+ * (`ui/page.zod.ts` tombstones: `visibility` → `visibleWhen` at 17.7.0,
+ * `responsive` removed at 17.2.0). [#25767] The five `dashboard.widgets[]`
+ * columns this file pinned before aged out of the shape with the ≤16.x kits.
+ */
+const RETIRED_COMPONENT_COLUMNS = ['visibility', 'responsive'] as const;
+
+/** The live component columns that must survive beside them — the lit control. */
+const LIVE_COMPONENT_COLUMNS = [
+    'aria', 'className', 'dataSource', 'events', 'id', 'label', 'properties',
+    'responsiveStyles', 'style', 'type', 'visibleWhen',
+] as const;
+
+/** The widget row's live columns — still the lit control there, with nothing left to strip beside them. */
 const LIVE_WIDGET_COLUMNS = [
     'chartConfig', 'colorVariant', 'compareTo', 'dataset', 'description', 'dimensions',
     'filter', 'filterBindings', 'id', 'layout', 'options', 'requiresObject',
@@ -223,16 +253,29 @@ const LIVE_WIDGET_COLUMNS = [
 ] as const;
 
 describe('#17502 — the served repeater row offers no column the parse door refuses', () => {
-    it('control: the pre-strip derivation really did carry the five tombstone columns', () => {
+    it('control: the pre-strip derivation really did carry the two tombstone columns', () => {
         // Without this, both halves below could pass over a payload that never
         // had the nodes — and the pin would be green on `origin/main` too.
-        const row = widgetRow(preStripDerivation('dashboard'));
-        for (const key of RETIRED_WIDGET_COLUMNS) {
-            expect(Object.keys(row), `pre-strip dashboard.widgets row declares ${key}`).toContain(key);
+        const row = componentRow(preStripDerivation('page'));
+        for (const key of RETIRED_COMPONENT_COLUMNS) {
+            expect(Object.keys(row), `pre-strip page.regions[].components row declares ${key}`).toContain(key);
             expect(acceptsNothing((row as any)[key]), `${key} is a node that admits nothing`).toBe(true);
             expect(String((row as any)[key].description)).toMatch(/^\[REMOVED\] /);
         }
-        expect(Object.keys(row).length).toBe(22);
+        expect(Object.keys(row).length).toBe(13);
+    });
+
+    it('[#25767] control: the former carrier, the pre-strip `dashboard.widgets` row, carries no tombstone any more', () => {
+        // The five ≤16.x tombstones left the shape with their kits, so the
+        // derivation and the served payload agree on this row without a strip.
+        const row = widgetRow(preStripDerivation('dashboard'));
+        expect(Object.keys(row).sort()).toEqual([...LIVE_WIDGET_COLUMNS].sort());
+        expect(Object.entries(row).filter(([, node]) => acceptsNothing(node)).map(([k]) => k)).toEqual([]);
+    });
+
+    it('lit: the served `page.regions[].components` row still carries every live column', async () => {
+        const row = componentRow((await servedSchemas()).get('page'));
+        expect(Object.keys(row).sort()).toEqual([...LIVE_COMPONENT_COLUMNS].sort());
     });
 
     it('lit: the served `dashboard.widgets` row still carries every live column', async () => {
@@ -240,10 +283,10 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         expect(Object.keys(row).sort()).toEqual([...LIVE_WIDGET_COLUMNS].sort());
     });
 
-    it('dark: the five retired columns are gone from the served row', async () => {
-        const row = widgetRow((await servedSchemas()).get('dashboard'));
-        for (const key of RETIRED_WIDGET_COLUMNS) {
-            expect(Object.keys(row), `dashboard.widgets must not offer ${key}`).not.toContain(key);
+    it('dark: the two retired columns are gone from the served component row', async () => {
+        const row = componentRow((await servedSchemas()).get('page'));
+        for (const key of RETIRED_COMPONENT_COLUMNS) {
+            expect(Object.keys(row), `page.regions[].components must not offer ${key}`).not.toContain(key);
         }
     });
 
@@ -304,15 +347,14 @@ describe('#17502 — the served repeater row offers no column the parse door ref
 
         // Non-vacuity: without this the two assertions above pass over a ledger
         // that read nothing at all. `dashboard` is the type that exercises every
-        // depth — the five repeater-row columns pinned above, three top-level
-        // tombstones, and FIVE inside the widget's own `chartConfig` — so the
-        // ledger is proven to reach a row shape and not only the surface.
+        // depth — one top-level tombstone and FIVE inside the widget's own
+        // `chartConfig` — so the ledger is proven to reach a row shape and not
+        // only the surface. [#25767] The five widget-row columns and the
+        // top-level `aria` / `performance` left this list with the ≤16.x kits;
+        // the repeater-row depth is pinned on `page` right below instead.
         // Sorted, so key ORDER is not what is pinned.
         expect([...(removedByType.get('dashboard') ?? [])].sort()).toEqual([
-            ...RETIRED_WIDGET_COLUMNS.map((k) => `dashboard.properties.widgets.items.properties.${k}`),
             'dashboard.properties.refreshInterval',
-            'dashboard.properties.aria',
-            'dashboard.properties.performance',
             // [#17751] `ChartConfigSchema.aria` retired one level deeper than the
             // widget row, inside `chartConfig`.
             'dashboard.properties.widgets.items.properties.chartConfig.properties.aria',
@@ -327,6 +369,11 @@ describe('#17502 — the served repeater row offers no column the parse door ref
                 (k) => `dashboard.properties.widgets.items.properties.chartConfig.properties.${k}`,
             ),
         ].sort());
+        // [#25767] The repeater-row depth: the two component-row columns pinned
+        // above are among what the strip took away from `page`.
+        expect(removedByType.get('page') ?? []).toEqual(expect.arrayContaining(
+            RETIRED_COMPONENT_COLUMNS.map((k) => `page.properties.regions.items.properties.components.items.properties.${k}`),
+        ));
     });
 
     // ⚠️ This control derives with zod's DEFAULT (output) arm only, which is
@@ -352,28 +399,43 @@ describe('#17502 — the served repeater row offers no column the parse door ref
 
 describe('#17502 — the removal is payload-only: every prescription channel survives', () => {
     it('the parse still refuses the key with the tombstone prescription, byte for byte', async () => {
+        const page = getMetadataTypeSchema('page') as z.ZodTypeAny;
+        const result = page.safeParse({
+            name: 'ops_page', label: 'Ops', type: 'app',
+            regions: [{ name: 'main', components: [{ id: 'c1', type: 'object-grid', responsive: { xsmall: { columns: 1 } } }] }],
+        } as never);
+        expect(result.success, 'a retired component column is still refused at publish').toBe(false);
+        const issue = result.error!.issues.find((i) => i.path[i.path.length - 1] === 'responsive');
+        expect(issue, 'the refusal names the retired key').toBeDefined();
+        expect((issue as { expected?: string }).expected).toBe('never');
+        // The prescription — the FROM -> TO mapping this retirement exists to
+        // deliver — is carried by the refusal, which the strip never touches.
+        expect(issue!.message).toContain('was removed in @objectstack/spec 17');
+        expect(issue!.message).toContain('responsiveStyles');
+        expect(issue!.message).toContain('os migrate meta --from 17');
+    });
+
+    it('[#25767] an aged-out column is refused as a strict unknown key naming the upgrade guide — no prescription, no silent strip', () => {
+        // The former carrier's `actionUrl` has no tombstone now; the strict
+        // widget shape refuses it, and the sentence points at the guide that
+        // carries the prescription the kit used to.
         const dashboard = getMetadataTypeSchema('dashboard') as z.ZodTypeAny;
         const result = dashboard.safeParse({
             name: 'ops', label: 'Ops',
             widgets: [{ id: 'w1', type: 'metric', actionUrl: '/x' }],
         } as never);
-        expect(result.success, 'a retired widget column is still refused at publish').toBe(false);
-        const issue = result.error!.issues.find((i) => i.path[i.path.length - 1] === 'actionUrl');
-        expect(issue, 'the refusal names the retired key').toBeDefined();
-        expect((issue as { expected?: string }).expected).toBe('never');
-        // The prescription — the FROM -> TO mapping this retirement exists to
-        // deliver — is carried by the refusal, which the strip never touches.
-        expect(issue!.message).toContain('was removed in @objectstack/spec 17.0.0');
-        expect(issue!.message).toContain('header: { actions:');
-        expect(issue!.message).toContain('os migrate meta --from 16');
+        expect(result.success).toBe(false);
+        const issue = result.error!.issues.find((i) => /Unrecognized key\(s\) on this dashboard widget: `actionUrl`/.test(i.message));
+        expect(issue, JSON.stringify(result.error!.issues)).toBeDefined();
+        expect(issue!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('the Zod shape still declares the tombstone — nothing is un-retired upstream', () => {
         // `packages/spec`'s `authorable-surface/` ratchet and the generated
         // reference pages read this shape, not the served payload, so both keep
         // publishing the retirement. The strip is a property of ONE emitter.
-        const row = widgetRow(preStripDerivation('dashboard'));
-        for (const key of RETIRED_WIDGET_COLUMNS) {
+        const row = componentRow(preStripDerivation('page'));
+        for (const key of RETIRED_COMPONENT_COLUMNS) {
             expect(Object.keys(row)).toContain(key);
         }
     });

@@ -76,7 +76,7 @@ const BOOK_TRANSLATIONS_RETIRED =
   + 'near neighbour that DOES work: `doc.translations` is live and read on every doc render '
   + 'path — localize the docs themselves, and the portal picks the reader\'s locale up from '
   + 'there. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 export const BookGroupSchema = lazySchema(() =>
   z.object({

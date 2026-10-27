@@ -119,22 +119,12 @@ const POSITIONS: ReadonlyArray<{
     }),
     probe: (p) => p.regions[0].components[0].properties.items[0].children[0].properties,
   },
-  {
-    name: 'page:card → properties.body[]',
-    page: recordPage({
-      regions: [
-        { name: 'main', components: [{ type: 'page:card', properties: { body: [legacyHeader('card body line')] } }] },
-      ],
-    }),
-    // `page-card-body-to-children` MOVES the container key on the way past, so
-    // the converted node carries the sub-tree under `children`. Read whichever
-    // spelling survives — this row is about the header inside, not about which
-    // key the card ends up using.
-    probe: (p) => {
-      const props = p.regions[0].components[0].properties;
-      return (props.children ?? props.body)[0].properties;
-    },
-  },
+  // `page:card → properties.body[]` was a row here until spec 18.2: the
+  // `page-card-body-to-children` conversion that moved the container key on
+  // the way past aged out with the 16.x kits (objectstack#25767, ADR-0087), so
+  // a `body` sub-tree is no longer walked — the strict spec refuses `body` on
+  // the card as an unknown key naming the upgrade guide, and nothing descends
+  // into it. The surviving rows cover every container key the walk reads.
   {
     name: 'page:card → properties.footer[]',
     page: recordPage({

@@ -60,18 +60,23 @@ describe('validateMetadataDraft — object field conditional rules (real engine)
   });
 
   // `conditionalRequired` is no longer one of OUR lint keys — @objectstack/spec
-  // 17 (#3855) retired it, so the draft is rejected by the spec parse itself,
-  // and the rejection carries the rename prescription. We assert the author
-  // still gets told, and told by the spec (AGENTS.md #0.1 — one contract).
-  it('rejects the retired conditionalRequired alias via the spec tombstone', async () => {
+  // 17 (#3855) retired it, so the draft is rejected by the spec parse itself.
+  // Through spec 18.1 the rejection was the tombstone's, at the key's own path,
+  // carrying the rename prescription; at 18.2 the tombstone aged out one major
+  // on (objectstack#25767) and the strict field refuses the key as an unknown
+  // one at the field's path, naming it and the protocol upgrade guide. We
+  // assert the author still gets told, and told by the spec (AGENTS.md #0.1 —
+  // one contract).
+  it('rejects the retired conditionalRequired alias via the spec\'s strict unknown-key refusal', async () => {
     const res = await validateMetadataDraft(
       'object',
       draftWith({ status: { type: 'text', conditionalRequired: 'record.x == 1' } }),
     );
     expect(res.ok).toBe(false);
-    const issue = res.issues.find((i) => i.path === 'fields.status.conditionalRequired');
-    expect(issue).toBeTruthy();
-    expect(issue!.message).toMatch(/requiredWhen/);
+    const issue = res.issues.find((i) => i.path === 'fields.status' && /`conditionalRequired`/.test(i.message));
+    expect(issue, JSON.stringify(res.issues)).toBeTruthy();
+    expect(issue!.message).toMatch(/Unrecognized key\(s\)/);
+    expect(issue!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('uses index paths for the ARRAY fields shape', async () => {

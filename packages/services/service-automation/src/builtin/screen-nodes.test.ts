@@ -144,6 +144,15 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
  * script node that leaves it out — so the stored flow no longer REGISTERS (at
  * boot: skipped with a `failed to register flow` warn naming it), rather than
  * registering and refusing at run time. Same verdict, named the same way.
+ *
+ * [#25767] The `actionType` branches were ≤16.x retirements, and a retirement
+ * kit lives one protocol major past the major it retired in: at 18 their
+ * tombstones and their conversion left the registry together. A stored flow
+ * still carrying one meets neither channel now — the strict script shape
+ * refuses the key as unknown, naming the protocol upgrade guide (which carries
+ * the prescription the kit used to), and the row is for `os migrate meta` on a
+ * release that still carried the step. The `function`-less refusal below is
+ * unchanged; the shorthand-to-`function` move is gone with the kit.
  */
 describe('script retired branches, as a stored flow meets them (#4343)', () => {
     let engine: AutomationEngine;
@@ -165,13 +174,15 @@ describe('script retired branches, as a stored flow meets them (#4343)', () => {
         expect(await engine.getFlow('script_flow')).toBeNull();
     });
 
-    it('converts a shorthand `actionType` into the function it always named, and runs it', async () => {
+    it('[#25767] a stored flow carrying the aged-out `actionType` shorthand no longer registers — refused naming the key and the upgrade guide', async () => {
         // The one retired value carrying real intent: `actionType` that matched
-        // no built-in was a function name (#1870), so the conversion moves it
-        // rather than dropping it — and the node keeps working.
-        engine.registerFlow('script_flow', scriptFlow({ actionType: 'score_lead' }));
-        const result = await engine.execute('script_flow', {} as any);
-        expect(result.success).toBe(true);
+        // no built-in was a function name (#1870), and the ≤16.x conversion
+        // moved it to `function`. That kit aged out of the registry, so no step
+        // of the chain replays it: the key is refused outright, and the flow is
+        // never registered.
+        expect(() => engine.registerFlow('script_flow', scriptFlow({ actionType: 'score_lead' })))
+            .toThrow(/Unrecognized key\(s\) on this script node config: `actionType`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
+        expect(await engine.getFlow('script_flow')).toBeNull();
     });
 
     it('accepts the converged shape', async () => {
@@ -180,13 +191,16 @@ describe('script retired branches, as a stored flow meets them (#4343)', () => {
         expect(result.success).toBe(true);
     });
 
-    it('the tombstones still refuse an AUTHORED key outright, prescription and all', () => {
+    it('the strict shape still refuses an AUTHORED retired key outright — as an unknown key naming the upgrade guide', () => {
         // The other channel: no conversion runs in front of a direct parse, so
         // this is what `tsc` and `os validate` put in front of an author.
+        // [#25767] The tombstone's own prescription aged out with the kit; the
+        // refusal now names the key and the guide that carries the prescription.
         const result = ScriptConfigSchema.safeParse({ function: 'score_lead', actionType: 'email' });
         expect(result.success).toBe(false);
-        expect(result.error!.issues[0]!.message).toMatch(/`script\.config\.actionType` was removed/);
-        expect(result.error!.issues[0]!.message, 'the prescription teaches the replacement, never a tracker id')
+        expect(result.error!.issues[0]!.message).toMatch(/Unrecognized key\(s\) on this script node config: `actionType`/);
+        expect(result.error!.issues[0]!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+        expect(result.error!.issues[0]!.message, 'the refusal teaches where the prescription lives, never a tracker id')
             .not.toMatch(/#\d{3,5}/);
         expect(ScriptConfigSchema.parse({
             function: 'score_lead',

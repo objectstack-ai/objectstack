@@ -20,7 +20,7 @@
  * ```
  *
  * ⚠️ Shipped behaviour, not a regression: `virtualScroll`, `striped` and
- * `bordered` have read this way since 17.0.0. Guidance that exists and cannot
+ * `bordered` read this way from 17.0.0 until their kit aged out (#25767). Guidance that exists and cannot
  * be seen is, from the author's side, indistinguishable from guidance that does
  * not exist.
  *
@@ -86,47 +86,60 @@ const topMessage = (body: unknown): string => {
 // from the WRONG branch would be measuring nothing about reach.
 // ───────────────────────────────────────────────────────────────────────────
 
-const BRANCH_PINS: ReadonlyArray<readonly [ViewMetadataBranch, string, Record<string, unknown>, string]> = [
+/**
+ * [#25767] The carriers moved: `virtualScroll` / `striped` / `form.aria` were
+ * ≤16.x kits that aged out and read as strict unknown keys now (the catchall
+ * channel, §3), so each branch carries a 17.x tombstone instead. The last
+ * column says whether the prescription carries the `os migrate meta`
+ * sentence: the form branch's only surviving top-level-reachable tombstone is
+ * the ADR-0089 D2 `visibleOn` rename, which the parse folded and no
+ * conversion ever rode, so it never carried one.
+ */
+const BRANCH_PINS: ReadonlyArray<readonly [ViewMetadataBranch, string, Record<string, unknown>, string, boolean]> = [
   [
     'viewItem',
-    'config.virtualScroll',
+    'owner (the record\'s own key)',
     {
-      name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list',
-      config: { type: 'grid', columns: ['name'], virtualScroll: true },
+      name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list', owner: 'admin',
+      config: { type: 'grid', columns: ['name'] },
     },
-    '`view.virtualScroll` was removed',
+    '`view.owner` was removed',
+    true,
   ],
   [
     'container',
-    'list.striped',
+    'list.filterableFields',
     {
       name: 'crm_lead', object: 'crm_lead',
-      list: { type: 'grid', columns: ['name'], striped: true },
+      list: { type: 'grid', columns: ['name'], filterableFields: ['name'] },
     },
-    '`view.striped` was removed',
+    '`view.list.filterableFields` was removed',
+    true,
   ],
   [
     'listOverlay',
-    'virtualScroll (the card\'s own repro)',
+    'filterableFields (the card\'s own repro, re-targeted)',
     {
       name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list',
-      type: 'grid', columns: ['name'], virtualScroll: true,
+      type: 'grid', columns: ['name'], filterableFields: ['name'],
     },
-    '`view.virtualScroll` was removed',
+    '`view.list.filterableFields` was removed',
+    true,
   ],
   [
     'formOverlay',
-    'aria',
+    'sections[].visibleOn',
     {
       name: 'crm_lead.edit', object: 'crm_lead', viewKind: 'form',
-      type: 'simple', aria: { label: 'x' },
+      type: 'simple', sections: [{ fields: ['name'], visibleOn: 'record.status == "open"' }],
     },
-    '`form.aria` was removed',
+    '`view.form.sections[].visibleOn` was removed',
+    false,
   ],
 ];
 
 describe('§1 reach — every branch of the view union surfaces its own prescription', () => {
-  it.each(BRANCH_PINS)('%s branch (%s)', (branch, _key, body, opening) => {
+  it.each(BRANCH_PINS)('%s branch (%s)', (branch, _key, body, opening, migrateSentence) => {
     expect(selectViewMetadataBranch(body), 'the pin must exercise the branch it names').toBe(branch);
 
     const message = topMessage(body);
@@ -136,7 +149,9 @@ describe('§1 reach — every branch of the view union surfaces its own prescrip
     // its `os migrate meta` sentence is pinned class-wide by
     // `../shared/retired-key-migrate-sentence.test.ts`. A message this code
     // composed would be a second spelling of a pinned string.
-    expect(message).toContain('to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.');
+    const sentence = 'to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+    if (migrateSentence) expect(message).toContain(sentence);
+    else expect(message).not.toContain(sentence);
   });
 
   it('the lifted string is byte-identical to the nested issue it came from', () => {

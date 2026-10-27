@@ -474,21 +474,33 @@ describe('DashboardWidgetSchema derives from the spec', () => {
   it('REFUSES the four keys objectstack#5010 retired, by name', () => {
     // Not "strips" — refuses. That distinction is the whole point of
     // ADR-0049 enforce-or-remove: a stale dashboard carrying `actionUrl` gets
-    // told where the affordance moved (`header.actions[]`) instead of silently
-    // losing it, which is what the pre-derivation hand copy did.
+    // refused instead of silently losing it, which is what the pre-derivation
+    // hand copy did. Through spec 18.1 each was a tombstone reporting at its
+    // own path with the move prescription (`header.actions[]`); at 18.2 the
+    // tombstones aged out one major on (objectstack#25767, ADR-0087), so the
+    // key meets this schema's `.strict()` door instead — the objectui#6002
+    // ruled outcome for an undeclared widget key: zod's `unrecognized_keys`
+    // issue at the widget's path, naming the key. Loud, which is what the
+    // ruling asked; the prescription moved to the spec's own strict widget,
+    // whose refusal names the key and the protocol upgrade guide (the contract
+    // leg below). Unlike the `app` / `dashboard` twins, this schema is not
+    // `.passthrough()`, so no arm of its own is needed to keep the refusal.
+    const widget = { id: 'w1', type: 'bar', dataset: 'pipeline', dimensions: ['stage'], values: ['amount'] };
     for (const key of ['actionUrl', 'actionType', 'actionIcon', 'aria'] as const) {
-      const result = DashboardWidgetSchema.safeParse({
-        id: 'w1',
-        type: 'bar',
-        dataset: 'pipeline',
-        dimensions: ['stage'],
-        values: ['amount'],
-        [key]: key === 'aria' ? { ariaLabel: 'Pipeline' } : 'x',
-      });
+      const value = key === 'aria' ? { ariaLabel: 'Pipeline' } : 'x';
+      const result = DashboardWidgetSchema.safeParse({ ...widget, [key]: value });
       expect(result.success, `'${key}' must be refused, not accepted`).toBe(false);
       if (!result.success) {
-        expect(result.error.issues.some((i) => i.path[0] === key)).toBe(true);
+        const refusal = result.error.issues.find((i) => i.path.length === 0 && i.code === 'unrecognized_keys');
+        expect(refusal, `'${key}' must be refused at the widget's path`).toBeDefined();
+        expect((refusal as { keys?: string[] }).keys, `'${key}' must be named by the refusal`).toContain(key);
       }
+      // The contract leg: the spec's strict widget names the key AND the guide.
+      const spec = SpecDashboardWidgetSchema.safeParse({ ...widget, [key]: value });
+      expect(spec.success, `the spec accepts '${key}' again`).toBe(false);
+      const root = spec.success ? '' : spec.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+      expect(root).toMatch(new RegExp(`Unrecognized key\\(s\\)[^\\n]*\`${key}\``));
+      expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
     }
   });
 
@@ -512,19 +524,23 @@ describe('DashboardWidgetSchema derives from the spec', () => {
     });
     expect(result.success, '`responsive` must be refused, not accepted').toBe(false);
     if (!result.success) {
-      const issue = result.error.issues.find((i) => i.path[0] === 'responsive');
-      expect(issue, '`responsive` must be reported by name').toBeDefined();
-      // The tombstone names its own retirement, not #5010's — if this ever reads
-      // `#5010` the key was folded into the wrong retirement upstream.
-      // Was `'#4876, ADR-0049 D2'`. 17.3.0 stripped the `#NNNN` half of that
-      // citation and kept the ADR reference and the prescription, so the
-      // assertion keeps the durable half plus the repair the author acts on.
-      expect(issue?.message).toContain('ADR-0049 D2');
-      expect(issue?.message).toContain('Delete the key.');
-      // And it must point at the surviving home for breakpoint behaviour rather
-      // than just saying "removed".
-      expect(issue?.message).toContain('page.components[].responsive');
+      // Its tombstone aged out with the others at spec 18.2 (objectstack#25767):
+      // the refusal is this schema's `.strict()` unknown-key issue at the
+      // widget's path, naming the key; the per-retirement citation
+      // (`ADR-0049 D2`) and the pointer at `page.components[].responsive`
+      // (itself retired, #11027) left with the tombstone text, and the guide
+      // sentence lives on the spec's own refusal (the contract leg).
+      const issue = result.error.issues.find((i) => i.path.length === 0 && i.code === 'unrecognized_keys');
+      expect(issue, '`responsive` must be reported at the widget\'s path').toBeDefined();
+      expect((issue as { keys?: string[] }).keys, '`responsive` must be named by the refusal').toContain('responsive');
     }
+    const spec = SpecDashboardWidgetSchema.safeParse({
+      id: 'w1', type: 'bar', dataset: 'pipeline', dimensions: ['stage'], values: ['amount'], responsive: { sm: { columns: 1 } },
+    });
+    expect(spec.success, 'the spec accepts `responsive` again').toBe(false);
+    const root = spec.success ? '' : spec.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+    expect(root).toMatch(/Unrecognized key\(s\)[^\n]*`responsive`/);
+    expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('refuses `responsive` on the TypeScript interface too', () => {

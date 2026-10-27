@@ -5,7 +5,6 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { ElementApiDataSourceSchema } from './page.zod';
-import { retiredKey } from '../shared/retired-key';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -1239,8 +1238,7 @@ const AREA_ORDER_RETIRED =
   + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
   + 'authored, so declaration order already IS display order. Delete the key and reorder the '
   + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
-  + '`order` is genuinely sorted — this removal does not touch it. Run '
-  + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + '`order` is genuinely sorted — this removal does not touch it. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * `app.areas[].visible` and `app.areas[].requiredPermissions`, retired in
@@ -1290,8 +1288,7 @@ const AREA_VISIBLE_RETIRED =
   + 'tree — the app\'s top-level `navigation` AND every `areas[].navigation`, both stripped '
   + 'server-side. The distinction survives at every level: `visible` is CEL '
   + 'evaluated in the browser, so it hides an entry that has already been sent, while '
-  + '`requiredPermissions` stops that entry from being served at all. Run '
-  + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + '`requiredPermissions` stops that entry from being served at all. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
   '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
@@ -1306,7 +1303,7 @@ const AREA_REQUIRED_PERMISSIONS_RETIRED =
   + 'area-level key is not revived. Still evaluated client-side ONLY, at every level: '
   + '`visible` (CEL) and `requiresObject` — so anything that must never reach the browser '
   + 'goes in `requiredPermissions`, never in `visible`. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Navigation Area Schema
@@ -1446,7 +1443,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + 'offered an All row regardless of this flag, so `includeAll: false` hardened nothing '
     + 'and `includeAll: true` unlocked nothing. Delete the key. To widen what a selector '
     + 'offers, widen `optionsSource.filter` instead. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   showall:
     '`contextSelectors[].includeAll` (which `showall` aliased) was removed in '
     + '@objectstack/spec 17.0.0 — selectors are mandatory-scope and never render an '
@@ -1454,8 +1451,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
   placement:
     '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 ('
     + 'ADR-0049) — no renderer ever read it. Selectors always render in the sidebar header '
-    + "block, and `'topbar'` placed nothing in the topbar. Delete the key. Run "
-    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + "block, and `'topbar'` placed nothing in the topbar. Delete the key. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.",
   location:
     '`contextSelectors[].placement` (which `location` aliased) was removed in '
     + '@objectstack/spec 17.0.0 — selectors always render in the sidebar header. '
@@ -1638,7 +1634,7 @@ const HOME_PAGE_ID_RETIRED =
   + 'follows `isDefault` routing. Delete the key; to change where an app opens, '
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
   + 'should own the root landing. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * The prescription for every author-shaped spelling of the ADR-0045 publish
@@ -1720,18 +1716,6 @@ export const AppSchema = lazySchema(() => strictObject(
   
   /** Display label */
   label: I18nLabelSchema.describe('App display label'),
-
-  /**
-   * REMOVED — never read by any consumer (2026-06 AppSchema liveness audit).
-   * An app's version is its owning package's `manifest.version`; a second
-   * per-app number had no reader and could silently disagree with it.
-   */
-  version: retiredKey(
-    '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
-    'no consumer in framework or objectui). An app is versioned by its owning package: ' +
-    'use `manifest.version`. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /** Description */
   description: I18nLabelSchema.optional().describe('App description'),
@@ -1845,14 +1829,6 @@ export const AppSchema = lazySchema(() => strictObject(
   contextSelectors: z.array(AppContextSelectorSchema).optional()
     .describe('App-level scope dropdowns whose value is injected into nav items as {<id>} template vars'),
   
-  /**
-   * REMOVED in 17.0.0 (#4667) — see {@link HOME_PAGE_ID_RETIRED}. Tombstoned
-   * rather than deleted, matching the seven #4142 retirements on this schema:
-   * `retiredKey` types it `never`, so an app still authoring it fails to
-   * compile as well as to parse.
-   */
-  homePageId: retiredKey(HOME_PAGE_ID_RETIRED),
-
   /** 
    * Access Control
    * List of permissions required to access this app.
@@ -1861,77 +1837,6 @@ export const AppSchema = lazySchema(() => strictObject(
    */
   requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this app'),
   
-  /**
-   * REMOVED — the self-described "config file convenience" slots were never
-   * read (2026-06 liveness audit): objects register via `defineStack`, and the
-   * ambient chatbot derives an app's object list from its NAV ITEMS
-   * (`collectNavObjects`), never from `App.objects`.
-   */
-  objects: retiredKey(
-    '`App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
-    'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
-    'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
-    'navigation items. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  apis: retiredKey(
-    '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
-    'never read). Delete the key and declare the endpoint one level up, on the STACK: ' +
-    '`defineStack({ apis })`. That surface EXECUTES from protocol 17. Before ' +
-    'the executor landed it was refused wholesale — nothing mounted a declared ' +
-    'path, so every key including `authRequired` parsed and gated nothing — and that ' +
-    'blanket refusal is now narrowed to five per-endpoint publish gates (namespace, ' +
-    'supported target, mapping, policy, uniqueness): an endpoint that passes them is ' +
-    'mounted and serves traffic as soon as the stack is published. Two things to get ' +
-    'right when you move it: the path must sit inside your own carve-out, ' +
-    '`/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` ' +
-    '(ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the ' +
-    'only thing that opens anonymous access, and ADR-0121 D6 then requires an armed ' +
-    '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
-    '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
-    'security review, not a rename. An endpoint whose work needs CODE still lands here: ' +
-    'compute in a flow and register the code as a stack function ' +
-    '(`defineStack({ functions })`) or a connector — an app does not mount routes on ' +
-    '`http.server`, and the manifest `contributes.routes` key was removed in ' +
-    '@objectstack/spec 17 (nothing ever read it; authoring it is now rejected with its ' +
-    'own prescription). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  /**
-   * REMOVED — a declared-but-unenforced security surface (ADR-0049 class,
-   * 2026-06 liveness audit): the only live sharing/embed path is
-   * `FormView.sharing` (public data collection); no public-app or iframe route
-   * ever read the app-level blocks, so authoring them created a false
-   * security/feature impression.
-   */
-  sharing: retiredKey(
-    '`App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
-    'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
-    'sharing that did not exist. Public access is granted per FORM VIEW ' +
-    '(`FormView.sharing`, the public-data-collection surface). Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  embed: retiredKey(
-    '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
-    'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
-    '(`FormView.sharing`), not an app-level switch. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  /**
-   * REMOVED — fully unimplemented (2026-06 liveness audit: even
-   * `packages/mobile` ignored it). Re-admit only together with a real mobile
-   * navigation implementation, per the ADR-0049 trichotomy — a mode picker
-   * that changes nothing is an authoring trap.
-   */
-  mobileNavigation: retiredKey(
-    '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
-    'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
-    'it). Delete the key; the block returns if/when a real mobile navigation ships. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
   /**
    * Default agent for this app's ambient chat surface.
    *
@@ -1965,21 +1870,6 @@ export const AppSchema = lazySchema(() => strictObject(
    */
   defaultAgent: SnakeCaseIdentifierSchema.optional()
     .describe("Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1"),
-
-  /**
-   * REMOVED — never read at the APP level (2026-06 liveness audit). ARIA
-   * attributes are live on the page / page-component / list-view surfaces that
-   * render DOM. NOT on a dashboard widget: `dashboard.widgets[].aria` was
-   * retired in this same 17.0.0 (#5010), so "component/widget" pointed half of
-   * its readers at another tombstone (#6756).
-   */
-  aria: retiredKey(
-    '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
-    'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
-    'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
-    'list view `aria` are live too). Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

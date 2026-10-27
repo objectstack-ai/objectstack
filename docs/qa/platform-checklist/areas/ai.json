@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -90,9 +90,9 @@
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/spec/src/ai/agent.zod.ts#tenantId (requireds, aliases, retiredKey tools/knowledge, visibility/tenantId guidance)",
+        "packages/spec/src/ai/agent.zod.ts#tenantId (requireds, aliases, retiredKey lifecycle, visibility/tenantId guidance; `tools`/`knowledge` aged out on #25767 — strict unknown keys naming the upgrade guide)",
         "packages/spec/src/ai/tool.zod.ts#TOOL_RETIRED_KEY_GUIDANCE (.strict() + TOOL_RETIRED_KEY_GUIDANCE; READ-ONLY PROJECTION note)",
-        "packages/spec/src/ai/skill.zod.ts#triggerPhrases (requireds, retiredKey triggerPhrases, permissions/trigger guidance #5013)",
+        "packages/spec/src/ai/skill.zod.ts#SkillSchema (requireds, permissions/trigger guidance #5013; `triggerPhrases` aged out on #25767 — a strict unknown key naming the upgrade guide)",
         "packages/spec/src/kernel/metadata-type-schemas.ts#registered (agent/tool/skill registered with schemas)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (registry rows: agent allowRuntimeCreate:false ADR-0063 §2; tool/skill true; file patterns)",
         "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET/PUT /meta/:type/:name)",
@@ -119,6 +119,12 @@
           "date": "2026-10-19",
           "change": "steps[1] and acceptance[3].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.agent-tool-skill-metadata-roundtrip; wave anchor #24579 §3). Compiling an app-package agent now warns agent-authoring-withdrawn (packages/lint/src/validate-ai-agent-authoring.ts, warning tier) while the meta door still serves it, and the package-shipped agent PUT answers NOT_OVERRIDABLE where revision 5's history cited only the runtime-name NOT_CREATABLE. Re-derived at base 9a7838edf5. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "source anchors re-pointed after the ≤16.x retirement kits aged out (#25767): `skill.triggerPhrases` and `agent.tools`/`agent.knowledge` are no longer declared — their probes are strict unknown keys whose refusal names the protocol upgrade guide, not tombstones; the skill anchor now cites SkillSchema and the agent line names the surviving `lifecycle` tombstone. The negative clause holds as written: a probe accepted with a clean parse is still a FAIL.",
+          "ref": "#25767"
         }
       ]
     },

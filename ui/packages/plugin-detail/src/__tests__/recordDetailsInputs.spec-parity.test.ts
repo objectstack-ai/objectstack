@@ -540,23 +540,26 @@ describe('record:details — registry inputs vs @objectstack/spec', () => {
  * legible if that helper is ever loosened.
  */
 describe('record:details — `layout` is retired, not merely undocumented (#3818)', () => {
-  it('the spec REJECTS `layout`, with the ADR-0087 migration message', () => {
-    // The premise, checked first: if upstream ever un-retires the key, this
-    // fails before the negative pins below start guarding a dead rule.
-    expect(specTopLevelKeys()).toContain('layout'); // tombstone is still declared
-    expect(isTombstoned('layout')).toBe(true);
+  it('the spec REJECTS `layout` — as an unknown key naming the upgrade guide, its tombstone aged out', () => {
+    // The premise, checked first: if upstream ever re-declares the key, this
+    // fails before the negative pins below start guarding a dead rule. Through
+    // spec 18.1 the tombstone was still declared (`z.never()`); at 18.2 it aged
+    // out of the row one major on (objectstack#25767), so the key is not
+    // declared at all and the strict row refuses it as an unknown key.
+    expect(specTopLevelKeys()).not.toContain('layout');
     expect(specAcceptedTopLevelKeys()).not.toContain('layout');
 
     // A rejection case, so the assertion set is the envelope and not a bare
-    // "it failed": path + code + the named migration text. Both formerly
-    // published values AND both values the dead renderer branch tested — all
-    // four are unauthorable now, which is the whole point.
+    // "it failed": path + code + the text that sends the author on. Both
+    // formerly published values AND both values the dead renderer branch
+    // tested — all four are unauthorable now, which is the whole point.
     for (const value of ['auto', 'custom', 'inline', 'compact']) {
       const parsed = RecordDetailsProps.safeParse({ layout: value });
       expect(parsed.success).toBe(false);
-      expect(parsed.error?.issues.map((i) => i.path.join('.'))).toContain('layout');
-      expect(parsed.error?.issues.map((i) => i.code)).toContain('invalid_type');
-      expect(parsed.error?.issues[0]?.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
+      const root = parsed.error?.issues.find((i) => i.path.length === 0 && i.message.includes('`layout`'));
+      expect(root?.code).toBe('unrecognized_keys');
+      expect(root?.message).toMatch(/Unrecognized key\(s\)/);
+      expect(root?.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     }
   });
 
