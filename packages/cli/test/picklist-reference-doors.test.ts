@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: 11 CLI spawns over four fixtures, each a distinct command, face or fixture (`os validate` json and text, `os build`, `os lint`); slowest CI reading 57.37 s (run 40447801748) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * The `picklist` kind through the three authoring doors, over the real CLI.

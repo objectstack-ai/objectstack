@@ -1,5 +1,88 @@
 # @object-ui/plugin-editor
 
+## 18.2.0
+
+### Minor Changes
+
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+
+### Patch Changes
+
+- 56a2346: fix(plugin-editor): the Console's code editor loads Monaco from its own build, never from cdn.jsdelivr.net
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio's code editors (the JSON source tab, the html / react page source editor, the metadata form's code fields) and the `code-editor` page component fetched Monaco's core from `cdn.jsdelivr.net` at run time, through `@monaco-editor/loader`'s default config. An install with no route to that CDN, and every Console served under its content-security-policy (which lists no CDN in `script-src`), got a plain textarea instead, and the `code-editor` component stayed on "Loading..." for good.
+  
+  - **`@object-ui/plugin-editor`:** `monaco-editor` is now a dependency, bundled by the host. The new `configureBundledMonaco(loader)` imports its ESM core as a lazy chunk and hands it to the loader with `loader.config({ monaco })` before the first `loader.init()`, so the loader injects no CDN script. Each language worker is imported through Vite's `?worker` when Monaco first asks for it, and starts from a same-origin file under the build's assets. The `code-editor` component mounts the editor only once that config has landed, and when the editor chunk cannot be fetched it edits the same text in a plain textarea instead of loading forever.
+  - **`@object-ui/app-shell`:** the code editors' one loader probe per page awaits `configureBundledMonaco` before `loader.init()`. The plain-textarea fallback stays for a chunk that cannot be fetched.
+  - **`@objectstack/console`:** the built Console carries Monaco as lazy chunks and worker files under `assets/` (about 13.5 MB of uncompressed JavaScript, loaded only on a screen that opens an editor); the first-paint closure is unchanged.
+  
+  What to do: nothing. A host that bundles `@object-ui/plugin-editor` with a bundler other than Vite must handle the `?worker` imports itself.
+- 6ea429d: chore(ui): every ui package whose `test` script calls `vitest` now declares `vitest` as a devDependency, so `pnpm --filter @object-ui/PKG test` runs from the repository root
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The package `test` scripts run `vitest run --root ../.. packages/PKG/`. A pnpm script resolves its binaries from the package's own `node_modules/.bin` and the workspace root's, and vitest was installed only under `ui/node_modules/.bin`, so 24 of the 41 ui packages with a `test` script failed with `vitest: not found` from both the repository root and `ui/`. Each of them now declares `vitest: ^4.1.10`, the range `ui/package.json` and the other 17 packages already declare; the lockfile resolves every new entry to the snapshot those packages already use, so no package gains a copy. Nothing a consumer installs changes: only the `devDependencies` field of the published `package.json` moves.
+- Updated dependencies [80f267d]
+- Updated dependencies [dc71845]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [326a559]
+- Updated dependencies [c86c823]
+- Updated dependencies [ef025fe]
+- Updated dependencies [1bbb7bf]
+- Updated dependencies [e843b5b]
+- Updated dependencies [4f48d2b]
+- Updated dependencies [0b76a1f]
+- Updated dependencies [0e7be7e]
+- Updated dependencies [14b5597]
+- Updated dependencies [6ea429d]
+- Updated dependencies [0489214]
+- Updated dependencies [48a9d9d]
+- Updated dependencies [57ab06b]
+  - @object-ui/components@18.2.0
+  - @object-ui/types@18.2.0
+  - @object-ui/core@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes
