@@ -62,19 +62,19 @@ the connector layer, which uses none of it:
 
 | surface | what exists on `main` | where |
 |:---|:---|:---|
-| sign-in OAuth | better-auth `socialProviders`, from the host's config | `packages/plugins/plugin-auth/src/auth-plugin.ts:557` |
-| OAuth authorization **server** (for MCP clients and SSO into ObjectStack) | `@better-auth/oauth-provider`, `/oauth2/{authorize,token,…}` | `packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts:478-488` |
-| a per-user linked account holding the provider's tokens | `sys_account`, `user_id` required, keyed `(provider_id, account_id)` | `packages/platform-objects/src/identity/sys-account.object.ts:183-187`, `packages/plugins/plugin-auth/src/auth-schema-config.ts:83-140` |
-| declarative instance auth | `none` / `bearer` / `api-key` / `basic` only | `packages/spec/src/shared/connector-auth.zod.ts:158-163` |
-| credential resolution | once, at materialization; open default reads `process.env` | `packages/services/service-automation/src/credential-resolver.ts:12,21-22`; `plugin.ts:1955,1997,2306-2337` |
-| MCP http transport auth | static header fold of the resolved credential | `packages/connectors/connector-mcp/src/mcp-provider.ts:63-79,115` |
-| OpenAPI `securitySchemes` | typed, never read | `packages/connectors/connector-openapi/src/openapi-connector.ts:52,88-93` (the only reader of auth is the static `applyAuth`, `:365`) |
-| REST connector auth | static only | `packages/connectors/connector-rest/src/rest-connector.ts:86-89`, `src/index.ts:11` |
+| sign-in OAuth | better-auth `socialProviders`, from the host's config | `packages/plugins/plugin-auth/src/auth-plugin.ts#socialProviders` |
+| OAuth authorization **server** (for MCP clients and SSO into ObjectStack) | `@better-auth/oauth-provider`, `/oauth2/{authorize,token,…}` | `packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts` |
+| a per-user linked account holding the provider's tokens | `sys_account`, `user_id` required, keyed `(provider_id, account_id)` | `packages/platform-objects/src/identity/sys-account.object.ts#user_id`, `packages/plugins/plugin-auth/src/auth-schema-config.ts#AUTH_ACCOUNT_CONFIG` |
+| declarative instance auth | `none` / `bearer` / `api-key` / `basic` only | `packages/spec/src/shared/connector-auth.zod.ts#ConnectorInstanceAuthSchema` |
+| credential resolution | once, at materialization; open default reads `process.env` | `packages/services/service-automation/src/credential-resolver.ts#CredentialResolver`, `#defaultEnvCredentialResolver`; `packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors`, `#resolveInstanceAuth` |
+| MCP http transport auth | static header fold of the resolved credential | `packages/connectors/connector-mcp/src/mcp-provider.ts#applyAuthToHeaders`, `#normalizeTransport` |
+| OpenAPI `securitySchemes` | typed, never read | `packages/connectors/connector-openapi/src/openapi-connector.ts#OpenApiDocument`, `#OpenApiSecurityScheme` (the only reader of auth is the static `#applyAuth`) |
+| REST connector auth | static only | `packages/connectors/connector-rest/src/rest-connector.ts#applyAuth`, `packages/connectors/connector-rest/src/index.ts` |
 
 `resolveInstanceAuth` turns a `credentialRef` into a `ResolvedConnectorAuth` once and hands it to the
-provider factory (`plugin.ts:2306-2337`); nothing re-resolves it, so a token that expires has no
+provider factory; nothing re-resolves it, so a token that expires has no
 refresh point. The one per-connection credential seam on `main` is the IMAP connector's
-`MailCredentialProvider.credentialFor(account)` (`packages/connectors/connector-imap/src/account.ts:60-70`),
+`MailCredentialProvider.credentialFor(account)` (`packages/connectors/connector-imap/src/account.ts#MailCredentialProvider`, `#credentialFor`),
 which already says "obtaining and refreshing the token is the provider's job, not the connector's" — the
 shape D4 generalises.
 
@@ -84,13 +84,14 @@ The card's re-check `git grep -n "intentionally absent"` on that file answers no
 the sentence is still there: it wraps, "OAuth2 is intentionally" ending line 113 and "absent (enterprise
 tier, ADR-0015)." opening line 114. The file holds two shapes, for two doors:
 
-- **`ConnectorOAuth2Schema`** (`connector-auth.zod.ts:30-40`) is a variant of the **runtime** union
-  `ConnectorAuthConfigSchema` (`:79-85`): what a plugin hands to `registerConnector`, with
-  `clientSecret` and `refreshToken` **inline** (`:35,38`). It may never be authored —
+- **`ConnectorOAuth2Schema`** (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorOAuth2Schema`) is a
+  variant of the **runtime** union `ConnectorAuthConfigSchema` (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorAuthConfigSchema`): what a plugin hands to `registerConnector`, with
+  `clientSecret` and `refreshToken` **inline**. It may never be authored —
   `DeclarativeConnectorEntrySchema` refuses any non-`none` `authentication` on every published entry
-  (`packages/spec/src/integration/connector.zod.ts:1168-1192`). No provider consumes it: the providers
-  take `ResolvedConnectorAuth`, which `Extract`s exactly the four static kinds (`connector-auth.zod.ts:99-102`).
-- **`ConnectorInstanceAuthSchema`** (`connector-auth.zod.ts:158-163`) is the **authored** shape, with
+  (`packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema`). No provider consumes it: the providers
+  take `ResolvedConnectorAuth`, which `Extract`s exactly the four static kinds
+  (`packages/spec/src/shared/connector-auth.zod.ts#ResolvedConnectorAuth`).
+- **`ConnectorInstanceAuthSchema`** (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorInstanceAuthSchema`) is the **authored** shape, with
   `credentialRef` in place of every secret. It has no OAuth2 variant; that absence is what lines 113-114
   and ADR-0097:119 ("The open tier deliberately omits OAuth2 from `ConnectorInstanceAuthSchema`")
   record.
@@ -216,7 +217,7 @@ and must not be revoked or replaced by an unrelated sign-in. Whatever the storag
 
 ### D7 — The unused runtime `oauth2` shape is settled by the spec slice
 
-`ConnectorOAuth2Schema` (`connector-auth.zod.ts:30-40`) inlines a client secret and a refresh token
+`ConnectorOAuth2Schema` (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorOAuth2Schema`) inlines a client secret and a refresh token
 and has no consumer. The spec slice that adds D2's `oauth2` variant either retires it or redefines it
 as the resolved, post-refresh shape a provider receives. Either way it goes through ADR-0087 and does
 not survive as a second authored dialect.
@@ -265,14 +266,13 @@ A covers every acceptance scenario #26702 names, and adding a scope key later is
 Reuse better-auth's `account` storage and refresh, or a dedicated connection object?
 
 - **A. Reuse `sys_account`.** Measured against D3 and D6:
-  - `user_id` is required (`sys-account.object.ts:183-187`), so an organization-shared connection (Q1 A)
+  - `user_id` is required (`packages/platform-objects/src/identity/sys-account.object.ts#user_id`), so an organization-shared connection (Q1 A)
     has no row to live in.
-  - The token columns are `textarea` + `internal: true` (`:236-255`): omitted from the data API, but not
+  - The token columns are `textarea` + `internal: true` (`packages/platform-objects/src/identity/sys-account.object.ts#access_token`, `#refresh_token`): omitted from the data API, but not
     the encrypted `secret` channel (ADR-0100), so D3's encryption at rest is not met as they stand.
   - A row is a linked sign-in account keyed `(provider_id, account_id)`, which is exactly what D6 forbids
     an integration grant to become.
-  - better-auth refreshes against the providers in its own configuration (`socialProviders`,
-    `auth-plugin.ts:557`), not against an endpoint declared per instance in metadata.
+  - better-auth refreshes against the providers in its own configuration (`packages/plugins/plugin-auth/src/auth-plugin.ts#socialProviders`), not against an endpoint declared per instance in metadata.
 - **B. A dedicated connection object** (the spec slice names it), owned by the automation service:
   - bound to `(organization, connector instance)`;
   - tokens and the registered MCP client in `secret` fields;
