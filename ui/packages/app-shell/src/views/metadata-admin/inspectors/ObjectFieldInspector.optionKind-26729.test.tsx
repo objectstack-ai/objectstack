@@ -34,7 +34,7 @@ vi.mock('../previews/useObjectFields', () => ({
 }));
 
 import { ObjectFieldInspector } from './ObjectFieldInspector';
-import { t } from '../i18n';
+import { t, type SupportedLocale } from '../i18n';
 
 // The zh case below reads the lazy `studio` catalogue; load it at import so no
 // assertion races the loader.
@@ -46,7 +46,7 @@ type Def = Record<string, unknown>;
 
 function renderField(
   fields: Record<string, Def>,
-  opts: { stageField?: string; locale?: string } = {},
+  opts: { stageField?: string; locale?: SupportedLocale } = {},
 ) {
   const onPatch = vi.fn();
   const initial: Record<string, unknown> = { name: 'probe_widget', fields };
