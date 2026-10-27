@@ -1707,6 +1707,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.stored-conversions.test.ts",
       "verb": "delete",
       "pinned": 1

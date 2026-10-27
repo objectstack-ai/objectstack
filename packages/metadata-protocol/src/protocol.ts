@@ -405,6 +405,7 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
+import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 // [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
 import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 // [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
@@ -20929,6 +20930,10 @@ export class ObjectStackProtocolImplementation implements
                         graftFoldedFormSections(request.item, parsed.data),
                         parsed.data,
                     );
+                    // [#26723] …and an action is stored as its parse, so its
+                    // `requiresFeature` / `requiresMembershipReach` is lowered
+                    // into `visible`. See {@link withParsedStoredActions}.
+                    request.item = withParsedStoredActions(singularType, request.item, parsed.data);
                 }
                 // [#20101] …and a page's declared `type` default, the one
                 // default that a reader of the served body selects on. It is
