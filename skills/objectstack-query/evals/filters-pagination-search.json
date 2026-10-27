@@ -50,6 +50,16 @@
         "must_contain": ["context", "isSystem: true", "limit: 1"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 6,
+      "prompt": "Find tasks that are overdue by each record's own grace period: `due_at` is a datetime and `grace_days_offset` is a number field holding the grace period as negative days.",
+      "expected_output": "`engine.find('task', { where: { due_at: { $lt: { $now: true, addDays: { $field: 'grace_days_offset' } } } } })` — the now-anchored comparand: `$now: true` is the instant the query runs at, `addDays` reads the signed whole-day offset off the same record (`-N` is N days ago). Not a stored formula field plus a hook, not `{N_days_ago}` (a literal N only), not `{ $field: 'due_at', addDays: ... }` (that compares two columns, never now).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["$now: true", "addDays", "$field: 'grace_days_offset'", "$lt"],
+        "must_not_contain": ["subDays", "type: 'formula'"]
+      }
     }
   ]
 }

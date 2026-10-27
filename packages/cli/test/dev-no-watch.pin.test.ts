@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: three `os dev` spawns in one beforeAll, each a distinct argv and directory on its workspace-orchestration branch; slowest CI reading 24.16 s (run 40392443783) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * PIN (#20681) — `os dev`'s watch opt-out is reachable, and the argv that used

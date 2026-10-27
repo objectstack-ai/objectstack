@@ -54,6 +54,32 @@ Legal in a **comparison** position only. As an `$in` / `$nin` member or a
 `$between` endpoint it is refused at parse — no evaluation path resolves a
 reference there.
 
+## Now-Anchored Comparands
+
+> ✅ **Enforced.** `{ $now: true, addDays: OFFSET }` is the instant the query
+> runs at, shifted by whole days — legal exactly where a `{ $field }` reference
+> is: the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte` on
+> a `date` or `datetime` field. The engine pins `$now` to ONE instant per query.
+
+```typescript
+// ✅ Overdue by each record's own grace period: due_at < now + grace_days_offset,
+//    the number field holding the grace period as NEGATIVE days
+where: {
+  due_at: { $lt: { $now: true, addDays: { $field: 'grace_days_offset' } } }
+}
+```
+
+`addDays` is **required** and always ADDED: an integer of any sign (`-30`
+is thirty days ago keeping the time of day, where `{30_days_ago}` names a
+calendar day; for the bare instant write `{now}`), or a `{ $field }` naming
+a **number** field of the same record (NULL counts as zero days). The filter
+cannot negate a positive `grace_days` column: store the signed offset. Refused
+with `INVALID_FILTER` / 400: an anchor without `addDays`, a fractional or
+string offset, any extra key (there is no `subDays`), a target that is not
+`date` / `datetime`, and any `$in` / `$nin` / `$between` position; SQL
+push-down also refuses a dotted or non-number offset field. The filter alone
+answers it — not a stored formula field plus a hook.
+
 ## Relation Filters
 
 A condition on a related record's fields beneath a relation field (`lookup`,

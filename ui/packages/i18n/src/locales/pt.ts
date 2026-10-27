@@ -4749,6 +4749,7 @@ const pt = {
       invalidCoordinatesExcluded: "Registros excluídos do mapa por coordenadas ausentes ou inválidas: {{excluded}}",
       styleFailedConfigured: "Não foi possível carregar o mapa ({{reason}}). Os registros estão listados abaixo; verifique a URL do estilo de mapa definida nesta visualização.",
       styleFailedDefault: "Não foi possível carregar o mapa ({{reason}}). Os registros estão listados abaixo; não foi possível carregar aqui os blocos de mapa públicos padrão, então peça ao seu administrador que defina um estilo de mapa para esta visualização.",
+      styleFailedDeployment: "Não foi possível carregar o mapa ({{reason}}). Os registros estão listados abaixo; não foi possível carregar aqui o estilo de mapa padrão definido para esta implantação, então peça ao seu administrador que o verifique.",
       styleFailedUnknownReason: "não foi possível carregar o estilo ou os blocos do mapa",
       webgl2Unavailable: "Não foi possível carregar o mapa (este navegador não oferece WebGL2, necessário para o mapa). Os registros estão listados abaixo; ative a aceleração de hardware ou use um navegador com WebGL2 para ver o mapa.",
       retry: "Tentar carregar o mapa novamente",

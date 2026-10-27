@@ -14,7 +14,7 @@ import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { AuthGuard, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { SchemaRendererProvider, ActionProvider, NotificationProvider } from '@object-ui/react';
+import { SchemaRendererProvider, ActionProvider, NotificationProvider, HostMapStyleProvider } from '@object-ui/react';
 import { NotificationAlerts, NotificationSnackbar } from '@object-ui/components';
 import { presentNotificationToast } from '../chrome/notificationToast.js';
 import { useActionModal } from '../hooks/useActionModal.js';
@@ -54,6 +54,7 @@ import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
 import { ImpersonationBanner } from '../layout/ImpersonationBanner.js';
 import { ReadRateBanner } from '../layout/ReadRateBanner.js';
 import { StorageUsageBanner } from '../layout/StorageUsageBanner.js';
+import { getRuntimeConfig } from '../runtime-config.js';
 
 // The console's every pre-React / pre-auth gate (Suspense fallback, adapter
 // not ready, org/auth loading) renders this. It used to be a bare, unbranded
@@ -162,7 +163,15 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
        console route and several arrive through `ComponentRegistry`, where no
        prop could be passed. */
     <HostNavigationBridge>
-      <ConsoleShellProviders>{children}</ConsoleShellProviders>
+      {/* objectstack#26163 — the deployment's default map style (the
+          operator's `OS_CONSOLE_MAP_STYLE_URL`, served as runtime-config
+          `mapStyleUrl`), for a map view that declares no style of its own.
+          The map arrives through `ComponentRegistry`, lazily, so a context is
+          the only way to reach it; absent, the map keeps the demo style.
+          `initRuntimeConfig()` settles before the console's first render. */}
+      <HostMapStyleProvider styleUrl={getRuntimeConfig().mapStyleUrl}>
+        <ConsoleShellProviders>{children}</ConsoleShellProviders>
+      </HostMapStyleProvider>
     </HostNavigationBridge>
   );
 }
