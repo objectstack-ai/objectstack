@@ -172,7 +172,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # No `pnpm install`: the gate imports `node:fs` and one local module.
       # Installing the workspace here would buy nothing and would give a

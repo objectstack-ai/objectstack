@@ -50,6 +50,7 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
 | `externalId` | `'name'` | Stable business key used for upsert / update lookup |
 | `mode` | `'upsert'` | Import strategy (see below) |
+| `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
@@ -64,6 +65,26 @@ Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 | `update` | Update only existing rows; never create. | Patching existing config |
 | `ignore` | Insert; silently skip duplicates. | Additive bootstrap |
 | `replace` ⚠️ | Delete everything, then insert. **Data loss.** | Cache / lookup tables only — never user data |
+
+### Columns the app owns after the first load — `columns.FIELD.applyOn`
+
+A seed is replayed (every dev-server boot, every re-publish) and an `upsert`
+replay re-asserts every column on the row it matched — right for master data,
+wrong for a column a job or an admin advances after the first load. Declare it
+`applyOn: 'create'`: written when the seed creates the row, left as the row
+holds it on every replay (an `update` dataset never writes it; `insert` /
+`ignore` / `replace` never update a matched row, so nothing changes there).
+Each key must be a field of the object or an injected system column —
+`defineSeed` refuses one that is not. Same values and meaning as an import
+mapping entry's `applyOn` (objectstack-api).
+
+```typescript
+defineSeed(Invoice, {
+  externalId: 'number',
+  columns: { status: { applyOn: 'create' } },   // the payment job owns it after the first seed
+  records: [{ number: 'INV-001', status: 'draft', amount: 1200 }],
+});
+```
 
 ### `externalId` selection
 
