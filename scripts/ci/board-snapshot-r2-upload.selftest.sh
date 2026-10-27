@@ -45,21 +45,24 @@ fi
 fail=0
 # Battery roster: every case name, with the minimum checks it must register.
 # A case that stops running, or runs fewer checks, names itself at the floor.
-declare -A FLOOR=(
-  ['unset secrets: one notice, status skipped, exit 0, no aws call']=5
-  ['a configured sync: mtimes from history, then the sync, then the day tarball']=9
-  ['the day tarball already exists: no second tarball, and the status says so']=4
-  ['a failing sync is red: FAILED status, an error annotation, no tarball']=5
-  ['an unreadable history falls back to a FULL re-upload, warned, never skipped']=4
+# Parallel indexed arrays, not `declare -A`: the bash floor is 3.2.
+NAMES=(
+  'unset secrets: one notice, status skipped, exit 0, no aws call'
+  'a configured sync: mtimes from history, then the sync, then the day tarball'
+  'the day tarball already exists: no second tarball, and the status says so'
+  'a failing sync is red: FAILED status, an error annotation, no tarball'
+  'an unreadable history falls back to a FULL re-upload, warned, never skipped'
 )
+FLOORS=(5 9 4 5 4)
+COUNTS=(0 0 0 0 0)
 ROSTER_SIZE=5
-declare -A SEEN=()
-current=''
+STARTED=0
+current=-1
 
 check() { # check <description> <condition-exit-status>
-  SEEN[$current]=$(( ${SEEN[$current]:-0} + 1 ))
+  COUNTS[$current]=$(( ${COUNTS[$current]} + 1 ))
   if [ "$2" != 0 ]; then
-    echo "  ✗ [$current] $1"
+    echo "  ✗ [${NAMES[$current]}] $1"
     fail=1
   fi
 }
@@ -112,8 +115,12 @@ T_TWO=$(/bin/date -u -d '2026-10-02T00:00:00Z' +%s)
 # run_case <name> [VAR=value ...] -- a fresh work dir holding a copy of the
 # archive, the script run with the stubs first on PATH and the case's env.
 run_case() {
-  current=$1; shift
-  W="$FIX/work-${#SEEN[@]}"
+  current=-1
+  for i in "${!NAMES[@]}"; do [ "${NAMES[$i]}" = "$1" ] && current=$i; done
+  if [ "$current" -lt 0 ]; then echo "  ✗ case \"$1\" is not in the roster"; exit 1; fi
+  shift
+  STARTED=$((STARTED + 1))
+  W="$FIX/work-$STARTED"
   mkdir -p "$W/runner-temp"
   cp -a "$SEED" "$W/archive"
   : > "$W/out"; : > "$W/aws.log"
@@ -124,7 +131,6 @@ run_case() {
       bash -e "$SCRIPT" > "$W/stdout" 2> "$W/stderr"
   )
   CODE=$?
-  SEEN[$current]=${SEEN[$current]:-0}
 }
 
 SECRETS=(AWS_ACCESS_KEY_ID=id AWS_SECRET_ACCESS_KEY=secret R2_ACCOUNT_ID=acct R2_BUCKET=bucket)
@@ -174,17 +180,13 @@ check 'the status line names the fallback' "$(has "$W/out" '(FULL re-upload, mti
 check 'the sync still ran' "$([ "$(sed -n 1p "$W/aws.log")" = "$SYNC" ]; echo $?)"
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
-if [ "${#FLOOR[@]}" -lt "$ROSTER_SIZE" ]; then
-  echo "  ✗ the roster declares ${#FLOOR[@]} batteries, below the pinned $ROSTER_SIZE"
+if [ "${#NAMES[@]}" -lt "$ROSTER_SIZE" ] || [ "${#FLOORS[@]}" -ne "${#NAMES[@]}" ]; then
+  echo "  ✗ the roster declares ${#NAMES[@]} batteries and ${#FLOORS[@]} floors, below or apart from the pinned $ROSTER_SIZE"
   fail=1
 fi
-for name in "${!SEEN[@]}"; do
-  if [ -z "${FLOOR[$name]+x}" ]; then echo "  ✗ case \"$name\" is not in the roster"; fail=1; fi
-done
-for name in "${!FLOOR[@]}"; do
-  got=${SEEN[$name]:-0}
-  if [ "$got" -lt "${FLOOR[$name]}" ]; then
-    echo "  ✗ battery \"$name\" registered $got check(s), below its floor of ${FLOOR[$name]} -- it DID NOT RUN in full"
+for i in "${!NAMES[@]}"; do
+  if [ "${COUNTS[$i]}" -lt "${FLOORS[$i]}" ]; then
+    echo "  ✗ battery \"${NAMES[$i]}\" registered ${COUNTS[$i]} check(s), below its floor of ${FLOORS[$i]} -- it DID NOT RUN in full"
     fail=1
   fi
 done
@@ -192,6 +194,6 @@ if [ "$fail" -ne 0 ]; then
   echo "✗ board-snapshot-r2-upload self-test FAILED"
   exit 1
 fi
-total=0; for n in "${SEEN[@]}"; do total=$((total + n)); done
-echo "✓ board-snapshot-r2-upload self-test: ${#SEEN[@]} cases, $total checks"
+total=0; for n in "${COUNTS[@]}"; do total=$((total + n)); done
+echo "✓ board-snapshot-r2-upload self-test: $STARTED cases, $total checks"
 reached=1

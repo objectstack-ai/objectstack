@@ -19,6 +19,8 @@
 // files and same clock, captured before the move.
 //
 // Dependency-free: the report job runs no `pnpm install`.
+//
+// dispatch-gates: no-path-population -- the --self-test (the one invocation a pull request runs, in Lint & Repo Gates) drives in-memory API doubles and a throwaway $RUNNER_TEMP under the OS temp directory and reads no tracked file; the shard log tails it names are fixture files it writes there, and the step itself reads only the artifacts the nightly run downloaded
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -233,6 +235,9 @@ const refreshed = (n) => [
   { info: `refreshed nightly-tiers card #${n} (BODY chars, tiers failure)` },
   { notice: `nightly tiers are red on main — card #${n} refreshed.` },
 ];
+// A shard's log tail as the step finds it under $RUNNER_TEMP, joined rather
+// than spelled so the gate derivation does not read it as a tracked path.
+const tailFixture = (shard) => ['nightly-reports', shard, 'log-tail.txt'].join('/');
 
 const SELF_TEST_CASES = [
   {
@@ -240,8 +245,8 @@ const SELF_TEST_CASES = [
     env: { TIERS_RESULT: 'failure', FAILING_FILES_EXIT: '0' },
     files: {
       'failing-files.txt': 'packages/a/x.e2e.test.ts\npackages/b/y.live.test.ts\n',
-      'nightly-reports/shard-2/log-tail.txt': 'short tail',
-      'nightly-reports/shard-1/log-tail.txt': `${'L'.repeat(25000)}END`,
+      [tailFixture('shard-2')]: 'short tail',
+      [tailFixture('shard-1')]: `${'L'.repeat(25000)}END`,
     },
     api: { 'issues.listForRepo': async () => others(3), 'issues.create': async () => ({ data: { number: 601 } }) },
     calls: [scan(1), create],

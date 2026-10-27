@@ -3479,14 +3479,33 @@ jobs:
       # blocks into scripts/ci/ (#26086). Each step fires only on an event no
       # pull request produces (a red scheduled run, a red nightly on main), so
       # its module's --self-test is the one place it runs before it fires.
-      # Offline doubles; sub-second each.
+      # Offline doubles; sub-second each. A collector, so one red self-test
+      # does not hide the others (#10814).
       - name: Moved workflow step bodies self-test
         id: moved-workflow-step-bodies-self-test
         continue-on-error: true
         run: |
-          node scripts/ci/scheduled-full-run-card.mjs --self-test
-          node scripts/ci/nightly-tiers-card.mjs --self-test
-          bash scripts/ci/board-snapshot-r2-upload.selftest.sh
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
+          run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
+          run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Moved workflow step bodies self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Moved workflow step bodies self-tests — all three ran and passed"
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
