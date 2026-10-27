@@ -500,6 +500,99 @@ jobs:
               - 'packages/sdui-parser/**'
               - 'packages/types/**'
 
+  # ── WHICH TEST CORE SHARDS START (#26084) ─────────────────────────────
+  # The `test` matrix used to be the literal 1..8, so every Test Core run
+  # started eight runners, and a shard whose bin was empty paid checkout,
+  # install and its package-set selection before printing "No packages on this
+  # shard". Measured over the 25 most recent completed pull_request runs on
+  # 2026-10-27 (40415024961 to 40426272873): 72 of 168 Test Core shard jobs
+  # were empty, 7020 runner-seconds, ~97 s each. A diff that reaches no
+  # package (a root script, a doc, a workflow) fills one to three bins of
+  # eight.
+  #
+  # This job runs the shards' own selection and partition ONCE and publishes
+  # the indices of the bins that hold work; `test` builds its matrix from
+  # them. The plan never re-sizes: the count stays SHARD_COUNT, so a started
+  # shard carries exactly the slice it carried before, and only the empty ones
+  # are not created. Every shard re-derives the plan from its own package set
+  # and reds when its digest differs (`--verify` in "Compute this shard's
+  # package set"), so the plan cannot silently disagree with the shards it
+  # leaves out. scripts/ci/plan-test-core-shards.mjs carries the reasoning.
+  #
+  # The price is one serial hop: Test Core's shards start after this job, ~65-95
+  # s later (the same checkout + install a shard pays before its selection,
+  # measured on run 40426272873's shards), on every run that starts Test Core.
+  #
+  # Same `if:` as `test`, so the plan exists exactly when the matrix could.
+  # Fail-open both ways (THE FILTER CONTRACT): a plan job that dies publishes
+  # no outputs, the matrix falls back to its full literal, and the gate counts
+  # that same fallback.
+  test-plan:
+    name: Plan Test Core shards
+    needs: filter
+    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      digest: ${{ steps.plan.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The same history the shards check out: the selection diffs against
+          # the PR's merge base, the queue's base_sha or the push's before sha.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore only: the `test` shards save this key.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Its own self-test, where it runs (check:self-test-wired). Milliseconds.
+      # A red here fails this job before it publishes a plan, so the matrix
+      # falls back to all eight shards: a broken planner costs runners, never
+      # coverage.
+      - name: Test Core shard planner self-test
+        run: node scripts/ci/plan-test-core-shards.mjs --self-test
+
+      # The event fields are the `test` job's "Compute this shard's package
+      # set", verbatim: the plan is that step's answer, computed once.
+      - name: Plan this run's Test Core shards
+        id: plan
+        env:
+          OS_SHARD_EVENT_NAME: ${{ github.event_name }}
+          OS_SHARD_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          OS_SHARD_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          bash scripts/ci/select-shard-packages.sh
+          node scripts/ci/plan-test-core-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
+            --exclude @objectstack/dogfood --github-output "$GITHUB_OUTPUT"
+
   test:
     # Sharded 8-way BY PACKAGE (6-way until #25376): a core-touching PR ran
     # the affected suite ~11½ min on one 4-vCPU runner — the longest pole in
@@ -597,13 +690,18 @@ jobs:
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
     name: Test Core (${{ matrix.shard }}/8)
-    needs: filter
+    needs: [filter, test-plan]
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
     # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
     # in, never ANDed: two independent reasons to run this job, and it skips only
     # when BOTH filters explicitly said false, so the contract's "when in doubt,
     # RUN EVERYTHING" posture is unchanged (#9829).
-    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}
+    #
+    # The third clause is the plan's (#26084): `[]` is the test-plan job's
+    # positive statement that the package set is empty, and only that literal
+    # skips. A plan job that died publishes nothing, `'' != '[]'` holds, and the
+    # matrix below falls back to all eight shards: half 1 of the contract again.
+    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') && needs.test-plan.outputs.shards != '[]' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min was
@@ -676,10 +774,18 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    # ⭐ ONLY THE SHARDS WITH WORK START (#26084). The list is the test-plan
+    # job's: the indices of the bins `partition-test-shards.mjs` fills at
+    # SHARD_COUNT (8) for this run's package set. The count stays 8, so a
+    # started shard runs exactly the `--shard k/8` slice it ran before, under
+    # the same name, cache key and attestation; a shard whose bin is empty is
+    # simply never created. The literal after `||` is the full roster, read
+    # when the plan job published nothing (it died or timed out), and the gate
+    # reads this same expression, so the two cannot count different rosters.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
 
     steps:
       - name: Checkout repository
@@ -824,6 +930,9 @@ jobs:
           OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           OS_SHARD_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          # No fallback on purpose: empty means the plan job published nothing
+          # and the matrix is the full roster, which `--verify` says and passes.
+          OS_SHARD_PLAN_DIGEST: ${{ needs.test-plan.outputs.digest }}
         run: |
           bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
@@ -831,6 +940,10 @@ jobs:
             > "$RUNNER_TEMP/shard-packages.txt"
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
+          # The plan this matrix was built from must be this shard's own plan,
+          # or a bin the plan called empty could hold a package no shard tests.
+          node scripts/ci/plan-test-core-shards.mjs --verify "$RUNNER_TEMP/turbo-ls.json" \
+            --exclude @objectstack/dogfood --shard ${{ matrix.shard }} --digest "$OS_SHARD_PLAN_DIGEST"
 
       # ⭐ A SHARD WHOSE TESTS READ NO `.d.ts` BUILDS ITS CLOSURE WITHOUT THEM
       # (#25375). vitest loads JavaScript, so on most shards every declaration
@@ -1656,8 +1769,14 @@ jobs:
     # that was never scheduled publishes nothing and cannot be counted; a shard
     # that failed publishes nothing either. `cancelled` (#3668) and
     # filter-`skipped` (#4928) keep their existing meanings — see the script.
+    #
+    # The DECLARED roster is the PLANNED one since #26084: the `test-plan` job
+    # starts only the shards whose bin holds a package, so the gate counts
+    # those, read from the same expression the matrix reads (`OS_TEST_PLAN`
+    # below; check:shard-attestation holds the two byte-identical). A plan of
+    # `[]` skips the matrix and expects zero credentials, as a filter skip does.
     name: Test Core
-    needs: [test, filter]
+    needs: [test, filter, test-plan]
     # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
     # What this required aggregate stands in for, stated rather than inferred.
     # `node scripts/check-aggregator-roster.mjs` asserts MEMBERS + NON_MEMBERS
@@ -1667,12 +1786,14 @@ jobs:
     # keep being claimed. `filter` is a non-member on purpose: it is consulted
     # for the #4928 skipped-only-when-filter-succeeded guard, not aggregated —
     # and having somewhere to SAY that is what stops the roster from being
-    # widened to launder a red. The members are cross-checked against the
-    # `--leg` tokens below, so this declaration cannot drift into a second
-    # source of truth for what check:shard-attestation counts.
+    # widened to launder a red. `test-plan` is a non-member for the same kind
+    # of reason: it supplies the roster (#26084), it carries no verdict. The
+    # members are cross-checked against the `--leg` tokens below, so this
+    # declaration cannot drift into a second source of truth for what
+    # check:shard-attestation counts.
     env:
       OS_AGGREGATOR_MEMBERS: test
-      OS_AGGREGATOR_NON_MEMBERS: filter
+      OS_AGGREGATOR_NON_MEMBERS: filter test-plan
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1714,6 +1835,11 @@ jobs:
           OS_TEST_RESULT: ${{ needs.test.result }}
           OS_FILTER_RESULT: ${{ needs.filter.result }}
           OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
+          # The planned roster, spelled exactly as the `test` job's matrix
+          # spells it, fallback included: a plan job that died leaves the
+          # matrix on 1..8, and the gate then counts 1..8 too (#26084).
+          OS_TEST_PLAN: ${{ needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]' }}
+          OS_TEST_PLAN_RESULT: ${{ needs.test-plan.result }}
           # Read ONLY on the partially-attested-cancelled path above, never
           # otherwise; without it that path fails closed (red, naming the
           # missing token).
@@ -1724,7 +1850,9 @@ jobs:
             --dir "$OS_ATTEST_DIR" \
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
-            --leg "test/8:$OS_TEST_RESULT"
+            --leg "test/8:$OS_TEST_RESULT" \
+            --planned "test=$OS_TEST_PLAN" \
+            --plan-result "$OS_TEST_PLAN_RESULT"
 
       # ── The timing table this gate publishes (#16454) ─────────────────────
       #
@@ -4148,12 +4276,12 @@ jobs:
       # 81bba6c3f), then it enumerates the registry under plain Node (~8 s; ~6 s
       # for the whole run when nothing moved). It serialises through the
       # @objectstack/sdui-parser the step above built, so a parser edit moves
-      # this verdict too, which no committed digest does. On merge_group it runs
-      # on the queue's combined tree, the one run that sees two entries' effect
-      # on the manifest together. Only the artefact is compared: the records the
-      # generator rewrites beside it are held by `check-sdui-manifest` in
-      # lint.yml. The Console build below reads the registry through its src/
-      # aliases, so the dist this step builds does not reach it.
+      # this verdict too. On merge_group it runs on the queue's combined tree,
+      # the one run that sees two entries' effect on the manifest together.
+      # Only the artefact is compared: the record the generator rewrites beside
+      # it is held by `check-sdui-manifest` in lint.yml. The Console build below
+      # reads the registry through its src/ aliases, so the dist this step
+      # builds does not reach it.
       - name: The committed SDUI manifest is the one this tree generates
         run: |
           node scripts/gen-sdui-manifest-node.mjs

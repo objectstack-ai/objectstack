@@ -4,6 +4,8 @@ Authentication & Identity Plugin for ObjectStack.
 
 > **✨ Status:** ObjectQL-based authentication implementation! Uses ObjectQL for data persistence (no third-party ORM required). Core authentication structure is in place with better-auth v1.4.18.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Features
 
 ### Currently Implemented

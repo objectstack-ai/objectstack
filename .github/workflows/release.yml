@@ -387,8 +387,7 @@ jobs:
       # surface, 4 major-only — the three blank-template files and
       # protocol-version.ts. The template half is now judged by the gates below;
       # protocol-version.ts is still refused, for the measured reason given at
-      # the refusal. cut-rc.yml's allowlist block carries the same surface for
-      # the RC lane and agrees path-for-path.
+      # the refusal.
       #
       # WHAT IS CHECKED, AND WHY EACH ONE (7 s total, measured on the rendered
       # tree in this job's own state: install, NO build. With the major-boundary
@@ -401,8 +400,8 @@ jobs:
       #   the doc and template halves of that surface are RESOLVED AT RUN TIME
       #   from the very declarations the rewriters read (`SURFACES` in
       #   check-docs-image-tag.mjs, `stampedPaths()` in
-      #   sync-template-versions.mjs), on the principle cut-rc.yml states for
-      #   the same two lists: one list, N consumers, because "a fourth literal
+      #   sync-template-versions.mjs), on the principle those two declarations
+      #   exist for: one list, N consumers, because "a fourth literal
       #   is a fourth contract". This is the half that ends the treadmill: a
       #   fifth rewriter, or an existing one growing an output, reddens this
       #   lane on the day it lands instead of shipping unvalidated.
@@ -658,7 +657,7 @@ jobs:
             exit 1
           fi
 
-          # Same five filters cut-rc.yml applies to the same surface: the fixed
+          # Five filters over the reviewed surface: the fixed
           # release paths by pattern, then the four declared lists by WHOLE-LINE
           # EXACT match, so no derived filter can accept a path its declaration
           # does not name and none needs regex-escaping.

@@ -5486,8 +5486,8 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   // The complement, so the zero above cannot be the union quietly hiding a
   // member: a family reached by NO PR-time event at all must come from a
-  // workflow that declares no `schedule` either. Today that is `cut-rc.yml`,
-  // the human release lane, which is `workflow_dispatch`-only.
+  // workflow that declares no `schedule` either (a `workflow_dispatch`-only
+  // lane, say); the set may be empty.
   const noPRTime = triggerFamilies.filter((e) => !reachesPRTime(e.workflows));
   t(
     `the complement agrees: all ${noPRTime.length} famil(ies) reached by no PR-time event at all come from workflows that declare no schedule`,

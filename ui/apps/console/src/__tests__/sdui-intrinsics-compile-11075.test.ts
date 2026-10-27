@@ -17,7 +17,7 @@
  * the eager plugin imports) and its `assertFullyLoaded` are the ones this file
  * reads, so a plugin the dump gains or loses moves this pin with it. The
  * `.d.ts` is then generated from that manifest exactly as `buildArtifacts` in
- * `packages/sdui-parser/scripts/gen-manifest.ts` generates
+ * `apps/console/scripts/gen-manifest.ts` generates
  * `sdui-intrinsics.d.ts`.
  *
  * Before the fix the generated file itself did not compile:
@@ -39,7 +39,7 @@
 
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
-import { generateDts, type Manifest } from '@object-ui/sdui-parser';
+import { generateDts, type Manifest } from '@objectstack/sdui-parser';
 
 // `manifest-dump.tsx` is the page script of `dev/manifest-dump.html`: it writes
 // the manifest (or the generator's error) into `#out` and onto `window`.

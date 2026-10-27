@@ -19,7 +19,6 @@
 '@object-ui/providers': patch
 '@object-ui/react': patch
 '@object-ui/react-runtime': patch
-'@object-ui/sdui-parser': patch
 '@object-ui/types': patch
 ---
 

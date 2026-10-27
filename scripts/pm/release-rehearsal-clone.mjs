@@ -78,7 +78,7 @@
  *
  * ## Not a production defect, and not wired into `pnpm run version`
  *
- * `cut-rc.yml` and `release.yml` check out with `fetch-depth: 0`, so the real
+ * `release.yml` checks out with `fetch-depth: 0`, so the real
  * cut has full history and never enters this branch. This is a LOCAL rehearsal
  * trap — but a throwaway-clone rehearsal is the prescribed verification route
  * for release-machinery changes, so it sits on the path of every card in that
