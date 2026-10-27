@@ -18,6 +18,4 @@ Metadata-protocol: narrowed
 - **Not judged.** A dataset that resolves to nothing (`chart-dataset-unknown`), a dataset that declares no `object`, and a list view whose own binding does not resolve.
 - **Who moves.** No list view in `examples/**` or `packages/platform-objects` is refused: the two chart list views in the showcase app bind datasets over their own objects.
 
-**FROM → TO.** FROM a chart on object A's list view with `chart: { dataset: '<dataset over object B>' }` TO a dataset whose `object` is A, or the same chart on a list view of B, or a dashboard widget naming the dataset.
-
-**The one-line fix.** Bind a dataset declared over the list view's own object, or move the chart to a list view of the dataset's object or to a dashboard.
+**The remedy.** Bind a dataset declared over the list view's own object, or move the chart to a list view of the dataset's object or to a dashboard widget naming the dataset. Which one is the author's call, so nothing rewrites it for you.
