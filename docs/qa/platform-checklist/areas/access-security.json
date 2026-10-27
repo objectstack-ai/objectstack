@@ -1036,7 +1036,7 @@
       "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1116,7 +1116,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Batch and security-explain joined at revision 2; before that they were checked by hand only. What it does NOT assert, so these legs stay hand-driven: acceptance[4]'s /meta member contrast is `.not.toBe(401)` in the pin, not the clause's 200 (only the /data contrast asserts 200); acceptance[5]'s declared-public contrast (an anonymous forms-family route answering non-401) has no case in any pin; negative[0]'s read-back — the authed GET /api/v1/automation/showcase_reassign_wizard answering 200 after the anonymous DELETE — is not driven (the pin asserts only the DELETE's 401)"
+        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts (shared-showcase project, the platform-default posture: the harness passes no requireAuth override) — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Per clause: acceptance[0]–[3] — the per-surface 401 cases, the nonexistent-record action probe (401, never 404), the two mutually exclusive envelope predicates, and the analytics faces for both callers; acceptance[4] — the member's GET /data/showcase_private_note and GET /meta both asserted 200; acceptance[5] — an anonymous GET /forms/contact-us (the rest-route ledger's 'public' forms row) on the same boot answers 200 serving the showcase_inquiry form, never 401; negative[0] — the anonymous DELETE /automation/showcase_reassign_wizard answers 401 and the admin's GET /automation/showcase_reassign_wizard then answers 200, so the flow is still registered. acceptance[6] is procedural (one verdict per variant in the run record). Batch and security-explain joined at revision 2"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1154,6 +1154,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-anonymous-deny-surfaces.dogfood.test.ts: acceptance[4]'s /meta member contrast is .not.toBe(401) where the clause demands 200; acceptance[5]'s public-forms contrast is in no pin; negative[0]'s post-DELETE authed read-back is not driven. automated.ref names all three as hand-driven legs. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP) in showcase-anonymous-deny-surfaces: acceptance[4]'s member /meta read now asserts 200 (it was .not.toBe(401)); acceptance[5]'s declared-public contrast (anonymous GET /forms/contact-us answers 200 with the form, on the same platform-default boot); negative[0]'s read-back (the flow answers 200 at its own route after the refused anonymous DELETE). acceptance[6] stays procedural. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -1722,7 +1728,7 @@
       "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1800,7 +1806,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 3 cases: the precondition, acceptance[0] through the save's env-wide message, and acceptance[1], end to end on a showcase boot with an organization active) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). The no-organization read of step 4 has no end-to-end pin, so acceptance[0] does not score from the pins alone: the dogfood pin carries the save's 200 naming the environment-wide scope, both doors' 404 FORM_NOT_FOUND and the 0 landed rows, and the no-organization read is a live leg. acceptance[2] to acceptance[5] have no stock fixture (knownGaps); their pins are a unit (the rest file drives RestServer over a mocked protocol) and an in-process protocol over a stub registry (the metadata-protocol file), which is the layer their test oracle asks for"
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 4 cases on a showcase boot with an organization active: the precondition, acceptance[0] and negative[1] through the save — 200, a message naming the env-wide scope and never the active organization's id, both doors 404 FORM_NOT_FOUND, 0 landed rows — then the no-organization read: set-active null, GET /meta/view/showcase_inquiry.contact serves config.sharing.allowAnonymous false with the link kept, set-active the organization again; and acceptance[1], both doors open with the row landing in the organization) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). acceptance[0], acceptance[1], negative[0] and negative[1] score from the dogfood pin. acceptance[2] to acceptance[5] have no stock fixture (knownGaps); their pins are a unit (the rest file drives RestServer over a mocked protocol) and an in-process protocol over a stub registry (the metadata-protocol file), which is the layer their test oracle asks for. negative[2] is the dogfood pin's save at 200; negative[3] to negative[5] are procedural"
       },
       "source": [
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors make over the environment's list: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
@@ -1836,6 +1842,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a0: the ref conceded no end-to-end pin for step 4's no-organization read; it now draws the consequence (acceptance[0] does not score from pins alone) and names which legs the dogfood pin does carry. a2-a5: the record measured the rest pin as a unit over a mocked protocol and the protocol pin as in-process over a stub registry, both fitting the test oracle; the ref names those layers. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP) in showcase-public-form-withdrawal-layers: step 4's no-organization read (set-active null, the /meta view read serves allowAnonymous false with the link kept, then the organization is made active again), which closes acceptance[0]'s live leg; and negative[1]'s save message, asserted to name no organization id. acceptance[2] to acceptance[5] stay test-scored (no stock fixture). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -2654,7 +2666,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2743,7 +2755,7 @@
       },
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the posture x operator matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass; both are unit pins (the domain handler over fakes, no HTTP). What they do NOT reach: the flow pin has no caller-without-manage_metadata case at all — that tier and its exact FLOW_ENABLEMENT_DENY_MESSAGE sentence are pinned at the same unit layer by packages/runtime/src/domains/automation-toggle-deny-message.test.ts (#11666, sentence plus 403 PERMISSION_DENIED, both directions) and packages/runtime/src/domains/automation-write-capability-gate.test.ts (envelope); the action pin's 'REFUSES a caller without `manage_metadata`, in every posture' runs only `single` and asserts only that the message contains 'manage_metadata' — not acceptance[1]'s 'functionally equivalent to deleting it' rationale nor its 'a packaged action' subject. + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (#12359) drives the action flip over HTTP and asserts ONE deployment-level row with no organization_id key — acceptance[3]'s row shape — but as the dev admin, not a manage_metadata holder without platform_admin, so acceptance[3]'s persona leg stays live. STILL MANUAL: acceptance[1] and acceptance[0] over HTTP (the pins stop at the handler), acceptance[3]'s persona, and acceptance[5]'s live corroboration — no pin restarts a boot and reads the re-hydration line, only the test half is pinned"
+        "ref": "packages/qa/dogfood/test/activation-write-operator-gate-single.dogfood.test.ts (#26571, isolated showcase boot, the stock single posture) drives both doors over HTTP: acceptance[0] — a plain member's POST /automation/showcase_urgent_task_alert/toggle {enabled:false} answers 403 PERMISSION_DENIED with exactly FLOW_ENABLEMENT_DENY_MESSAGE; acceptance[1] — the same member's POST /actions/_activation/showcase_task/showcase_mark_done answers 403 PERMISSION_DENIED with exactly the refuseUngrantedActivationAuthoring sentence ('a packaged action', 'functionally equivalent to deleting it'); acceptance[2] — the {enabled:\"false\"} body still answers the 403 at both doors, and GET /data/sys_metadata_activation filtered on the two names returns no row after the refusals; acceptance[3] — a fresh member granted a runtime-authored set (PUT /meta/permission, systemPermissions ['manage_metadata'], a sys_user_permission_set row) whose get-session and /auth/me/permissions carry no platform_admin position is admitted 200 at both doors, each landing one row (metadata_type 'flow' / 'action', active false) whose KEY SET has no organization_id over HTTP and in the store, then re-enabled; negative[0] — no refusal message matches 'tenancy posture'; negative[1] — the admin's same calls answer 200; negative[2] — the two sentences are distinct. Unit pins beneath: packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) + action-activation-posture-gate.test.ts (#12160) — the posture x operator matrix for both doors, including the group/isolated legs, the no-write-on-refusal assertion and the isSystem bypass — with automation-toggle-deny-message.test.ts (#11666) and automation-write-capability-gate.test.ts for the flow door's tier sentence and envelope, and packaged-activation-ledger-reach.dogfood.test.ts (#12359) for the deployment-level row as the dev admin. acceptance[4] stays pin-scored (its live leg needs a walled boot, knownGaps[0]); acceptance[5] is test-scored, and no pin restarts a boot to read the re-hydration line. negative[3] is procedural"
       },
       "source": [
         "packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite (the shared §5 gate: the posture read through readEffectiveTenancyPosture and the early return where postureEnforcesWall is false, then the PLATFORM_ADMIN posture-rung test, #15981 — never a position name) + packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationAuthoring (the manage_metadata tier) + packages/runtime/src/domains/activation-gate.ts#FLOW_ACTIVATION_SUBJECT and packages/runtime/src/domains/activation-gate.ts#ACTION_ACTIVATION_SUBJECT (the per-artifact remedies); the fail-open rationale is the file header's section 'Fail-open on an ABSENT posture is deliberate'",
@@ -2813,6 +2825,12 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96, all in automated.ref. a0/n2: the ref claimed the full posture x identity matrix while automation-activation-posture-gate.test.ts has no caller-without-manage_metadata case — the ref now says so and names the two unit pins that do hold that tier. The record's second half (FLOW_ENABLEMENT_DENY_MESSAGE asserted by no test) does not hold on this tree: automation-toggle-deny-message.test.ts (#11666) asserts the sentence verbatim, by value rather than by the constant's name; it joins the ref. a1: the action pin's no-manage_metadata case is single-only and asserts a substring. a3: packaged-activation-ledger-reach.dogfood.test.ts joins the ref for the row shape, with its dev-admin persona named. a5: the restart re-hydration corroboration is named unpinned. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin activation-write-operator-gate-single at the api oracle's layer: acceptance[0] and [1] over HTTP with each door's exact sentence, acceptance[2] (invalid body still 403, no ledger row after the refusals), acceptance[3]'s persona (a manage_metadata holder without the platform_admin position, admitted at both doors, rows with no organization_id key), negative[0] to negative[2]. acceptance[4] and [5] stay test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3015,7 +3033,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3099,7 +3117,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4; clause 6 is test-only) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server. Also unpinned: negative[0]'s declaration — ADMIN_STANDING_NON_TABLE_INPUTS in packages/core/src/security/admin-standing-surface.ts, where OS_PLATFORM_OWNER_EMAIL is declared a non-table derivation input — is asserted by no test; admin-standing-surface.test.ts pins ADMIN_STANDING_SURFACE (the tables the resolver reads) and never reads the non-table list, so a run reads that declaration from source"
+        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; negative[3] is out of scope"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
@@ -3167,6 +3185,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: admin-standing-surface.test.ts never asserts ADMIN_STANDING_NON_TABLE_INPUTS, the OS_PLATFORM_OWNER_EMAIL non-table declaration negative[0] cites (no test in the repo names it); automated.ref now says so. a0-a3: the record confirms the ref already records these as STILL MANUAL live-HTTP arms that the unit pins do not score — no edit was owed for that line. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin platform-owner-email-anchor at the api / log oracles' layer, restarting one deployment per value: acceptance[0] to acceptance[3] and acceptance[4]'s live leg over HTTP, the [authz] log line captured for acceptance[3], and negative[0]'s ADMIN_STANDING_NON_TABLE_INPUTS declaration, which no test asserted. acceptance[5] stays test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3312,7 +3336,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3395,7 +3419,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps). For clause 5 in particular: the exclusion-filter pin probes sys_audit_log and sys_session, not the sys_job the clause names (sys_job is still on AUDIT_EXCLUDED_OBJECTS, audit-writers.ts), and no pin observes the AuditPlugin install line ('record-view auditing installed on N object(s)'), so both halves of its log oracle are read from a live boot"
+        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin()): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] needs a broken ledger and is out of scope for a stock run; negative[1] is the unit pin's no-principal skip; negative[2] is a cross-reference"
       },
       "source": [
         "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
@@ -3427,6 +3451,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: negative[0] said a ledger write failure is reported once per process; read-audit.test.ts's '#18247' describe pins once per CAUSE (a second, different cause reports again at error), so the text now says that. a4: clause 5 cites sys_job while the pin probes sys_audit_log / sys_session, and no pin observes the install line; automated.ref says both halves of the log oracle are live. No clause's assertion or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin record-view-read-audit at the api / log oracles' layer: acceptance[0] on the stock option-less AuditPlugin (no read row after a 200 detail read, no install line with INFO present), and the configured opt-in through bootShowcase's extraPlugins in place of the scratch-copy recipe — acceptance[1] to acceptance[4], including the install line, the sys_job exclusion warning and the landed row's fields. acceptance[5] stays test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },

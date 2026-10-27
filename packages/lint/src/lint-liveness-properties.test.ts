@@ -2317,3 +2317,27 @@ describe('report period and export (#26548 — planned until the report renderer
     expect(lintLivenessProperties(report())).toEqual([]);
   });
 });
+
+// ── #26619: a greyed action's reason is declared before the console reads it ──
+//
+// `disabledReason` is `planned` + `authorWarn` until the console's greyed-action
+// readers show it. Read off the SHIPPED ledger, so the console PR's flip to
+// `live` (which drops `authorWarn`) turns the warning half of this block red
+// on purpose — rewrite it as a silence pin in that same edit.
+describe('action disabled reason (#26619 — planned until the console reads it)', () => {
+  const action = (extra: Record<string, unknown> = {}) => ({
+    actions: [{ name: 'submit_for_approval', label: 'Submit for approval', objectName: 'clm_contract', disabled: "record.legal_review_status != 'approved'", ...extra }],
+  });
+
+  it('warns on the key, at the action, with the row\'s author hint', () => {
+    const findings = lintLivenessProperties(action({ disabledReason: 'An approved legal review is required first.' }));
+    expect(ruleOf(findings, 'disabledReason')).toBe('liveness-planned-property');
+    const f = findings.find((x) => x.rule === 'liveness-planned-property')!;
+    expect(f.where).toContain('submit_for_approval');
+    expect(f.hint).toMatch(/^Keep it, but nothing reads it yet: no console shows a greyed action's `disabledReason`/);
+  });
+
+  it('CONTROL — an action declaring no reason draws no warning', () => {
+    expect(lintLivenessProperties(action())).toEqual([]);
+  });
+});

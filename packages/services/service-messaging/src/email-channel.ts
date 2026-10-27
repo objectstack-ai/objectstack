@@ -362,9 +362,10 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     return { ok: true, externalId: id != null ? String(id) : undefined };
                 } catch (err) {
                     // sendTemplate's own failure vocabulary (TEMPLATE_NOT_FOUND /
-                    // TEMPLATE_INACTIVE / MISSING_VARIABLES) arrives as a thrown
-                    // Error — keep the code at the front of the row's error so
-                    // classifyError() below can grade it permanent.
+                    // TEMPLATE_INACTIVE / MISSING_VARIABLES / TEMPLATE_INVALID)
+                    // arrives as a thrown Error — keep the code at the front of
+                    // the row's error so classifyError() below can grade it
+                    // permanent.
                     return { ok: false, error: (err as Error)?.message ?? String(err) };
                 }
             }
@@ -406,7 +407,11 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // permanent (→ dead immediately, with the code on the delivery
             // row) instead of burning the whole retry schedule first. These
             // are `IEmailService.sendTemplate`'s own error codes plus this
-            // channel's missing-capability refusal above.
+            // channel's missing-capability refusal above. `TEMPLATE_INVALID`
+            // is a template whose hole the mail grammar refuses (a second
+            // formatter, a currency argument that is not a literal ISO 4217
+            // code): stored before the authoring rule existed, it fails every
+            // attempt until it is republished.
             //
             // [commit 879b51270] `transport_not_configured` joins them, and the grade is
             // driven rather than assumed: in the shipping composition the same
@@ -417,7 +422,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // answer one condition differently, burning the whole ladder
             // against a transport that no attempt can install.
             const msg = typeof err === 'string' ? err : String((err as Error)?.message ?? err ?? '');
-            if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
+            if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_INVALID|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
                 return 'permanent';
             }
             if (msg.startsWith(`${TRANSPORT_NOT_CONFIGURED}:`)) return 'permanent';
