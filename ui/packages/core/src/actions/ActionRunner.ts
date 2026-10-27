@@ -1680,7 +1680,18 @@ export class ActionRunner {
       // Check for a registered custom handler first
       if (actionType && this.handlers.has(actionType)) {
         const handler = this.handlers.get(actionType)!;
-        return handler(action, this.context);
+        // An `api` target is interpolated HERE, by the runner, before a host
+        // handler sees it — the same `interpolateTarget` the built-in
+        // `executeAPI` and `executeUrl` run. A registered `api` handler (the
+        // console's) replaces `executeAPI` wholesale, so without this the spec's
+        // documented `${ctx.recordId}` went out on the wire as the literal
+        // placeholder while a `url` target with the same token resolved. One
+        // substitution, one vocabulary, one encoding, whoever sends the request.
+        // A target with no token reaches the handler as the same object.
+        const target = actionType === 'api' && typeof action.target === 'string'
+          ? this.interpolateTarget(action.target, action)
+          : action.target;
+        return handler(target === action.target ? action : { ...action, target }, this.context);
       }
 
       // Built-in action execution by type.
@@ -2802,7 +2813,8 @@ export class ActionRunner {
   /**
    * Substitute `${param.X}` and `${ctx.X}` tokens in an action target.
    *
-   * Used by executeUrl and executeAPI so metadata can produce dynamic
+   * Used by executeUrl and executeAPI — and on an `api` target before a
+   * registered `api` handler receives it — so metadata can produce dynamic
    * URLs without coupling to the wider ExpressionEvaluator surface
    * (which would also evaluate operators, member access, etc. — overkill
    * and unsafe for URL-position values).
@@ -2867,7 +2879,8 @@ export class ActionRunner {
     //
     // `result` (the handler's own return value) is passed by exactly one caller:
     // the `ActionSchema.onSuccess` post-success hop, where a response exists.
-    // Every other caller — `executeUrl`, `executeAPI` — interpolates a target
+    // Every other caller — `executeUrl`, `executeAPI`, the registered `api`
+    // handler hand-off in `dispatchCollected` — interpolates a target
     // BEFORE the request, so there is no result to read; admitting `${result.*}`
     // there would widen the authorable surface with nothing behind it and
     // silently blank the token instead of leaving the author's mistake visible.
