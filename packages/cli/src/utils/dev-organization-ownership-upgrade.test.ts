@@ -39,13 +39,15 @@ function fakeRun(opts: {
   applyEnd?: CeremonyRunEnd;
   /** What the apply leaves at its `--out` path instead of a report. */
   applyFile?: string;
+  /** The plan file the plan run writes. */
+  plan?: Record<string, unknown>;
 }): DevelopmentUpgradeInput['run'] {
   return (args, logFile) => {
     calls.push([...args]);
     const out = args[args.indexOf('--out') + 1]!;
     if (!args.includes('--apply')) {
       writeFileSync(logFile, opts.planCode ? '  ✗ Refused (sys_mystery): sys_mystery carries organization_id …\n' : 'planned\n', { flag: 'a' });
-      if (!opts.planCode) writeFileSync(out, '{}');
+      if (!opts.planCode) writeFileSync(out, JSON.stringify(opts.plan ?? {}));
       return { status: opts.planCode ?? 0 };
     }
     if (opts.applyLog) writeFileSync(logFile, opts.applyLog, { flag: 'a' });
@@ -145,6 +147,32 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(existsSync(join(dir, 'backups'))).toBe(false);
     expect(result.lines[0]).toContain('os migrate organization-ownership --dev');
     expect(result.lines[0]).not.toContain('17.x');
+  });
+
+  it('⭐ a column drop that discards stamped values is said, per table, before the apply runs, and the upgrade completes', () => {
+    const announced: Array<{ line: string; callsSoFar: number }> = [];
+    const stamps = (rowsLosingTheirStamp: number) => ({ columnPresent: true, rowsLosingTheirStamp, rowsWithNullOrganization: 0 });
+    const result = upgradeDevelopmentDatabase(input(
+      fakeRun({
+        plan: {
+          tables: [
+            { object: 'sys_flow_credential', fate: 'column-drop', fateCounts: stamps(0) },
+            { object: 'sys_secret', fate: 'column-drop', fateCounts: stamps(3) },
+            // Attribution keeps every stamp: nothing is discarded there.
+            { object: 'sys_job', fate: 'attribution', fateCounts: stamps(9) },
+          ],
+        },
+        report: { complete: true, blocking: 0, warnings: [], steps: [] },
+      }),
+      { announce: (line) => announced.push({ line, callsSoFar: calls.length }) },
+    ));
+    expect(result.ok).toBe(true);
+    expect(announced.map((a) => a.line)).toEqual([
+      `sys_secret: the plan drops its retired organization_id column, discarding 3 stamped value(s); the copy in ${BACKUP()} keeps them.`,
+    ]);
+    // Said after the plan and before the apply.
+    expect(announced[0]!.callsSoFar).toBe(1);
+    expect(calls).toHaveLength(2);
   });
 
   describe('an apply that writes no report still names its cause, and the exact command that carries on', () => {

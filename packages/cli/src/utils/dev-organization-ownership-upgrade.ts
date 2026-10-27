@@ -47,6 +47,13 @@ import { resolveTelemetryDbPath } from './telemetry-datasource.js';
  *    of its log. Then the exact command that carries on from the plan it wrote.
  *  - **Once per session.** A boot refused again after a finished upgrade ends
  *    `os dev`, naming the refusal; it never loops.
+ *  - **No silent drop.** A stale `organization_id` the plan gives the
+ *    column-drop fate is a column it accounts for (the object retired it, and
+ *    the plan says its values go), so the upgrade proceeds; before the apply
+ *    runs, it says per table how many stamped values the drop discards (the
+ *    plan's `fateCounts.rowsLosingTheirStamp`), beside the copy that keeps
+ *    them. A column the plan accounts for no fate of refuses the plan, which
+ *    names the command (seat ruling 6446501014).
  *  - **The warnings.** What the ceremony decided on the developer's behalf
  *    (the plan's warnings) is printed, as the production ceremony prints it.
  */
@@ -78,6 +85,8 @@ export interface DevelopmentUpgradeInput {
   env: NodeJS.ProcessEnv;
   cwd: string;
   now?: Date;
+  /** Prints one line before the apply runs (what the plan's column drops discard). */
+  announce?: (line: string) => void;
   /** Run one CLI invocation, its output appended to `logFile`; answers how it ended. Injected by tests. */
   run?: (args: readonly string[], logFile: string) => CeremonyRunEnd;
 }
@@ -192,6 +201,27 @@ function readApplyOutcome(applyFile: string): ApplyOutcome {
 }
 
 /**
+ * What each column drop of the plan discards: a table given the column-drop
+ * fate whose stale organization column still holds stamped values. Read from
+ * the plan file the ceremony wrote; a plan it cannot read names nothing here
+ * (the apply reads the same file and refuses it in its own words).
+ */
+function discardedStamps(planFile: string): Array<{ object: string; rows: number }> {
+  let plan: { tables?: Array<{ object?: unknown; fate?: unknown; fateCounts?: { rowsLosingTheirStamp?: unknown } }> };
+  try {
+    plan = JSON.parse(readFileSync(planFile, 'utf8')) as typeof plan;
+  } catch {
+    return [];
+  }
+  return (plan.tables ?? []).flatMap((t) => {
+    const rows = t.fateCounts?.rowsLosingTheirStamp;
+    return t.fate === 'column-drop' && typeof t.object === 'string' && typeof rows === 'number' && rows > 0
+      ? [{ object: t.object, rows }]
+      : [];
+  });
+}
+
+/**
  * Upgrade the development database in place: copy it, plan, apply the plan.
  * Synchronous on purpose — nothing else may open the files while it runs.
  */
@@ -238,6 +268,12 @@ export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): Deve
   // apply resumes from its checkpoint, and finished steps are not repeated.
   const again =
     `\`os migrate organization-ownership --dev --database-url ${input.databaseUrl} --apply --plan-file ${planFile} --backup-taken\``;
+  for (const { object, rows } of discardedStamps(planFile)) {
+    input.announce?.(
+      `${object}: the plan drops its retired organization_id column, discarding ${rows} stamped value(s); ` +
+        `the copy in ${backupDir} keeps them.`,
+    );
+  }
   const applied = run([...CEREMONY, '--database-url', input.databaseUrl, '--apply', '--plan-file', planFile, '--backup-taken', '--out', applyFile], log);
   const outcome = readApplyOutcome(applyFile);
   if (outcome.kind !== 'report') {

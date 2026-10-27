@@ -13,9 +13,10 @@
  * by `requires: ['automation']`) and `sys_secret`, each with the
  * `organization_id` column and the `idx_<table>_organization_id` index the
  * tenant-column injection gave every table before both declared
- * `systemFields: { tenant: false }`, holding rows written with no stamp; and no
- * organization-ownership marker in `sys_migration` (those releases wrote
- * none). It is staged on a database a fresh `os dev` of this tree created, so
+ * `systemFields: { tenant: false }`; a `sys_secret` row still stamped with the
+ * Default Organization (a 17.x write) and a `sys_flow_credential` row with no
+ * stamp; and no organization-ownership marker in `sys_migration` (those
+ * releases wrote none). It is staged on a database a fresh `os dev` of this tree created, so
  * every other table is the shape this release expects — the guard refuses for
  * the two columns and the absent marker alone.
  *
@@ -23,6 +24,10 @@
  *
  * - the refused boot is upgraded in place and the server starts on it: the
  *   verdict line, then the server's own start line;
+ * - the stamped value the `sys_secret` drop discards is said before the apply
+ *   runs, with its count, and the unstamped table is not named (seat ruling
+ *   6446501014: the plan's column-drop fate accounts for the column, so the
+ *   upgrade proceeds, loudly);
  * - the two columns are gone, and the marker the guard reads is verified;
  * - the copy taken before the upgrade is kept, with the columns still in it.
  *
@@ -99,7 +104,7 @@ function hasOrganizationColumn(file: string, table: string): boolean {
   }
 }
 
-/** The pre-release shape: the injected column and its index on both objects, unstamped rows, no marker. */
+/** The pre-release shape: the injected column and its index on both objects, one stamped row, no marker. */
 function stagePreReleaseShape(): void {
   const handle = new Database(db);
   try {
@@ -107,7 +112,11 @@ function stagePreReleaseShape(): void {
       handle.exec(`ALTER TABLE "${table}" ADD COLUMN "organization_id" varchar(255)`);
       handle.exec(`CREATE INDEX "idx_${table}_organization_id" ON "${table}" ("organization_id")`);
     }
-    handle.prepare('INSERT INTO sys_secret (id, namespace, key, ciphertext) VALUES (?, ?, ?, ?)').run('sec_stale', 'setting', 'stale.key', 'x');
+    const organization = handle.prepare('SELECT id FROM sys_organization ORDER BY id LIMIT 1').get() as { id: string } | undefined;
+    if (!organization) throw new Error('the fresh boot created no Default Organization to stamp the stale row with');
+    handle
+      .prepare('INSERT INTO sys_secret (id, namespace, key, ciphertext, organization_id) VALUES (?, ?, ?, ?, ?)')
+      .run('sec_stale', 'setting', 'stale.key', 'x', organization.id);
     handle
       .prepare('INSERT INTO sys_flow_credential (id, flow_name, state, node_id, credential_key, position, value) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run('fc_stale', 'stale_flow', 'active', 'n1', 'token', 'p1', 'secret:sec_stale');
@@ -236,6 +245,15 @@ describe('#26615 — `os dev` starts a development database with a stale organiz
     expect(output).toContain('Upgraded the development database to the v18 organization ownership.');
     expect(output).not.toContain('The upgrade did not run to a report');
     expect(output).toMatch(UPGRADED_READY);
+  });
+
+  it('the stamped value the drop discards is said, with its count, before the apply runs', () => {
+    const output = upgraded();
+    const said = output.indexOf('sys_secret: the plan drops its retired organization_id column, discarding 1 stamped value(s)');
+    expect(said, output.slice(-4000)).toBeGreaterThan(-1);
+    expect(said).toBeLessThan(output.indexOf('Upgraded the development database'));
+    // The unstamped table discards nothing, so it is not named.
+    expect(output).not.toContain('sys_flow_credential: the plan drops');
   });
 
   it('both stale columns are dropped, and the marker the guard reads is verified', () => {
