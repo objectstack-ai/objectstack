@@ -320,20 +320,28 @@ describe('#8833 — a history-store outage stops masquerading as an empty diff',
         // SELECTIVE rather than a blanket "any failure 503s" — which would
         // break first boot on a minimal deployment that never provisioned
         // `sys_metadata_history`.
+        //
+        // [#26462] What "benign" answers moved, not the discrimination: with no
+        // history rows, a NAMED version is a miss — 404 `VERSION_NOT_FOUND`,
+        // the rollback door's refusal, as for any item with no history — and
+        // the default range is the empty diff. Neither is the 503.
         const { engine } = makeStubEngine({ historyError: MISSING_TABLE_ERROR });
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        const res: any = await protocol.diffMetaItem({
-            type: PRESENT_TYPE,
-            name: 'grid',
-            fromVersion: 1,
-            toVersion: 2,
-        });
+        const res: any = await protocol.diffMetaItem({ type: PRESENT_TYPE, name: 'grid' });
 
         expect(res.added).toEqual([]);
         expect(res.removed).toEqual([]);
         expect(res.changed).toEqual([]);
         expect(res.type).toBe(PRESENT_TYPE);
+
+        const err: any = await protocol
+            .diffMetaItem({ type: PRESENT_TYPE, name: 'grid', fromVersion: 1, toVersion: 2 })
+            .then(() => null, (e: unknown) => e);
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('VERSION_NOT_FOUND');
+        expect(err.status).toBe(404);
     });
 
     it('the 503 does not depend on the type — gated-shut types propagate identically', async () => {
