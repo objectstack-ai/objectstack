@@ -19,4 +19,4 @@ Now the target is read from the majors the range admits, with the same grammar t
 
 `^`, `~`, `>=`, `<=`, wildcards, exact versions, hyphen ranges and partial bounds (`'>18.1'`, `'<18.5'`) answer as before. No range changes between admitted and refused: only the refusal's target and prescription change.
 
-Two CLI readers of `targetMajor` follow: `objectstack migrate meta` now rewrites a `'<N'` range to `'^N'` when it migrates a stack to protocol N (it used to leave it for the load to refuse), and the protocol-version advisory now speaks for such a range.
+Two CLI readers of `targetMajor` follow: `objectstack migrate meta` now rewrites a `'<18'` range to `'^18'` when it migrates a stack to protocol 18 (it used to leave it for the load to refuse), and the protocol-version advisory now speaks for such a range.
