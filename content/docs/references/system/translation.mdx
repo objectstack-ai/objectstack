@@ -128,6 +128,7 @@ Translation data for a single field
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -227,6 +228,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -384,6 +386,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -603,6 +606,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -742,7 +746,7 @@ One locale of translations — the `translation` metadata type
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
-| **name** | `string` | optional | Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent |
+| **name** | `string` | optional | Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale` |
 | **label** | `string` | optional | Human-readable label shown in metadata lists |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -791,6 +795,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |

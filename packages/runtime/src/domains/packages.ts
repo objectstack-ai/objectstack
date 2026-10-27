@@ -119,7 +119,10 @@ import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from 
 // domain calls: it writes the bare `{ error: { code, message } }` body onto a
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
-import { repeatedQueryParamMessage } from '@objectstack/rest';
+// [#26713] …and its recognition sibling, the one sentence for a query
+// parameter a door does not read (`packages/rest/src/query-allowlist.ts`),
+// asked by the draft doors (`refuseDraftDoorQuery`).
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [commit 0862063ba] The repo's ONE coercion for a query parameter its schema declares
 // `z.boolean()`, from the module whose header is the authority on the rule
 // (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
@@ -1063,6 +1066,34 @@ function refuseRepeatedWriteFlag(
 }
 
 /**
+ * [#26713] The closed query set of the package draft doors —
+ * `POST /packages/:id/publish-drafts` and `POST /packages/:id/discard-drafts`.
+ * **Measured**: EMPTY. Both read the path's id, the session and the body
+ * (`actor`, and `backfill` on publish); neither reads a query parameter.
+ */
+const DRAFT_DOOR_QUERY_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
+ * [#26713] AGENTS.md route rule 5 at the draft doors: a query parameter they
+ * do not read is refused `400 VALIDATION_ERROR` with the recognition sentence
+ * every closed-query door answers ({@link unknownQueryParamRefusalMessage}),
+ * in this domain's envelope, as the `/meta` doors write it (#23072). Asked
+ * after the capability and wall gates and before anything else is read.
+ *
+ * Both doors ignored the query string, so `publish-drafts?dryRun=true`
+ * published the drafts for real and answered `200 outcome: "published"`, and
+ * the same parameter on `discard-drafts` dropped them. A dry run is not a
+ * parameter these doors declare; until one is, the name is refused.
+ *
+ * @returns the refusal to answer, or `null` when the query names nothing.
+ */
+function refuseDraftDoorQuery(deps: DomainHandlerDeps, query: unknown): HttpDispatcherResult | null {
+    const message = unknownQueryParamRefusalMessage(query, DRAFT_DOOR_QUERY_PARAMS);
+    if (message === undefined) return null;
+    return { handled: true, response: deps.error(message, 400, { code: 'VALIDATION_ERROR' }) };
+}
+
+/**
  * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
  * comparison (commit 0862063ba).
  *
@@ -1699,6 +1730,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing the drafts of package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refuseDraftDoorQuery(deps, query); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
@@ -2059,6 +2091,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Discarding the drafts of package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refuseDraftDoorQuery(deps, query); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {

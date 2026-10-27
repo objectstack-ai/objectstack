@@ -284,3 +284,12 @@ Author new analytics directly in dataset form: define the metric once as a
 and list-view charts to it **by name**. Presentations reference a dataset by its
 `name` string — the shipped presentation schemas carry no inline/anonymous
 dataset shape, so even a one-off single-object KPI is a small named dataset.
+
+A list-view chart draws the rows of its dataset's base `object`, never the
+list's own records: the list's filter does not reach the dataset query. So a
+list view's chart must bind a dataset whose `object` is the object the list
+lists. A dataset over another object is refused at publish and fails
+`os validate` (`list-view-chart-dataset-foreign-object`), even when its
+`include` reaches the list's object through a relationship, because `include`
+adds columns to group by, not rows. Put a chart of another object's data on
+that object's list view or on a dashboard.
