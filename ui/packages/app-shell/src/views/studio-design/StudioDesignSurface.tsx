@@ -1807,10 +1807,19 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     setSlotPropsClaims((n) => n + 1);
     return () => setSlotPropsClaims((n) => n - 1);
   }, []);
-  const showSlotProps = React.useCallback(() => {
+  // objectstack#26737 — a selection shows its properties at every width: a
+  // hidden slot unfolds, as `⌘.` unfolds it, so a builder who hid the panel is
+  // never left with a selection whose properties are drawn nowhere. One
+  // function for the surface's life (state, not a memo — AGENTS.md #10): the
+  // pillars ask on a new selection only, never because this was re-created.
+  const setSlotOpenRef = React.useRef(setSlotOpen);
+  React.useLayoutEffect(() => {
+    setSlotOpenRef.current = setSlotOpen;
+  });
+  const [showSlotProps] = React.useState(() => () => {
     setSlotMode('props');
-    if (isMobile) setSlotOpenMobile(true);
-  }, [isMobile]);
+    setSlotOpenRef.current(true);
+  });
   const slotHandle = React.useMemo<StudioRightSlotHandle | null>(
     () =>
       slotHost
