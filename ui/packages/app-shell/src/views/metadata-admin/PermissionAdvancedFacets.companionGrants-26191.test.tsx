@@ -228,17 +228,18 @@ describe("PermissionAdvancedFacets · delegated admin companion grants", () => {
     expect(within(hint).getByText("perm.admin.companions.packageNote")).toBeTruthy();
   });
 
-  it("the Studio Access pillar mount (the package door's only host) is package-bound by default", async () => {
+  it("the Studio Access pillar's flat presentation (`only`) does not by itself imply a package binding", async () => {
     await mount({ name: "field_ops_delegate", objects: {}, adminScope: ANCHORED }, { only: "admin" });
-    expect(screen.getByTestId("admin-companions")).toBeTruthy();
-    expect(grantButton()).toBeNull();
+    expect(row("setup.access").getAttribute("data-granted")).toBe("false");
+    expect(grantButton()).toBeTruthy();
   });
 
-  it("an explicit packageBound={false} on that mount keeps the action", async () => {
+  it("that presentation under an explicit packageBound lists the grants unmarked, with no action", async () => {
     await mount(
       { name: "field_ops_delegate", objects: {}, adminScope: ANCHORED },
-      { only: "admin", packageBound: false },
+      { only: "admin", packageBound: true },
     );
-    expect(grantButton()).toBeTruthy();
+    expect(row("setup.access").hasAttribute("data-granted")).toBe(false);
+    expect(grantButton()).toBeNull();
   });
 });
