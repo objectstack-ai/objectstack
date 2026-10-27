@@ -1,5 +1,286 @@
 # @objectstack/objectql
 
+## 18.2.0
+
+### Patch Changes
+
+- 48e84a9: fix(objectql,types,rest)!: a database NOT NULL refusal on a declared field is the record validator's `ValidationError` at every door, named by the field's label
+  
+  A field declared `storage: { notNull: true }` without `required` is ADR-0113's engine-populated column: the record validator judges `required` only, so a write with no value for it reaches the driver and the database refuses it. The engine let the driver's error out, and each HTTP door classified it from the driver's text its own way. For the same refused write, the runtime dispatcher's `/data` POST and PATCH answered `500 INTERNAL_ERROR`, the actions door answered `400 VALIDATION_ERROR` with the driver's text and `declaredCode: 'SQLITE_CONSTRAINT_NOTNULL'`, and `RestServer` answered `400 VALIDATION_FAILED` relabelled by a second object read on its own `POST` / `PATCH` only.
+  
+  Clause-②: yes (narrowing: `@objectstack/types` adds the export `notNullViolationSite` and retires `notNullRefusalSite` and `relabelNotNullRefusal`; the HTTP doors' answer for this refusal moves to the record validator's envelope)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/types#notNullRefusalSite, @objectstack/types#relabelNotNullRefusal) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What retires is two function exports of `@objectstack/types`' published entry, whose only consumer was `@objectstack/rest`'s door-side relabel, retired in this same change; no other consumer was found in this repository (its `ui/` and `examples/` included) or in hotcrm. The affected party is a TypeScript caller, and the compiler at that call site delivers the break. -->
+  
+  **BREAKING** (an export retirement and a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/objectql`.** The write doors' driver exits (single-row and batch insert, the autonumber retry, by-id and predicate update) translate a driver NOT NULL refusal on a field the object's field map holds into the record validator's own `ValidationError` (`code: 'VALIDATION_FAILED'`), built by the validator's own builder with the validator's message context: one field error, `code: 'required'`, the field named by its label (translation bundle, then declared `label`, then API name) in the caller's locale, with the sentence the validator gives the same verb (`required` on insert, `required_cleared` on update). The driver's error rides `cause`, and the doors' log line still carries the database's own diagnosis. Left as the driver threw it: a column no field declares, a refusal the driver attributes to another table, and a NOT NULL code whose column the driver did not name. `required` and `storage.notNull` stay apart (ADR-0113 D1 / D2): no pre-write check reads `storage.notNull`.
+  - **Every door answers it alike**, because every door already answers that class alike: the dispatcher `/data` POST and PATCH now answer `400 VALIDATION_FAILED` (was `500 INTERNAL_ERROR`), the actions door `400 VALIDATION_FAILED` with the field envelope (was `400 VALIDATION_ERROR` with the driver's text), and `RestServer`'s `POST` / `PATCH` and its `/data/:object/batch` rows answer the validator's envelope and sentence. Import rows, the public form submit and MCP write through the same engine doors and answer the same class through the same arms; they were not driven separately. On `RestServer` the body is now exactly the validator's `required` shape: `fields[0]` carries `label`, there is no `hint`, and a `PATCH` writing null reads the clear-out sentence.
+  - **`@objectstack/types`.** New export `notNullViolationSite(error)`: the column (and table, where the dialect names it) of a driver's NOT NULL refusal, read from the error's codes (better-sqlite3 `SQLITE_CONSTRAINT_NOTNULL`; libsql `extendedCode` / `rawCode: 1299`; node-postgres `23502` with its `column` / `table` fields; mysql2 `ER_BAD_NULL_ERROR` / `errno: 1048`), then its text (all sql.js gives), then one step down its `cause` chain. An error whose code names another refusal is not read for NOT NULL text. `mapDataError`'s NOT NULL branch is unchanged, and answers the column no field declares.
+  - **`@objectstack/rest`.** The `/data` create and update doors' NOT NULL relabel (`not-null-refusal-label.ts`) retires: every path it served is an engine write.
+  
+  Migration, for a TypeScript caller of the retired exports:
+  
+  - FROM `notNullRefusalSite(answer)` TO `notNullViolationSite(error)`: ask the driver's error, not `mapDataError`'s answer.
+  - FROM `relabelNotNullRefusal(answer, { message, declaresNotNull })` TO nothing (no replacement): write through the engine, which answers a declared field's NOT NULL refusal as a labelled `ValidationError` itself.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- e44a1ff: fix(objectql)!: a code package's action is stored as its `ActionSchema` parse, so `requiresFeature` takes effect on bound actions
+  
+  Clause-②: no (narrowing) — `SchemaRegistry.registerItem`, and with it `ObjectQL.registerApp` and every door that registers a code package's items, now refuses with `422 INVALID_METADATA` an `action` body that does not satisfy `ActionSchema`. Before, it registered that body as written. Nothing is widened.
+  
+  Metadata-protocol: none (`ActionSchema` is unchanged and no key is added, retired or re-shaped; every body the registry now refuses already fails the same schema at `defineStack`, `os validate` and the metadata save door)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: `ActionSchema` is byte-unchanged, and no spec key, authorable spelling, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no old-to-new mapping to record. What changes is one runtime door converging on the existing contract: the schema registry now stores a code package's action as its parse and refuses one that does not parse. Every body it refuses was already off-contract, and refused by the authoring doors, before this change. The remedy is a correction of that body against the issues the refusal lists, not a conversion between two contract versions. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  The schema registry now parses every `action` item a code package registers through `ActionSchema` before storing it. The stored item is the parsed body. Before this, an action that reached the registry without a parse was stored as authored. Examples are a programmatic `registerApp`, a nested plugin's manifest, a `strict: false` stack, and a raw plugin manifest. Such an action was then attached to its target object unparsed. Its `requiresFeature` (and `requiresMembershipReach`) was never lowered into `visible`, so the declared gate did nothing. A platform object's own actions were already lowered.
+  
+  What the parse does to such an action, as with any parsed action:
+  
+  - it lowers `requiresFeature` / `requiresMembershipReach` into `visible`;
+  - it fills schema defaults;
+  - it wraps a CEL string shorthand in `{ dialect, source }`.
+  
+  An action a strict `defineStack` already parsed is stored unchanged.
+  
+  **BREAKING** for a package that registers an action body `ActionSchema` does not accept.
+  
+  - **Before.** The registry stored such a body as written, and served it with any declared gate inert.
+  - **Now.** Registration is refused with `INVALID_METADATA` (422). The error names the action and its package, and `issues[]` gives the path and message of each failure. The registration that carried it fails.
+  - **Fix.** Correct the action as `issues[]` describes. An action that passes `os validate`, or a strict `defineStack`, is unaffected.
+- 073f08b: fix(security): a hook that runs as system and an action body are refused writes to position holdings, permission-set grants, invitations and memberships, as a system flow already is
+  
+  Clause-②: no (narrowing: app-authored hook and action-script writes to the four identity objects are refused at run time, as #25251 did for flows; the seat runs the contract review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to a hook or action body's elevated write to four platform objects; the save-time refusal and its semantic entry are the spec half of the same card. -->
+  
+  **BREAKING** (a served-set narrowing) for app-authored automation that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` under system elevation. A census of the hooks and action bodies in this repository and in HotCRM found none that does.
+  
+  A `runAs: 'system'` flow has been refused these writes since 18.1. Two other kinds of app-authored automation run with the same elevation and were not: a hook that declares `runAs: 'system'`, and an action body (`type: 'script'`), which always runs elevated. Their writes skipped the delegated-administration gate (so a grant carried no `granted_by`) and the invitation door's placement and role-cap checks. Both are now refused the same way:
+  
+  - An insert, update, delete, transfer, restore or purge of one of the four objects, from a `runAs: 'system'` hook (a sandboxed body or an in-process handler) or from an action body (through `ctx.api` or `ctx.engine`), answers `403 PERMISSION_DENIED`. Nothing is written. A hook's refusal aborts the triggering write under the default `onError: 'abort'`.
+  - The message names the source and the fix. For position holdings and permission-set grants: set the hook's `runAs` to `'user'`, so the delegated-administration gate judges the user the hook acts for and records them as `granted_by`. An action body has no `runAs`, so its grant moves to a `runAs: 'user'` flow, which an action of type `flow` runs as the invoking user. For invitations and memberships: use the organization endpoints.
+  
+  Unchanged: reads of the four objects, and writes to every other object, from the same hook or body. A hook under `runAs: 'user'`, which the ordinary gates judge as its user. The platform's own writers (better-auth and its reconciliation, invitation placement, the seeders, any `sudo()`), which carry no app-automation mark. A system flow's refusal, word for word.
+  
+  **What changes for you.** A hook or action body that grants a position or a permission set under elevation now fails. Declare `runAs: 'user'` on the hook, or move an action body's grant into a `runAs: 'user'` flow. Invitations and memberships change through `POST /api/v1/auth/organization/invite-member`, `cancel-invitation`, `update-member-role` and `remove-member`.
+  
+  `@objectstack/core` exports the mark: `APP_AUTOMATION_ELEVATION`, `markAppAutomationElevation`, `appAutomationElevationOf` and `carryAppAutomationElevation`.
+- 6a6ebff: fix(security): an app-authored hook that inherits a system context, its `ctx.api.sudo()`, and an action it reaches through `execute()` are refused writes to position holdings, permission-set grants, invitations and memberships
+  
+  Clause-②: no (narrowing: an app-authored hook's inherited or sudo() elevation, and an action reached through ObjectRepository.execute(), are refused the four identity objects at run time, as a runAs: 'system' hook already is)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to an app-authored hook's elevated write to four platform objects. -->
+  
+  **BREAKING** (a served-set narrowing) for an app-authored hook that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` while elevated. A census of the hooks in this repository and in HotCRM found none that does.
+  
+  Since the previous release, a hook that declares `runAs: 'system'` and an action body are refused these writes. Three other ways app-authored code ran elevated were not:
+  
+  - a hook that declares no `runAs` and fires on a write made under a system context, which it inherits;
+  - a hook's in-process `ctx.api.sudo()`;
+  - an action reached through `ctx.api.object(name).execute(action)`.
+  
+  Each is now refused the same way: `403 PERMISSION_DENIED`, nothing written, and under the default `onError: 'abort'` the triggering write aborts. The message names the hook and the fix: set its `runAs` to `'user'` and leave `ctx.api.sudo()` out, or use the organization endpoints for invitations and memberships.
+  
+  A hook is app-authored when it is bound from metadata through the hook binder (the same hooks the `skipAutomations` opt-out skips). A hook a plugin registers in code with `engine.registerHook`, and platform code's own `sudo()`, keep writing these objects. Reads of the four objects, and writes to every other object, are unchanged.
+- 5874d25: fix(objectql): a free-text `search` resolves only over the fields the caller may query
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The server-resolved search set used to include fields the caller cannot read, so the field-read predicate guard refused the whole expanded `$or` with 403. On `sys_user`, `role`, `ban_reason` and `last_login_ip` broke every user and owner picker for non-admin members as soon as they typed. The engine now asks the registered security service's `getQueryableFields` (the complement of what the guard refuses) and withholds every other field from the resolved set, on `find`, `findOne`, `count` and `aggregate`. The guard is unchanged: an explicit `filter`, or a `searchFields` naming a hidden field, is still refused with 403. A search whose declared fields are all hidden from the caller answers the existing `400 INVALID_FIELD` empty-search-set refusal, never every row.
+- a4eae06: fix(objectql)!: an object's own actions are stored as their `ActionSchema` parse, so `requiresFeature` takes effect on a raw manifest's object actions
+  
+  Clause-②: no (narrowing: an object's own action that fails `ActionSchema` is refused at the runtime registration door, as #25649 did for standalone actions)
+  
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: `ActionSchema` and `ObjectSchema` are byte-unchanged, and no spec key, authorable spelling, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no old-to-new mapping to record. What changes is one runtime door converging on the existing contract: the schema registry now stores a code package's object with its own actions as their parse and refuses an object whose action does not parse. Every body it refuses was already off-contract, and refused by the authoring doors (`defineStack`, `os validate`, the metadata save door), before this change. The remedy is a correction of that body against the issues the refusal lists, not a conversion between two contract versions. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  The schema registry now parses an object's own `actions` through `ActionSchema` when a code package registers the object (`SchemaRegistry.registerObject`), and stores the parsed actions. A standalone `action` item has been stored this way already; both now go through one parse. Before this, an object that reached the registry without a parse kept its actions as authored. Examples are a raw plugin manifest, a `strict: false` stack, and a programmatic `registerApp`. Such an object was served with its actions unparsed: a declared `requiresFeature` (or `requiresMembershipReach`) was never lowered into `visible`, so the gate did nothing.
+  
+  What the parse does to such an action, as with any parsed action:
+  
+  - it lowers `requiresFeature` / `requiresMembershipReach` into `visible`;
+  - it fills schema defaults;
+  - it wraps a CEL string shorthand in `{ dialect, source }`.
+  
+  An object a strict `defineStack` or `ObjectSchema.create` already parsed is stored unchanged. A registration with no package, and a tenant-authored body (the metadata save door's write-through, the boot rehydration of stored rows), is not judged here.
+  
+  **BREAKING** for a package that registers an object whose own action `ActionSchema` does not accept.
+  
+  - **Before.** The registry stored such an object as written, and served the action with any declared gate inert.
+  - **Now.** The object's registration is refused with `INVALID_METADATA` (422), and nothing of it is stored. The error names the action, its object and its package, and `issues[]` gives the path (`actions.N.KEY`) and message of each failure.
+  - **Fix.** Correct the action as `issues[]` describes. An object that passes `os validate`, or a strict `defineStack`, is unaffected.
+- be78977: feat(install): a package that declares an installed app in `manifest.dependencies` may share that app's namespace, and a boot hydrates installed packages in dependency order (ADR-0141 D5)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning. The one narrowing is an install-local acceptance detail of the not-yet-released ADR-0141 D2 check (an artifact wrapper's own id no longer counts as a delivered package), plus the matching removal of the unreleased `DeclaredDependencyCheck.deliveredIds` option; there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **Namespace co-ownership by declaration.** The install gate (`SchemaRegistry.installPackage`) used to admit packages into one namespace only when one release artifact delivered them together. A module shipped as its own artifact that uses its app's namespace was refused `422 NAMESPACE_CONFLICT` beside the installed app, whatever it declared. Now an installed package P co-owns namespace N with:
+  
+  - an installed X that P declares in `manifest.dependencies`, when both use N;
+  - a sitting owner of N that declares P, which is the same relation read from the other end, so an upgrade or reinstall of the app beside its modules is admitted;
+  - a sibling S, when S and P each declare one installed package that holds N (two modules of one app, neither declaring the other).
+  
+  Only direct declarations count. The shared parent must be installed and must hold N itself.
+  
+  The object-name check reads the same co-owner set. A co-owner by declaration that defines an object name another co-owner already owns is refused `422 DUPLICATE_ARTIFACT_OBJECT_NAME` before any DDL. Examples: a module redefining its app's object, a sibling redefining the other sibling's object, or an app upgrade newly defining a name one of its modules owns. The message is worded per source (same artifact, declared dependency, sibling). `NAMESPACE_CONFLICT` now names the declaration as the fix for a package that extends the app holding the namespace.
+  
+  **Hydrate order.** The `sys_packages` hydrate and the install-local `kernel:ready` rehydrate used to register in source-listing order. Now they sort their batch by `manifest.dependencies`, with declared ids as optional edges, through `resolvePluginOrder`. Before this, a module that hydrated before the app whose namespace it shares could be refused and stay absent for the process lifetime. In the install-local rehydrate, each ledger entry is one node, so a declared id resolves to the entry that carries that package. A dependency cycle never stops a hydrate: its members keep source order and an error names them.
+  
+  **BREAKING** (an install-acceptance narrowing of the unreleased ADR-0141 D2 check) at `POST /api/v1/marketplace/install-local`. A multi-package artifact's own wrapper id no longer counts as delivered unless one of its packages carries it. A module declaring the wrapper id is judged like any other entry, because it would be `absent` on its first standalone install. `DeclaredDependencyCheck.deliveredIds` is removed with it. Also, an undecided range union whose installed version is readable is now reported `found: 'unreadable-range'` instead of `'unreadable-version'`; for example, `<5 || latest` against `7.0.0`.
+  
+  **What changes for you.**
+  
+  - A module that extends an app and uses its namespace declares the app in `manifest.dependencies`, and then installs beside it as its own artifact. Two modules of one app need not declare each other.
+  - Every package of the app's own artifact that uses the namespace should declare the app too.
+  - New exports: `@objectstack/core` exports `orderHydrationBatch` and `declaredDependencyIds`.
+- be531f6: feat(spec,core,objectql,driver-sql,formula,driver-mongodb,service-analytics): a filter compares a datetime column against now shifted by whole days held on the record (`{ $now: true, addDays }`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6415710193
+  
+  An analytics dataset could not say "opened longer ago than this ticket's own SLA": the comparand grammar had a `{ $field, addDays }` pair for two columns of the record and `{N_days_ago}` placeholders for a fixed number of days, but nothing that anchored at the current instant and read the number of days off the row. Authors fell back to a literal day count, which drifts from every record whose SLA differs.
+  
+  `FilterCondition` gains a now-anchored comparand, legal exactly where a `{ $field }` reference is — as the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`, on a `date` or `datetime` column:
+  
+  ```ts
+  // opened more than review_sla_days_offset days ago — the column holds NEGATIVE days
+  { opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } } }
+  // on or after thirty days ago
+  { closed_on: { $gte: { $now: true, addDays: -30 } } }
+  ```
+  
+  - **`@objectstack/spec`.** `NowAnchorSchema` (`data/filter.zod.ts`): `$now` is the literal `true`, `addDays` is REQUIRED — an integer of any sign or a `{ $field }` reference to a numeric column of the same record, the `addDays` grammar `FieldReferenceSchema` already carries; there is no `subDays`, and the unshifted instant stays the `{now}` placeholder. The `FilterCondition` door refuses a malformed anchor in the anchor's own words, and an anchor as an `$in` / `$nin` member or a `$between` endpoint by name, as it refuses a reference there. `filter.mdx` and the authorable surface document the shape.
+  - **`@objectstack/core`.** `resolveFilterTokens` pins `$now` to the tree's one instant (the `now` every `{N_days_ago}` in the tree resolves from), as an ISO string, so every executor sees `{ $now: '<ISO>', addDays }`; an anchor without `addDays` is `INVALID_FILTER` / 400 there.
+  - **`@objectstack/driver-sql`.** SQL push-down compiles the anchor on SQLite, PostgreSQL and MySQL through the `addDays` arithmetic (`crossFieldOffsetExpr`), with the instant bound in the target column's storage form: a `datetime` column keeps the time of day, a `date` column meets the instant's UTC calendar day. A NULL offset column is zero days (`coalesce`). The predicate is total: an ordering and `$eq` need the target to have a value, `$ne` holds when it has none or differs, so `$not` takes exactly the complement. The offset column is held to the same-table rules the `addDays` pair's is (declared, numeric, same table, never the tenant-isolation column); a non-temporal target, a malformed anchor and every other position are refused with the operands withheld from the message and the diagnostic in the server log.
+  - **`@objectstack/formula`.** `matchesFilterCondition` resolves the anchor in the form of the stored value it meets (a calendar day stays a calendar day), so the memory path answers the SQL path's rows; `$now: true` reads the evaluator's clock for a caller with no resolver seam.
+  - **`@objectstack/objectql`.** `aggregations[i].filter` and `having` judge the anchor by `where`'s rules (temporal target, declared numeric offset) before any row is read, and evaluate it per row through the formula evaluator.
+  - **`@objectstack/service-analytics`.** `NativeSQLStrategy` declines a query carrying an anchor, as it declines a `{ $field }` comparand, so a dataset filter or measure filter routes to the engine path where the driver compiles it; a dataset's authored `$now: true` is pinned by the service's own token seam.
+  - **`@objectstack/driver-mongodb`.** Refuses the anchor in every position (`INVALID_FILTER` / 400) rather than translating it as a literal sub-document.
+  
+  Pinned on the drivers' cross-field conformance corpus (`CROSS_FIELD_NOW_CASES` / `CROSS_FIELD_NOW_REFUSALS`, exported from `@objectstack/driver-sql`) on both execution paths, and on the analytics dataset shape the ruling was made for.
+- 7a04ba2: fix(objectql,metadata-protocol): an aggregate query that would answer a wrong table is refused 400, and an empty aggregate list no longer answers "not registered"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Date bucket on a non-date field.** `engine.aggregate` refuses a `groupBy` entry whose `dateGranularity` buckets a field the object declares neither a `date` nor a `datetime`: `INVALID_FIELD` / 400, `path: 'groupBy.N.dateGranularity'`. Before, every row fell into one `null` bucket (a `number` field into a `1970-01` bucket) under 200. A `formula` or undeclared field is not judged.
+  - **Two columns under one name.** `engine.aggregate` refuses a query whose aggregated row would carry two values under one column: an aggregation `alias` used twice, an alias equal to a group column (the field name, or the entry's own `alias`), or two group entries projecting one column. `INVALID_QUERY` / 400, `path` at the second position (`aggregations.1.alias`, `groupBy.1.field`). Before, the last value written won under 200: a count overwritten by a sum, or the group keys replaced by counts. Give the entry its own `alias`.
+  - Both refusals run at the engine's `aggregate` entry, before any driver is asked, so the REST query door, its dispatcher twin, the analytics ObjectQL strategy and the MCP data bridge answer alike.
+  - **Empty aggregate list.** `POST /data/:object/query` with `aggregations: []` (or `groupBy: []`, or both) and no non-empty axis beside it answers `400 INVALID_QUERY` naming `query.aggregations` (or `query.groupBy`) as empty. Before, it answered `404 OBJECT_NOT_FOUND`, "Object '…' is not registered", for a registered object. An empty list beside a non-empty axis is served as before.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [7a04ba2]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

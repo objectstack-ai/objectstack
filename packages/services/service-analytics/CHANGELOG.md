@@ -1,5 +1,200 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.2.0
+
+### Minor Changes
+
+- d1663ba: feat(spec,analytics,lint,platform-objects,app-shell): a dataset measure can aggregate the time between two datetime fields of each record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`**: `DatasetMeasureSchema` gains an optional `duration: { from, to, unit }`, in place of `field`. `from` and `to` name two `datetime` fields of the dataset's own object by their bare names, `unit` is `seconds`, `minutes`, `hours` or `days`, and the measure's `aggregate` is `avg`, `min`, `max` or `sum` of `to` minus `from`. A relationship path, an expression or the row wildcard in either column, the same column twice, another unit, a counting aggregate, or a `field`, `derived` or `currency` beside it is refused at parse. New exports: `DatasetMeasureDurationSchema`, `DatasetDurationUnit`, `DATASET_DURATION_UNIT_SECONDS`, `DATASET_DURATION_AGGREGATES`, `DATASET_DURATION_FIELD_TYPE` and the `DatasetMeasureDuration` / `DatasetDurationUnit` types.
+  - **`@objectstack/service-analytics`**: the dataset compile refuses a duration column declared anything but `datetime` (`400 DATASET_INVALID`, naming the column and its type). The native-SQL strategy computes the duration as one statement on SQLite, PostgreSQL and MySQL, in double precision on each; SQLite and PostgreSQL are tested live to answer the same number: a record missing either instant is left out, a `to` before its `from` counts as negative, and over a group with no such record `sum` answers `0` and the others `null`. Measure filters, derived measures, ordering and the draft preview serve it. A query the native strategy does not serve (a time dimension bucketed by `granularity`, a field-to-field filter, an object served through engine middleware or an external datasource, a non-SQL datasource) is refused with `400 INVALID_FIELD` naming the measure. Its two columns pass the field-level read gate like any measure's field. The temporal half of the aggregate × field-type refusal now names the duration measure instead of a stored "days open" number.
+  - **`@objectstack/lint`**: `os validate` refuses a duration column not declared `datetime` with the new gating rule `measure-duration-field-type-refused` (at `datasets[N].measures[M].duration.from` / `.to`), with an `os explain` entry. `dataset-field-unknown` now also reports a duration column the object does not declare.
+  - **`@objectstack/platform-objects`**: the dataset form's new **Duration** row is translated in every shipped locale.
+  - **`@object-ui/app-shell`**: changing a dataset's base object in the console's dataset inspector now clears a duration measure along with the other measures that name the old object's fields, instead of keeping it as if it were a plain row count.
+  
+  What to do: nothing. A dataset without `duration` parses, compiles and answers exactly as before.
+
+### Patch Changes
+
+- 2e6d446: fix(service-analytics)!: the analytics admission bridge answers `503 SERVICE_UNAVAILABLE`, not a denial's `403 PERMISSION_DENIED`, when the `security` service is missing or cannot be used
+  
+  `AnalyticsServicePlugin` bridges the object-level read admission to the `security` service. When that service cannot be used, the bridge refuses the query, fail-closed. That covers three cases: resolving the service throws, the service exposes neither `canReadObject` nor `explain`, or no `security` service was ever registered (`ObjectKernel` and `LiteKernel` throw on a lookup for a service nobody registered). Until now the refusal answered `403 PERMISSION_DENIED`, the same answer as a caller who may not read the object. The bridge reached no verdict, so the refusal now answers `503 SERVICE_UNAVAILABLE` naming the object, like the other analytics read gates that cannot decide. The cause stays in the server log. Fail-closed is unchanged: nothing is read, and nothing that was refused is now served. A real denial (`canReadObject` or `explain` answering false) still answers `403 PERMISSION_DENIED`, byte for byte. The bridge's `error` log line no longer says "A security service is wired on this deployment". That was untrue when no security service was ever registered. The line now says the `security` service is missing or cannot be used. The row-level read scope bridge's `error` line said the same untrue sentence and is corrected the same way; what that bridge answers does not change.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored shape or exported declaration is added, removed, renamed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the code and status one analytics refusal answers when the `security` service is missing or cannot be used (403 PERMISSION_DENIED to 503 SERVICE_UNAVAILABLE); every request that was refused is still refused and every request that was served is still served. The remedy is on the consumer's side, reading the code, or on the deployment's side, registering a security service; never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the wire answer of one fault refusal changes; no request that was served is refused and none that was refused is served), shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before:** with no `admitObjectRead` supplied, an analytics query on a deployment whose `security` service is broken, or was never registered, was refused `403 PERMISSION_DENIED`. That was the same code and status as a caller who genuinely may not read the object.
+  - **Now:** the same refusal answers `503 SERVICE_UNAVAILABLE` (`status: 503`, `object` naming the object). On `POST /api/v1/analytics/dataset/query` the body is `{"code":"SERVICE_UNAVAILABLE","error":"Internal server error"}`. Real denials still answer `403 PERMISSION_DENIED`, unchanged.
+  - **Fix:** a client that treated every analytics `403` as "no access" should treat `503 SERVICE_UNAVAILABLE` as a server-side fault and check the server log. A deployment that wants analytics to answer registers a `security` service (for example `plugin-security`), or its host supplies its own `admitObjectRead`.
+- f1d6be0: fix(service-analytics)!: an analytics read gate that could not decide answers `503 SERVICE_UNAVAILABLE`, not the `403 PERMISSION_DENIED` of a real denial
+  
+  Three of the analytics door's refusals are operator-side faults: the object-level read admission provider threw, the field-level read permissions could not be resolved, or the API exposure declaration could not be read. Each refused the query, which is right, but each answered with the same body as a real denial, `403 PERMISSION_DENIED`. A caller could not tell "you may not read this" from "the server could not decide", except by parsing the English message. All three now answer `503 SERVICE_UNAVAILABLE`. That is an existing ADR-0112 code, and it is the spelling `@objectstack/core` already uses when the permission store is unreachable. The refusal names the object and nothing else; it names no gate, grant or existence fact. The cause stays in the server log, as before. Fail-closed is unchanged: nothing that was refused is now admitted. Real denials keep their answers byte for byte: `403 PERMISSION_DENIED` when the caller holds no read grant or reads a hidden field, and `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED` for an unexposed object. `POST /api/v1/analytics/dataset/query` relays the declared fault as `503 SERVICE_UNAVAILABLE`, with the message withheld as for every declared server fault. It does not answer `500 ANALYTICS_QUERY_FAILED`. The cube query door relays the status the same way.
+  
+  The publish build probe (`@objectstack/metadata-protocol`) reads the code too. A widget query that fails with `SERVICE_UNAVAILABLE` now gets a `widget_query_failed` fix that names the server-side fault: the dataset is not the cause, and the server could not decide read access to the named object. Before, it fell to "Fix the dataset definition…", which is wrong for an outage. The finding's `code`, `severity` and `message` are unchanged.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored shape or exported declaration is added, removed, renamed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the code and status three analytics refusals answer when a permission or exposure resolver fails (403 PERMISSION_DENIED to 503 SERVICE_UNAVAILABLE); every request that was refused is still refused and every request that was served is still served. The remedy is on the consumer's side, reading the code, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the wire answer of three fault refusals changes; no request that was served is refused and none that was refused is served), shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before:** when the analytics read-admission provider threw, or the field-level read permissions or the API exposure declaration could not be resolved, the query was refused `403 PERMISSION_DENIED`. That was the same code and status as a caller who genuinely may not read the object.
+  - **Now:** the same refusals answer `503 SERVICE_UNAVAILABLE` (`status: 503`, `object` naming the object). On `POST /api/v1/analytics/dataset/query` the body is `{"code":"SERVICE_UNAVAILABLE","error":"Internal server error"}`. Real denials still answer `403 PERMISSION_DENIED` (and `404` / `405` for exposure), unchanged.
+  - **Fix:** a client that treated every analytics `403` as "no access" should treat `503 SERVICE_UNAVAILABLE` as a server-side fault: retry once the permission or exposure resolver is healthy, and check the server log for the cause. Do not show it as a missing grant.
+- be531f6: feat(spec,core,objectql,driver-sql,formula,driver-mongodb,service-analytics): a filter compares a datetime column against now shifted by whole days held on the record (`{ $now: true, addDays }`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6415710193
+  
+  An analytics dataset could not say "opened longer ago than this ticket's own SLA": the comparand grammar had a `{ $field, addDays }` pair for two columns of the record and `{N_days_ago}` placeholders for a fixed number of days, but nothing that anchored at the current instant and read the number of days off the row. Authors fell back to a literal day count, which drifts from every record whose SLA differs.
+  
+  `FilterCondition` gains a now-anchored comparand, legal exactly where a `{ $field }` reference is — as the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`, on a `date` or `datetime` column:
+  
+  ```ts
+  // opened more than review_sla_days_offset days ago — the column holds NEGATIVE days
+  { opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } } }
+  // on or after thirty days ago
+  { closed_on: { $gte: { $now: true, addDays: -30 } } }
+  ```
+  
+  - **`@objectstack/spec`.** `NowAnchorSchema` (`data/filter.zod.ts`): `$now` is the literal `true`, `addDays` is REQUIRED — an integer of any sign or a `{ $field }` reference to a numeric column of the same record, the `addDays` grammar `FieldReferenceSchema` already carries; there is no `subDays`, and the unshifted instant stays the `{now}` placeholder. The `FilterCondition` door refuses a malformed anchor in the anchor's own words, and an anchor as an `$in` / `$nin` member or a `$between` endpoint by name, as it refuses a reference there. `filter.mdx` and the authorable surface document the shape.
+  - **`@objectstack/core`.** `resolveFilterTokens` pins `$now` to the tree's one instant (the `now` every `{N_days_ago}` in the tree resolves from), as an ISO string, so every executor sees `{ $now: '<ISO>', addDays }`; an anchor without `addDays` is `INVALID_FILTER` / 400 there.
+  - **`@objectstack/driver-sql`.** SQL push-down compiles the anchor on SQLite, PostgreSQL and MySQL through the `addDays` arithmetic (`crossFieldOffsetExpr`), with the instant bound in the target column's storage form: a `datetime` column keeps the time of day, a `date` column meets the instant's UTC calendar day. A NULL offset column is zero days (`coalesce`). The predicate is total: an ordering and `$eq` need the target to have a value, `$ne` holds when it has none or differs, so `$not` takes exactly the complement. The offset column is held to the same-table rules the `addDays` pair's is (declared, numeric, same table, never the tenant-isolation column); a non-temporal target, a malformed anchor and every other position are refused with the operands withheld from the message and the diagnostic in the server log.
+  - **`@objectstack/formula`.** `matchesFilterCondition` resolves the anchor in the form of the stored value it meets (a calendar day stays a calendar day), so the memory path answers the SQL path's rows; `$now: true` reads the evaluator's clock for a caller with no resolver seam.
+  - **`@objectstack/objectql`.** `aggregations[i].filter` and `having` judge the anchor by `where`'s rules (temporal target, declared numeric offset) before any row is read, and evaluate it per row through the formula evaluator.
+  - **`@objectstack/service-analytics`.** `NativeSQLStrategy` declines a query carrying an anchor, as it declines a `{ $field }` comparand, so a dataset filter or measure filter routes to the engine path where the driver compiles it; a dataset's authored `$now: true` is pinned by the service's own token seam.
+  - **`@objectstack/driver-mongodb`.** Refuses the anchor in every position (`INVALID_FILTER` / 400) rather than translating it as a literal sub-document.
+  
+  Pinned on the drivers' cross-field conformance corpus (`CROSS_FIELD_NOW_CASES` / `CROSS_FIELD_NOW_REFUSALS`, exported from `@objectstack/driver-sql`) on both execution paths, and on the analytics dataset shape the ruling was made for.
+- 1cce9d8: fix(analytics): a dataset filter key that names an object field filters that field, even when a dimension shares its name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard global filter's `field` resolves against the dataset's object, not against its dimensions, and so do a widget's own `filter`, the dataset's `filter` and a measure's `filter`. The runtime read the key the other way round when the names collided. With a dimension `{ name: 'department', field: 'department.name' }`, picking a department in the filter bar sent `runtimeFilter: { department: UNIT_ID }`, and the query compared `department.name` to that id. Every widget on the board read 0, while the draft preview of the same dataset showed the right rows.
+  
+  `queryDataset` now filters such a key on the object's own `department` column, on the native SQL and the ObjectQL paths alike. The field-read admission judges that column too. When the same key is selected as a dimension, the rows are still grouped by `department.name`. Nothing else moves:
+  
+  - A key that is not a field of the object keeps resolving through the dimension of that name, as before (`department_name: 'Legal'`).
+  - A dimension whose `field` is its own name (`{ name: 'stage', field: 'stage' }`) already filtered the same column.
+  - `/analytics/query` on a registered dataset's cube still reads `where` as the cube's member names.
+  - A host that cannot list the object's fields (no `getObjectFieldNames`) keeps the old resolution. The shipped `AnalyticsServicePlugin` wires it.
+  
+  What to do: nothing. A dashboard that worked around this by renaming the dimension keeps working.
+- 3117289: fix(service-analytics)!: a filtered dataset measure asked on the cube door as `CUBE.MEASURE`, the name `GET /analytics/meta` lists, applies its filter, as the bare name always did
+  
+  A registered dataset's measure can carry its own `filter`, for example `won_amount` summing `amount` only where `stage` is `won`. `GET /analytics/meta` lists every cube member as `CUBE.MEASURE` (`sales.won_amount`), and `POST /analytics/query` accepts that spelling. The measure itself resolved under both spellings, but its filter was looked up by the spelling as asked, so the listed one missed it. `measures: ['sales.won_amount']` ran `SUM(amount)`: the total of every deal, under the won-deals measure's name, with no error. That happened on both strategies (native SQL and the ObjectQL aggregate) and in the dry-run statement echo.
+  
+  Every reader of a measure's scoped filter now resolves the name through one rule, the one the duration measure's lookup already used: the bare name, or the name without its own cube's qualifier. The listed spelling answers the same conditional aggregate and binds the same values as the bare one, under the column name asked. The native strategy's routing declines (a nested-relation condition, a JSON-stored comparison on an unnamed dialect) read the same filter, so they route the qualified spelling as they route the bare one. Another dotted prefix keys nothing, as before. Queries through `POST /analytics/dataset/query` were never affected: that path builds bare names.
+  
+  Clause-②: no (narrowing) — the field-level read gate now judges the fields of the measure's filter under the qualified spelling too. A caller who may not read a field that a filtered measure's filter names was refused `403 PERMISSION_DENIED` for the bare spelling and answered (with the unfiltered number) for the qualified one. It is now refused for both. Nothing is widened.
+  
+  Metadata-protocol: none (how the analytics query door resolves a requested member name; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the analytics query door reads a filtered measure asked under its listed `CUBE.MEASURE` spelling: its filter is applied, and the read gate judges the filter's fields. The remedy for a caller now refused is a permission grant or a different measure, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that asked a filtered measure under its `CUBE.MEASURE` spelling: the number changes, and a caller who may not read the filter's fields is now refused. Shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** `measures: ['sales.won_amount']` aggregated every row, ignoring the measure's filter, and the read gate did not judge the filter's fields.
+  - **Now.** It answers what `measures: ['won_amount']` answers: the filtered aggregate, or `403 PERMISSION_DENIED` naming the unreadable field.
+  - **Fix.** Nothing to change for a caller that wanted the measure as declared. A caller that relied on the unfiltered total asks for an unfiltered measure instead.
+- d5f4c2a: fix(service-analytics): an all-NULL `sum` group sorts and pages as the `0` it answers, the same on SQLite and PostgreSQL
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The native-SQL strategy folded a NULL `sum` (a group whose aggregand is NULL in every row, or a measure-scoped `sum` with no admitted row) to `0` in JavaScript, after the statement had already ordered and paged on the NULL. SQLite sorts NULL lowest and PostgreSQL highest, so `order { total: 'asc' }, limit 2` answered `0` before `-3` on SQLite and cut the `0` group from the page on PostgreSQL. The ObjectQL face answered `-3`, `0`.
+  - **Now.** The identity `emptyGroupValueFor` declares is in the statement, `COALESCE(SUM(…), 0)`, so `ORDER BY`, `LIMIT` and `OFFSET` read the value the group answers, on every dialect. The echoed `sql` and `/analytics/sql` show it. `count` is not wrapped: SQL `COUNT` already answers `0` over nothing.
+  - **NULL placement is stated.** `avg`, `min` and `max` keep NULL over nothing, and a dimension can hold NULL. On SQLite and PostgreSQL every `ORDER BY` key now carries `NULLS LAST`, in both directions: the ordering the ObjectQL face and the dataset door's post-pass already apply. A host whose dialect is MySQL or unnamed keeps the driver's placement, because no one spelling parses on all of them.
+  - **The ObjectQL face's echo states it too.** That face already orders NULL last (`applyOrdering`); its echoed `sql` and `/analytics/sql` now render the same `ORDER BY` as the native face, `NULLS LAST` included, so the printed statement runs to the order the face answered.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes
