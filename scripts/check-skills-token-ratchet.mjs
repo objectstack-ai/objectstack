@@ -649,7 +649,24 @@ export const CEILINGS = new Map([
   // moves: no existing row is raised, the population is unchanged, and
   // `evals/**` stays priced.
   ['skills/objectstack-ai/evals/skills-tools-knowledge.json', 1074],
-  ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1042],
+  // 1042 -> 1234 (card #26299, the objectstack-api row of the skills gap
+  // audit): one eval for the import mapping's `applyOn: 'create'` — the
+  // published teaching is the only place an author meets the column policy
+  // before a re-run upsert reverts an admin's edit, and this fixture is the
+  // instrument that makes the wrong answer fail at scoring. Maintainer ruling
+  // 2026-10-27 on the seat's decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, his tap verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」. Paid down first, as the ruling asks: the
+  // file's five fixtures share no sentence, so there was no duplicate to cut
+  // (0 bytes). Arithmetic in bytes, because that is what this convention
+  // divides: on `origin/main` the file was 4156 bytes (1039 tokens, headroom
+  // 3); the fixture adds +780 bytes, so the LANDED file is 4936 bytes -> 1234
+  // tokens: the 3 tokens of headroom are absorbed and the ceiling moves
+  // 1042 -> 1234 (+192). Pinned AT the measurement — zero headroom, so the
+  // next token added here is paid for by deleting one from this file.
+  // Independently reproducible without running this script:
+  //   ceil($(wc -c < skills/objectstack-api/evals/endpoints-auth-routes.json) / 4) == ceil(4936 / 4)
+  ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1234],
   ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1255],
   ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 894],
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
