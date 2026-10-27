@@ -86,8 +86,11 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
 /** The prefix `retiredKey()` writes onto a tombstone's description. */
 const TOMBSTONE_MARKER = '[REMOVED]';
 
-/** The population measured on the commit that pinned this — the non-vacuity floor. */
-const TOMBSTONE_FLOOR = 40;
+/**
+ * The non-vacuity floor: about two thirds of the measured population, so retiring
+ * a tombstoned key (ADR-0087's normal end of a window) does not red it (#26541).
+ */
+const TOMBSTONE_FLOOR = 32; // measured 48 on 2026-10-27 (pinned at 40); floor = floor(48 × 2/3)
 
 function defOf(s: any): any {
   return s && (s._zod?.def ?? s._def);
@@ -172,7 +175,7 @@ describe('shipped ledgers — a tombstoned key is `dead`', () => {
     const offenders = tombstones.filter((t) => t.status !== 'dead').map((t) => `${t.coord} → status=${t.status}`);
     expect(offenders).toEqual([]);
     // Non-vacuity: a walker that stopped resolving shapes would satisfy the
-    // line above by asking nothing at all. 40 was the measured population.
+    // line above by asking nothing at all. The floor sits ~1/3 under the census.
     expect(tombstones.length).toBeGreaterThanOrEqual(TOMBSTONE_FLOOR);
   });
 
