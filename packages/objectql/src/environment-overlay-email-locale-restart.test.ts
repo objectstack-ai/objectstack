@@ -536,6 +536,18 @@ describe('[#26699] the layered read addresses ONE member by the selector', () =>
             .toEqual(await protocol.getMetaItemLayered({ type: T, name: NAME }));
     });
 
+    it('the MetadataService copy is a code layer only of the member it is — the canonical read never reports another member\'s', async () => {
+        // The service keys a type's items by name alone, so for a bundle it
+        // holds whichever member registered last: here, zh-CN.
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { engine } = await bootWithBothSaved(stores);
+        const metadata = { get: async () => template('zh-CN', 'SVC zh') };
+        const withService = new ObjectStackProtocolImplementation(engine, () => new Map([['metadata', metadata]]), 'env_prod');
+        expect((await layersOf(withService)).code).toBe('PKG en');
+        expect((await layersOf(withService, 'en-US')).code).toBe('PKG en');
+        expect((await layersOf(withService, 'zh-CN')).code).toBe('SVC zh');
+    });
+
     it('a member no layer holds answers no layer at all — the door\'s absent item, never the canonical member', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await bootWithBothSaved(stores);

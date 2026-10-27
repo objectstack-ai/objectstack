@@ -548,9 +548,11 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // helper prescribes for a transport that cannot say where
                     // it serves the item.
                     const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
-                    // [#22877] The layered view reads no member, so a member
-                    // named on it is refused rather than answered with the
-                    // canonical member's layers. [#23072] The decision's
+                    // [#22877] The deprecated `?layers=` spelling reads no
+                    // member, so a member named beside it is refused rather
+                    // than answered with the canonical member's layers; a
+                    // member's layers are `/layers?member=` (#26699).
+                    // [#23072] The decision's
                     // third rule (`layered-member`), the only one that can
                     // still be pending here; thrown to `handleRouteError` as
                     // it always was.
