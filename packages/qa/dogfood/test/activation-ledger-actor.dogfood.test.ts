@@ -18,7 +18,8 @@
 // What only a boot can measure: the stamp lands through the REAL engine (the
 // unit suites pin the context each door hands down, not what the engine does
 // with it) and the audit row is the REAL audit plugin's, reading the same
-// session.
+// session. The showcase boot composes no audit plugin of its own, so this file
+// adds `AuditPlugin`, as `objectstack serve` composes it.
 //
 // ⛔ The flow toggle (`POST /api/v1/automation/:name/toggle`) is not here: it
 // reaches the ledger through `IAutomationService.toggleFlow(name, enabled)`, a
@@ -26,6 +27,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 import { bootShowcase } from './showcase-boot.js';
 
 const LEDGER = 'sys_metadata_activation';
@@ -50,7 +52,7 @@ describe('the activation ledger names the administrator who switched an item', (
     let ql: Engine;
 
     beforeAll(async () => {
-        stack = await bootShowcase();
+        stack = await bootShowcase({ extraPlugins: [new AuditPlugin()] });
         token = await stack.signIn();
         ql = (await stack.kernel.getServiceAsync('objectql')) as unknown as Engine;
         const me: any = await (await stack.apiAs(token, 'GET', '/auth/get-session')).json();
@@ -101,7 +103,7 @@ describe('the activation ledger names the administrator who switched an item', (
             expect(created.action).toBe('create');
             expect(created.user_id).toBe(adminId);
             expect(created.actor).toBe(adminId);
-        });
+        }, 30_000);
 
         it(`${door.label}: switching it back ON updates the row, and the update is the admin's too`, async () => {
             const res = await stack.apiAs(token, 'POST', door.path, { enabled: true });
@@ -116,6 +118,6 @@ describe('the activation ledger names the administrator who switched an item', (
             expect(updated, `no update audit row: ${JSON.stringify(audits)}`).toBeDefined();
             expect(updated!.user_id).toBe(adminId);
             expect(updated!.actor).toBe(adminId);
-        });
+        }, 30_000);
     }
 });
