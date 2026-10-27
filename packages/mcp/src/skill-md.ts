@@ -30,6 +30,10 @@
  * cloud) by calling {@link renderSkillMarkdown} with the env's MCP URL.
  */
 
+import type { AIToolDefinition } from '@objectstack/spec/contracts';
+import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { grantsAuthoringTools } from './mcp-http-tools.js';
+
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
 /**
@@ -50,6 +54,17 @@ export const OBJECTSTACK_SKILL_DESCRIPTION =
   'read and filter records, and create/update/delete under your own ' +
   'permissions and row-level security. Use when the user wants to inspect or ' +
   'change data in their ObjectStack environment.';
+/**
+ * [#26464] The frontmatter description served when the skill also teaches the
+ * authoring tools (see {@link RenderSkillOptions.authoringTools}). A
+ * skills-capable agent decides whether to load a skill from this one line, so
+ * a skill that teaches building must SAY so here, or an agent asked to build
+ * an object never opens it. The data sentence stays verbatim in front.
+ */
+export const OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING =
+  OBJECTSTACK_SKILL_DESCRIPTION +
+  ` With the ${MCP_OAUTH_SCOPE_METADATA_WRITE} scope, also build and change the ` +
+  'app\'s metadata (objects, fields, views, flows) as drafts a person publishes.';
 
 export interface RenderSkillOptions {
   /**
@@ -60,9 +75,62 @@ export interface RenderSkillOptions {
   mcpUrl?: string;
   /** Optional human label for the environment, shown in the intro. */
   envName?: string;
+  /**
+   * [#26464] The OAuth scopes the caller's token carries. The authoring
+   * section renders only when they admit the family (`grantsAuthoringTools`:
+   * a scope list naming `metadata:write`) AND {@link authoringTools} names at
+   * least one tool — the same predicate that registers the family on the HTTP
+   * surface, so the skill never teaches a tool the server would refuse.
+   * Undefined (an API key, a session, or a host that serves the skill
+   * publicly) renders the data skill exactly as before.
+   */
+  grantedScopes?: readonly string[];
+  /**
+   * The authoring tools the host injects for this caller (name and
+   * description, as `tools/list` shows them). Which tools these are is the
+   * host's business — this renderer names what it is handed and nothing else.
+   */
+  authoringTools?: ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
+
+/** One line for a tool's description — a bullet in the skill cannot hold a paragraph break. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * [#26464] The authoring section, rendered only for a caller whose grant
+ * admits the family and whose host injected at least one authoring tool. It
+ * teaches the build loop the maintainer ruled for hosted MCP (cloud
+ * ADR-0112): create, verify, and leave a draft that a person publishes in the
+ * UI — from the same source as the data loop, so the client model learns both
+ * the same way. Tool names come from the host; none is hard-coded here.
+ */
+function renderAuthoringSection(tools: ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>): string {
+  const bullets = tools.map((t) => `- **${t.name}** — ${oneLine(t.description)}`).join('\n');
+  return `
+## Build — authoring tools (\`${MCP_OAUTH_SCOPE_METADATA_WRITE}\`)
+
+Your connection also carries the **\`${MCP_OAUTH_SCOPE_METADATA_WRITE}\`** scope, so this
+environment exposes its **authoring tools**: you can build and change the app's
+own metadata — objects, fields, views, flows and the rest — not only its
+records. Authoring lands as **drafts**: nothing you write is published, and a
+person reviews and publishes the drafts in the UI. Every authoring call is
+checked against the scope AND your own metadata permissions, so a refused
+authoring call means you may not author that here, not that the connection is
+broken.
+
+The build loop is **create → verify → draft**: create or change the metadata,
+verify it (the environment validates what you wrote and reports what it
+refuses, so read the result before the next step), and leave it as a draft for
+a person to publish. Discover first here too — \`describe_object\` on an object
+before you change it.
+
+${bullets}
+`;
+}
 
 /**
  * Render the full `SKILL.md` (YAML frontmatter + body). Pass the env's MCP URL
@@ -74,10 +142,18 @@ export function renderSkillMarkdown(options: RenderSkillOptions = {}): string {
   const intro = envLabel
     ? `This skill connects you to the **${envLabel}** ObjectStack environment.`
     : 'This skill connects you to an ObjectStack environment.';
+  // [#26464] The authoring section exists only for a grant the HTTP surface
+  // would honour, and only when there is a tool to name — one predicate,
+  // shared with `registerAuthoringTools`.
+  const authoringTools =
+    grantsAuthoringTools(options.grantedScopes) && options.authoringTools && options.authoringTools.length > 0
+      ? options.authoringTools
+      : undefined;
+  const description = authoringTools ? OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING : OBJECTSTACK_SKILL_DESCRIPTION;
 
   return `---
 name: ${OBJECTSTACK_SKILL_NAME}
-description: ${OBJECTSTACK_SKILL_DESCRIPTION}
+description: ${description}
 ---
 
 # ObjectStack
@@ -188,7 +264,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-
+${authoringTools ? renderAuthoringSection(authoringTools) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
