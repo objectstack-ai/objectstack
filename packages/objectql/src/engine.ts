@@ -235,6 +235,13 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+// [#25522 cut 17] The registration door's forward conversion, the
+// nested-plugin registration and its navigation resolution; the methods of the
+// same names below hand each body the members it reads
+// (`PackageRegistrationHost`). Imported where this file imported
+// `@objectstack/metadata-core`, which only those bodies read, so the
+// evaluation order of every module and external package is what it was.
+import { convertPackageBodyForward, registerPlugin, resolveNavObjectNames } from './engine-package-registration.js';
 // [#6806] The ONE shared "is this driver error a unique-constraint violation?"
 // predicate, and its narrower companion "which column conflicted" (#6250 /
 // #6544, both landed in `@objectstack/types`). The engine's autonumber
@@ -392,12 +399,6 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
-// [#25522 cut 17] The registration door's forward conversion, the
-// nested-plugin registration and its navigation resolution; the methods of the
-// same names below hand each body the members it reads
-// (`PackageRegistrationHost`). Imported after every module those bodies
-// import, so the engine's module evaluation order is what it was.
-import { convertPackageBodyForward, registerPlugin, resolveNavObjectNames } from './engine-package-registration.js';
 import {
   applyHaving,
   aggregatedRowColumns,
