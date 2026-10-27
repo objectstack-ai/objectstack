@@ -5,11 +5,7 @@ import type {
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
-// [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
-// `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
-// this question with it is a bug (cloud#1020, #5233) — so the posture, and only
-// the posture, is what the runtime authoring gate is told.
-import { judgePermissionSetOwnerBinding, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { judgePermissionSetOwnerBinding, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -27,7 +23,6 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
-    HIERARCHY_SCOPE_RESOLVER_SERVICE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -105,10 +100,6 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
-    // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
-    // the anonymous form doors read it — the runtime authoring gate's input for
-    // its public-form intake advisory (see `tenancyPostureInForce()`).
-    anonymousFormIntakePosture,
     // [ADR-0131 D6/D7] A legacy organization's rows, off the physical column,
     // on a database the ceremony has not migrated — see migrateStoredMetadata.
     readLegacyOrganizationRows,
@@ -167,7 +158,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -420,6 +411,8 @@ import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 import { saveConflict } from './protocol-save-conflict.js';
 // [#25467 cut 25] The post-persistence mutation fan-out: projector, local listeners, cluster publish, publish listeners.
 import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
+// [#25467 cut 26] The runtime authoring gate's deployment-posture probes: org wall, tenancy, RLS keys, hierarchy.
+import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7460,11 +7453,8 @@ export class ObjectStackProtocolImplementation implements
      * refusal combination to be turned away.
      */
     private orgWallEnforced(): boolean {
-        try {
-            return postureEnforcesWall(resolveTenancyPosture());
-        } catch {
-            return true;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts`; it reads no member.
+        return orgWallEnforced();
     }
 
     /**
@@ -7494,11 +7484,12 @@ export class ObjectStackProtocolImplementation implements
      * reports none, and the advisory is simply not raised.
      */
     private tenancyPostureInForce(): TenancyPosture | undefined {
-        try {
-            return anonymousFormIntakePosture(this.getServicesRegistry?.().get('tenancy'));
-        } catch {
-            return undefined;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof tenancyPostureInForce> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return tenancyPostureInForce.call(host);
     }
 
     /**
@@ -7516,18 +7507,12 @@ export class ObjectStackProtocolImplementation implements
      * wrong ones.
      */
     private rlsMembershipResolverKeys(): readonly string[] | undefined {
-        const registry = this.getServicesRegistry?.();
-        if (!registry) return undefined;
-        let resolver: unknown;
-        try {
-            resolver = registry.get(RLS_MEMBERSHIP_RESOLVER_SERVICE);
-        } catch {
-            return undefined;
-        }
-        if (resolver === undefined || resolver === null) return [];
-        const keys = (resolver as { keys?: unknown }).keys;
-        if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) return undefined;
-        return keys as readonly string[];
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof rlsMembershipResolverKeys> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return rlsMembershipResolverKeys.call(host);
     }
 
     /**
@@ -7544,14 +7529,12 @@ export class ObjectStackProtocolImplementation implements
      * throws.
      */
     private hierarchyResolverMounted(): boolean | undefined {
-        const registry = this.getServicesRegistry?.();
-        if (!registry) return undefined;
-        try {
-            const resolver = registry.get(HIERARCHY_SCOPE_RESOLVER_SERVICE);
-            return resolver !== undefined && resolver !== null;
-        } catch {
-            return undefined;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof hierarchyResolverMounted> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return hierarchyResolverMounted.call(host);
     }
 
     /**

@@ -29,6 +29,7 @@ import {
   MAX_MANAGER_CHAIN_DEPTH,
   type SetUserManagerDeps,
   type SetUserManagerEngine,
+  type SetUserManagerResult,
 } from './admin-set-user-manager';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields';
 import type { AdminActor } from './admin-user-endpoints';
@@ -59,7 +60,15 @@ function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
       throw new Error(`engineDouble: unsupported WHERE combinator '${key}' — implement it or stop issuing it`);
     }
     if (value !== null && typeof value === 'object') {
-      throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+      // `$in` is the one operator issued (the depth cap's subordinate reads);
+      // anything else, or `$in` beside another operator, is refused loudly.
+      const ops = Object.keys(value);
+      const list = (value as { $in?: unknown }).$in;
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray(list)) {
+        throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+      }
+      if (!list.some((v) => String(row[key] ?? '') === String(v ?? ''))) return false;
+      continue;
     }
     if (String(row[key] ?? '') !== String(value ?? '')) return false;
   }
@@ -68,18 +77,22 @@ function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
 
 function makeEngine(tables: Record<string, Row[]>) {
   const updates: Recorded[] = [];
+  const reads: Array<{ object: string; where: Record<string, unknown> }> = [];
   const failReads = new Set<string>();
   const engine: SetUserManagerEngine & {
     updates: Recorded[];
+    reads: Array<{ object: string; where: Record<string, unknown> }>;
     failReadsOn(object: string): void;
   } = {
     updates,
+    reads,
     failReadsOn(object: string) {
       failReads.add(object);
     },
     async find(object: string, query?: unknown): Promise<unknown[]> {
       if (failReads.has(object)) throw new Error(`read of ${object} failed`);
       const q = (query ?? {}) as { where?: Record<string, unknown>; limit?: number };
+      reads.push({ object, where: q.where ?? {} });
       const rows = tables[object] ?? [];
       const where = q.where ?? {};
       const out = rows.filter((r) => matchesWhere(r, where));
@@ -356,6 +369,156 @@ describe('set-user-manager — refusal 3: depth', () => {
     expect(res.body.error?.details?.reason).toBe('max_depth_exceeded');
     expect(res.body.error?.message).toContain(String(MAX_MANAGER_CHAIN_DEPTH));
     expect(engine.updates).toEqual([]);
+  });
+
+  // ── The whole chain the link creates, in either building order ──────────
+  //
+  // `n0` is the top and `n{k}` reports to `n{k-1}` once linked. A full chain of
+  // MAX + 1 links needs MAX + 2 people. Each order writes the same edges; only
+  // the sequence differs, and the cap must not care which.
+
+  const loose = (people: number) => ({
+    sys_user: Array.from({ length: people }, (_, i) => ({
+      id: `n${i}`,
+      manager_id: null,
+      source: 'env_native',
+    })) as Row[],
+  });
+
+  /** The longest manager chain in the table, in links (from the rows, not the handler). */
+  const longestChain = (rows: Row[]): number => {
+    const managerOf = new Map(rows.map((r) => [String(r.id), r.manager_id ? String(r.manager_id) : null]));
+    let longest = 0;
+    for (const id of managerOf.keys()) {
+      let links = 0;
+      for (let at = managerOf.get(id); at; at = managerOf.get(at) ?? null) links += 1;
+      longest = Math.max(longest, links);
+    }
+    return longest;
+  };
+
+  async function linkInOrder(edges: Array<[string, string]>, tables: Record<string, Row[]>) {
+    const engine = makeEngine(tables);
+    const answers: SetUserManagerResult[] = [];
+    for (const [userId, managerId] of edges) {
+      answers.push(await runSetUserManager(deps(engine), ACTOR, post({ userId, managerId })));
+    }
+    return { engine, answers };
+  }
+
+  /** Edges `n{k} -> n{k-1}` for k = 1..links. */
+  const edges = (links: number): Array<[string, string]> =>
+    Array.from({ length: links }, (_, i) => [`n${i + 1}`, `n${i}`] as [string, string]);
+
+  const expectDepthRefusal = (res: SetUserManagerResult) => {
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('VALUE_OUT_OF_RANGE');
+    expect(res.body.error?.details?.reason).toBe('max_depth_exceeded');
+  };
+
+  it(`TOP-DOWN: links 1..${MAX_MANAGER_CHAIN_DEPTH} are admitted, link ${MAX_MANAGER_CHAIN_DEPTH + 1} is refused`, async () => {
+    const tables = loose(MAX_MANAGER_CHAIN_DEPTH + 2);
+    const { engine, answers } = await linkInOrder(edges(MAX_MANAGER_CHAIN_DEPTH + 1), tables);
+
+    expect(answers.slice(0, MAX_MANAGER_CHAIN_DEPTH).map((r) => r.status)).toEqual(
+      Array(MAX_MANAGER_CHAIN_DEPTH).fill(200),
+    );
+    expectDepthRefusal(answers[MAX_MANAGER_CHAIN_DEPTH]!);
+    expect(engine.updates).toHaveLength(MAX_MANAGER_CHAIN_DEPTH);
+    expect(longestChain(tables.sys_user)).toBe(MAX_MANAGER_CHAIN_DEPTH);
+  });
+
+  it(`BOTTOM-UP: links 1..${MAX_MANAGER_CHAIN_DEPTH} are admitted, the link that would make ${MAX_MANAGER_CHAIN_DEPTH + 1} is refused`, async () => {
+    // The bottom edge first, the top edge last. Every write sees a chain of
+    // ONE link above its proposed manager; what grows is the chain already
+    // hanging below the edited user.
+    const tables = loose(MAX_MANAGER_CHAIN_DEPTH + 2);
+    const { engine, answers } = await linkInOrder(edges(MAX_MANAGER_CHAIN_DEPTH + 1).reverse(), tables);
+
+    expect(answers.slice(0, MAX_MANAGER_CHAIN_DEPTH).map((r) => r.status)).toEqual(
+      Array(MAX_MANAGER_CHAIN_DEPTH).fill(200),
+    );
+    expectDepthRefusal(answers[MAX_MANAGER_CHAIN_DEPTH]!);
+    // The refused link is the top one, n1 -> n0, and it was not written.
+    expect(tables.sys_user.find((r) => r.id === 'n1')?.manager_id).toBeNull();
+    expect(engine.updates).toHaveLength(MAX_MANAGER_CHAIN_DEPTH);
+    expect(longestChain(tables.sys_user)).toBe(MAX_MANAGER_CHAIN_DEPTH);
+  });
+
+  it(`MIDDLE: joining an upper chain and a lower chain counts both halves`, async () => {
+    // Upper: n0..n9 (9 links). Lower: n10..n21 (11 links). Joining n10 -> n9
+    // makes 9 + 1 + 11 = 21; joining with one fewer below makes exactly 20.
+    const build = (lowerTop: number, lowerBottom: number) => {
+      const t = loose(lowerBottom + 1);
+      for (let k = 1; k <= lowerBottom; k++) {
+        if (k !== lowerTop) t.sys_user[k]!.manager_id = `n${k - 1}`;
+      }
+      return t;
+    };
+    const over = makeEngine(build(10, MAX_MANAGER_CHAIN_DEPTH + 1));
+    expectDepthRefusal(await runSetUserManager(deps(over), ACTOR, post({ userId: 'n10', managerId: 'n9' })));
+    expect(over.updates).toEqual([]);
+
+    const exact = makeEngine(build(10, MAX_MANAGER_CHAIN_DEPTH));
+    const res = await runSetUserManager(deps(exact), ACTOR, post({ userId: 'n10', managerId: 'n9' }));
+    expect(res.status).toBe(200);
+  });
+
+  it('the LONGEST branch below the edited user counts, not the first one read', async () => {
+    // `x` has many shallow reports and one deep branch, read last.
+    const rows: Row[] = [
+      { id: 'top', manager_id: null, source: 'env_native' },
+      { id: 'x', manager_id: null, source: 'env_native' },
+      ...Array.from({ length: 30 }, (_, i) => ({ id: `wide${i}`, manager_id: 'x', source: 'env_native' })),
+      ...Array.from({ length: MAX_MANAGER_CHAIN_DEPTH }, (_, i) => ({
+        id: `deep${i}`,
+        manager_id: i === 0 ? 'x' : `deep${i - 1}`,
+        source: 'env_native',
+      })),
+    ];
+    const engine = makeEngine({ sys_user: rows });
+    // 1 (x -> top) + MAX below = MAX + 1.
+    expectDepthRefusal(await runSetUserManager(deps(engine), ACTOR, post({ userId: 'x', managerId: 'top' })));
+    expect(engine.updates).toEqual([]);
+  });
+
+  it('the subordinate walk reads one level per query, and stops once the cap is proven crossed', async () => {
+    // 40 direct reports, each with a chain of MAX - 1 below it: 1 + MAX links.
+    const rows: Row[] = [
+      { id: 'top', manager_id: null, source: 'env_native' },
+      { id: 'x', manager_id: null, source: 'env_native' },
+    ];
+    for (let b = 0; b < 40; b++) {
+      for (let d = 0; d < MAX_MANAGER_CHAIN_DEPTH + 5; d++) {
+        rows.push({ id: `b${b}d${d}`, manager_id: d === 0 ? 'x' : `b${b}d${d - 1}`, source: 'env_native' });
+      }
+    }
+    const engine = makeEngine({ sys_user: rows });
+    expectDepthRefusal(await runSetUserManager(deps(engine), ACTOR, post({ userId: 'x', managerId: 'top' })));
+
+    const levelReads = engine.reads.filter(
+      (r) => r.object === 'sys_user' && typeof r.where.manager_id === 'object' && r.where.manager_id !== null,
+    );
+    // Budget below is MAX - 1 (the edge itself is one link); the walk proves
+    // the crossing on level MAX and reads no further, whatever lies beneath.
+    expect(levelReads).toHaveLength(MAX_MANAGER_CHAIN_DEPTH);
+    // Per level, not per user: the second read names all 40 branch heads.
+    expect((levelReads[1]!.where.manager_id as { $in: string[] }).$in).toHaveLength(40);
+  });
+
+  it('terminates on a loop that ALREADY runs back through the edited user below it', async () => {
+    // x -> y -> x is corrupt; re-pointing x at `top` breaks the loop, and the
+    // subordinate walk must not revisit x when it reads y's reports.
+    const engine = makeEngine({
+      sys_user: [
+        { id: 'top', manager_id: null, source: 'env_native' },
+        { id: 'x', manager_id: 'y', source: 'env_native' },
+        { id: 'y', manager_id: 'x', source: 'env_native' },
+      ],
+    });
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'x', managerId: 'top' }));
+    expect(res.status).toBe(200);
+    expect(engine.updates).toHaveLength(1);
   });
 });
 
