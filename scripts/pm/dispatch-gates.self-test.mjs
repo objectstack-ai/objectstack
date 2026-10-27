@@ -11133,15 +11133,6 @@ export function selfTest({ tier = 'full' } = {}) {
   t('and with no inputs to narrow by it keeps everything and reads ignored as NOT MEASURED (null), never as an empty array',
     narrowToDerivationInputs(['a', 'b'], null).changed.join() === 'a,b' && narrowToDerivationInputs(['a', 'b'], null).ignored === null
       && narrowToDerivationInputs(['a'], undefined).changed.join() === 'a' && narrowToDerivationInputs(['a'], undefined).ignored === null);
-  // The loud reading says when it was NOT narrowed — a `--tier` run, which
-  // reads no workflow by contract — and names the run that measures the
-  // inputs; a narrowed loud reading carries no such line, its list IS the
-  // inputs. Pinned on the literal shape above (no `ignored` field at all) and
-  // on the two real readings in the temporary repository below.
-  t('a loud reading with NO narrowing says so and names the deriving runs that measure the inputs',
-    loudText.includes('Not narrowed to what the answer is made of') && loudText.includes('--commands or --ran'));
-  t('and a loud reading that WAS narrowed carries no such line — its list is the inputs',
-    !driftLines({ base: 'aaaaaaa', behind: 2, changed: ['scripts/pm/dispatch-gates.mjs'], ignored: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' }).join('\n').includes('Not narrowed'));
   t('liveDerivationInputs on this tree answers the measured set itself, never a degraded null',
     liveDerivationInputs() === live);
   // The MEASURED set, read off this tree's own discovery: the narrowing is
@@ -11192,6 +11183,15 @@ export function selfTest({ tier = 'full' } = {}) {
   t('it names the stale files themselves, not just a count', loudText.includes('scripts/pm/dispatch-gates.mjs') && loudText.includes('.github/workflows/lint.yml'));
   t('it says the exit code is no defence — the measured failure exited 0', loudText.includes('exited 0'));
   t('the count is a LOWER bound, because the base ref is local and only a fetch moves it', loudText.includes('At least') && loudText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  // The loud reading says when it was NOT narrowed — a `--tier` run, which
+  // reads no workflow by contract — and names the run that measures the
+  // inputs; a narrowed loud reading carries no such line, its list IS the
+  // inputs. Pinned on the literal shape above (no `ignored` field at all) and
+  // on the two real readings in the temporary repository below.
+  t('a loud reading with NO narrowing says so and names the deriving runs that measure the inputs',
+    loudText.includes('Not narrowed to what the answer is made of') && loudText.includes('--commands or --ran'));
+  t('and a loud reading that WAS narrowed carries no such line — its list is the inputs',
+    !driftLines({ base: 'aaaaaaa', behind: 2, changed: ['scripts/pm/dispatch-gates.mjs'], ignored: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' }).join('\n').includes('Not narrowed'));
   t('drift reaches the banner, and stays behind the repo line that must come first', bannerLines({ identity: hereIdentity, paths: [], drift: { base: 'aaaaaaa', behind: 9, changed: ['scripts/x.mjs'] } })[0].includes('gate list derived from the tree of'));
   t('and a banner given no drift is byte-identical to before the flag existed', bannerLines({ identity: hereIdentity, paths: [], drift: null }).join('\n') === bannerLines({ identity: hereIdentity, paths: [] }).join('\n'));
 
