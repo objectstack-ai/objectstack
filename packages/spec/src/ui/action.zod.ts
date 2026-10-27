@@ -32,6 +32,12 @@ import {
 } from './action-copy-template';
 import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
+// [#25653] Import-free leaf, shared with `HookSchema`: the identity-assignment
+// set, the body-source reading and the refusal text.
+import {
+  identityAssignmentBodyWriteRefusal,
+  identityAssignmentWritesNamedIn,
+} from '../identity/identity-assignment-body-writes';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
@@ -1134,6 +1140,15 @@ const actionObject = () => strictObject({
    * The sandbox reports the discarded `ctx.record` writes at INVOCATION time as
    * well, covering the computed keys, aliases and Studio/API-authored bodies a
    * parse cannot reach.
+   *
+   * An action body runs as system, and elevation does not reach identity
+   * assignment (#25653, ruling record 6384657105 letter A): its writes to
+   * `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and
+   * `sys_member` are refused at run time with `PERMISSION_DENIED`, and the
+   * refinement on {@link ActionSchema} refuses a sandboxed JS body whose
+   * `source` names such a write. A grant goes through a flow whose `runAs` is
+   * `'user'` (an action of `type: 'flow'` runs it as the invoking user);
+   * invitations and memberships through the organization endpoints.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 
@@ -1956,6 +1971,28 @@ function refuseUnopenableOnSuccessNavigate(
   if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['navigate'], message: refusal });
 }
 
+/**
+ * [#25653, ruling record 6384657105 letter A] App-authored automation does not
+ * use elevation to write the four identity-assignment objects, and an action
+ * body always runs as system (`buildActionExecutionContext`, runtime). The data
+ * middleware refuses the write at run time (`flow-system-identity-write-refusal.ts`,
+ * plugin-security); this refuses the `script` action whose sandboxed JS (L2)
+ * `body` names one — a write method on `ctx.api.object('<object>')`, called on
+ * the handle or on a name the body bound it to — at every door that parses an
+ * action, one issue per object at `body.source`. An expression (L1) body
+ * performs no IO, and reads of the four objects stay legal, as at run time.
+ * `HookSchema` carries the same check for a `runAs: 'system'` hook.
+ */
+function refuseIdentityAssignmentBodyWrite(
+  data: { type?: string; body?: { language?: string; source?: unknown } },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.type !== 'script' || data.body?.language !== 'js' || typeof data.body.source !== 'string') return;
+  for (const object of identityAssignmentWritesNamedIn(data.body.source)) {
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: identityAssignmentBodyWriteRefusal(object, 'action') });
+  }
+}
+
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -2202,6 +2239,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
+  .superRefine(refuseIdentityAssignmentBodyWrite)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final
   // term — the convention the platform-objects feature-gate guard reads. One

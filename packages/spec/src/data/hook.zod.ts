@@ -14,6 +14,13 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // conversion chain) has no business in this schema's import graph.
 import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { HookBodySchema } from './hook-body.zod';
+// [#25653] The save-time half of the identity-assignment refusal — the set, the
+// body-source reading and the refusal text, shared with `ActionSchema`. An
+// import-free leaf, so this schema's import graph is unchanged.
+import {
+  identityAssignmentBodyWriteRefusal,
+  identityAssignmentWritesNamedIn,
+} from '../identity/identity-assignment-body-writes';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
 // cycle. `import type` is erased, leaving the edge in the type graph only.
@@ -132,6 +139,52 @@ function refuseBodyOnStoredMetadataTarget(
         + `register the hook and it never runs. ${STORED_METADATA_BODY_PRESCRIPTION}`,
     });
   });
+}
+
+/*
+ * ── A hook that runs as system does not write identity assignment ───────────
+ *
+ * [#25653, ruling record 6384657105 letter A] App-authored automation does not
+ * use elevation to write `sys_user_position`, `sys_user_permission_set`,
+ * `sys_invitation` or `sys_member`. The data middleware refuses that write at
+ * run time with `PERMISSION_DENIED` (`flow-system-identity-write-refusal.ts`,
+ * plugin-security), whichever way the hook came to be elevated. The parse
+ * refuses the hook whose `body` says so in writing, so the author meets the
+ * refusal at every door that parses a hook — the metadata save door,
+ * `defineStack` / `os validate`, compile, an artifact's parse (the JSON-stage
+ * hook in `stack.zod.ts` keeps this check through `safeExtend`) — instead of
+ * in a failed write:
+ *
+ *  - a hook that declares `runAs: 'system'`, the one elevation its metadata
+ *    states;
+ *  - carrying a sandboxed JS (L2) `body` — an expression (L1) body performs no
+ *    IO, and a code `handler` is not metadata a parse can read;
+ *  - whose `source` names a write (`insert`, `update`, `delete`, `updateMany`,
+ *    `deleteMany`, `upsert`) on `ctx.api.object('<one of the four>')`, called
+ *    on the handle or on a name the body bound it to. One issue per object, at
+ *    `body.source`.
+ *
+ * Reads of the four objects stay legal, as they do at run time. The run-time
+ * refusal stays the enforcement for every elevated write; this is its
+ * authoring half (the #21565 precedent above).
+ */
+
+/**
+ * The object-level check that refuses a `runAs: 'system'` hook whose sandboxed
+ * body names a write to an identity-assignment object. See the block above.
+ */
+function refuseElevatedIdentityAssignmentBodyWrite(
+  hook: { runAs?: string; body?: { language?: string; source?: unknown } },
+  ctx: z.RefinementCtx,
+): void {
+  if (hook.runAs !== 'system' || hook.body?.language !== 'js' || typeof hook.body.source !== 'string') return;
+  for (const object of identityAssignmentWritesNamedIn(hook.body.source)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['body', 'source'],
+      message: identityAssignmentBodyWriteRefusal(object, 'hook'),
+    });
+  }
 }
 
 /**
@@ -462,6 +515,17 @@ export const HookSchema = lazySchema(() => strictObject(
    * to `'user'`; the default differs because the situations differ, not the
    * word. ⛔ Do not add `'inherit'` to FlowSchema.
    *
+   * Elevation does not reach identity assignment (#25653, ruling record
+   * 6384657105 letter A — the principle `FlowSchema.runAs` states for a
+   * flow): under `'system'`, and under an inherited system context, the
+   * hook's governed writes (insert, update, delete, transfer, restore, purge)
+   * to `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and
+   * `sys_member` are refused with `PERMISSION_DENIED`, and a `'system'` hook
+   * whose sandboxed `body` names such a write is refused at parse. Declare
+   * `'user'` for position holdings and permission-set grants, so the ADR-0090
+   * D12 delegated-administration gate judges the user the hook acts for;
+   * invitations and memberships change through the organization endpoints.
+   *
    * Scope, first cut: `ctx.api` data operations ONLY. `condition` evaluation,
    * the `readonly` strip on the hook's own `ctx.input` payload, `ctx.session`
    * and the `async` semantics are untouched by this key — the triggering
@@ -484,6 +548,12 @@ export const HookSchema = lazySchema(() => strictObject(
         'A hook with no trigger user has no identity to scope to, so under user its ctx.api data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers any hook fired by a write that carried no user ' +
         '(an isSystem plugin/service write; a system-elevated flow node). ' +
+        "Elevation does not reach identity assignment: a system hook's governed writes (insert, update, delete, " +
+        'transfer, restore, purge) to sys_user_position, sys_user_permission_set, sys_invitation and sys_member ' +
+        'are refused with PERMISSION_DENIED, and a system hook whose body names such a write is refused at save; ' +
+        'declare user for position holdings and permission-set grants (the ADR-0090 D12 delegated-administration ' +
+        'gate then judges the user the hook acts for), and change invitations and memberships through the ' +
+        'organization endpoints. ' +
         'Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged.',
     ),
 
@@ -494,11 +564,12 @@ export const HookSchema = lazySchema(() => strictObject(
   // REJECTED here — the same live 422 that `permission` hit on the ADR-0094
   // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
-  // [#21565] The one object-level check: it pairs `object` with `body`, which
-  // no field-level refine can see together. A schema DERIVED from this one by
-  // overriding a key must use `.safeExtend()` (zod refuses `.extend()` over a
-  // refined object), which is what keeps the check on the derived schema too.
-}).superRefine(refuseBodyOnStoredMetadataTarget));
+  // [#21565] The object-level checks: the first pairs `object` with `body`,
+  // [#25653] the second `runAs` with `body`, pairs no field-level refine can
+  // see together. A schema DERIVED from this one by overriding a key must use
+  // `.safeExtend()` (zod refuses `.extend()` over a refined object), which is
+  // what keeps both checks on the derived schema too.
+}).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite));
 
 /**
  * Hook Runtime Context
