@@ -70,31 +70,29 @@
  * Once objectui's tree lives under `ui/` and `.objectui-sha` is gone (#25677),
  * the modules root is `ui/apps/console` and the registry is this tree's own.
  * The run is then one command with no prior step: it builds the registry
- * closure with turbo (`buildInTree`, a cache hit when nothing moved), refusing
- * registry sources the index does not hold, then enumerates exactly as above.
- * The record gains an `inTree` block — the modules root, the version read off
- * the build (provenance only), and where the per-package records live — and
+ * closure with turbo (`buildInTree`, a cache hit when nothing moved), then
+ * enumerates exactly as above. The record gains an `inTree` block — the
+ * modules root and the version read off the build (provenance only) — and
  * keeps the pin-keyed fields only while the artefact is byte-identical to the
  * one they describe. With the pin present, nothing here runs differently.
  *
- * ## One record per registry package, re-recorded only when it moved (#26051)
+ * ## The record moves only with the artefact
  *
- * Each registry package's source digest (`registrySourceDigests` in
- * scripts/check-sdui-manifest.mjs, which the gate recomputes) goes into its own
- * one-line record under `scripts/sdui-manifest.sources/`, beside the sha256 of
- * the artefact it was verified against. A run rewrites a package's record only
- * when that line changes: when one package's sources moved and the artefact did
- * not, exactly that package's record changes, so ui PRs that touch different
- * packages touch different files. When the artefact moved, every record names
- * the new sha256, so every in-flight branch that regenerated against the old
- * artefact conflicts once and regenerates on the merged tree. The shared record
- * moves with the artefact and nothing else: `generatedAt` and the provenance
- * version are carried while the artefact is byte-identical.
+ * The record describes an ARTEFACT, so an in-tree run whose artefact is
+ * byte-identical to the recorded one leaves it as it was: `generatedAt` and the
+ * provenance version are carried. A ui PR that does not change the manifest
+ * then touches neither file, and two such PRs do not conflict. Two PRs that
+ * both change it conflict on it, on purpose: only a regeneration on the merged
+ * tree can say what the manifest of the combination is. CI runs this script on
+ * every PR the registry's inputs move and on the merge queue's combined tree,
+ * and fails when the committed artefact differs from what it writes (ci.yml's
+ * Build & E2E UI step "The committed SDUI manifest is the one this tree
+ * generates", #26137). That comparison replaced the per-package source records
+ * under `scripts/sdui-manifest.sources/` (#26051), which this script wrote and
+ * `scripts/check-sdui-manifest.mjs` recomputed.
  *
- * It still BUILDS on every run, including one where only a package's sources
- * moved: the build and the enumeration are the only oracle that says whether
- * the artefact moved, and a record written without them would stamp a current
- * digest on a manifest no run has checked. What makes that cheap is turbo's
+ * It BUILDS on every run: the build and the enumeration are the only oracle
+ * that says whether the artefact moved. What makes that cheap is turbo's
  * input hashing — measured on objectstack 0a6948210c, one container, no remote
  * cache: cold 8m43s (0 of 63 tasks cached); one edit under
  * `ui/packages/plugin-grid/src` 33s (61 of 63 cached); one under
@@ -103,12 +101,10 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-
-import { gitFreeEnv } from './git-env.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD_PATH = join(ROOT, 'scripts', 'sdui-manifest.record.json');
@@ -158,42 +154,23 @@ const IN_TREE_NOTE = [
   'scripts/gen-sdui-manifest-node.mjs, the one producer (ruling 丙 on #17735): it builds the registry packages under',
   'ui/packages/, then enumerates them from `inTree.modulesRoot` exactly as ui/apps/console/dev/manifest-dump.tsx',
   'does: eager-import the 16 registry modules, ComponentRegistry.getPublicConfigs(), manifestFromConfigs from',
-  '@objectstack/sdui-parser. Each registry package has a one-line record under `inTree.registryRecords` (#26051): a',
-  "digest of that package's own src/ as the index holds them, and the sha256 of the artefact it was verified against.",
-  '`scripts/check-sdui-manifest.mjs` recomputes every digest, so a registry source edit without regeneration goes RED',
-  'there naming the package. This record moves only with the artefact; a run where only sources moved re-records only',
-  'their packages. `inTree.objectuiWorkspaceVersion` is provenance, not a verdict (#25712). Pin-keyed fields, where',
-  'present, say the artefact is byte-identical to the one generated at that pin.',
+  "@objectstack/sdui-parser. CI regenerates it in ci.yml's Build & E2E UI step and fails when the committed bytes differ",
+  "(#26137); `scripts/check-sdui-manifest.mjs` holds this record's shape and sha256. This record moves only with the",
+  'artefact. `inTree.objectuiWorkspaceVersion` is provenance, not a verdict (#25712). Pin-keyed fields, where present,',
+  'say the artefact is byte-identical to the one generated at that pin.',
   'Regenerate + re-record: node scripts/gen-sdui-manifest-node.mjs',
 ];
 
-/** Lines of `git status --porcelain` under `dirs` that the INDEX does not hold: unstaged edits and untracked files. */
-function unindexed(dirs) {
-  const status = execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--untracked-files=all', '--', ...dirs], {
-    // #16644: `-C ROOT` alone names the repository — the gate's self-test runs
-    // this file inside a mkdtemp fixture, where an inherited GIT_DIR outranks it.
-    env: gitFreeEnv(),
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return status.split('\n').filter((line) => line.length > 2 && line[1] !== ' ');
-}
-
 /**
  * No pin — the merged layout (#25712): build the registry's packages from this
- * tree's own sources, then read that build. Returns the gate module and the
- * per-package reading of the sources the build was made from.
+ * tree's own sources, then read that build.
  *
- * The build is THIS script's step here, not the caller's: the records name the
- * sources by digest (`registrySourceDigests` in scripts/check-sdui-manifest.mjs,
- * which the gate recomputes), and only a build of exactly those sources makes
- * the artefact describe them — a run over a stale dist would stamp a fresh
- * digest on a stale manifest. Turbo's input hashing makes an up-to-date build a
- * cache hit. Refused before anything is built: no in-tree console, a registry
- * list that disagrees with the gate's, unreadable sources, or bytes under them
- * the index does not hold (the digest reads the index, the build the working
- * tree). Refused after: a build that moved them.
+ * The build is THIS script's step here, not the caller's: only a build of the
+ * sources as they stand makes the artefact describe them, and a run over a
+ * stale dist would write a stale manifest. Turbo's input hashing makes an
+ * up-to-date build a cache hit. Refused before anything is built: no in-tree
+ * console, or no turbo. Refused after: a build that left the console without
+ * the registry's dist.
  */
 async function buildInTree() {
   if (!existsSync(join(ROOT, ...UI_CONSOLE.split('/'), 'package.json'))) {
@@ -202,47 +179,20 @@ async function buildInTree() {
         '  With the pin this reads objectui\'s build at that commit; without it, the console under ui/.',
     );
   }
-  const gate = await import(new URL('./check-sdui-manifest.mjs', import.meta.url).href);
-  if (JSON.stringify(gate.REGISTRY_MODULES) !== JSON.stringify(REGISTRY_MODULES)) {
-    fail(
-      'REGISTRY_MODULES here and in scripts/check-sdui-manifest.mjs disagree, so the digest the gate recomputes\n' +
-        '  would describe a different registry than the one enumerated here. Make the two lists equal.',
-    );
-  }
-  const before = gate.registrySourceDigests(ROOT);
-  if (before.problem) fail(`cannot digest the registry sources: ${before.problem}`);
-  const sources = before.packages.map(({ dir }) => `${dir}/src`);
-  const notIndexed = unindexed(sources);
-  if (notIndexed.length > 0) {
-    fail(
-      'the registry sources carry bytes the index does not hold, so the build would read what the digest does not name:\n' +
-        notIndexed.slice(0, 20).map((line) => `    ${line}`).join('\n') +
-        (notIndexed.length > 20 ? `\n    … and ${notIndexed.length - 20} more` : '') +
-        '\n  Stage or discard them, then re-run.',
-    );
-  }
 
   const turbo = join(ROOT, 'node_modules', '.bin', 'turbo');
   if (!existsSync(turbo)) fail('no turbo at node_modules/.bin/turbo — run `pnpm install` first.');
   const filters = ['@object-ui/core', ...REGISTRY_MODULES].map((name) => `--filter=${name}...`);
-  console.error(
-    `→ building the registry from this tree: ${before.packages.length} package(s), ` +
-      `${before.packages.reduce((sum, { files }) => sum + files, 0)} source(s) (turbo — a cache hit when nothing moved)`,
-  );
+  console.error(`→ building the registry from this tree: @object-ui/core and ${REGISTRY_MODULES.length} module(s) (turbo — a cache hit when nothing moved)`);
   const build = spawnSync(turbo, ['run', 'build', ...filters, '--filter=@objectstack/sdui-parser', '--output-logs=errors-only'], {
     cwd: ROOT,
     stdio: ['ignore', 2, 2],
   });
   if (build.status !== 0) fail(`the in-tree build exited ${build.status ?? build.signal}; its output is above.`);
 
-  const after = gate.registrySourceDigests(ROOT);
-  if (after.problem || JSON.stringify(after.packages) !== JSON.stringify(before.packages) || unindexed(sources).length > 0) {
-    fail('the build moved the registry sources it was meant to read (their digest or their untracked files changed). Nothing was written.');
-  }
   if (!existsSync(join(ROOT, ...UI_CONSOLE.split('/'), 'node_modules', '@object-ui', 'core', 'dist', 'index.js'))) {
     fail(`${UI_CONSOLE}/node_modules/@object-ui/core/dist/index.js is missing after the build, so ${UI_CONSOLE} does not resolve the registry the build made.`);
   }
-  return { gate, packages: before.packages };
 }
 
 if (process.argv.length > 2) {
@@ -263,7 +213,6 @@ const pinned = existsSync(pinPath);
 
 let pin = null;
 let MODULES_ROOT_REL;
-let inTree = null;
 if (pinned) {
   if (!existsSync(PARSER_DIST)) fail(PARSER_DIST_MISSING);
 
@@ -295,7 +244,7 @@ if (pinned) {
     );
   }
 } else {
-  inTree = await buildInTree();
+  await buildInTree();
   if (!existsSync(PARSER_DIST)) fail(PARSER_DIST_MISSING);
   MODULES_ROOT_REL = UI_CONSOLE;
 }
@@ -398,8 +347,8 @@ const sha256 = createHash('sha256').update(json).digest('hex');
 // while the regenerated artefact is byte-identical to the one it was written
 // for (the same sha256), when it still says something true about these bytes,
 // and replaced the moment it is not. That is what keeps this file out of the
-// diff of a run where only registry sources moved (#26051). `undefined` keys
-// are left out of the JSON.
+// diff of a ui PR that does not change the manifest. `undefined` keys are left
+// out of the JSON.
 const carried = !pinned && record.sha256 === sha256 ? record : {};
 const today = new Date().toISOString().slice(0, 10);
 const nextRecord = {
@@ -417,34 +366,9 @@ const nextRecord = {
     : {
         modulesRoot: MODULES_ROOT_REL,
         objectuiWorkspaceVersion: carried.inTree?.objectuiWorkspaceVersion ?? workspaceVersion,
-        registryRecords: inTree.gate.REGISTRY_RECORDS,
       },
 };
 
-// One record per registry package, written only where its line changed; a
-// record for a package the registry no longer reaches is removed (#26051).
-const rerecorded = [];
-const removed = [];
-if (!pinned) {
-  const { gate } = inTree;
-  const recordsDir = join(ROOT, ...gate.REGISTRY_RECORDS.split('/'));
-  mkdirSync(recordsDir, { recursive: true });
-  const keep = new Set();
-  for (const pkg of inTree.packages) {
-    const rel = gate.registryRecordPath(pkg.dir);
-    keep.add(rel);
-    const path = join(ROOT, ...rel.split('/'));
-    const line = gate.registryRecordLine(pkg, sha256);
-    if (existsSync(path) && readFileSync(path, 'utf8') === line) continue;
-    writeFileSync(path, line);
-    rerecorded.push(pkg.dir);
-  }
-  for (const name of readdirSync(recordsDir).sort()) {
-    if (keep.has(`${gate.REGISTRY_RECORDS}/${name}`)) continue;
-    rmSync(join(recordsDir, name), { recursive: true, force: true });
-    removed.push(`${gate.REGISTRY_RECORDS}/${name}`);
-  }
-}
 const nextRecordText = JSON.stringify(nextRecord, null, 2) + '\n';
 const recordMoved = !existsSync(RECORD_PATH) || readFileSync(RECORD_PATH, 'utf8') !== nextRecordText;
 writeFileSync(RECORD_PATH, nextRecordText);
@@ -455,19 +379,11 @@ if (pinned) {
       `@object-ui/core workspace version ${workspaceVersion}`,
   );
 } else {
-  const { packages } = inTree;
   console.error(
     `✓ ${recordMoved ? 're-recorded' : 'left unchanged'} scripts/sdui-manifest.record.json in-tree — ${SOURCE} ${MODULES_ROOT_REL}, ` +
       `@object-ui/core workspace version ${nextRecord.inTree.objectuiWorkspaceVersion}` +
       (carried.sha256 ? ` (artefact unchanged since ${nextRecord.generatedAt}: its date and version are carried)` : '') +
       '; ' +
       (carried.objectuiSha ? `pin fields kept (artefact unchanged since pin ${carried.objectuiSha.slice(0, 12)})` : 'no pin fields'),
-  );
-  console.error(
-    `✓ ${rerecorded.length} of ${packages.length} registry package record(s) re-recorded under ${inTree.gate.REGISTRY_RECORDS}/` +
-      (rerecorded.length > 0 ? `: ${rerecorded.map((dir) => dir.slice(dir.lastIndexOf('/') + 1)).join(', ')}` : '') +
-      (carried.sha256 ? '' : ' (the artefact moved, so every record names its new sha256)') +
-      (removed.length > 0 ? `; removed ${removed.join(', ')} (no longer reached)` : '') +
-      ` — ${packages.reduce((sum, { files }) => sum + files, 0)} source(s) in all.`,
   );
 }

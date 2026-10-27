@@ -5,12 +5,10 @@
     "scripts/gen-sdui-manifest-node.mjs, the one producer (ruling 丙 on #17735): it builds the registry packages under",
     "ui/packages/, then enumerates them from `inTree.modulesRoot` exactly as ui/apps/console/dev/manifest-dump.tsx",
     "does: eager-import the 16 registry modules, ComponentRegistry.getPublicConfigs(), manifestFromConfigs from",
-    "@objectstack/sdui-parser. Each registry package has a one-line record under `inTree.registryRecords` (#26051): a",
-    "digest of that package's own src/ as the index holds them, and the sha256 of the artefact it was verified against.",
-    "`scripts/check-sdui-manifest.mjs` recomputes every digest, so a registry source edit without regeneration goes RED",
-    "there naming the package. This record moves only with the artefact; a run where only sources moved re-records only",
-    "their packages. `inTree.objectuiWorkspaceVersion` is provenance, not a verdict (#25712). Pin-keyed fields, where",
-    "present, say the artefact is byte-identical to the one generated at that pin.",
+    "@objectstack/sdui-parser. CI regenerates it in ci.yml's Build & E2E UI step and fails when the committed bytes differ",
+    "(#26137); `scripts/check-sdui-manifest.mjs` holds this record's shape and sha256. This record moves only with the",
+    "artefact. `inTree.objectuiWorkspaceVersion` is provenance, not a verdict (#25712). Pin-keyed fields, where present,",
+    "say the artefact is byte-identical to the one generated at that pin.",
     "Regenerate + re-record: node scripts/gen-sdui-manifest-node.mjs"
   ],
   "source": "built-tree",
@@ -20,7 +18,6 @@
   "components": 106,
   "inTree": {
     "modulesRoot": "ui/apps/console",
-    "objectuiWorkspaceVersion": "18.1.0",
-    "registryRecords": "scripts/sdui-manifest.sources"
+    "objectuiWorkspaceVersion": "18.1.0"
   }
 }

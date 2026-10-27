@@ -88,6 +88,15 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. An unrelated label's run
+# gets a group of its own (its job is skipped anyway), so adding some other label never
+# cancels a running `needs:pack-smoke` run.
+concurrency:
+  group: pack-smoke-optin-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'needs:pack-smoke' && github.run_id || 'run' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pack-smoke:
     # ~45 minutes of build + pack + clean install. Opt-in only — see the header.
