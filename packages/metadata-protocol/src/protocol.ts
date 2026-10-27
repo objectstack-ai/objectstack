@@ -11400,6 +11400,8 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         packageId?: string;
+        /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         type: string;
         name: string;
@@ -11446,6 +11448,18 @@ export class ObjectStackProtocolImplementation implements
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
+        // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
+        // option-A ruling on #26649: ONE member of a bundled type, the
+        // selector's or else the canonical one, read exactly as
+        // {@link getMetaItem} reads it. Every layer below is that member's or
+        // nothing — the code layer's service copy, artifact and registry entry,
+        // and the stored row — so a named member nothing holds answers no
+        // layer, which the door answers as an absent item, ⛔ never with the
+        // canonical member's layers.
+        const member = resolveBundleMemberSelector(request.type, request.member);
+        const wantedMember = bundleMemberDiscriminator(request.type, member);
+        const isWantedMember = (candidate: unknown): boolean =>
+            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
 
         // [ADR-0131 D6] Environment → code: the overlay layer is the
         // environment's stored row; no organization's row is read.
@@ -11462,15 +11476,22 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
+                // [#26699] …when it is the member this read addresses, as in
+                // {@link getMetaItem}: the service keys a type's items by name
+                // alone, so for a bundle it holds whichever member it
+                // registered last. Another member's copy is no layer of this
+                // one; the artifact and registry lookups below ask for it.
                 // [#7556] The CODE layer of an object is D9.6's "owner's
                 // declaration with its extenders folded on", so the
                 // MetadataService copy is its base, not the layer itself.
                 // `effective` is `overlay ?? code`, so an object with no
                 // overlay row — the ordinary shape — is corrected by this
                 // single fold on both layers the diagnostic reports.
-                code = this.foldObjectExtendersFromRegistry(
-                    request.type, request.name, fromService.data,
-                );
+                if (isWantedMember(fromService.data)) {
+                    code = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
+                }
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -11509,13 +11530,25 @@ export class ObjectStackProtocolImplementation implements
             // item-lock resolution below). A
             // runtime-registered item with no package carries no tenant marker
             // and keeps its code layer.
+            //
+            //
+            // [#26699] Each lookup is asked for the addressed member, exactly
+            // as {@link getMetaItem}'s are: the artifact at the member (the
+            // canonical one when none was named), and the registry for the
+            // member named. The registry's bare-name read still answers a
+            // bundle that ships no canonical member; a registry that does not
+            // narrow by member can answer another one for a NAMED member, and
+            // that answer is not this member's layer.
             const runtimeOnly = (item: unknown): unknown =>
                 item !== undefined && isTenantAuthored(item) ? undefined : item;
-            let regItem = this.lookupArtifactItem(request.type, request.name, request.packageId)
-                ?? runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId));
+            const namedMemberOnly = (item: unknown): unknown =>
+                member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
+            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+            let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
+                ?? namedMemberOnly(runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId, member)));
             if (regItem === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId));
+                if (alt) regItem = namedMemberOnly(runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId, member)));
             }
             if (regItem !== undefined) code = regItem;
         }
@@ -11558,15 +11591,17 @@ export class ObjectStackProtocolImplementation implements
         // lock stays at the request's address, as the `_lock` gate judges it.
         // Asked outside the `try` below: its own failed read already answers
         // the #5532 envelope, with the driver's error as `cause`.
-        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
+            // [#26699] At the addressed member, as that read asks it.
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
                 ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
