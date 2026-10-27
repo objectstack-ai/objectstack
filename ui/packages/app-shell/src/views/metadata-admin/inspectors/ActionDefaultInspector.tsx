@@ -28,6 +28,11 @@
  * `aiDescription` keys, which the spec refuses by name, so one tick refused
  * every later save of the object (objectstack#26728). The two flat keys are
  * cleared by the AI control's next write, and never read.
+ *
+ * The Type control shows the `type` the draft holds, and every write that
+ * authors a script writes `type: 'script'` with it (objectstack#26734). The
+ * field-value editor holds a row that names no field yet, and writes it to
+ * `patch` once it does (objectstack#26735).
  */
 
 import * as React from 'react';
@@ -94,6 +99,16 @@ const ACTION_TYPES: KeyedOption[] = [
   { value: 'form', labelKey: 'engine.inspector.action.type.form' },
   { value: 'url', labelKey: 'engine.inspector.action.type.url' },
 ];
+
+/**
+ * objectstack#26734 — the route `@objectstack/spec` gives an action that names
+ * no `type` (`ActionSchema.type` defaults to it). The Behavior panels follow it,
+ * so a draft without `type` still shows the editor for what it will run. It is
+ * never shown in the Type control as if stored: the console reads the stored
+ * row, not its parse, and runs nothing for an action without `type`. The first
+ * script write stores it instead.
+ */
+const DEFAULT_ACTION_TYPE = 'script';
 
 const VARIANT_OPTS: KeyedOption[] = [
   { value: 'primary', labelKey: 'engine.inspector.action.variant.primary' },
@@ -402,6 +417,19 @@ const BODY_SHAPE_OPTS: KeyedOption[] = [
 ];
 
 /** What a script action DOES — `operation` is authored beside `type`, not in it. */
+/** One field-value row of an update action: the field, and the value written to it. */
+type PatchRow = [string, unknown];
+
+/** The rows `patch` stores: those that name a field, under the trimmed name. */
+function namedPatchRows(rows: ReadonlyArray<PatchRow>): PatchRow[] {
+  return rows.filter(([key]) => key.trim() !== '').map(([key, value]) => [key.trim(), value]);
+}
+
+function samePatchRows(a: ReadonlyArray<PatchRow>, b: ReadonlyArray<PatchRow>): boolean {
+  return a.length === b.length
+    && a.every(([key, value], i) => key === b[i][0] && JSON.stringify(value) === JSON.stringify(b[i][1]));
+}
+
 const SCRIPT_OPERATIONS: KeyedOption[] = [
   { value: '', labelKey: 'engine.inspector.action.scriptOp.run' },
   { value: 'update', labelKey: 'engine.inspector.action.scriptOp.update' },
@@ -626,7 +654,13 @@ export function ActionDefaultInspector({
   const iconFieldId = React.useId();
 
   const str = (k: string): string => (typeof draft[k] === 'string' ? (draft[k] as string) : '');
-  const type = str('type') || 'script';
+  // objectstack#26734 — `storedType` is what the Type control shows ("—" when
+  // the draft holds none); `type` is the route the panels below follow.
+  const storedType = str('type');
+  const type = storedType || DEFAULT_ACTION_TYPE;
+  /** A script write, with the `type` a draft that holds none is stored with. */
+  const withScriptType = (change: Record<string, unknown>): Record<string, unknown> =>
+    storedType === '' ? { type: 'script', ...change } : change;
   const objectName = str('objectName');
   const body = (draft.body && typeof draft.body === 'object' ? draft.body : {}) as Record<string, unknown>;
   const params: ActionParam[] = Array.isArray(draft.params) ? (draft.params as ActionParam[]) : [];
@@ -674,15 +708,30 @@ export function ActionDefaultInspector({
       onPatch(cleared);
       return;
     }
-    const out: Record<string, unknown> = { operation: undefined, patch: undefined };
+    const out: Record<string, unknown> = withScriptType({ operation: undefined, patch: undefined });
     if (!str('target')) out.body = writeScriptBody(body, {});
     onPatch(out);
   };
 
-  const commitPatch = (rows: Array<[string, unknown]>) => {
-    const next: Record<string, unknown> = {};
-    for (const [key, value] of rows) if (key.trim() !== '') next[key.trim()] = value;
-    onPatch({ patch: next });
+  /* ─── objectstack#26735 — a field-value row waits here for its field ──────
+   *
+   * `patch` is a record, so a row that names no field has no key to be stored
+   * under. "Add field value" used to commit `['', '']`, the write dropped the
+   * blank key, and no row ever appeared. The rows on screen are now this list:
+   * a row is written to `patch` once it names a field, and one that names none
+   * (just added, or its field cleared) is held here, so a blank row never
+   * reaches the draft. Stamped with the action, like the Wrap choice below, and
+   * read only while its named rows are exactly the draft's `patch`: any other
+   * write to `patch` shows the draft's rows instead. */
+  const [heldRows, setHeldRows] = React.useState<{ action: string; rows: PatchRow[] } | null>(null);
+  const fieldValueRows: PatchRow[] =
+    heldRows && heldRows.action === str('name') && samePatchRows(namedPatchRows(heldRows.rows), patchRows)
+      ? heldRows.rows
+      : patchRows;
+  const commitFieldValueRows = (rows: PatchRow[]) => {
+    setHeldRows({ action: str('name'), rows });
+    const named = namedPatchRows(rows);
+    if (!samePatchRows(named, patchRows)) onPatch(withScriptType({ patch: Object.fromEntries(named) }));
   };
 
   /* ─── objectui#7234 — the OTHER way a correctly-placed action never appears ──
@@ -818,7 +867,7 @@ export function ActionDefaultInspector({
   }, [blockingIssues]);
 
   // objectui#11921 — every body write goes through the one writer.
-  const patchBody = (p: Record<string, unknown>) => onPatch({ body: writeScriptBody(body, p) });
+  const patchBody = (p: Record<string, unknown>) => onPatch(withScriptType({ body: writeScriptBody(body, p) }));
   const patchParam = (i: number, p: Partial<ActionParam>) =>
     onPatch({ params: params.map((it, j) => (j === i ? { ...it, ...p } : it)) });
 
@@ -869,7 +918,7 @@ export function ActionDefaultInspector({
       {/* 2 ─ Behavior (type-first) */}
       <div className="border-t pt-3 space-y-3">
         <SectionHeader title={tr('engine.inspector.action.behavior')} hint={tr('engine.inspector.action.behaviorHint')} />
-        <InspectorSelectField label={tr('engine.inspector.action.type')} value={type} options={localizeOptions(ACTION_TYPES, locale)} onCommit={commitType} disabled={readOnly || isUpdateOperation} />
+        <InspectorSelectField label={tr('engine.inspector.action.type')} value={storedType || undefined} options={localizeOptions(ACTION_TYPES, locale)} onCommit={commitType} disabled={readOnly || isUpdateOperation} />
         {isUpdateOperation && (
           <div className="text-[11px] text-muted-foreground/70">
             {withSlots(tr('engine.inspector.action.pinnedScript'), { script: <code>script</code> })}
@@ -888,18 +937,20 @@ export function ActionDefaultInspector({
             {isUpdateOperation ? (
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">{tr('engine.inspector.action.fieldValues')}</Label>
-                {patchRows.length === 0 ? (
+                {fieldValueRows.length === 0 ? (
                   <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-center text-[11px] text-muted-foreground">
                     {tr('engine.inspector.action.fieldValuesEmpty')}
                   </p>
                 ) : (
-                  patchRows.map(([key, value], i) => (
+                  // Keyed by position, so a held row that gains its field keeps
+                  // its inputs (and the focus) as it is written.
+                  fieldValueRows.map(([key, value], i) => (
                     <div key={i} className="flex items-end gap-2">
                       <div className="flex-1">
                         <InspectorTextField
                           label={tr('engine.inspector.action.fieldValueField')}
                           value={key}
-                          onCommit={(v) => commitPatch(patchRows.map((row, j) => (j === i ? [v, row[1]] : row)))}
+                          onCommit={(v) => commitFieldValueRows(fieldValueRows.map((row, j) => (j === i ? [v, row[1]] : row)))}
                           placeholder="status"
                           disabled={readOnly}
                           mono
@@ -909,7 +960,7 @@ export function ActionDefaultInspector({
                         <InspectorTextField
                           label={tr('engine.inspector.action.fieldValueValue')}
                           value={typeof value === 'string' ? value : JSON.stringify(value ?? '')}
-                          onCommit={(v) => commitPatch(patchRows.map((row, j) => (j === i ? [row[0], v] : row)))}
+                          onCommit={(v) => commitFieldValueRows(fieldValueRows.map((row, j) => (j === i ? [row[0], v] : row)))}
                           placeholder="done"
                           disabled={readOnly}
                           mono
@@ -922,7 +973,7 @@ export function ActionDefaultInspector({
                         className="h-8 w-8 shrink-0"
                         disabled={readOnly}
                         aria-label={tr('engine.inspector.action.removeFieldValue')}
-                        onClick={() => commitPatch(patchRows.filter((_, j) => j !== i))}
+                        onClick={() => commitFieldValueRows(fieldValueRows.filter((_, j) => j !== i))}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -935,7 +986,7 @@ export function ActionDefaultInspector({
                   size="sm"
                   className="h-7 text-xs"
                   disabled={readOnly}
-                  onClick={() => commitPatch([...patchRows, ['', '']])}
+                  onClick={() => commitFieldValueRows([...fieldValueRows, ['', '']])}
                 >
                   <Plus className="mr-1 h-3 w-3" /> {tr('engine.inspector.action.addFieldValue')}
                 </Button>
