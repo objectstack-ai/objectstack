@@ -24,6 +24,7 @@
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
+ *   recordCarriesDesignJudgment  whether a face's record carries item ④, the full review's design judgment
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
@@ -137,9 +138,18 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
  * The four contract faces, in the order a mixed diff is decided in, each with
  * the NAME of the tier it maps to.
  *
- *   `id`        the token `--template --face` takes and `reviewFace` answers with
- *   `tierName`  the ONE `Served-tier:` token a review owed on this face stands with
- *   `words`     how the face is named to a human
+ *   `id`         the token `--template --face` takes and `reviewFace` answers with
+ *   `tierName`   the ONE `Served-tier:` token a review owed on this face stands with
+ *   `fullReview` whether a record on this face carries item ④, the design judgment. The project
+ *                owner's order, transcribed on #25765 (2026-10-25, scope and cadence refined in
+ *                ruling record 6396446237), makes the at-tier review of a published schema, a skill
+ *                or an ADR a FULL review: ①②③ plus a judgment of the change against the code it
+ *                cites and the scenario it is accepted against. Those three surfaces ARE the schema
+ *                face and the rules face already — the governed register names `skills/**`,
+ *                `.claude/**` and `docs/adr/**` — so ④ rides those two faces and no face is added;
+ *                the narrowing face is free of all three by construction, and the declaration face
+ *                is the lane seat's own review. `recordCarriesDesignJudgment` reads it.
+ *   `words`      how the face is named to a human
  *
  * ⭐ The face is read off the PULL REQUEST'S COMMITTED TREE, and ⛔ never off a
  * seat's statement: its FILE LIST decides the schema and rules faces, the way
@@ -151,10 +161,10 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
  * declared was owed by the `Clause-②: yes` line alone.
  */
 export const REVIEW_FACES = Object.freeze([
-  Object.freeze({ id: 'schema', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'a published schema (the clause-② suspect surface, test files excepted)' }),
-  Object.freeze({ id: 'rules', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'governed rules text (a path the governed register names)' }),
-  Object.freeze({ id: 'narrowing', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'a `Clause-②: no (narrowing)` declaration (a published accept set narrowed; no schema and no governed path in the diff)' }),
-  Object.freeze({ id: 'declaration', tierName: TIER_DEFAULT_NAME, words: 'the `Clause-②: yes` declaration alone (no schema, no governed path and no narrowing declared)' }),
+  Object.freeze({ id: 'schema', tierName: CONTRACT_REVIEW_TIER_NAME, fullReview: true, words: 'a published schema (the clause-② suspect surface, test files excepted)' }),
+  Object.freeze({ id: 'rules', tierName: CONTRACT_REVIEW_TIER_NAME, fullReview: true, words: 'governed rules text (a path the governed register names)' }),
+  Object.freeze({ id: 'narrowing', tierName: CONTRACT_REVIEW_TIER_NAME, fullReview: false, words: 'a `Clause-②: no (narrowing)` declaration (a published accept set narrowed; no schema and no governed path in the diff)' }),
+  Object.freeze({ id: 'declaration', tierName: TIER_DEFAULT_NAME, fullReview: false, words: 'the `Clause-②: yes` declaration alone (no schema, no governed path and no narrowing declared)' }),
 ]);
 
 /** Every NAME a `Served-tier:` line can stand with — one per tier the faces map to, and nothing else. */
@@ -246,6 +256,15 @@ export function reviewFace(paths, repo = SELF_REPO_ID, { declaredOn } = {}) {
 /** The face a `--face` argument names, or null — the CLI's half of the same table. */
 export function reviewFaceById(id) {
   return REVIEW_FACES.find((face) => face.id === id) ?? null;
+}
+
+/**
+ * Does the record printed for this face carry item ④, the design judgment? Read off the face
+ * table's `fullReview` flag, ⛔ never a second list of faces. A null face is the bare template —
+ * the tier of a schema or governed-path face — so it does; below tier nothing does. Pure.
+ */
+export function recordCarriesDesignJudgment(face, tierName) {
+  return tierName === CONTRACT_REVIEW_TIER_NAME && (face === null || face.fullReview === true);
 }
 
 /**
@@ -861,7 +880,16 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * Plain text, ⛔ never a code span: a span is where `contractReviewHeadMatch`
  * looks for the head, and a path must never be a candidate for it.
  *
- * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[]}} values
+ * ⭐ Item ④, the design judgment, is a FOURTH section of this ONE record — the full review the
+ * owner's order makes mandatory on a published schema, a skill or an ADR rides the record every
+ * reader here already locates, so one record shape stays and no second record is read anywhere.
+ * It prints on the schema and rules faces and on the bare template, which is their tier
+ * (`recordCarriesDesignJudgment`); ⛔ not on the narrowing face, which is free of those surfaces
+ * by construction, and not below tier. `faceId` says which face; left out, the bare record.
+ * The heading is prose to every reader in this file: the locator, the `Served-tier:` and head
+ * readers are unchanged by it, which the self-test drives.
+ *
+ * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[], faceId?: string}} values
  * @returns {string[]}
  */
 export function contractReviewRecordLines(values = {}) {
@@ -870,6 +898,11 @@ export function contractReviewRecordLines(values = {}) {
   if (!REVIEW_TIER_NAMES.includes(tierName)) {
     throw new Error(`record-recognisers: no face maps to the tier name '${tierName}' — known: ${REVIEW_TIER_NAMES.join(', ')}`);
   }
+  const face = values.faceId === undefined ? null : reviewFaceById(values.faceId);
+  if (values.faceId !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${values.faceId}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  const designJudgment = recordCarriesDesignJudgment(face, tierName);
   const scopeHits = values.scopeHits === undefined ? RECORD_SCOPE_PLACEHOLDERS.hits : values.scopeHits.join(', ');
   return [
     '## Contract review',
@@ -885,6 +918,7 @@ export function contractReviewRecordLines(values = {}) {
     '',
     '### ③ Boundary flags',
     '',
+    ...(designJudgment ? ['### ④ Design judgment', ''] : []),
     `Implemented-by: \`${implementedBy}\``,
     `Reviewed-by: \`${reviewedBy}\``,
     '',
@@ -1045,7 +1079,7 @@ export function contractReviewTemplateLines(values = {}) {
     '   and stays silent, so writing one line badly is the only way to be refused.',
     '',
     RECORD_TEMPLATE_FENCE_START,
-    ...contractReviewRecordLines({ ...recordValues, tierName, ...(scopeHits === undefined ? {} : { scopeHits }) }),
+    ...contractReviewRecordLines({ ...recordValues, tierName, ...(scopeHits === undefined ? {} : { scopeHits }), ...(face === null ? {} : { faceId: face.id }) }),
     RECORD_TEMPLATE_FENCE_END,
     '',
     "  · Served-tier     the NAME of the tier the review's FACE maps to, ⛔ never a model id, and EXACT:",
@@ -1068,6 +1102,11 @@ export function contractReviewTemplateLines(values = {}) {
     `                    below \`hits\`. The rest of a mixed diff is the lane seat's ACCEPT at ${TIER_DEFAULT_NAME},`,
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
     '                    face the floor is every path of the diff outside the prose faces: no path is a remainder.',
+    '  · ④ Design judgment  on the schema and rules faces only — the published spec, skills and ADR surfaces the',
+    '                    full-review order names; the narrowing and declaration faces carry no ④. For each `hits`',
+    '                    file: does the change hold against the code it cites and the scenario it is accepted',
+    '                    against — an ADR against its first consumer and its execution plan? The cited code is',
+    '                    READ to judge it, never reviewed; a must-fix found here is a FAIL like any other.',
     '  · Implemented-by  the identity that produced the diff, read off the implementation claim:',
     "                    a mode:subagent dev's BRANCH, a mode:remote dev's session id.",
     '  · Reviewed-by     the session that RENDERS or ADOPTS the verdict — a session only. Prose',
@@ -1161,6 +1200,15 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * letter B): its floor is every path of the diff outside the prose faces, and
  * the brief says so instead of handing the reviewer an empty floor and the whole
  * diff as the lane seat's remainder.
+ *
+ * ⭐ Item ④, on the faces whose record carries it (`recordCarriesDesignJudgment`): the brief
+ * hands the reviewer the design judgment as an ADVERSARIAL instruction — hold the change against
+ * the code it cites and the scenario it is accepted against, an ADR against its first consumer
+ * and its execution plan, and try to break it — and the surface-file scope rule the owner refined
+ * the order with: ④ judges the `hits` files only; lockfiles, generated output, changesets and
+ * prose elsewhere in the PR are not reviewed, and the cited code is READ to judge them, never
+ * reviewed. The narrowing brief carries neither: its floor is the whole diff outside the prose
+ * faces, and the order does not reach it.
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
@@ -1169,6 +1217,7 @@ export function contractReviewBriefLines(values = {}) {
   const { face, scopeHits } = templateFace({ face: values.face, paths: values.paths });
   const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
   const atTier = tierName === CONTRACT_REVIEW_TIER_NAME;
+  const designJudgment = recordCarriesDesignJudgment(face, tierName);
   const templateArgs = scopeHits !== undefined && atTier
     ? ` --paths ${scopeHits.join(' ')}`
     : face === null ? '' : ` --face ${face.id}`;
@@ -1183,6 +1232,10 @@ export function contractReviewBriefLines(values = {}) {
     '  plus every file those hunks make a claim about, read in the cited code — a rule and the gate that enforces it',
     "  are one change, read as one. Widen it freely, ⛔ never below `hits`; the record's `Scope:` line lists both.",
     `  The rest of the diff is the lane seat's ACCEPT at \`${TIER_DEFAULT_NAME}\`, exactly as a standalone PR of those files.`,
+    ...(designJudgment ? [
+      '  ④ judges the `hits` files ONLY: lockfiles, generated output, changesets and prose elsewhere in the PR are',
+      '  not reviewed; the cited code is READ to judge them, never reviewed.',
+    ] : []),
     '',
   ];
   return [
@@ -1212,6 +1265,12 @@ export function contractReviewBriefLines(values = {}) {
     '  ① Derived judgments — every accept-set and public-surface change the diff implies, each named right or wrong.',
     '  ② Semver level — the changeset (or `skip-changeset`) matches what the diff publishes, and the `Clause-②:` line.',
     '  ③ Boundary flags — every dev flag and every `open_questions` entry answered, or escalated.',
+    ...(designJudgment ? [
+      '  ④ Design judgment — for EVERY `hits` file: does the change hold against the code it cites and the',
+      '     scenario it is accepted against — an ADR against its first consumer and its execution plan? Read the',
+      '     cited code in the live tree and try to break the design; name each finding must-fix or should-fix.',
+      "     A must-fix is a FAIL. ⛔ Judge the tree, never the PR body's account of it.",
+    ] : []),
     "Sign `Implemented-by:` with the dev's branch and `Reviewed-by:` with your session id — the value is the FIRST",
     'thing after each colon.',
     BRIEF_TEMPLATE_FENCE_END,
@@ -1356,10 +1415,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling names no head': 7,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 19,
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 27,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
-  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 16,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
@@ -1371,6 +1430,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 8 → 10 with the two B′-with-C batteries (ruling record 6159870311): two batteries, two rows.
 // Raised 10 → 11 with the letter-C scope battery (ruling record 6184805932): one battery, one row.
 // Raised 11 → 12 with the letter-B narrowing-face battery (ruling record 6203713500): one battery, one row.
+// Item ④ (the owner's full-review order, #25765) added no battery: the template battery's floor rose 19 → 27
+// and the brief battery's 10 → 16, one pin per new printed line or face reading, so a pin that stops
+// registering reds here instead of leaving the ④ lines unmeasured.
 const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
@@ -1764,6 +1826,17 @@ export async function selfTest() {
   t('⭐ the record carries `Local-runs: none` — the read-only shape, declared where the reader reads it', TPL_RECORD.includes('Local-runs: none') && readLocalRuns(TPL_RECORD).value === 'none' && localRunsStand(readLocalRuns(TPL_TEXT)));
   t('…and the notes explain both values and that an absent line is not re-judged', says(TPL_TEXT, 'probe — REASON') && says(TPL_TEXT, 'not re-judged'));
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
+  // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
+  const DJ = '### ④ Design judgment';
+  const headings = (lines) => lines.filter((line) => line.startsWith('### '));
+  t('⭐ the bare record carries `### ④ Design judgment` right after `### ③ Boundary flags` — ONE record shape, a fourth item, never a second record', (() => { const rec = contractReviewRecordLines(); const i3 = rec.indexOf('### ③ Boundary flags'); const i4 = rec.indexOf(DJ); return i3 > 0 && i4 === i3 + 2 && headings(rec).length === 4 && rec.indexOf('Implemented-by: `claude/issue-NNNN-slug`') > i4; })());
+  t('…and the schema and rules faces print it, as does `--paths` over a mixed list — read off the face table', ['schema', 'rules'].every((id) => contractReviewRecordLines({ faceId: id }).includes(DJ) && contractReviewTemplateLines({ face: id }).includes(DJ)) && contractReviewTemplateLines({ paths: MIXED }).includes(DJ));
+  t('⛔ the narrowing face carries NO ④ — the order names published spec, skills and ADRs, and that face is free of all three by construction', !contractReviewRecordLines({ faceId: 'narrowing' }).includes(DJ) && !fenced(contractReviewTemplateLines({ face: 'narrowing' })).includes('④') && headings(contractReviewRecordLines({ faceId: 'narrowing' })).length === 3);
+  t('⛔ nor the declaration face, below tier — with or without its face named', !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).includes(DJ) && !contractReviewRecordLines({ faceId: 'declaration', tierName: TIER_DEFAULT_NAME }).includes(DJ) && !fenced(contractReviewTemplateLines({ face: 'declaration' })).includes('④'));
+  t('⭐ the face table marks exactly the two path-read faces as full-review faces, every face answering — never a second list', REVIEW_FACES.filter((f) => f.fullReview === true).map((f) => f.id).join() === 'schema,rules' && REVIEW_FACES.every((f) => typeof f.fullReview === 'boolean') && recordCarriesDesignJudgment(null, CONTRACT_REVIEW_TIER_NAME) && !recordCarriesDesignJudgment(null, TIER_DEFAULT_NAME));
+  t('⛔ an unknown `faceId` is REFUSED, never printed as the bare record', (() => { try { contractReviewRecordLines({ faceId: 'lane' }); return false; } catch { return true; } })());
+  t('⭐ item ④ is prose to every reader — a record carrying it still reads FOUND on its head and its tier STANDS', (() => { const r = tplOn(contractReviewRecordLines({ headSha: TPL_REAL_HEAD, reviewedBy: 'session_01PINFOUR' }).join('\n'), TPL_REAL_HEAD); return r.state === 'found' && r.sha === TPL_REAL_HEAD && servedTierStands(r.served); })());
+  t('the notes explain ④: which faces, judged against the cited code and the accepted scenario, an ADR against its first consumer, the cited code READ never reviewed', ['on the schema and rules faces only', 'against the code it cites', 'scenario it is accepted', 'first consumer and its execution plan', 'READ to judge it, never reviewed', 'narrowing and declaration faces carry no ④'].every((frag) => says(TPL_TEXT, frag)));
   // The branch placeholder is ASSEMBLED in the module body so the derivation
   // does not read it as a dead path population. This pin spells the printed
   // form OUT, here where the scan does not reach, so the assembly can never
@@ -1800,6 +1873,13 @@ export async function selfTest() {
   const printedBrief = cli(['--brief-template']);
   t('⭐ `--brief-template` prints exactly `contractReviewBriefLines()` and exits 0', printedBrief.status === 0 && printedBrief.stdout === `${contractReviewBriefLines().join('\n')}\n`, `status ${printedBrief.status} ${String(printedBrief.stderr).split('\n')[0]}`);
   t('…and the usage names it', usageLines().join('\n').includes('--brief-template'));
+  // -- item ④ in the brief: the adversarial design-judgment instruction and the surface-file scope rule --
+  t('⭐ the brief carries the ④ instruction, adversarial: hold against the code it cites and the accepted scenario, an ADR against its first consumer and execution plan, try to break it, a must-fix is a FAIL', ['④ Design judgment', 'against the code it cites', 'scenario it is accepted against', 'first consumer and its execution plan', 'try to break the design', 'must-fix or should-fix', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(BRIEF_BODY, frag)));
+  t('…and the surface-file scope rule: ④ judges the `hits` files ONLY; lockfiles, generated output, changesets and prose elsewhere are not reviewed; the cited code is READ, never reviewed', ['④ judges the `hits` files ONLY', 'lockfiles, generated output, changesets and prose', 'not reviewed', 'READ to judge them, never reviewed'].every((frag) => says(BRIEF_BODY, frag)));
+  t('…on the schema and rules faces and over a mixed path list alike', ['schema', 'rules'].every((id) => contractReviewBriefLines({ face: id }).join('\n').includes('④ Design judgment')) && contractReviewBriefLines({ paths: MIXED }).join('\n').includes('④ judges the `hits` files ONLY'));
+  t('⛔ the narrowing brief carries no ④ and no surface-file rule — its floor is the whole diff outside the prose faces', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return !b.includes('④') && !b.includes('files ONLY'); })());
+  t('⛔ nor the declaration brief, below tier', !contractReviewBriefLines({ face: 'declaration' }).join('\n').includes('④'));
+  t('⛔ the ④ text keeps the brief free of angle brackets, model identifiers and digit-shaped card numbers', !BRIEF_TEXT.includes('<') && !BRIEF_TEXT.includes('>') && !isModelIdentifierToken(BRIEF_TEXT) && !/#\d/.test(BRIEF_BODY));
 
   // -- #18701: ONE thread set -- what the template STATES, the guard READS -----
   //

@@ -1666,6 +1666,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // The CHILD row's own `settledWhen` verdict (objectui#11815), judged
           // against the row the table hands this cell — never the parent record.
           deadlineSettled: isDeadlineSettled(def, row, { scope: predicateScope, fields: objectSchema?.fields }),
+          // Every cell this builder makes is one of a table COLUMN's cells
+          // (objectstack#26344, the grid's objectstack#25884): an undeclared
+          // `date` reads in one absolute face down the column, its relative
+          // phrase the tooltip. A declared `format` still wins.
+          inGridColumn: true,
         });
       };
     };

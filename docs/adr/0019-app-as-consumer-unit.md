@@ -1,6 +1,7 @@
 # ADR-0019: App as the Consumer-Facing Unit
 
 **Status**: Proposed (v3 — narrowed to the consumer-surface decision)
+**Shares its number with**: [`0019-approval-as-flow-node`](./0019-approval-as-flow-node.md) (Collapse Approval into Flow — approval as a durable-pause node) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0019-app-as-consumer-unit`.
 **Date**: 2026-05-31
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: ADR-0003 (Package as First-Class Citizen), ADR-0006 (Three-Layer Tenancy), ADR-0016 (Studio Package Authoring & Publish)

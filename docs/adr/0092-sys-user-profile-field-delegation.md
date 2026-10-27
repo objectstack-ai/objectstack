@@ -1,6 +1,6 @@
 # ADR-0092: Identity-table write guard — engine-enforced `managedBy: 'better-auth'`, with sys_user profile fields as the first whitelist
 
-- **Status:** Accepted
+**Status**: Accepted
 - **Date:** 2026-07-10 (proposed) · 2026-07-11 (revised: D2 generalized from a sys_user-only hook to a registry-driven guard over every better-auth-managed object, per review) · 2026-07-11 (accepted) · **2026-09-03 (amended: D5 — self-service edits of the whitelisted columns route through the generic data path; see the D5 Amendment)** · **2026-09-05 (amended: D1 — Tier 1 becomes `{name, image, locale}`, carrying the 2026-09-03 ruling on #14787; see the D1 Amendment)**
 - **Implementation:** #2816 (generic identity write guard — D2/D3/D6) → #2817 (sys_user edit affordance + form field gating — D4, gated on #2816)
 - **Deciders:** ObjectStack Protocol Architects

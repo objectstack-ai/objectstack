@@ -1,6 +1,6 @@
 # ADR-0098: Pinyin Search via a Locale-Gated Companion Column
 
-- **Status**: Accepted
+**Status**: Accepted
 - **Date**: 2026-07-16
 - **Issue**: #2486
 - **Extends**: ADR-0061 (record search architecture — purely additive), ADR-0045 (additive materialization), ADR-0079 (display-name contract)

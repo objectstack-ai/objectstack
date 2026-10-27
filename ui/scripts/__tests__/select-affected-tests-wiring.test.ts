@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
 import { workspaceRoot } from '../workspace-root.mjs';
+import { UI_JOBS } from './helpers/root-ci';
 
 /**
  * objectui#13350 — the two steps of the `Test UI` job that make the affected
@@ -14,7 +16,7 @@ import { workspaceRoot } from '../workspace-root.mjs';
  * runs this tree's suite; the objectui copy under `ui/.github/` runs nowhere.
  *
  * `Select the tests this change affects` (id `select`) appends the selector's
- * verdict line to `$GITHUB_OUTPUT`; `Run the ui tests (shard N/16)` reads one
+ * verdict line to `$GITHUB_OUTPUT`; `Run the ui tests (shard N/M)` reads one
  * output of that step into an env var and branches on it. The runner splits each appended
  * line at its first `=`, so the line `mode=affected` is the output `mode` with
  * the value `affected`. From objectui#12214 until this card the run step
@@ -33,7 +35,10 @@ import { workspaceRoot } from '../workspace-root.mjs';
  * `env:` names, and reads which command the run step chose off a `pnpm`
  * stand-in that records its argv.
  * Textual rather than YAML-parsed, for the reason `markdown-test-inputs.test.ts`
- * gives: what is under test is the bytes CI runs.
+ * gives: what is under test is the bytes CI runs. The matrix width M is not
+ * spelled here either: the monorepo's `scripts/ci-shard-matrix.mjs` reads it
+ * off the job's own `shard:` list, so resizing the matrix moves every `/M`
+ * below with it.
  *
  *   affected  a `pull_request` and a `merge_group` event hand vitest exactly the
  *             filters the selector wrote.
@@ -49,9 +54,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 /** Where the workflow runs: its steps' working directory, and the home of `.github/`. */
 const workflowRoot = workspaceRoot(repoRoot);
 const CI_YML = path.join(workflowRoot, '.github', 'workflows', 'ci.yml');
+const YAML = fs.readFileSync(CI_YML, 'utf8');
+/** The `test-ui` matrix width, read from the workflow by the one reader of shard sizes. */
+const SHARDS = shardTotal(YAML, UI_JOBS.test);
 
 const SELECT_HEADER = '      - name: Select the tests this change affects\n';
-const RUN_HEADER = '      - name: Run the ui tests (shard ${{ matrix.shard }}/16)\n';
+const RUN_HEADER = `      - name: Run the ui tests (shard \${{ matrix.shard }}/${SHARDS})\n`;
 /** The output reference a run step's `env:` value is, when it reads the select step. */
 const SELECT_OUTPUT = /^\$\{\{ steps\.select\.outputs\.([A-Za-z0-9_-]+) \}\}$/;
 
@@ -91,7 +99,6 @@ function readStep(yaml: string, header: string): Step {
   return { at, id, env, run: `${body.join('\n').trimEnd()}\n` };
 }
 
-const YAML = fs.readFileSync(CI_YML, 'utf8');
 const SELECT = readStep(YAML, SELECT_HEADER);
 const RUN = readStep(YAML, RUN_HEADER);
 
@@ -288,8 +295,8 @@ describe('the affected speed, both steps run as ci.yml writes them (objectui#133
     const shard = runShard({ name: 'pull_request', base: BASE_REF }, real.temp, real.outputs);
     expect(shard.argv.slice(0, AFFECTED_ARGV.length)).toEqual(AFFECTED_ARGV);
     expect(shard.argv.slice(-real.filters.length)).toEqual(real.filters);
-    expect(shard.argv).toContain('--shard=1/16');
-    expect(shard.log).toContain(`Affected speed: ${real.filters.length} vitest filter(s), shard 1 of 16.`);
+    expect(shard.argv).toContain(`--shard=1/${SHARDS}`);
+    expect(shard.log).toContain(`Affected speed: ${real.filters.length} vitest filter(s), shard 1 of ${SHARDS}.`);
   });
 
   it('a merge_group build hands vitest the same filters', () => {
@@ -306,7 +313,7 @@ describe('the affected speed, both steps run as ci.yml writes them (objectui#133
     const event: Event = { name: 'push', base: '' };
     const shard = runShard(event, temp, runSelect(event, temp, replay).outputs);
     expect(shard.argv.slice(0, FULL_ARGV.length)).toEqual(FULL_ARGV);
-    expect(shard.argv).toContain('--shard=1/16');
+    expect(shard.argv).toContain(`--shard=1/${SHARDS}`);
     expect(shard.argv.filter((arg) => real.filters.includes(arg))).toEqual([]);
   });
 

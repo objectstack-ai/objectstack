@@ -1,6 +1,6 @@
 # ADR-0103: `managedBy` write policy — split the overloaded `system` bucket, enforce engine-owned writes
 
-- **Status**: Accepted (D5 completed in v17 — see the #3355 addendum at the end:
+**Status**: Accepted (D5 completed in v17 — see the #3355 addendum at the end:
   the residual `system` bucket is renamed `system-data` and the bare value retired)
   · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): `sys_position_permission_set`, one of the RBAC link tables this record files as writable data, and `sys_position` / `sys_capability`, two of the provenance-column objects it sets apart, are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13); the policy stands. See the notes in the Context and the two addenda.
 - **Date**: 2026-07-19
