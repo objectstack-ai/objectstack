@@ -789,9 +789,12 @@ export function writeFailureLogMeta(
 
 /**
  * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
- * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
- * delete runs the referential pass that refuses an organization still owning
- * rows and keeps every row's reference to it.
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. An organization is
+ * deleted one at a time, through plugin-auth's organization delete: its
+ * refusal of an organization that still owns records and its
+ * `beforeDeleteOrganization` clean-up of the organization's teams, team members
+ * and admin grants run there, once per organization. A delete matching
+ * organizations by a filter runs neither, and no caller needs one.
  */
 function organizationPredicateDeleteRefusal(): Error {
   const err: any = new Error(
@@ -799,9 +802,10 @@ function organizationPredicateDeleteRefusal(): Error {
       'Delete each organization by its id.',
   );
   err.developerMessage =
-    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
-    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
-    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: organizations are deleted one at a time, because ` +
+    "plugin-auth's organization delete refuses an organization that still owns records and removes its teams, " +
+    'team members and admin grants per organization, and a predicate delete runs neither. Delete each organization ' +
+    `by id (engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
   err.code = 'DELETE_RESTRICTED';
   err.status = 409;
   err.httpStatus = 409;
@@ -19646,11 +19650,11 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
-      // [#24948] An organization is deleted by id or not at all. The predicate
-      // arm runs no referential cascade, so it could neither refuse an
-      // organization that still owns rows nor keep a single row from naming a
-      // deleted one; any delete not by id is refused here, whatever the driver
-      // offers, before any hook or write.
+      // [#24948] An organization is deleted by id or not at all: plugin-auth's
+      // organization delete refuses one that still owns records and removes its
+      // auth structure per organization, which a predicate delete would skip
+      // (see `organizationPredicateDeleteRefusal`). Any delete not by id is
+      // refused here, whatever the driver offers, before any hook or write.
       if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
         throw organizationPredicateDeleteRefusal();
       }
