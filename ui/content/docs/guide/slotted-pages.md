@@ -126,6 +126,18 @@ its own tab is a one-word change on the relationship, not a page-authoring task.
 `relatedLayout: 'tabs' | 'stack'` remains an app-level override (force
 all-own-tabs / all-stacked).
 
+That strip is the page at its narrow width. The console lays the same page
+out by the width of the view it occupies (the drawer, the split pane or the
+full page), never by the viewport: from **1280 px** the tabs become three
+resident columns — details · timeline (the discussion composer on top, then
+Activity and History) · related (each related list as a card, then Approvals,
+Attachments and the record's created/updated line); from **1024 px** the
+related column folds into a rail behind a **Related (N)** toggle; below
+1024 px, and always in a drawer or split pane, the strip as described above.
+One header serves every width, and a slotted `details` body fills the details
+column. A slotted `tabs` strip is your own strip, so it stays a strip at every
+width; `?tab=` selects a tab in the strip and is ignored by the columns.
+
 Related lists are additionally gated on the current user's **object-level
 read permission** for the child object: a relationship whose child the user
 cannot read produces no section and no tab (and the `record:related_list`
