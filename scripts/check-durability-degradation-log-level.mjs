@@ -3741,6 +3741,32 @@ function readInventionKey(f) {
     return `${f.file}::${f.fn ?? '<anonymous>'}`;
 }
 
+/**
+ * One shrink-only ledger against one rule's findings, shared by both rules
+ * (#26444). ONE-SIDED: a finding with no ledger row is a VIOLATION and fails; a
+ * ledger row no finding uses is STALE, which is reported and passes — deleting
+ * or fixing a file must not red a PR that never touched this gate. Until the
+ * stale row is deleted it re-licenses that key, and the report says so.
+ *
+ * @param {object[]} findings
+ * @param {Map<string, object>} allowed ledger rows by key
+ * @param {(f: object) => string} keyOf a finding's ledger key
+ * @returns {{violations: object[], stale: string[]}}
+ */
+function reconcileLedger(findings, allowed, keyOf) {
+    const used = new Set();
+    const violations = [];
+    for (const f of findings) {
+        const key = keyOf(f);
+        if (allowed.has(key)) {
+            used.add(key);
+            continue;
+        }
+        violations.push(f);
+    }
+    return { violations, stale: [...allowed.keys()].filter((k) => !used.has(k)) };
+}
+
 // ── The ratchet-remedy authority convention (#8435) ──────────────────────────
 //
 // The read-seam report's `OR :` line hands the author the baseline-expanding
@@ -3753,8 +3779,8 @@ function readInventionKey(f) {
 // declaration registries rather than debt ratchets: FAILURE_PROPAGATION_CALLEES
 // / FAILURE_PROPAGATION_SITES record HOW a failure is delivered (declaring one
 // is the correct fix, not a weakening), and the two baselines' stale-entry
-// messages tell the author to DELETE an entry, which is the ratchet tightening
-// and squarely their job.
+// reports tell the author to DELETE an entry, which is the ratchet tightening
+// and squarely their job (a stale entry passes since #26444; it is reported).
 //
 // ⛔ This STRENGTHENS ratchet governance and weakens nothing. No seam's verdict
 // moves, no baseline entry is added, and the findings this rule reports are
@@ -3898,18 +3924,7 @@ function runReadSeamRule({ list = false } = {}) {
 
     const baseline = loadReadInventionBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.fn}`, e]));
-    const violations = [];
-    const usedKeys = new Set();
-
-    for (const f of findings) {
-        const key = readInventionKey(f);
-        if (allowed.has(key)) {
-            usedKeys.add(key);
-            continue;
-        }
-        violations.push(f);
-    }
-    const stale = [...allowed.keys()].filter((k) => !usedKeys.has(k));
+    const { violations, stale } = reconcileLedger(findings, allowed, readInventionKey);
 
     let failed = false;
 
@@ -3978,12 +3993,11 @@ function runReadSeamRule({ list = false } = {}) {
     }
 
     if (stale.length > 0) {
-        failed = true;
-        console.error(
-            `\n✗ ${stale.length} stale entr(ies) in scripts/durability-read-invention.baseline.json — the seam no longer invents an unreported answer, so delete the entry (the baseline is shrink-only):\n`,
+        console.log(
+            `\n↓ ${stale.length} stale entr(ies) in scripts/durability-read-invention.baseline.json — the seam no longer invents an unreported answer. Passing; delete the entry (the baseline is shrink-only) — until then it re-licenses that seam:\n`,
         );
-        for (const k of stale) console.error(`  ${k}`);
-        console.error('');
+        for (const k of stale) console.log(`  ${k}`);
+        console.log('');
     }
 
     // A discriminator nothing consults is a licence waiting for the next catch
@@ -4219,21 +4233,10 @@ function run({ list = false } = {}) {
 
     const baseline = loadBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [baselineEntryKey(e), e]));
-    const violations = [];
-    const usedBaselineKeys = new Set();
-
-    for (const f of findings) {
-        const key = baselineKey(f);
-        if (allowed.has(key)) {
-            usedBaselineKeys.add(key);
-            continue;
-        }
-        violations.push(f);
-    }
-
-    // Shrink-only: a baseline entry whose violation is gone must be deleted, so
-    // the file can never quietly re-license a site that was already fixed.
-    const stale = [...allowed.keys()].filter((k) => !usedBaselineKeys.has(k));
+    // Shrink-only, one-sided (#26444): a baseline entry whose violation is gone
+    // is reported for deletion on every run, but passes — until it is deleted it
+    // can quietly re-license a site that was already fixed, and the report says so.
+    const { violations, stale } = reconcileLedger(findings, allowed, baselineKey);
 
     let failed = false;
 
@@ -4290,12 +4293,11 @@ function run({ list = false } = {}) {
     }
 
     if (stale.length > 0) {
-        failed = true;
-        console.error(
-            `\n✗ ${stale.length} stale baseline entr(ies) in scripts/durability-degradation.baseline.json — the site no longer violates, so delete the entry (the baseline is shrink-only):\n`,
+        console.log(
+            `\n↓ ${stale.length} stale baseline entr(ies) in scripts/durability-degradation.baseline.json — the site no longer violates. Passing; delete the entry (the baseline is shrink-only) — until then it re-licenses that site:\n`,
         );
-        for (const k of stale) console.error(`  ${k}`);
-        console.error('');
+        for (const k of stale) console.log(`  ${k}`);
+        console.log('');
     }
 
     if (!failed) {
@@ -4557,6 +4559,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'flags: #22985 — `.apply(recv, args)` and `.bind(recv)(…)` invoke their target too': 1,
         'passes: #22985 — a bare `.bind(recv)` invokes nothing, so it guards nothing': 1,
         'passes: #22985 — a shadowing parameter or a `let` binding is not resolved as an alias': 1,
+        'ledger: a stale baseline entry PASSES and is reported; an unledgered finding still FAILS (#26444)': 1,
     }),
     // Partition 2 — the read-seam invention rule's table, driven by
     // `selfTestReadSeams()`.
@@ -4618,6 +4621,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'passes: #13474 — a later same-named body that reads must not INVENT a seam at a call it does not enclose': 1,
         'flags: #13474 — three same-named bodies, resolved from inside the first (the live `lookup` shape)': 1,
         'flags: #13474 — a name declared ONCE still resolves from outside its scope (the fix must not narrow the census)': 1,
+        'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
     }),
 });
 
@@ -4628,8 +4632,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // added to the roster with no size pin at all: the lookup below reads
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
-    selfTest: 68,
-    selfTestReadSeams: 57,
+    selfTest: 69,
+    selfTestReadSeams: 58,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -4637,7 +4641,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 125;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 127;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -5845,6 +5849,24 @@ function selfTest() {
     // Orthogonal to the verdict handshake: the handshake catches a `return`
     // that skips this line entirely, the floor catches a run that REACHES this
     // line having stopped running cases.
+    // The ledger is ONE-SIDED (#26444), driven through the comparison `run()` uses.
+    {
+        const row = 'ledger: a stale baseline entry PASSES and is reported; an unledgered finding still FAILS (#26444)';
+        registerCase(row);
+        const hit = { file: 'a.ts', callee: 'syncSchema' };
+        const ledger = new Map([[baselineEntryKey(hit), hit]]);
+        const gone = reconcileLedger([], ledger, baselineKey);
+        const kept = reconcileLedger([hit], ledger, baselineKey);
+        const fresh = reconcileLedger([hit, { file: 'b.ts', callee: 'syncSchema' }], ledger, baselineKey);
+        if (gone.violations.length !== 0 || gone.stale.length !== 1
+            || kept.violations.length !== 0 || kept.stale.length !== 0
+            || fresh.violations.length !== 1 || fresh.stale.length !== 0) {
+            failures++;
+            console.error(`  ✗ ${row}`);
+        } else {
+            console.log(`  ✓ ${row}`);
+        }
+    }
     failures += checkSelfTestFloor(
         'selfTest',
         cases.map((c) => c.name),
@@ -7120,6 +7142,24 @@ function selfTestReadSeams() {
     // Orthogonal to the verdict handshake: the handshake catches a `return`
     // that skips this line entirely, the floor catches a run that REACHES this
     // line having stopped running cases.
+    // The ledger is ONE-SIDED (#26444), driven through the comparison `runReadSeamRule()` uses.
+    {
+        const row = 'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)';
+        registerCase(row);
+        const hit = { file: 'a.ts', fn: 'load' };
+        const ledger = new Map([[readInventionKey(hit), hit]]);
+        const gone = reconcileLedger([], ledger, readInventionKey);
+        const kept = reconcileLedger([hit], ledger, readInventionKey);
+        const fresh = reconcileLedger([hit, { file: 'b.ts', fn: 'load' }], ledger, readInventionKey);
+        if (gone.violations.length !== 0 || gone.stale.length !== 1
+            || kept.violations.length !== 0 || kept.stale.length !== 0
+            || fresh.violations.length !== 1 || fresh.stale.length !== 0) {
+            failures++;
+            console.error(`  ✗ ${row}`);
+        } else {
+            console.log(`  ✓ ${row}`);
+        }
+    }
     failures += checkSelfTestFloor(
         'selfTestReadSeams',
         cases.map((c) => c.name),
