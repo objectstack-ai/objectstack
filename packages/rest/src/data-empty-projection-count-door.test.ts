@@ -15,7 +15,7 @@
  * | `GET ?$count=maybe`, `?$count=1`, `?count=` (with `$top`) | 200, `total` reported | 400 naming the spelling |
  * | `POST {"select":""}`, `{"fields":[]}` | 200, every column | 400 naming the key |
  * | `POST {"count":"maybe"}` | 400 `VALIDATION_FAILED` (the body schema) | unchanged |
- * | `GET /:id?select=`, `?select=,` | 200, every column | 400 naming `select` |
+ * | `GET /:id?select=`, `?select=,` | 200, every column | `VALIDATION_ERROR` naming `select`, at this route's 404 (it rewrites every 400, as for `?select=nope`) |
  * | `GET ?$select=label`, `?$count=true` / `false`, absent; `GET /:id?select=label` | 200 | unchanged |
  *
  * The per-spelling pin with a recording engine is `metadata-protocol`'s
@@ -167,11 +167,17 @@ describe('[#26644] an empty projection and an unrecognised count flag on the Dat
     expect(res.body.code).toBe('VALIDATION_FAILED');
   });
 
-  it('GET by id: 400 VALIDATION_ERROR naming `select` — no read', async () => {
+  it("GET by id: VALIDATION_ERROR naming `select`, at the status this route gives every projection refusal — no read", async () => {
+    // This route's catch rewrites every 400 into a 404 (`crud-routes.ts`: "a
+    // bad id is a miss"), so its projection refusals already answer 404 — an
+    // unknown `select` field included. The empty projection joins that answer
+    // rather than inventing a second one here; the code is what differs.
+    const unknownField = await byId({ select: 'nope' });
+    expect(unknownField.body.code, JSON.stringify(unknownField.body)).toBe('INVALID_FIELD');
     const before = reads.n;
     for (const select of ['', ',']) {
       const res = await byId({ select });
-      expect(res.status, `select=${JSON.stringify(select)}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.status, `select=${JSON.stringify(select)}: ${JSON.stringify(res.body)}`).toBe(unknownField.status);
       expect(res.body.code).toBe('VALIDATION_ERROR');
       expect(res.body.error).toContain("Query parameter 'select' names no field");
     }
