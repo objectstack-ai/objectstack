@@ -410,3 +410,26 @@ describe('the activation door\'s own contract', () => {
         expect(messageOf(res)).toContain('ADR-0126 §8');
     });
 });
+
+// [#26474] The row is written ON BEHALF of the administrator who asked, so the
+// door hands the engine that caller's own envelope, elevated: the elevation
+// keeps the engine-owned ledger writable, and the caller's `userId` is what the
+// engine stamps on `created_by` / `updated_by` and the audit plugin records as
+// `user_id` / `actor`. A bare system context — what the store used before —
+// names nobody, which left all four fields null.
+describe('the activation write names the caller who asked for it', () => {
+    it.each([
+        ['a tenant admin under `single`', 'single', TENANT_ADMIN],
+        ['the platform operator under `isolated`', 'isolated', PLATFORM_OPERATOR],
+    ] as const)('%s: the engine is handed the caller\'s envelope, elevated', async (_label, posture, caller) => {
+        const h = boot(posture);
+        const ctx = caller();
+
+        expect(statusOf(await flip(h, ctx))).toBe(200);
+
+        expect(h.setActionActive).toHaveBeenCalledTimes(1);
+        const [, options] = h.setActionActive.mock.calls[0];
+        expect(options?.context).toEqual({ ...(ctx.executionContext as object), isSystem: true });
+        expect(options?.context?.userId).toBe((ctx.executionContext as { userId: string }).userId);
+    });
+});
