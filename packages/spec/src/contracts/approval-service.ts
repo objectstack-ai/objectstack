@@ -933,6 +933,44 @@ export interface IApprovalService {
   getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null>;
 
   /**
+   * **Is this record held by a locking approval?** — the record-anchored half
+   * of {@link ApprovalRequestRow.lock_record}, for a caller who sees no request
+   * row (the #25934 ruling A, 2026-10-26).
+   *
+   * `lock_record` rides the request row, and a caller who is not a participant
+   * is rightly served no request row (#8652: request content is visible to
+   * record readers only behind the object's `approvalsVisibleToReaders`). So
+   * that promise — a client never has to guess, and never offers an edit the
+   * server will refuse with `RECORD_LOCKED` — had no carrier for them. This is
+   * the carrier.
+   *
+   * - **Who is answered:** every caller who can READ the record, judged by
+   *   reading it AS THE CALLER (object read, then row-level access). A caller
+   *   who cannot read it gets `null` — exactly the answer for a record id that
+   *   does not exist, ⛔ never one that tells the two apart. A caller refused
+   *   the object's read outright is refused the same way for every id.
+   * - **What is answered:** `locked` only. `true` when a pending request on the
+   *   record comes from a node whose `lockRecord` is not `false` — the same
+   *   judgement, off the same snapshot, the record-lock `beforeUpdate` hook
+   *   enforces. ⛔ No request id, node, participants or `pending` flag: whether
+   *   the caller may see the request is still `approvalsVisibleToReaders`'
+   *   question, and this member does not answer it.
+   *
+   * **Optional, and its absence is loud:** an approvals implementation without
+   * it still satisfies this contract, so a door probes for presence and answers
+   * `501`, never a guess in either direction.
+   *
+   * @param object - The target object's name
+   * @param recordId - The target record's id
+   * @returns `{ locked }`, or `null` when the caller cannot read that record
+   */
+  getRecordLock?(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<{ locked: boolean } | null>;
+
+  /**
    * Record a decision on a node-driven request. Honours the node's
    * `unanimous` behaviour, finalises the request when satisfied, and resumes
    * the owning flow run down the matching `approve` / `reject` edge.

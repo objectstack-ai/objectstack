@@ -105,7 +105,7 @@ export interface ActionButtonRendererProps {
   /**
    * The host-EVALUATED enablement verdict, declared rather than left to the
    * index signature (objectui#9131). `SchemaRenderer` evaluates the node's
-   * `disabled` / `disabledOn` and forwards the answer under this name as
+   * `disabled` and forwards the answer under this name as
    * `disabled: __disabled || undefined`. It is consumed by name below and
    * therefore never reaches the DOM spread — see the destructure.
    */

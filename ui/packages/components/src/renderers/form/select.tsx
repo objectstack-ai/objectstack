@@ -21,8 +21,8 @@ import { toControlValue, matchOptionValue } from './option-value';
 import React from 'react';
 
 const SelectRenderer = ({ schema, className, onChange, value, disabled: hostDisabled, ...props }: { schema: SelectSchema; className?: string; onChange?: (val: any) => void; value?: any; disabled?: boolean; [key: string]: any }) => {
-  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
-  // `disabledOn`, not the raw authored key — which may be a predicate STRING,
+  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled`,
+  // not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).
   // Extract designer-related props
   const { 

@@ -25,6 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type { ScreenFieldSpec, ScreenSpec } from '@objectstack/spec/contracts';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { SCREEN_FIELD_RECORD_LINK_TYPE } from '@objectstack/spec/automation';
 import { isFileIdToken } from '@objectstack/spec/data';
 
 /** One violation of a screen's declared field contract. */
@@ -33,8 +34,8 @@ export interface ScreenInputIssue {
   field: string;
   /**
    * Which constraint the bag violated, from the field-level catalog
-   * (ADR-0114 D2) — `required`, `invalid_type`, `min_value`, `max_value` and
-   * `unknown_field`. Typed as `FieldErrorCode` rather than a local literal
+   * (ADR-0114 D2) — `required`, `invalid_type`, `invalid_value`, `min_value`,
+   * `max_value` and `unknown_field`. Typed as `FieldErrorCode` rather than a local literal
    * union for the reason `ActionParamIssue` gives: a screen field, an action
    * param and a record column must not drift into three vocabularies for the
    * same conditions. ⛔ Every member here is one the catalog ALREADY declares —
@@ -74,6 +75,15 @@ const SCREEN_FIELD_VALUE_DOMAINS: ReadonlyMap<string, { admits: (value: unknown)
   ]);
 
 /**
+ * Whether a screen field is the read-only record link (`type: 'record_link'`):
+ * it SHOWS a record by the id its `defaultValue` was served with, and takes no
+ * value. Matched exactly, as the value domains are.
+ */
+function isRecordLinkField(field: { type?: string }): boolean {
+  return field.type === SCREEN_FIELD_RECORD_LINK_TYPE;
+}
+
+/**
  * Whether a screen surfaces a field contract worth enforcing.
  *
  * Two screens deliberately declare NOTHING and so keep the historical
@@ -104,6 +114,7 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *  - the VALUE SHAPE of a `type: 'number'` field (#17306) and of a
  *    `type: 'file'` field (#25801);
  *  - the declared numeric bound pair `min` / `max` (#17306);
+ *  - no value at all under a `type: 'record_link'` field;
  *  - undeclared keys.
  *
  * `visibleWhen` is resolved FIRST, by the caller-supplied {@link visibility}
@@ -158,6 +169,17 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * No other widget hint is read as a value domain: the set is
  * {@link SCREEN_FIELD_VALUE_DOMAINS}, and a member joins it by ruling.
+ *
+ * `'record_link'` is the one member that takes NO value (ruling B on the
+ * screen-flow result screen). The field shows a record — the id its
+ * `defaultValue` was served with — as a link, and nothing the user does on the
+ * screen changes it. So a resume that carries ANY value under its name, `null`
+ * included, is refused with `invalid_value` (the catalog's member for a value
+ * refused for a reason no other member names; ADR-0114 D2, no new code), ⛔
+ * never dropped and ⛔ never bound: binding it would let a caller who skips the
+ * console overwrite the flow variable the id came from, and dropping it would
+ * answer a wrong request with success. Visibility does not matter here — a
+ * hidden display field takes no value either.
  */
 export function validateScreenInputs(
   fields: readonly ScreenFieldSpec[],
@@ -205,6 +227,18 @@ export function validateScreenInputs(
       field: field.name,
       code: 'invalid_type',
       message: `Screen field "${field.name}" must be ${domain.expected}`,
+    });
+  }
+
+  // A read-only record link takes no value, visible or not — the key itself is
+  // the error, so presence is judged on the key, not on `isPresent`.
+  for (const field of declared.values()) {
+    if (!isRecordLinkField(field)) continue;
+    if (!Object.prototype.hasOwnProperty.call(bag, field.name)) continue;
+    issues.push({
+      field: field.name,
+      code: 'invalid_value',
+      message: `Screen field "${field.name}" shows a record and takes no value — leave it out of the resume`,
     });
   }
 
@@ -265,6 +299,8 @@ export function declaredScreenFieldNames(fields: readonly ScreenFieldSpec[]): st
  */
 export interface ScreenFieldContract {
   name: string;
+  /** Read for one member only: a `'record_link'` field is never answered by a caller. */
+  type?: string;
   required?: boolean;
   visibleWhen?: string;
 }
@@ -482,6 +518,9 @@ export function judgeHeadlessScreen(
   const supplied: string[] = [];
   const bag: Record<string, unknown> = {};
   for (const field of declared) {
+    // A read-only record link takes no value, so no caller can answer it: a
+    // param that happens to share its name does not drive this screen.
+    if (isRecordLinkField(field)) continue;
     if (!callerSupplied(field.name, context)) continue;
     supplied.push(field.name);
     bag[field.name] = variables.get(field.name);
