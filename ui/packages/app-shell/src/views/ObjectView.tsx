@@ -11,19 +11,9 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, createElement, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
-import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, isRecordScopedAction, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
-import {
-    parseUserFilterParams,
-    applyUserFilterParams,
-    parseListStateParams,
-    applyListStateParams,
-    userFilterParamsKey,
-    type ListStatePatch,
-    type ListUrlState,
-} from './userFilterUrlState.js';
-import { buildListFilterKey, readListFilterState, writeListFilterState } from './listFilterStorage.js';
+import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
+import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import { useObjectListPreferences, type ListViewPreference } from '../context/ListPreferencesProvider.js';
-import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
@@ -88,20 +78,16 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { ActionProvider, SchemaRenderer, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
-import { useOfferedNavRunAction } from '../hooks/useNavRunAction.js';
-import { actionRendersAt } from '@object-ui/types';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import {
     VIEW_TYPE_ICONS,
     FALLBACK_USER,
     substituteFilterTokens,
     declaredPrimaryToolbarAction,
-    selectFilterParams,
     MOBILE_FAB_LIST_CLEARANCE,
 } from './objectViewHelpers.js';
 import {
     defaultListColumnsFromObject,
-    bulkWiredActionNamesKey,
     buildAddViewSpec,
     loadViewOverrides,
     buildViewTabs,
@@ -123,6 +109,8 @@ import { useObjectViewLiveData } from './objectViewLiveData.js';
 import { useObjectViewIdentity } from './objectViewIdentity.js';
 import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
+import { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
+import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -795,83 +783,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? { ...baseView, ...viewDraft }
         : baseView;
 
-    // objectui#12462 (ruling A-narrow) — the header does not draw a duplicate of
-    // the selection bar. The bar is the list toolbar in its selection mode: a
-    // `list_toolbar` action the ACTIVE view wires to it (`bulkActions`, or a
-    // `bulkActionDefs` entry) is still drawn at its declared placement, on the
-    // rows it acts on, so the header's permanent copy is the duplicate. Only a
-    // RECORD-SCOPED action leaves (`isRecordScopedAction`: it also mounts on
-    // rows or records). Launched from the header it runs on exactly one ticked
-    // row, which the bar's per-record run covers. An object-level action keeps
-    // its header entry, because it can run with nothing selected and the bar
-    // cannot. Nothing else moves: the bar reads the same view keys itself.
-    //
-    // The names are the ones `ObjectGrid` folds into its bar from the keys this
-    // page relays to it (see `renderListView`): every non-empty `bulkActions`
-    // name except `delete`, which the grid routes to its built-in bulk delete
-    // rather than to an object action, and the `name` of every `bulkActionDefs`
-    // entry the grid can render. Keyed on a string of the names, not on
-    // `activeView`, which is a fresh object on every render while a draft is
-    // open (AGENTS.md #10).
-    const bulkWiredNamesKey = bulkWiredActionNamesKey(activeView);
-    const headerToolbarActions = useMemo(() => {
-        const wired = new Set<string>(JSON.parse(bulkWiredNamesKey) as string[]);
-        if (wired.size === 0) return localizedToolbarActions;
-        return localizedToolbarActions.filter(
-            (a: any) => !(typeof a?.name === 'string' && wired.has(a.name) && isRecordScopedAction(a)),
-        );
-    }, [localizedToolbarActions, bulkWiredNamesKey]);
-
-    // [#5216] The DECLARED nav `runAction` slot, consumed generically.
-    // An object nav entry declaring `runAction: '<name>'` resolves (via
-    // `resolveHref`) to this list's href carrying `?runAction=`; landing here
-    // runs that action once, through the ordinary execute path.
-    //
-    // Arm only on an action THIS toolbar actually renders — `list_toolbar` is
-    // the slot's surface, so a name that only exists at `record_header` cannot
-    // be triggered from here and must not spend the one-shot intent (#4123).
-    // That is also why it reads `headerToolbarActions`: an action that left the
-    // header for the selection bar (objectui#12462) is not armed either, and the
-    // link stays in the URL, as for any name this header does not draw.
-    // `sys_environment` is excluded because `EnvironmentListToolbar` owns the
-    // arming there: it must additionally wait for entitlements to resolve, and
-    // two consumers of one param would race to strip it.
-    //
-    // [objectui#4191] …and only on an action its author has not HIDDEN here:
-    // the action's own declared `visible` outranks the deep link. A hidden
-    // candidate is neither marked `autoTrigger` nor consumed, and the refusal
-    // is reported — see `useOfferedNavRunAction`, which evaluates the same
-    // predicate `action:button` does.
-    const navRunAction = useOfferedNavRunAction(
-        headerToolbarActions,
-        (a: any) => actionRendersAt(a, 'list_toolbar'),
-        !isEnvironmentList,
-    );
-    // Mark exactly the requested action `autoTrigger`, leaving every other
-    // action's identity untouched so the bar's ordering/overflow is unchanged.
-    const toolbarActionsWithDeepLink = useMemo(
-        () =>
-            navRunAction === null
-                ? headerToolbarActions
-                : headerToolbarActions.map((a: any) =>
-                      a?.name === navRunAction ? { ...a, autoTrigger: true } : a,
-                  ),
-        [headerToolbarActions, navRunAction],
-    );
-    // The schema-driven toolbar, typed as the `action:bar` node it is
-    // (objectui#11355), not as the `BaseSchema` the `schema` prop accepts: a key
-    // `ActionBarSchema` does not declare is refused here. On mobile it collapses
-    // all schema-driven toolbar actions into a single overflow menu, so the
-    // icon-only New / Import buttons stay visible without pushing the page title
-    // off-screen.
-    const toolbarBar: ActionBarSchema = {
-        type: 'action:bar',
-        location: 'list_toolbar',
-        actions: toolbarActionsWithDeepLink,
-        size: 'sm',
-        variant: 'outline',
-        mobileMaxVisible: 0,
-    };
+    // objectstack#25992 slice 8: the header toolbar actions, the nav `runAction` deep link
+    // and the `action:bar` node moved to `./objectViewHeaderToolbar.ts`.
+    const { headerToolbarActions, toolbarActionsWithDeepLink, toolbarBar } = useObjectViewHeaderToolbar({
+        activeView,
+        localizedToolbarActions,
+        isEnvironmentList,
+    });
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -897,122 +815,25 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // A boolean, so the relay keys on a value (AGENTS.md #10).
     const activeViewIsSaved = !!baseView && isSavedViewId(savedViews, baseView.id);
 
-    /**
-     * objectui#11860 — the list's toolbar state in the URL: the Filter panel's
-     * conditions, the search term, the sort and the grouping, under the `uf_`
-     * family `userFilterUrlState` owns (its header names the params and their
-     * shapes). Panels and dialogs stay out of it.
-     *
-     * The SEED — what the list opens with — is decided once per list identity
-     * (object + view, the same identity `renderListView` keys the list on;
-     * `ListView` reads its initial filters and search once, at mount):
-     *
-     * 1. The URL, when it carries any `uf_*` state this page did not write
-     *    itself — an opened link, a reload, Back. It is then the WHOLE state:
-     *    the per-browser cache is not consulted, so a shared link opens the
-     *    same list for everyone who may read it. A piece the URL lacks is
-     *    absent, not filled from storage.
-     * 2. Otherwise the user's own state (objectui#12418, `listPrefs`): the
-     *    Filter panel's conditions and the sort they left this view with, and
-     *    the search term from the per-user cache (`listFilterStorage`); the
-     *    view's own sort when they stored none, and its own grouping. The
-     *    seed waits until that state has been read (`listPrefs.ready`), so a
-     *    second browser opens on it rather than on an empty cache.
-     *
-     * Then the seed is written back into the URL (replace, never a new history
-     * entry), so the address bar shows the list on screen: a restored filter
-     * is in the link a user copies, and an entry dropped on load (a field the
-     * object does not declare or the user cannot read, a condition the spec
-     * refuses) leaves the address bar too.
-     *
-     * "Did this page write it" is `ownListParamsRef`: the `uf_*` params as the
-     * last write by this page left them. It matters when the identity moves
-     * WITHOUT a navigation — the saved views arrive after the first render and
-     * the active view resolves to another one — where params this page wrote
-     * for the first view would otherwise read as a link to the second. A real
-     * view switch navigates to a path with no query string, so it starts from
-     * the cache, and the ad-hoc params never follow the user into another view.
-     */
-    // objectui#12418 — "Reset view" opens the list again as the view declares
-    // it: the identity moves, so the list remounts and re-seeds. A reset is the
-    // one case that WANTS the list's own state thrown away (AGENTS.md #8 is
-    // about refreshing data, which never does).
-    const [listResetGeneration, setListResetGeneration] = useState(0);
-    const listIdentityKey = activeView?.id
-        ? `${objectName}-${activeView.id}${listResetGeneration ? `~${listResetGeneration}` : ''}`
-        : undefined;
-    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState } | undefined>(undefined);
-    const ownListParamsRef = useRef<string | undefined>(undefined);
-    if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
-        const carried = userFilterParamsKey(searchParams);
-        if (carried && carried !== ownListParamsRef.current) {
-            // A field the object does not declare (a stale link) or one this
-            // user cannot read is dropped. Field-level permissions gate only
-            // once loaded — the same gate `ListView` puts on its columns.
-            const acceptField = (field: string) =>
-                !!objectDef.fields?.[field]
-                && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
-            listSeedRef.current = {
-                key: listIdentityKey,
-                source: 'url',
-                state: parseListStateParams(searchParams, acceptField),
-            };
-        } else {
-            const stored = readListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
-            const viewPref = listPrefs.preference.perView?.[activeView.id];
-            listSeedRef.current = {
-                key: listIdentityKey,
-                source: 'storage',
-                state: {
-                    filters: (viewPref?.filters ?? undefined) as ListUrlState['filters'],
-                    search: stored?.search || undefined,
-                    sort: viewPref?.sort,
-                },
-            };
-        }
-    }
-    useEffect(() => {
-        const seed = listSeedRef.current;
-        if (!seed || seed.key !== listIdentityKey) return;
-        const next = applyListStateParams(searchParams, {
-            filters: seed.state.filters ?? null,
-            search: seed.state.search ?? null,
-            sort: seed.state.sort ?? null,
-            grouping: seed.state.grouping ?? null,
-        });
-        // Only a mirror of the CACHE is this page's own write. A link's params,
-        // even rewritten, stay the link's: the identity can still move to the
-        // view the link names once the saved views arrive.
-        if (seed.source === 'storage') ownListParamsRef.current = userFilterParamsKey(next);
-        if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
-        // Once per list identity, by design: later URL writes are the list's
-        // own changes, already on screen. (`listPrefs.ready` because the seed
-        // is taken only once the user's own state has been read.)
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-    }, [listIdentityKey, listPrefs.ready]);
-    /** Write the list's own change into the URL — replace, never a history entry per keystroke. */
-    const writeListUrlState = useCallback(
-        (patch: ListStatePatch) => {
-            setSearchParams(prev => {
-                const next = applyListStateParams(prev, patch);
-                ownListParamsRef.current = userFilterParamsKey(next);
-                return next;
-            }, { replace: true });
-        },
-        [setSearchParams],
-    );
-
-    /**
-     * objectui#12418 — "Reset view": drop this user's sort, filters and column
-     * layout for the active view, and open the list again as the view declares
-     * it. Offered only while they have stored something for it.
-     */
-    const activeViewHasPreference = !!(activeView?.id && listPrefs.preference.perView?.[activeView.id]);
-    const handleResetView = useCallback(() => {
-        if (!activeView?.id) return;
-        listPrefs.resetView(activeView.id);
-        setListResetGeneration(g => g + 1);
-    }, [activeView?.id, listPrefs.resetView]);
+    // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
+    // "Reset view") moved to `./objectViewListUrlState.ts`.
+    const {
+        listIdentityKey,
+        listSeedRef,
+        ownListParamsRef,
+        writeListUrlState,
+        activeViewHasPreference,
+        handleResetView,
+    } = useObjectViewListUrlState({
+        objectName,
+        objectDef,
+        activeView,
+        listPrefs,
+        perms,
+        user,
+        searchParams,
+        setSearchParams,
+    });
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
@@ -1286,77 +1107,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         language,
     });
 
-    /**
-     * URL-derived equality filters in the form `?filter[<field>]=<value>`.
-     * Used by related-list "View All" buttons to scope the destination list
-     * to a single parent record. Emitted as ObjectQL triples (`[field, '=', value]`)
-     * which matches the shape consumed by the list view's data fetcher when
-     * merging base filters.
-     *
-     * Read through `drillUrlFilters` — the ONE module that owns this URL family
-     * — rather than a private regex here (objectui#9196). This route implements
-     * the EQUALITY arm only: an operator suffix it cannot execute
-     * (`?filter[amount][gte]=100`) is DROPPED, never downgraded to equality and
-     * never swallowed into the field name. The greedy capture this replaced did
-     * the last of those, emitting a condition against a field literally named
-     * `amount][gte` that no object declares — a silently wrong query, not an
-     * ignored parameter. Range operators live on the ADR-0055 `/data` surface
-     * (`parseUrlFilterTriples`); giving them to this route would widen an
-     * addressable public surface and is deliberately not done here.
-     */
-    // Dep on the serialized `filter[...]` entries only — `uf_*` user-filter
-    // params also live in the URL and must not invalidate this memo (a new
-    // array identity here rebuilds the whole list schema and refetches).
-    const filterParams = selectFilterParams(searchParams);
-    const filterParamsKey = filterParams.toString();
-    const urlFilters = useMemo(
-        // The params object is read DIRECTLY — nothing is serialized here and
-        // parsed back, so there is no round trip left for a character to be
-        // lost in (objectui#9287). `filterParamsKey` is the memo's identity
-        // only.
-        () => parseUrlEqualityFilterTriples(filterParams),
-        // Keyed on the SERIALIZED params, not on the object's identity:
-        // `filterParams` is rebuilt every render, so listing it would
-        // invalidate this memo on every unrelated `uf_*` write — the churn
-        // this key exists to prevent. Equal keys imply equal contents, so the
-        // captured object is never stale.
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-        [filterParamsKey],
-    );
-
-    /**
-     * End-user filter selections restored from `uf_*` URL params (ADR-0047
-     * persistence), read from the CURRENT location once per list identity —
-     * the identity `listSeedRef` seeds on and `renderListView` keys the list
-     * on (objectui#11992). A view switch keeps this page mounted and remounts
-     * the list, whose `UserFilters` read these once, at that mount. So each
-     * view starts from the selections its own URL carries: none on the bare
-     * path a view tab navigates to, the link's on a link, the entry's own on
-     * Back. A capture once per PAGE mount restored the first view's selections
-     * on every view after it, while their address bar showed none.
-     *
-     * Held per identity rather than re-read every render: the list's own
-     * writes (below) reach the URL after the list already shows them, and a
-     * new object here would rebuild the list's schema on every chip click.
-     * The router's location is read, not `window.location`: it is the one this
-     * page writes to and the one `listSeedRef` reads.
-     */
-    const ufSelectionsRef = useRef<{ key: string; selections: Record<string, string[]> | undefined } | undefined>(undefined);
-    if (listIdentityKey && ufSelectionsRef.current?.key !== listIdentityKey) {
-        ufSelectionsRef.current = { key: listIdentityKey, selections: parseUserFilterParams(searchParams) };
-    }
-    const initialUfSelections = listIdentityKey ? ufSelectionsRef.current?.selections : undefined;
-    const handleUserFilterSelectionsChange = useCallback(
-        (selections: Record<string, Array<string | number | boolean>>) => {
-            setSearchParams(prev => {
-                const next = applyUserFilterParams(prev, selections);
-                // objectui#11860 — this page's own write (see `ownListParamsRef`).
-                ownListParamsRef.current = userFilterParamsKey(next);
-                return next;
-            }, { replace: true });
-        },
-        [setSearchParams],
-    );
+    // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
+    // user-filter selections moved to `./objectViewListUrlState.ts`.
+    const { urlFilters, initialUfSelections, handleUserFilterSelectionsChange } = useObjectViewUrlFilters({
+        searchParams,
+        setSearchParams,
+        listIdentityKey,
+        ownListParamsRef,
+    });
 
     // objectui#10046 — the last `options` bag handed to `ListView`, so an
     // equal-content rebuild keeps its identity (see `isSameOptionsValue`).

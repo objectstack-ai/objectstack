@@ -2,7 +2,7 @@
  * Write the console's SDUI component manifest into a build output directory as
  * `sdui.manifest.json` (objectui#11403).
  *
- * The one generator is `packages/sdui-parser/scripts/gen-manifest.ts`: this
+ * The one generator is `apps/console/scripts/gen-manifest.ts`: this
  * calls its `buildArtifacts` and serializes nothing itself, so the shipped file
  * is byte for byte what that generator writes for the registry loaded in this
  * process. The caller registers that registry first — the generator's
@@ -16,7 +16,7 @@
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildArtifacts } from '../../../packages/sdui-parser/scripts/gen-manifest.ts';
+import { buildArtifacts } from './gen-manifest.ts';
 
 export const SDUI_MANIFEST_FILE = 'sdui.manifest.json';
 

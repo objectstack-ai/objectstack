@@ -25,6 +25,7 @@ import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectst
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
+import { collectSeedFiles } from '../utils/bundle-seed-files.js';
 import {
   printHeader,
   printKV,
@@ -765,6 +766,28 @@ export default class Validate extends Command {
         printError(`Package docs validation failed (${docErrors.length} issue${docErrors.length > 1 ? 's' : ''})`);
         // [#11642] `--json` on this same exit publishes them all as `errors`.
         printDocIssueErrors(docErrors, { remedy: JSON_FULL_LIST_REMEDY });
+        this.exit(1);
+      }
+
+      // 3d. [#25779] Seed files — each `seedFile(path)` a seed record names
+      //     must name a file under the directory holding the config, of a type
+      //     the extension or the reference tells. `os build` refuses the same
+      //     paths before it bundles the bytes into the artifact.
+      const seedFiles = collectSeedFiles(absolutePath, result.data as Record<string, unknown>);
+      if (seedFiles.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: seedFiles.issues,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Seed file validation failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
+        for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
         this.exit(1);
       }
 

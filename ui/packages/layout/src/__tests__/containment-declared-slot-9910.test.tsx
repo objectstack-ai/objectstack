@@ -35,8 +35,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, AdapterCtx } from '@object-ui/react';
-import { CHILD_LIST_KEY, manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { CHILD_LIST_KEY, manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 
 import { registerLayout } from '../index';
 

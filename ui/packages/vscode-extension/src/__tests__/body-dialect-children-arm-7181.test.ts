@@ -59,7 +59,7 @@
  * dropped that second arm — the past tense is load-bearing, because a reader
  * replaying this sentence against `@object-ui/core` today finds one spelling),
  * and the manifest
- * tier's `BASE_PROPS` in `@object-ui/sdui-parser` (which carries `children` and
+ * tier's `BASE_PROPS` in `@objectstack/sdui-parser` (which carries `children` and
  * does NOT carry `body`). Both readers in this package guarded their child-list
  * recursion on `schema.body` ALONE.
  *
@@ -525,7 +525,8 @@ describe('the two spellings of the retired key cannot drift (objectui#6771)', ()
 
   it('the extension and `sdui-parser` name the same key', () => {
     const parserSource = readFileSync(
-      resolve(HERE, '../../../sdui-parser/src/body-dialect.ts'),
+      // The one parser: the monorepo root's `packages/sdui-parser` (#25712 item 3).
+      resolve(HERE, '../../../../../packages/sdui-parser/src/body-dialect.ts'),
       'utf8'
     );
 

@@ -76,7 +76,7 @@ export type { ComponentInput } from '@object-ui/types';
  * - `'json'` — the JSON/SDUI authoring surface. A node an author (or an AI)
  *   writes as `{ "type": "…" }` in metadata.
  * - `'html'` — a `kind:'html'` page, written as constrained JSX text that
- *   `@object-ui/sdui-parser` COMPILES (never executes) into SDUI nodes, tag
+ *   `@objectstack/sdui-parser` COMPILES (never executes) into SDUI nodes, tag
  *   name straight through. `isHtmlTierNode` marks what that parser emitted.
  *
  * The distinction is not decorative here: it is the whole reason

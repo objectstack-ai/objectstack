@@ -620,7 +620,7 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/components': path.resolve(import.meta.dirname, '../../packages/components/src'),
   '@object-ui/core': path.resolve(import.meta.dirname, '../../packages/core/src'),
   '@object-ui/react-runtime': path.resolve(import.meta.dirname, '../../packages/react-runtime/src'),
-  '@object-ui/sdui-parser': path.resolve(import.meta.dirname, '../../packages/sdui-parser/src'),
+  '@objectstack/sdui-parser': path.resolve(import.meta.dirname, '../../../packages/sdui-parser/src'),
   '@object-ui/fields': path.resolve(import.meta.dirname, '../../packages/fields/src'),
   '@object-ui/layout': path.resolve(import.meta.dirname, '../../packages/layout/src'),
   '@object-ui/plugin-dashboard': path.resolve(import.meta.dirname, '../../packages/plugin-dashboard/src'),

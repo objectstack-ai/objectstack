@@ -1075,9 +1075,11 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
     // sit at the census re-measured for objectui#13464, when every published
     // package came to declare the field: 12 `false` and 17 arrays, the rest
     // `true` — so a lost workspace root, a broken glob parser or a renamed
-    // field is a failure and not a quiet pass.
-    expect(declaringPackages.length).toBeGreaterThanOrEqual(29);
-    expect(falsePackages.length).toBeGreaterThanOrEqual(12);
+    // field is a failure and not a quiet pass. One fewer since
+    // `@object-ui/sdui-parser` (a `false`) was retired for the root
+    // `@objectstack/sdui-parser` (objectstack#25712 item 3): 28, 11 of them `false`.
+    expect(declaringPackages.length).toBeGreaterThanOrEqual(28);
+    expect(falsePackages.length).toBeGreaterThanOrEqual(11);
     expect(arrayPackages.length).toBeGreaterThanOrEqual(17);
 
     // The census by name. `true` packages (`components`, `fields`, four
@@ -1111,7 +1113,6 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
       '@object-ui/providers',
       '@object-ui/react',
       '@object-ui/react-runtime',
-      '@object-ui/sdui-parser',
       '@object-ui/types',
     ]);
 

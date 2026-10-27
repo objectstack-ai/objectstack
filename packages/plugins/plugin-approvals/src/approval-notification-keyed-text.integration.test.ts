@@ -277,8 +277,10 @@ describe('#24978 — every approval notification carries its text as catalog key
         if (out.body === SENTINEL.body || out.body === e.payload?.body || out.body.includes('{{')) {
           offenders.push(`${site} ${locale} body: ${out.body}`);
         }
-        // Every body sentence names the record; in this locale, by this locale's label.
-        if (!out.body.includes(`${DEAL_LABELS[locale]} D_`)) offenders.push(`${site} ${locale} body names no localized record: ${out.body}`);
+        // Every body sentence names the record; in this locale, by this locale's
+        // label, and [#26181] by its title (each deal is titled by its key).
+        const title = site.split('@')[1]?.replace('>submitter', '');
+        if (!out.body.includes(`${DEAL_LABELS[locale]} ${title}`)) offenders.push(`${site} ${locale} body names no localized record: ${out.body}`);
       }
     }
     expect(offenders).toEqual([]);
@@ -344,18 +346,18 @@ describe('#24978 — end to end: a real messaging service renders each approver\
     }, asUser('u_sub'));
 
     expect(await inboxOf('u_zh')).toEqual([
-      { topic: 'approval.requested', title: '新的审批请求', body: '商机 D_1 正在等待您的审批决定。' },
+      { topic: 'approval.requested', title: '新的审批请求', body: '商机 Big deal 正在等待您的审批决定。' },
     ]);
     expect(await inboxOf('u_en')).toEqual([
-      { topic: 'approval.requested', title: 'Approval requested', body: 'A decision on Deal D_1 is waiting on you.' },
+      { topic: 'approval.requested', title: 'Approval requested', body: 'A decision on Deal Big deal is waiting on you.' },
     ]);
     expect(await inboxOf('u_none')).toEqual([
-      { topic: 'approval.requested', title: '承認依頼', body: '商談 D_1 について、あなたの承認判断が必要です。' },
+      { topic: 'approval.requested', title: '承認依頼', body: '商談 Big deal について、あなたの承認判断が必要です。' },
     ]);
 
     await svc.decide(request.id, { decision: 'approve', actorId: 'u_en', comment: 'Looks good — ship it.' }, asUser('u_en'));
     expect(await inboxOf('u_sub')).toEqual([
-      { topic: 'approval.approved', title: '请求已批准', body: '您的商机 D_1 已获批准。\n\nLooks good — ship it.' },
+      { topic: 'approval.approved', title: '请求已批准', body: '您的商机 Big deal 已获批准。\n\nLooks good — ship it.' },
     ]);
   });
 });

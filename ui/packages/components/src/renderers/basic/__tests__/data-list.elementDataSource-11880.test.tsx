@@ -41,8 +41,8 @@ import * as React from 'react';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { AdapterCtx, SchemaRenderer, notifyDataChanged } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { SchemaElement } from '@objectstack/sdui-parser';
 // Registers every `element:*` renderer at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../../../renderers';

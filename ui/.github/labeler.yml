@@ -74,10 +74,6 @@
   - changed-files:
     - any-glob-to-any-file: 'packages/runner/**/*'
 
-'package: sdui-parser':
-  - changed-files:
-    - any-glob-to-any-file: 'packages/sdui-parser/**/*'
-
 # Plugins
 'plugin':
   - changed-files:

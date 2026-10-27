@@ -440,6 +440,47 @@ duplicates on every replay boot ([#3434](https://github.com/objectstack-ai/objec
 
 ---
 
+## File Fields — `seedFile(path)`
+
+A `file`, `image`, `avatar`, `video` or `audio` field stores the id of a stored
+file, and a seed has no upload to make one. Name the file by the path your
+package ships it at instead, and the platform stores it for the record:
+
+```typescript
+import { defineSeed, seedFile } from '@objectstack/spec/data';
+
+export const contractVersionsSeed = defineSeed(ContractVersion, {
+  externalId: 'code',
+  records: [
+    { code: 'NDA-001-V1', file: seedFile('fixtures/nda-v1.pdf') },
+    // `name` is what a download is saved as; `contentType` for an extension
+    // the build does not know.
+    { code: 'MSA-001-V1', file: seedFile('fixtures/msa-v1', { name: 'MSA v1.pdf', contentType: 'application/pdf' }) },
+    // A `multiple: true` file field takes an array.
+    { code: 'SOW-001-V1', file: seedFile('fixtures/sow.pdf'), scans: [seedFile('fixtures/p1.png'), seedFile('fixtures/p2.png')] },
+  ],
+});
+```
+
+- **The path** is relative to the directory holding `objectstack.config.ts` and
+  stays inside it — `/` separators, no leading `/`, no `.` or `..` segment.
+- **`os build`** reads each referenced file and bundles its bytes into the
+  compiled artifact, so the seed carries them wherever the artifact goes
+  (`os dev`, `os serve`, a published package). A path that names no file fails
+  the build, and `os validate` refuses it too. `os serve` booting the config
+  itself reads the files the same way.
+- **The seed load** stores each file and writes its id into the field; the
+  record owns the file exactly as if it had been uploaded into that field. Every
+  row gets a file of its own, even when two rows name the same path. A replay
+  keeps a file whose bytes did not change, so restarting does not store it
+  again; changing the file and rebuilding replaces it.
+- **Refused, by row, loudly**: a reference whose bytes the build did not bundle
+  (a dataset written by hand without its `files`), bytes that do not match what
+  the build recorded, and a file field holding an id-shaped string that names no
+  stored file — write `seedFile(...)` there instead.
+
+---
+
 ## Dynamic Values (CEL)
 
 Any field value may be a **CEL expression** evaluated at install time against a
@@ -639,6 +680,9 @@ function defineSeed<
     records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
   }
 ): Seed
+
+// A file the package ships, for a file-class field (see "File Fields").
+function seedFile(path: string, options?: { name?: string; contentType?: string }): { $file: string; name?: string; contentType?: string }
 ```
 
 `SeedRecord` keys are the object's declared fields (a `lookup` / `master_detail`

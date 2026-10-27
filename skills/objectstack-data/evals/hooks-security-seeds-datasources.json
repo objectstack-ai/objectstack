@@ -40,6 +40,16 @@
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow"],
         "must_not_contain": ["new Date(", "defineDataset", "externalId: 'id'"]
       }
+    },
+    {
+      "id": 5,
+      "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, but not once it is approved, signing or active. Legal still edits them.",
+      "expected_output": "Field permission entries with a row condition on the finance set: `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }` and the same for `liability_cap`; the legal set keeps its edit grant. No validation rule and no `readonlyWhen`, which would lock the fields for every user.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["when:", "editable: false", "readable: true", "clm_contract.governing_law"],
+        "must_not_contain": ["validations:", "readonlyWhen"]
+      }
     }
   ]
 }

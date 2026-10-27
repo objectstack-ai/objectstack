@@ -64,7 +64,7 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 
 // No WebGL in the test env — same stub the sibling ObjectMap pins use. Every
 // assertion here is about the declaration or the QUERY, not the canvas.

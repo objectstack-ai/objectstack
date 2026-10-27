@@ -39,7 +39,7 @@
  *
  * So the reader moved out from under the sweep. `check-changeset-no-major.mjs`
  * and `check-adr-0087-registration.mjs` run in `lint.yml` and
- * `pr-automation.yml` on every PR, and in `cut-rc.yml` on a dispatched cut.
+ * `pr-automation.yml` on every PR.
  * `release.yml` names them in PROSE only (`:358`, `:590` — why a major cannot
  * reach that lane), runs neither, and therefore never loads this module. Before
  * this extraction each gate pulled in `pm/check-clause2-carriers.mjs` — ten
