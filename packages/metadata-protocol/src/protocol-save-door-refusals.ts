@@ -169,6 +169,7 @@ export interface SaveDoorRefusalHost {
     externalBindingDatasourceDefinition: ObjectStackProtocolImplementation['externalBindingDatasourceDefinition'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
     readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
+    listDrafts: ObjectStackProtocolImplementation['listDrafts'];
     objectsBoundExternallyTo: ObjectStackProtocolImplementation['objectsBoundExternallyTo'];
     overlayLockLayerAt: ObjectStackProtocolImplementation['overlayLockLayerAt'];
     readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
@@ -310,6 +311,65 @@ export async function externalBindingDatasourceDefinition(
 ): Promise<{ readonly schemaMode?: unknown } | undefined> {
     const definition = (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
     return definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined;
+}
+
+/**
+ * The body of `ObjectStackProtocolImplementation#unknownDatasourceSaveRefusal`;
+ * the method's docblock there is its contract. [#26724] Written here after the
+ * cut-6 move, beside the external-binding refusal it sits next to at every
+ * door, rather than moved: its reads are the same by-name read
+ * (`readMetaItem`) plus the engine's registered drivers.
+ */
+export async function unknownDatasourceSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts' | 'readMetaItem'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlySet<string>,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'object') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const raw = (item as { datasource?: unknown }).datasource;
+    if (typeof raw !== 'string' || raw === '' || raw === 'default') return undefined;
+    const datasource = raw;
+    // An engine that cannot name its registered drivers cannot say a name is
+    // unknown: a driver registered at run time (a `driver.*` service, an
+    // `onEnable` `drivers.register`) declares no datasource item.
+    const getDriverByName = (this.engine as { getDriverByName?: unknown } | undefined)?.getDriverByName;
+    if (typeof getDriverByName !== 'function') return undefined;
+    if (getDriverByName.call(this.engine, datasource)) return undefined;
+    // A declared datasource: the environment's stored row, else the code
+    // layer's definition. Its driver may not be connected (yet, or ever);
+    // that is reported where it is used, not refused here.
+    if ((await this.readMetaItem({ type: 'datasource', name: datasource }))?.item) return undefined;
+    // A datasource still pending: any draft, for a draft save; the batch's
+    // own drafts, for a package publish.
+    const pendingDraft = pending instanceof Set
+        ? pending.has(datasource)
+        : pending === 'drafts' && (await this.listDrafts({ type: 'datasource' })).drafts.some((d) => d.name === datasource);
+    if (pendingDraft) return undefined;
+    // The binding the object already holds is not this save's: a re-save, a
+    // stored-row migration or a restore that keeps it is judged at the save
+    // that introduced it. (A declaration boot never runs `onEnable`, so a
+    // driver registered there is absent from it.)
+    const current = (await this.readMetaItem({ type: 'object', name }))?.item as { datasource?: unknown } | undefined;
+    if (current?.datasource === datasource) return undefined;
+    const issues: MetadataIssueEntry[] = [{
+        path: 'datasource',
+        message: `Object '${name}' names datasource '${datasource}', and no datasource of that name exists here: `
+            + `none is declared (a \`*.datasource.ts\` or a saved \`datasource\`) and no driver is registered under it. `
+            + 'An object bound to it never registers, so every data call on it would answer 404. Correct the name, '
+            + `declare datasource '${datasource}' first, or remove \`datasource\` to use the primary datasource ('default').`,
+        code: 'custom',
+    }];
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
 }
 
 /** The body of `ObjectStackProtocolImplementation#objectsBoundExternallyTo`; the method's docblock there is its contract. */

@@ -36,6 +36,7 @@ import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
+import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
@@ -1580,6 +1581,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       t: (key, englishDefault) => String(serverActionEnvRef.current.t(key, englishDefault)),
     }),
     [authFetch],
+  );
+
+  // The registered `api` handler: {@link apiHandler}, except that an action
+  // declaring `opensInNewTab` + `newTabUrl` takes the server-action handler's
+  // zero-roundtrip new-tab path against THIS page's record, sending no request
+  // — from the header and its more-menu alike (objectstack#26747). Same
+  // composition as `useConsoleActionRuntime`.
+  const apiActionHandler = useMemo(
+    () => withNewTabUrlFastPath(apiHandler, serverActionHandler),
+    [apiHandler, serverActionHandler],
   );
 
   /**
@@ -3841,7 +3852,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onParamCollection={paramCollectionHandler}
           onResultDialog={resultDialogHandler}
           onModal={modalHandler}
-          handlers={{ api: apiHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
+          handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
