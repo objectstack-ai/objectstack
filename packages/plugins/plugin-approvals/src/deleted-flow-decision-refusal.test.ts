@@ -29,13 +29,18 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AutomationEngine, InMemorySuspendedRunStore } from '@objectstack/service-automation';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
-/** In-memory ObjectQL stand-in for the approvals tables. */
+/**
+ * In-memory ObjectQL stand-in for the approvals tables: the pinned double of
+ * `decision-strand-envelope.test.ts`, copied whole (bound by presence, writes
+ * through the engine-dispatch assertions).
+ */
 function makeFakeEngine() {
   const tables = new Map<string, any[]>();
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
@@ -46,22 +51,44 @@ function makeFakeEngine() {
     return row[k] === v;
   });
   return {
+    tables,
     async find(object: string, opts: any = {}) {
       const where = opts.where ?? opts.filter ?? {};
-      let out = rows(object).filter(r => matches(r, where));
-      if (opts.limit) out = out.slice(0, opts.limit);
-      return out.map(r => ({ ...r }));
+      const out = rows(object).filter(r => matches(r, where));
+      // The caller's bound is honoured by PRESENCE, never truthiness: `limit: 0`
+      // is a real bound that must return no rows, and a falsy test hands back
+      // the whole table instead.
+      const start = opts.offset ?? 0;
+      const page = typeof opts.limit === 'number' ? out.slice(start, start + opts.limit) : out.slice(start);
+      return page.map(r => ({ ...r }));
     },
     async insert(object: string, data: any) { rows(object).push({ ...data }); return { ...data }; },
-    async update(object: string, idOrData: any) {
-      const row = rows(object).find(r => r.id === idOrData.id);
-      if (row) Object.assign(row, idOrData);
-      return row ? { ...row } : null;
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const table = rows(object);
+      if (dispatch.kind === 'multi') {
+        let n = 0;
+        for (let i = 0; i < table.length; i++) {
+          if (matches(table[i], options?.where)) { table[i] = { ...table[i], ...data }; n++; }
+        }
+        return { updated: n };
+      }
+      const i = table.findIndex(r => r.id === dispatch.id);
+      if (i >= 0) table[i] = { ...table[i], ...data };
+      return i >= 0 ? { ...table[i] } : null;
     },
-    async delete(object: string, opts: any = {}) {
-      const list = rows(object);
-      for (let i = list.length - 1; i >= 0; i--) if (matches(list[i], opts.where ?? {})) list.splice(i, 1);
-      return { affected: 1 };
+    async delete(object: string, options?: any) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const table = rows(object);
+      if (dispatch.kind === 'multi') {
+        const survivors = table.filter(r => !matches(r, options?.where));
+        const deleted = table.length - survivors.length;
+        table.splice(0, table.length, ...survivors);
+        return { deleted };
+      }
+      const i = table.findIndex(r => r.id === dispatch.id);
+      if (i >= 0) table.splice(i, 1);
+      return { id: dispatch.id };
     },
   };
 }
