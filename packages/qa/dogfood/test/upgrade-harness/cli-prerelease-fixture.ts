@@ -70,6 +70,7 @@ function siblingOf(primary: string): string {
 
 function restore(to: string, from: string): void {
   if (!existsSync(join(from, 'database.sql'))) fail(`${from} holds no database.sql`, 2);
+  for (const file of [to, siblingOf(to)]) if (existsSync(file)) fail(`${file} exists; the restore writes NEW files only, so a run never upgrades the original`, 2);
   mkdirSync(dirname(to), { recursive: true });
   loadSqlIntoSqlite(readFileSync(join(from, 'database.sql'), 'utf8'), to);
   loadSqlIntoSqlite(readFileSync(join(from, 'telemetry.sql'), 'utf8'), siblingOf(to));
