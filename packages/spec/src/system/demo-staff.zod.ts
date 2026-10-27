@@ -74,7 +74,6 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
       permissionSet: 'permissionSets',
       managerEmail: 'manager',
       managerId: 'manager',
-      manager_id: 'manager',
       reportsTo: 'manager',
       supervisor: 'manager',
     },
@@ -140,7 +139,8 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
     manager: z
       .string()
       .email('A demo account\'s manager is named by the email of another demoStaff entry, not by its name')
-      .optional().describe('Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot'),
+      .optional()
+      .describe('Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot'),
   },
 ));
 
