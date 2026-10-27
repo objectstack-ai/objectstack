@@ -1365,9 +1365,8 @@ export function publishedSourceOwners(path, manifestOf) {
 // packed output — one path — and never which files it copies: the day the
 // console build ships a second tracked file, this leg sees it with no edit
 // here, and the day it stops copying the manifest, the leg stops claiming it.
-// `scripts/sdui-manifest.record.json` and the per-package records under
-// `scripts/sdui-manifest.sources/` are measured OUT for that reason rather than
-// by choice: the build does not copy them, so they are not part of the shipped
+// `scripts/sdui-manifest.record.json` is measured OUT for that reason rather
+// than by choice: the build does not copy it, so it is not part of the shipped
 // artefact.
 //
 // ⚠️ Residual, stated rather than implied: the reader understands the plain
@@ -4875,8 +4874,8 @@ function selfTest() {
         `this repository's ${PACKED_COPY_BUILD_SCRIPTS[0]} copies the repo-root sdui.manifest.json into packages/console/dist/ as read by this leg — got ${JSON.stringify(realPairs)}`,
       );
       assert(
-        !realPairs.some((p) => p.source === 'scripts/sdui-manifest.record.json' || p.source.startsWith('scripts/sdui-manifest.sources/')),
-        `measured, not chosen: the real build ships neither the manifest record nor a package record — got ${JSON.stringify(realPairs)}`,
+        !realPairs.some((p) => p.source === 'scripts/sdui-manifest.record.json'),
+        `measured, not chosen: the real build does not ship the manifest record — got ${JSON.stringify(realPairs)}`,
       );
 
       // ── The owner of a destination ────────────────────────────────────────
@@ -4956,13 +4955,11 @@ function selfTest() {
       const no = levelOf(copyRepo({ head: { ...PR22812, '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) } }), declaredNo);
       assert(no.result.verdict === 'none-clean' && no.exitCode === 0, `the manifest moved under \`Clause-②: no\` + \`none\` is unaffected — got ${no.result.verdict} / ${no.exitCode}`);
 
-      // The records move with regeneration but ship nothing: the shared one, and
-      // the one-line record of the registry package a ui PR re-recorded.
+      // The record moves with regeneration but ships nothing.
       const recordOnly = levelOf(
         copyRepo({
           head: {
             'scripts/sdui-manifest.record.json': '{"objectuiSha":"bbbb"}\n',
-            'scripts/sdui-manifest.sources/plugin-grid.json': '{"package":"ui/packages/plugin-grid"}\n',
             '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]),
           },
         }),
@@ -4970,7 +4967,7 @@ function selfTest() {
       );
       assert(
         recordOnly.touched.packages.length === 0 && recordOnly.touched.unreadable.length === 0 && recordOnly.result.verdict === 'clean',
-        `control: the records alone move no published file — got ${JSON.stringify(recordOnly.touched)} / ${recordOnly.result.verdict}`,
+        `control: the record alone moves no published file — got ${JSON.stringify(recordOnly.touched)} / ${recordOnly.result.verdict}`,
       );
 
       // #4690 on this leg: a build script that is THERE but yields no copy is

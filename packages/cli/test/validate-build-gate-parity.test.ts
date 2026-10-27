@@ -158,6 +158,11 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // before its named-export merge), which no rule is ever handed. `os lint` is
   // not an author-time door under the ruling and does not run it.
   'refuseUnbuiltStack',
+  // [#25779] Seed files: each `seedFile(path)` a seed record names must name a
+  // file under the config's directory, of a type its extension or the
+  // reference tells. Not a registry rule: it reads the filesystem. `os build`
+  // then writes the bytes it read into the artifact (`placeSeedFiles`, below).
+  'collectSeedFiles',
 ];
 
 /**
@@ -284,8 +289,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // classification, for the same reasons — it raises nothing, and it hands
   // back the `docs` array and `packages` value it was given when it has
   // nothing to move.
+  // [#25779] `placeSeedFiles` writes the seed file bytes `collectSeedFiles` —
+  // a gate in SHARED_NON_REGISTRY_GATES above — already read and judged into
+  // their datasets' `files` maps. It refuses nothing and reports nothing; with
+  // no artifact, `os validate` has nowhere to put them.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
-    ['placeCollectedDocs'],
+    ['placeCollectedDocs', 'placeSeedFiles'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { IDataEngine, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IFieldFileService, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
 import type {
   SeedLoaderRequestParsed,
   SeedLoaderResultParsed,
@@ -24,6 +24,9 @@ import {
   // (and which `managedBy` buckets exempt them), and the mask itself (ADR-0100).
   isMaskedOnReadFieldType,
   SECRET_MASK,
+  // [#25779] A replay reads a matched row's file fields in their STORED form
+  // (the bare `sys_file` id), the value a seed file is compared and kept by.
+  RAW_FILE_VALUES_CONTEXT_KEY,
 } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
@@ -41,6 +44,9 @@ import { validationFailureDetails } from '@objectstack/types';
 // `SysMetadataRepository` (#4867) and `cascadeDeleteRelations` (#8895) ask, so
 // a driver quirk is taught to the platform once instead of per seam.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+// [#25779] `seedFile(path)` values: stored, kept across replays, and owned by
+// the row that holds them; an id-shaped file value that names no file refused.
+import { SeedDatasetFiles, type SeedFileClaims } from './seed-files.js';
 
 interface Logger {
   info(message: string, meta?: Record<string, any>): void;
@@ -552,6 +558,17 @@ interface ReplayComparands {
   readonly masked: ReadonlySet<string>;
 }
 
+/** What a {@link SeedLoaderService} is built with beyond its engine, metadata and logger. */
+export interface SeedLoaderServiceOptions {
+  /**
+   * [#25779] The `field-files` service (`FIELD_FILE_SERVICE`,
+   * `@objectstack/spec/contracts`) seed files are stored through, resolved
+   * when a dataset loads. A caller with a kernel passes
+   * `() => ctx.getService(FIELD_FILE_SERVICE)`.
+   */
+  getFieldFiles?: () => IFieldFileService | null | undefined;
+}
+
 export class SeedLoaderService implements ISeedLoaderService {
   private engine: IDataEngine;
   private metadata: IMetadataService;
@@ -686,10 +703,20 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private uncomparedCredentials = new Map<string, { fields: Set<string>; rows: number }>();
 
-  constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
+  /**
+   * [#25779] The `field-files` service (`FIELD_FILE_SERVICE`) a seed file is
+   * stored through, read per dataset. Absent — a loader built without one, or
+   * a composition without `@objectstack/service-storage` — a row naming a seed
+   * file is refused, and an id-shaped file value is written unchecked, as the
+   * platform keeps one where it manages no files.
+   */
+  private readonly getFieldFiles: () => IFieldFileService | null | undefined;
+
+  constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger, options: SeedLoaderServiceOptions = {}) {
     this.engine = engine;
     this.metadata = metadata;
     this.logger = logger;
+    this.getFieldFiles = options.getFieldFiles ?? (() => undefined);
   }
 
   // ==========================================================================
@@ -1321,6 +1348,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           if (externalIdValue && internalId) {
             insertedRecords.get(objectName)!.set(externalIdValue, internalId);
           }
+          await settleSeedFiles(recordIndex, internalId); // [#25779]
         } else {
           errored++;
           const error = this.buildWriteError(objectName, record, externalId, recordIndex, res.error);
@@ -1359,6 +1387,45 @@ export class SeedLoaderService implements ISeedLoaderService {
     const comparands: ReplayComparands = {
       temporal: temporalFieldKinds(objectDefinition),
       masked: maskedOnReadFields(objectDefinition),
+    };
+    // [#25779] The dataset's file fields: seed files stored and kept, and an
+    // id-shaped file value that names no file refused (`seed-files.ts`).
+    // `null` for an object with no file-class field — the common case.
+    const datasetFiles = await SeedDatasetFiles.open({
+      dataset,
+      objectDefinition,
+      service: this.getFieldFiles() ?? null,
+      existingRecords,
+      organizationId: config.organizationId ?? this.fallbackOrgId ?? null,
+      dryRun: config.dryRun === true,
+    });
+    /** Record index → the files that row's slots must own once it lands. */
+    const fileClaimsByRecordIndex = new Map<number, { claims: SeedFileClaims; organizationId: string | null }>();
+    /**
+     * [#25779] Make row `recordIndex`, landed as `recordId`, the owner of the
+     * seed files it holds. Every write site below calls it once the row is
+     * there — an insert, an update, a skipped replay — and a skipped replay
+     * whose files are already its own costs a cached read.
+     */
+    const settleSeedFiles = async (recordIndex: number, recordId: string | undefined): Promise<void> => {
+      const pending = fileClaimsByRecordIndex.get(recordIndex);
+      if (!datasetFiles || !pending || !recordId) return;
+      const failure = await datasetFiles.settleRow(recordId, pending.claims, pending.organizationId);
+      if (failure === null) return;
+      const error: ReferenceResolutionError = {
+        sourceObject: objectName,
+        field: pending.claims.map((c) => c.field).join(', '),
+        targetObject: 'sys_file',
+        targetField: 'id',
+        attemptedValue: pending.claims.flatMap((c) => c.fileIds),
+        recordIndex,
+        message: failure,
+      };
+      errors.push(error);
+      allErrors.push(error);
+      // `error`: counted in `allErrors`, and the row looks seeded while the
+      // file its field names is on its way to being reclaimed.
+      this.logger.error(`[SeedLoader] ${failure}`, undefined, { object: objectName, recordIndex });
     };
     // [ADR-0131 D9] With no organization pinned and none derivable on an install
     // that registers the organization object, a row of an organization-owned
@@ -1867,6 +1934,52 @@ export class SeedLoaderService implements ISeedLoaderService {
         for (const column of createOnlyColumns) delete record[column];
       }
 
+      // [#25779] Seed files, once the row's references and organization are
+      // final: each `seedFile(path)` becomes the id of a file stored for (or
+      // kept by) this row, and a file value that cannot be honoured refuses
+      // the row before anything of it is written.
+      if (datasetFiles) {
+        const matched = existingRecords?.get(this.externalIdKey(record, externalId));
+        const organizationOfRow =
+          typeof record['organization_id'] === 'string' && record['organization_id'] !== ''
+            ? (record['organization_id'] as string)
+            : null;
+        const outcome = await datasetFiles.prepareRow({
+          record,
+          existing: matched,
+          organizationId: organizationOfRow,
+          willWrite: mode === 'update' ? matched !== undefined : mode === 'ignore' ? matched === undefined : true,
+          dryRun: config.dryRun === true,
+        });
+        if (!outcome.ok) {
+          errored++;
+          const error: ReferenceResolutionError = {
+            sourceObject: objectName,
+            field: outcome.field,
+            targetObject: 'sys_file',
+            targetField: 'id',
+            attemptedValue: outcome.attemptedValue,
+            recordIndex: i,
+            message: outcome.message,
+          };
+          errors.push(error);
+          allErrors.push(error);
+          // `error` (#4729 / #4632): counted, and the record is dropped. A dry
+          // run reports it like any other refusal it finds.
+          if (!config.dryRun) {
+            this.logger.error(
+              `[SeedLoader] ${outcome.message} ${objectName} record #${i} was NOT seeded.`,
+              undefined,
+              { object: objectName, field: outcome.field, recordIndex: i },
+            );
+          }
+          continue;
+        }
+        if (outcome.claims.length > 0) {
+          fileClaimsByRecordIndex.set(i, { claims: outcome.claims, organizationId: organizationOfRow });
+        }
+      }
+
       // [commit 1cba33f16] EARLY SIGNAL — emitted here, before this row reaches the
       // engine, for the deferrals it took on columns the write contract
       // requires on INSERT.
@@ -1934,6 +2047,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             if (externalIdValue && internalId) {
               insertedRecords.get(objectName)!.set(externalIdValue, String(internalId));
             }
+            await settleSeedFiles(i, internalId ? String(internalId) : undefined); // [#25779]
           } catch (err: any) {
             errored++;
             // Same cascade guard as the batched update path: the row may
@@ -1969,6 +2083,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             if (decision.id && externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
+            await settleSeedFiles(i, decision.id); // [#25779]
           } else if (decision.action === 'update') {
             // Register the externalId → id mapping BEFORE attempting the
             // write: the row exists and its id is known regardless of whether
@@ -1984,6 +2099,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             try {
               await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts)));
               updated++;
+              await settleSeedFiles(i, decision.id); // [#25779]
             } catch (err: any) {
               errored++;
               const error = this.buildWriteError(objectName, record, externalId, i, err);
@@ -3470,8 +3586,10 @@ export class SeedLoaderService implements ISeedLoaderService {
     try {
       // Full rows (not just id + externalId): the write decision compares the
       // incoming seed record against the existing row to skip no-op replays.
+      // [#25779] File fields in their STORED form: the ids a replay keeps a
+      // seed file by, and compares an authored id against.
       const findArgs: Record<string, unknown> = {
-        context: { isSystem: true },
+        context: { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true },
       };
       // Per-tenant replay: restrict to the target tenant's own rows
       // so upsert key matching never returns another tenant's record

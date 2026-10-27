@@ -2842,6 +2842,22 @@ export default class Serve extends Command {
         }
       }
 
+      // [#25779] Seed files, mirrored the same way. `os build` reads each file
+      // a seed record names with `seedFile(path)` into its dataset's `files`
+      // map (compile.ts step 4a), and the seed loader stores it from there.
+      // `defineStack(...)` carries the reference and not the bytes, so a config
+      // boot without this would refuse every such row that an artifact boot of
+      // the same project seeds. A path it cannot read is reported and left out;
+      // the loader then refuses that row, by name, and the boot goes on.
+      if (!useArtifactFallback) {
+        const { collectSeedFiles, placeSeedFiles } = await import('../utils/bundle-seed-files.js');
+        const seedFiles = collectSeedFiles(absolutePath, config as Record<string, unknown>);
+        placeSeedFiles(seedFiles);
+        for (const issue of seedFiles.issues) {
+          console.warn(chalk.yellow(`  ⚠ ${issue.location}: ${issue.message}`));
+        }
+      }
+
       // Boot-mode dispatch: this open-core CLI only supports `standalone`
       // (and the artifact-fallback shortcut). Cloud / multi-environment
       // boot modes live in a separate distribution and are no longer

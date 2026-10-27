@@ -37,6 +37,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
+- `node_modules/@objectstack/spec/src/data/seed-file.zod.ts` — Seed files — a file a package ships, written into a file field by a seed
 - `node_modules/@objectstack/spec/src/identity/eval-user.zod.ts` — EvalUser — the one user-context contract (ADR-0068 D1).
 - `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: AuthGateCodeSchema, AuthGateScopeSchema, ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
