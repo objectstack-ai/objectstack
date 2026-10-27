@@ -994,6 +994,15 @@ export {
 } from './validate-email-template-hole-placements.js';
 export type { EmailTemplateHolePlacementFinding } from './validate-email-template-hole-placements.js';
 
+// Every hole of an email template is within the mail hole grammar
+// (`@objectstack/formula`'s `judgeMailHoleGrammar`). The rule id is published
+// for `--json` consumers (`rule-id-barrel-exports.test.ts`).
+export {
+  validateEmailTemplateHoleGrammar,
+  EMAIL_TEMPLATE_HOLE_GRAMMAR,
+} from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
+
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
 export {

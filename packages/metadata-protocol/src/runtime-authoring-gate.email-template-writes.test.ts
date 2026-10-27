@@ -70,6 +70,24 @@ describe('the host threads an email_template publish to the runtime gate (#25189
     expect((verdict.error as { rulesRun?: string[] }).rulesRun).toContain('validateEmailTemplateHolePlacements');
   });
 
+  it('⭐ LIT — a currency argument that is not a literal ISO 4217 code is refused in the same envelope, naming the rule', () => {
+    const verdict = publishTemplate(cleanTemplate({ subject: 'Due {{ amount | currency:currency_code }}' }));
+
+    expect(verdict.error, 'the caller throws this; null here means the door judged nothing').not.toBeNull();
+    expect((verdict.error as { code?: string }).code).toBe('INVALID_METADATA');
+    expect((verdict.error as { status?: number }).status).toBe(422);
+
+    const issues = (verdict.error as { issues?: Array<Record<string, unknown>> }).issues!;
+    expect(issues.map((i) => [i.rule, i.path])).toEqual([['email-template-hole-grammar', 'emailTemplates[0].subject']]);
+    const wire = JSON.stringify(issues);
+    expect(wire).toContain('{{ amount | currency:currency_code }}');
+    expect(wire).toContain('ISO 4217');
+    expect((verdict.error as { rulesRun?: string[] }).rulesRun).toContain('validateEmailTemplateHoleGrammar');
+
+    // Non-vacuous: the literal code publishes.
+    expect(publishTemplate(cleanTemplate({ subject: 'Due {{ amount | currency:EUR }}' })).error).toBeNull();
+  });
+
   it('the same template publishes once the hole is moved to a supported placement', () => {
     const verdict = publishTemplate(cleanTemplate());
     expect(verdict.error, 'the refusal is about the placement, not about the type').toBeNull();

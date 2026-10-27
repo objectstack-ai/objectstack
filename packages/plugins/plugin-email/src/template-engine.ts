@@ -24,8 +24,17 @@
  * whitelist — `{{ order.total | currency:EUR }}`, `{{ ts | datetime }}` —
  * reusing `@objectstack/formula`'s `formatValue` so dates, money, and
  * (ADR-0053 Phase 2) reference-timezone `datetime` render identically to
- * in-app templates. An unknown formatter falls back to the raw string,
- * keeping the lenient "never throw on render" contract.
+ * in-app templates. An unknown formatter falls back to the raw string.
+ *
+ * The hole grammar is `@objectstack/formula`'s (`mailHolePattern`,
+ * `parseMailHole`), the one copy the authoring rule and the placement judge
+ * read too. A hole that grammar REFUSES — a `currency` argument that is not a
+ * literal ISO 4217 code — is refused at authoring and publish; one that still
+ * reaches the renderer (a template stored before the rule existed, or a body
+ * handed to these functions directly) makes the render throw
+ * `TEMPLATE_INVALID`, naming the hole and the rule. That is the one way a
+ * render throws: it prints neither a substituted currency nor formatter
+ * syntax to a recipient.
  *
  * Deliberately tiny (no loops / conditionals / partials) — the design
  * stance is that email templates SHOULD be data-only renderings; any
@@ -34,45 +43,12 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-import { formatValue } from '@objectstack/formula';
-
-// Match a hole: open braces, a BRACE-FREE inner body, close braces. Capturing
-// the inner with `[^{}]*` (a single star over a negated class — no nested
-// quantifier, no overlapping `\s*` groups) keeps the matcher strictly linear:
-// it can never backtrack into a polynomial-ReDoS shape. The inner body is then
-// parsed with plain string ops (`parseHole`) instead of a complex pattern.
-// 1=open(`{{`|`{{{`)  2=inner  3=close(`}}`|`}}}`).
-const PLACEHOLDER = /(\{\{\{?)([^{}]*)(\}\}\}?)/g;
+import { formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
 
 /** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
 export interface RenderOptions {
   locale?: string;
   timeZone?: string;
-}
-
-// A hole body is a dotted path with an optional `| formatter[:arg]`. Validated
-// against small, already-extracted strings (bounded input → no ReDoS).
-const PATH_RE = /^[\w.]+$/;
-const FILTER_RE = /^(\w+)(?::\s*'?([^']*?)'?)?$/;
-
-interface ParsedHole {
-  path: string;
-  formatter?: string;
-  arg?: string;
-}
-
-/** Parse a hole's inner body into a path + optional formatter. Null if malformed. */
-function parseHole(inner: string): ParsedHole | null {
-  const pipe = inner.indexOf('|');
-  if (pipe === -1) {
-    const path = inner.trim();
-    return PATH_RE.test(path) ? { path } : null;
-  }
-  const path = inner.slice(0, pipe).trim();
-  if (!PATH_RE.test(path)) return null;
-  const m = FILTER_RE.exec(inner.slice(pipe + 1).trim());
-  if (!m) return null;
-  return { path, formatter: m[1], arg: m[2] };
 }
 
 function lookup(data: Record<string, any>, path: string): unknown {
@@ -137,10 +113,11 @@ function render(
 ): string {
   if (!template) return '';
   return template.replace(
-    PLACEHOLDER,
+    mailHolePattern(),
     (match: string, open: string, inner: string, close: string) => {
-      const parsed = parseHole(inner);
+      const parsed = parseMailHole(inner, match);
       if (!parsed) return match; // not a path[+formatter] hole — leave verbatim
+      if (parsed.refusal) throw new Error(`TEMPLATE_INVALID: ${parsed.refusal.message}`);
       const isUnescaped = open === '{{{' && close === '}}}';
       const raw = lookup(data, parsed.path);
       let str: string;

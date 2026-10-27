@@ -82,6 +82,15 @@ never needs triple braces.
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
 
+**The `currency` argument is a literal code.** `currency:EUR` formats in euros,
+and `currency` with no argument formats in US dollars. The argument is an ISO
+4217 code in three capital letters, never a path: `currency:currency_code` does
+not read the record's `currency_code`. `os validate`, `os build`, `os lint` and
+the metadata publish door refuse any other argument (`email-template-hole-grammar`,
+a `422 INVALID_METADATA` at the publish door), naming the hole and the rule. To
+show an amount in each record's own currency, format it in the caller that
+supplies the data and pass the formatted text as its own variable.
+
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those
 are the supported placements for `{{path}}`. A hole anywhere else — inside a
@@ -94,10 +103,14 @@ the `href` shape above. The refusal (`email-template-hole-placement`, a
 supported ones. A template already stored keeps sending; it is judged the next
 time it is published.
 
-Two properties of the renderer to author around:
+Three properties of the renderer to author around:
 
-- **A missing placeholder renders as an empty string.** Rendering never throws.
-  Declare a variable `required` (below) if absence should be an error instead.
+- **A missing placeholder renders as an empty string.** Declare a variable
+  `required` (below) if absence should be an error instead.
+- **A hole the authoring rules refuse is refused at render too.** A template
+  stored before a rule existed is judged at its next publish; until then
+  `sendTemplate` and `renderTemplate` fail with `TEMPLATE_INVALID`, naming the
+  template and the hole, rather than send a wrong value.
 - **There are no loops, conditionals or partials.** A template is a data-only
   rendering by design; branching belongs in the caller, which passes in the
   already-decided values.
