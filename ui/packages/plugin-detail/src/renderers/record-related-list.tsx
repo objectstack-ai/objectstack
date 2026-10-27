@@ -38,6 +38,7 @@ import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
+import { RelatedListStackSlot, useListEmptyAnswer } from './relatedListEmptyFold';
 import {
   describeRelatedListActionRefusals,
   placeAuthoredRelatedListActions,
@@ -211,6 +212,9 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * nobody.
    */
   const ariaProps = useRecordAriaProps(schema.aria);
+  // Whether this list is empty, for its stack's empty fold (#25895). Here, with
+  // the other hooks, for the reason given above.
+  const [listEmpty, reportListEmpty] = useListEmptyAnswer();
   const i18n = useSafeFieldLabel();
   const { language } = useObjectTranslation();
 
@@ -588,9 +592,30 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * empty list.
    */
   const onViewAll = schema.showViewAll === false ? undefined : handlers?.onViewAll;
+  // Create a new child, pre-linked to this parent (增). Host omits when create
+  // is denied by lifecycle/permissions, hiding the "New" button; an authored
+  // `actions: []` omits it on this list alone (#26182).
+  const onNew = createWithheldByAuthor ? undefined : handlers?.onCreate;
+  /**
+   * May this list fold into its stack's empty line when it has no records
+   * (#25895, `relatedListEmptyFold.tsx`)? Only when that line can carry
+   * everything its row offers, which is New alone: an `add` picker, child
+   * toolbar actions or an authoring notice keep the list's own row.
+   */
+  const foldable =
+    !schema.add && !(toolbarActions && toolbarActions.length > 0) && !showActionRefusals && !showUnservedActions;
 
   return (
-    <div className={className} {...designer} {...ariaProps}>
+    <RelatedListStackSlot
+      title={title}
+      empty={listEmpty}
+      foldable={foldable}
+      hasNew={!!onNew}
+      newDisabled={!!handlers?.createDisabled}
+      onNew={onNew}
+      className={className}
+      rootProps={{ ...designer, ...ariaProps }}
+    >
       {showActionRefusals && (
         // The author-visible refusal the ruling asks for: an authored entry
         // this list cannot draw is named here, where the lookup answered,
@@ -674,10 +699,8 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
         onRowAction={handlers?.onRowAction}
         toolbarActions={toolbarActions}
         onToolbarAction={handlers?.onToolbarAction}
-        // Create a new child, pre-linked to this parent (增). Host omits when
-        // create is denied by lifecycle/permissions, hiding the "New" button;
-        // an authored `actions: []` omits it on this list alone (#26182).
-        onNew={createWithheldByAuthor ? undefined : handlers?.onCreate}
+        // Create a new child, pre-linked to this parent — see `onNew` above.
+        onNew={onNew}
         // [#4646] …and greys it — without hiding it — when the child object's
         // `userActions.create.disabledWhen` holds for THIS parent record. The
         // host owns both verdicts (it is the side that has the parent record
@@ -724,8 +747,10 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
                 }
               : undefined
         }
+        // Tells this list's stack whether it is empty (#25895).
+        onEmptyChange={reportListEmpty}
       />
-    </div>
+    </RelatedListStackSlot>
   );
 };
 
