@@ -27,9 +27,11 @@
  *     its own `locations`, with the bridge's rule: `list_toolbar` → header
  *     button, `list_item` → row menu. Running it stays the host's (the
  *     bridge's `onToolbarAction` / `onRowAction`).
- *   - `actions: []` → the author's choice of NO actions. The built-in
- *     New / Edit / Delete / View affordances are not action ids (the runtime
- *     ships no built-in action names) and are untouched by this key.
+ *   - `actions: []` → the author's choice of NO actions, the built-in New
+ *     included (#26182): the list offers no generic create form, whatever the
+ *     child object's `userActions.create` says. A NON-empty list leaves New
+ *     the host's, and Edit / Delete / View are row affordances this key never
+ *     touches (the runtime ships no built-in action names).
  *   - An id the registry cannot resolve, or one whose action declares no
  *     location this list renders, is REFUSED where the lookup answers: an
  *     inline `role="status"` notice on the list names it and says why. Never a
@@ -251,15 +253,52 @@ describe('record:related_list.actions — AUTHORED: the authored list is what re
     expect(onToolbarAction.mock.calls[0][0]).toMatchObject({ name: 'invite', label: 'Invite', type: 'api' });
   });
 
-  it('`actions: []` is the author’s choice of NO actions — while New stays, because it is not an action id', async () => {
+  it('`actions: []` is the author’s choice of NO actions — New included, though the host offers it (#26182)', async () => {
     mount([]);
     await waitForRow();
-    // Positive first, so the empty reads below are taken on a list that
-    // really drew its header: the host's create affordance is still there.
-    expect(await screen.findByTestId('related-list-new')).toBeInTheDocument();
+    expect(screen.queryByTestId('related-list-new')).toBeNull();
     expect(toolbarNames()).toEqual([]);
     expect(rowTriggers()).toHaveLength(0);
     expect(refusal()).toBeNull();
+  });
+});
+
+describe('record:related_list.actions — the built-in New: only `[]` withholds it (#26182)', () => {
+  // Each case reads the SAME host, which offers create for `contact`: what
+  // differs is only the authored key, so the verdict is this list's own.
+  it('CONTROL: with no `actions` the host’s New is drawn and runs the host’s create', async () => {
+    mount(undefined);
+    await waitForRow();
+    const button = await screen.findByTestId('related-list-new');
+    fireEvent.click(button);
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a NON-empty authored list leaves New the host’s: naming actions is not withholding create', async () => {
+    mount(['invite']);
+    await waitForRow();
+    await waitFor(() => expect(toolbarNames()).toEqual(['invite']));
+    expect(screen.getByTestId('related-list-new')).toBeInTheDocument();
+  });
+
+  it('`actions: []` withholds New on THIS list only — a sibling list of the same object keeps it', async () => {
+    render(
+      <MetadataCtx.Provider value={METADATA}>
+        <RecordContextProvider objectName="account" recordId="ACC-1" dataSource={makeDataSource() as never}>
+          <RelatedRecordActionsProvider value={HOST}>
+            <div data-testid="list-empty">
+              <SchemaRenderer schema={doc([]) as never} />
+            </div>
+            <div data-testid="list-default">
+              <SchemaRenderer schema={doc(undefined) as never} />
+            </div>
+          </RelatedRecordActionsProvider>
+        </RecordContextProvider>
+      </MetadataCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getAllByText('Alice')).toHaveLength(2));
+    expect(await within(screen.getByTestId('list-default')).findByTestId('related-list-new')).toBeInTheDocument();
+    expect(within(screen.getByTestId('list-empty')).queryByTestId('related-list-new')).toBeNull();
   });
 });
 

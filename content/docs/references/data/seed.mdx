@@ -35,6 +35,7 @@ const result = SeedSchema.parse(data);
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
+| **files** | `Record<string, { contentType: string; size: integer; sha256: string; data: string }>` | optional | Bytes of the package files the records name with `seedFile(path)`, keyed by path. Written by `os build`, which reads each path relative to the package root; the loader stores each one as a file the written record owns. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -48,6 +49,17 @@ const result = SeedSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When a seed load writes this column. `always` (default) writes it on every row the load creates or updates. `create` writes it only when the load creates the row: an `upsert` replay that matches an existing row leaves the row's value as it is, and an `update` dataset never writes it, so replaying the seed refreshes the `always` columns without reverting state the app wrote since the first load. A column of the dataset's `externalId` is still matched on and stays in the matched row's update. The same values and meaning as an import mapping entry's `applyOn`. |
+
+### Nested Shape: `Seed.files[string]`
+
+One bundled seed file: its bytes and what they must hash to
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **contentType** | `string` | ✅ | MIME type the stored file carries |
+| **size** | `integer` | ✅ | Byte length of the file |
+| **sha256** | `string` | ✅ | SHA-256 of the bytes, lowercase hex — the loader refuses bytes that do not match it |
+| **data** | `string` | ✅ | The bytes, base64-encoded |
 
 
 ---

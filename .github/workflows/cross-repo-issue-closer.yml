@@ -124,6 +124,9 @@ jobs:
     name: Close issues referenced in other repositories
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.2 min, max
+    # 0.3.
+    timeout-minutes: 5
     steps:
       - name: Close (or report) cross-repo closing keywords
         uses: actions/github-script@v9

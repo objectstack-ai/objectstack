@@ -244,7 +244,7 @@ export {
 } from './migrations/recorded-by-sentinel.js';
 export type { SentinelHistoryRow } from './migrations/recorded-by-sentinel.js';
 
-export { SeedLoaderService } from './seed-loader.js';
+export { SeedLoaderService, type SeedLoaderServiceOptions } from './seed-loader.js';
 export { runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,

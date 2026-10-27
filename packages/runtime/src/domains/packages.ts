@@ -11,6 +11,7 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { FIELD_FILE_SERVICE, type IFieldFileService } from '@objectstack/spec/contracts';
 // [#5320] A's mechanical half of the fork ruling: on export, view artifacts
 // are PARTITIONED — containers travel in `views:`, expanded items a travelling
 // container re-derives exactly are folded away (the import side's own
@@ -2872,7 +2873,12 @@ _context: HttpProtocolContext,
 
     const { SeedLoaderService } = await import('../seed-loader.js');
     const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
-    const loader = new SeedLoaderService(ql, metadata, deps.logger ?? console);
+    // [#25779] The service a seed file is stored through; absent, a row naming
+    // one is refused by the loader, by name.
+    const fieldFiles = await Promise.resolve()
+        .then(() => deps.resolveService(_context, FIELD_FILE_SERVICE))
+        .catch(() => undefined) as IFieldFileService | undefined;
+    const loader = new SeedLoaderService(ql, metadata, deps.logger ?? console, { getFieldFiles: () => fieldFiles });
     // [#8443] `safeParse`, not `parse` — the same producer-side declaration
     // #8333's P9 made next door, for the same reason. This catch's caller now
     // withholds anything undeclared, and a raw `ZodError` declares nothing, so

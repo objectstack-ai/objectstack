@@ -159,11 +159,11 @@ The Studio/Console UI lives in this workspace under `ui/` (`@object-ui/*`; the C
 and `ui/AGENTS.md` adds that tree's own rules to this file's. `pnpm console:build` builds the Console and copies its
 dist into `packages/console/` (`packages/console/build-dist.sh`). ⛔ Never hand-edit `packages/console/dist/`.
 
-**Moving the pin has a second half: regenerate the committed manifest** — `pnpm objectui:build`, then
-`node scripts/gen-sdui-manifest-node.mjs`, which reads objectui's BUILT tree at the pin (never an npm install, whose
-version string names an older commit) and takes no arguments; `scripts/check-sdui-manifest.mjs` reds until you do.
-`objectui:bump` and `objectui:refresh` print the step, and the console build ships that same tracked file in
-`packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
+**A registry change has a second half: regenerate the committed manifest** with
+`node scripts/gen-sdui-manifest-node.mjs`, which builds the registry under `ui/`, enumerates it from `ui/apps/console`
+(never an npm install) and takes no arguments; commit what it writes. CI's `Build & E2E UI` runs it too and fails
+when the committed `sdui.manifest.json` differs, the merge queue's combined tree included, and the console build
+ships that same tracked file in `packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
 `pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
