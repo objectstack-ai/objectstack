@@ -15,8 +15,10 @@
  * sentence, carrying the bound the server enforces: the agent acts within the
  * user's own permissions.
  *
- * Any scope the page does not map still renders as its raw string — the
- * `CONTROL` case — so no sentence is guessed from a scope's spelling.
+ * Any scope the page does not map renders as an explicit "unrecognised
+ * permission" line naming it — the `CONTROL` case — so no sentence is guessed
+ * from a scope's spelling, and the bare spelling never reads as a description
+ * of the grant (objectstack#26587, which also walks every MCP scope).
  *
  * The catalogue reaches the page through the global instance `createI18n`
  * registers, the same harness as `FormPage.chromeI18n-11071.test.tsx`.
@@ -106,12 +108,12 @@ describe('OAuthConsentPage — the agent scopes in words (objectui#12853)', () =
     ]);
   });
 
-  it('CONTROL: a scope the page does not map still renders as its raw string', async () => {
+  it('CONTROL: a scope the page does not map renders as unrecognised, never as its raw string', async () => {
     renderConsent('data:read reports:export', 'en');
 
     expect(await scopeRows()).toEqual([
       'Read records, within your own permissions',
-      'reports:export',
+      'Unrecognised permission: reports:export',
     ]);
   });
 });

@@ -106,8 +106,17 @@ export interface ApprovalRequestLite {
   step_label?: string;
   /** Display name of the submitter (`sys_user.name`), when resolvable. */
   submitter_name?: string;
-  /** Owning flow's approval steps for progress display (single reads only). */
+  /**
+   * Owning flow's approval steps in graph order (single reads only). ⚠️ The
+   * server walks one trunk of the graph, so this is NOT the route the request
+   * takes past a decision, and no surface draws it (objectstack#26563): the
+   * record's step line is read off `flow_run_id` / `flow_node_id` instead.
+   */
   flow_steps?: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+  /** The flow run that opened this request; every request of one run shares it. */
+  flow_run_id?: string;
+  /** The approval node of the run this request was opened for. */
+  flow_node_id?: string;
   /**
    * Server-computed capability of the current viewer (framework#3310), attached
    * by `getRequest`. `is_submitter` gates the record page's remind affordance

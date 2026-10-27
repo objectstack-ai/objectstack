@@ -28,8 +28,7 @@ export const InvoiceDocumentPage = definePage({
   label: 'Invoice',
   type: 'record',
   object: 'invoice',
-  kind: 'full',
-  isDefault: true,          // the console renders a record on its default record page
+  kind: 'full',             // not isDefault: the invoice keeps its own working record page
   print: { paperSize: 'A4', orientation: 'portrait', repeatHeader: true, pageNumbers: true },
   regions: [
     { name: 'header', components: [{ type: 'element:text', properties: { content: 'ACME Ltd' } }] },
@@ -40,9 +39,15 @@ export const InvoiceDocumentPage = definePage({
 // …and on the object: enable: { files: true }
 ```
 
-The server prints a record on the page the console renders it on, which is the
-object's **default record page** (`isDefault: true`). A print page that is not
-the default is refused rather than printed as some other page.
+A record prints on **any record page of its object that declares `print`**, so
+an object keeps its everyday record page and adds one or more documents beside
+it (an invoice, a delivery note, a quote). The server renders the page the
+request names on the console's own routes: the object's default record page
+(`isDefault: true`) on the record route, `…/OBJECT/record/ID`, and any other
+print page on the named record-page route, `…/OBJECT/record/ID/page/PAGE`. A
+page that is not a record page of the object (`type: 'record'` with that
+`object`), or that declares no `print`, is refused rather than printed as some
+other page.
 
 ## Compose the print service
 
@@ -153,7 +158,7 @@ before a session is minted or a browser is started, in this order:
 | 1 | The caller is not a signed-in user acting for themselves (system, agent, service or guest principal; a sign-in held by an authentication policy) | `PERMISSION_DENIED` / 403 |
 | 2 | The engine is not ready (`status()` says why) | `SERVICE_UNAVAILABLE` / 503 |
 | 3 | No such page | `RESOURCE_NOT_FOUND` / 404 |
-| 3 | The page is not the object's default record page, or declares no `print` | `VALIDATION_ERROR` / 400 |
+| 3 | The page is not a record page of the object (`type: 'record'`, that `object`), or declares no `print` | `VALIDATION_ERROR` / 400 |
 | 4 | The record does not exist, or the caller cannot read it | `RECORD_NOT_FOUND` / 404 |
 | 5 | The object does not declare `enable: { files: true }` | `FILES_DISABLED` / 403 |
 | 5 | The caller may not create attachments at all | `PERMISSION_DENIED` / 403 |

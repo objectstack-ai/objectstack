@@ -2822,6 +2822,8 @@ const zh = {
         dataRead: '读取记录（不超出您自己的权限）',
         dataWrite: '创建、修改和删除记录（不超出您自己的权限）',
         actionsExecute: '代表您运行操作（不超出您自己的权限）',
+        metadataWrite: '以草稿形式构建和修改此应用的元数据（不超出您自己的权限），由人来发布',
+        unrecognised: '无法识别的权限：{{scope}}',
       },
       deny: '拒绝',
       authorize: '授权',

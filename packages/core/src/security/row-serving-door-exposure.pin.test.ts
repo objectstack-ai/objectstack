@@ -101,7 +101,8 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-door',
     reason: 'the provider\'s service registration: it binds the admission into the `security` service the plugin registers; it serves no rows',
   },
-  'packages/objectql/src/engine.ts': {
+  // [#25522 cut 15] The ReadableIds composition's admission ask, moved out of engine.ts.
+  'packages/objectql/src/engine-readable-ids-permission-formula.ts': {
     kind: 'not-a-door',
     reason:
       'the ReadableIds composition (ADR-0139 D2): it asks the admission of a PARENT object to compose the scope of a `$in` leaf '

@@ -35,7 +35,7 @@ import {
   useApproverDirectory,
   type ApproverDirectory,
 } from '../hooks/useApproverDirectory.js';
-import { ApprovalStepLine } from './approval-progress/ApprovalStepLine.js';
+import { ApprovalStepLine, type ApprovalFlowStep } from './approval-progress/ApprovalStepLine.js';
 import { DecisionProgressIndicator } from './approval-progress/DecisionProgressIndicator.js';
 import { eligibleApproverCount } from './approval-progress/eligibleApprovers.js';
 
@@ -204,6 +204,63 @@ function stepDisplayText(
   machineName: string | null | undefined,
 ): string | null {
   return label || (machineName ? prettifyMachineName(machineName) : null);
+}
+
+/**
+ * The steps the record's step line draws for `current`: the approval steps
+ * its flow run has already passed, oldest first, then `current` itself
+ * (objectstack#26563). Every step is read off a request row the run really
+ * opened, never off the flow's graph.
+ *
+ * The approvals get's `flow_steps` is not this request's route: the server
+ * walks the flow from its start preferring `approve`, then `true`, then the
+ * first edge, and marks done / current / upcoming against that one trunk. A
+ * request a decision sent down another branch is then shown on rungs it never
+ * visits, and a rung a branch rejoins after shows the trunk's side-step as
+ * done. So the line is built from facts instead, until that read serves the
+ * route itself:
+ *
+ * - a passed step is a request of the same `flow_run_id`, on another node,
+ *   `approved`, opened before `current`; a node approved in several rounds
+ *   (ADR-0044) is drawn once, at its latest round;
+ * - nothing ahead of `current` is drawn: no request row says which branch the
+ *   run takes next.
+ *
+ * `requests` is the list read, which serves a request only to its
+ * participants, so a step this viewer took no part in is missing from the
+ * line rather than guessed. A row without a run, node or open time draws no
+ * line at all.
+ */
+export function visitedApprovalSteps(
+  current: ApprovalRequestLite | null | undefined,
+  requests: ReadonlyArray<ApprovalRequestLite>,
+): ApprovalFlowStep[] {
+  const runId = current?.flow_run_id;
+  const nodeId = current?.flow_node_id;
+  const openedAt = current?.submitted_at;
+  if (!current || !runId || !nodeId || !openedAt) return [];
+
+  const passed = new Map<string, { row: ApprovalRequestLite; at: string }>();
+  for (const r of requests) {
+    const node = r.flow_node_id;
+    const at = r.submitted_at;
+    if (r.flow_run_id !== runId || !node || node === nodeId) continue;
+    if (r.status !== 'approved' || !at || at >= openedAt) continue;
+    const prev = passed.get(node);
+    if (!prev || prev.at < at) passed.set(node, { row: r, at });
+  }
+
+  const step = (r: ApprovalRequestLite, id: string, state: ApprovalFlowStep['state']): ApprovalFlowStep => ({
+    id,
+    label: stepDisplayText(r.step_label, r.current_step || id) ?? id,
+    state,
+  });
+  return [
+    ...[...passed.entries()]
+      .sort(([, a], [, b]) => a.at.localeCompare(b.at))
+      .map(([node, { row }]) => step(row, node, 'done')),
+    step(current, nodeId, current.status === 'approved' ? 'done' : 'current'),
+  ];
 }
 
 /**
@@ -424,12 +481,12 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
       </div>
 
       <div className="px-4 py-3 space-y-3">
-        {/* Flow-level step strip — where in the multi-level flow this record
-            sits; present on the enriched pending row only (single reads).
-            Vertical at every step count (objectui#5554); the markup is the
-            one `ApprovalStepLine` the approval request page's decision panel
-            draws too (objectui#12491), and it draws nothing under two steps. */}
-        <ApprovalStepLine steps={pendingRequest?.flow_steps} />
+        {/* Flow-level step line — the steps the pending request's run has
+            passed, then the pending one, read off the run's own request rows
+            and never off the flow graph (objectstack#26563, see
+            `visitedApprovalSteps`). Vertical at every step count
+            (objectui#5554); it draws nothing under two steps. */}
+        <ApprovalStepLine steps={visitedApprovalSteps(pendingRequest, requests)} />
 
         {/* Aggregation progress — the pending node's server-computed tally
             (unanimous / quorum approvals, per-group countersign), drawn by

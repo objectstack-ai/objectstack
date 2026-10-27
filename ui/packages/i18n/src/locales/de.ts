@@ -2753,6 +2753,8 @@ const de = {
         dataRead: "Datensätze lesen (im Rahmen Ihrer eigenen Berechtigungen)",
         dataWrite: "Datensätze erstellen, ändern und löschen (im Rahmen Ihrer eigenen Berechtigungen)",
         actionsExecute: "Aktionen in Ihrem Namen ausführen (im Rahmen Ihrer eigenen Berechtigungen)",
+        metadataWrite: "Die Metadaten dieser App als Entwürfe erstellen und ändern (im Rahmen Ihrer eigenen Berechtigungen) – veröffentlicht werden sie von einer Person",
+        unrecognised: "Unbekannte Berechtigung: {{scope}}",
       },
       deny: "Ablehnen",
       authorize: "Autorisieren",

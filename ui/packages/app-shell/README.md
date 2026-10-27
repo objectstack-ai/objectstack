@@ -1180,7 +1180,8 @@ for a longer walkthrough.
 
 When a record has approval requests, its detail page grows an **Approvals
 tab** — a peer of Details/Related with a request-count badge (#3461):
-which step the approval sits at (with the flow's step strip), the
+which step the approval sits at (with the step line of the route its flow
+run took: the steps it passed, then the pending one), the
 server-computed decision progress (quorum tally, per-group 会签 ticks), the
 **waiting-on** approvers resolved to display names (group approvers labeled
 with their group), one chronological decision timeline merged across all of
@@ -1251,13 +1252,12 @@ summary is not drawn.
 Two more parts come from the same request row. A request no person submitted
 (its `submitter_id` absent or null, as the approvals get serves a request a
 flow run opened with no user context) is marked "Flow-initiated", above the
-summary; a request a person submitted carries no marker. Below the summary,
-when the owning flow has more than one approval step (`flow_steps`), the
-block draws the flow's vertical step line, done / current / upcoming, at any
-status: a decided request and a node with no progress tally draw it too. The
-line is the same stepper the record approvals panel draws, and it never
-scrolls sideways. The marker and the line's accessible name are the
-Approval Center's `approvalsInbox.*` rows.
+summary; a request a person submitted carries no marker. The block draws no
+step line: the row's `flow_steps` is the flow graph's first branch at every
+decision, not the route this request takes, and the row proves only its own
+step, which the page header names. The record approvals panel draws the line
+from the run's own request rows instead. The marker is the Approval Center's
+`approvalsInbox.flowOrigin` row.
 
 ## User-scoped state (favorites, recent items)
 

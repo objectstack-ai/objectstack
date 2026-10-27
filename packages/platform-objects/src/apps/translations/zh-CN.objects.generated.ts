@@ -3457,11 +3457,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       old_hash: {
         label: "旧哈希",
-        help: "旧值（规范化后）的 SHA-256。此前未设置时为 Null。"
+        help: "旧值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。此前未设置时为 Null，机密值没有可用的带密钥摘要时也为 Null。"
       },
       new_hash: {
         label: "新哈希",
-        help: "新值（规范化后）的 SHA-256。重置时为 Null。"
+        help: "新值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。重置时为 Null，机密值没有可用的带密钥摘要时也为 Null。"
       },
       encrypted: {
         label: "已加密",
