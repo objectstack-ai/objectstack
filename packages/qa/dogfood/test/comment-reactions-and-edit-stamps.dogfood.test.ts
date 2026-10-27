@@ -143,11 +143,15 @@ describe('records-forms.comment-reactions-and-edit-stamps — over the REST data
     const theirsId = String((await reactionRows({ comment_id: commentId, emoji: '❤️' }))[0].id);
 
     const patched = await call(memberTok, 'PATCH', `/data/${REACTION}/${mineId}`, { emoji: '🔥' });
-    expect(patched.status, JSON.stringify(patched.json)).toBeGreaterThanOrEqual(400);
+    // The object offers no `update` (apiMethods), so the door refuses before any row is read.
+    expect(patched.status, JSON.stringify(patched.json)).toBe(405);
+    expect(patched.json.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
     expect((await reactionRows({ id: mineId }))[0].emoji).toBe('🚀');
 
+    // The own-record floor, not a missing bit: the member holds delete on the object (rx_reactor).
     const foreign = await call(memberTok, 'DELETE', `/data/${REACTION}/${theirsId}`);
-    expect([403, 404], JSON.stringify(foreign.json)).toContain(foreign.status);
+    expect(foreign.status, JSON.stringify(foreign.json)).toBe(403);
+    expect(foreign.json.code).toBe('PERMISSION_DENIED');
     expect(await reactionRows({ id: theirsId })).toHaveLength(1);
 
     const own = await call(memberTok, 'DELETE', `/data/${REACTION}/${mineId}`);

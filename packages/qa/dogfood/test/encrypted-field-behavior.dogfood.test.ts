@@ -159,7 +159,10 @@ describe('records-forms.encrypted-field-behavior — fail-closed with no crypto 
   it('acceptance[3], negative[1]: a non-empty secret write is refused and nothing is persisted', async () => {
     const res = await stack.apiAs(token, 'POST', `/data/${VAULT}`, { name: 'efb-closed', token: 'x-cleartext' });
     const text = await res.text();
-    expect(res.status, text).toBeGreaterThanOrEqual(400);
+    // The engine's fail-closed throw is a plain Error, so REST answers its sanitised
+    // terminal branch: a refusal, with the message kept server-side.
+    expect(res.status, text).toBe(500);
+    expect(JSON.parse(text).code).toBe('INTERNAL_ERROR');
     expect(text).not.toContain('x-cleartext');
     expect(await stack.rows(VAULT, { name: 'efb-closed' })).toHaveLength(0);
     const list = await stack.apiAs(token, 'GET', `/data/${VAULT}`);

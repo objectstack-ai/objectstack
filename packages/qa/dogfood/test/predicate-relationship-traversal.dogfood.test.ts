@@ -192,7 +192,8 @@ describe('records-forms.predicate-relationship-traversal — a member who cannot
 
   it('control: the member really cannot read the parent', async () => {
     const read = await call('GET', `/data/${PARENT}/${openId}`);
-    expect([403, 404], JSON.stringify(read.json)).toContain(read.status);
+    expect(read.status, JSON.stringify(read.json)).toBe(403);
+    expect(read.json.code).toBe('PERMISSION_DENIED');
   });
 
   it('acceptance[3]: a legitimate write against a non-tripping parent goes through', async () => {

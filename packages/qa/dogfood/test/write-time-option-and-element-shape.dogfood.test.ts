@@ -127,7 +127,9 @@ describe('records-forms.write-time-option-and-element-shape-judgement — over R
 
     // Control: with the option off, the same cell is refused.
     const off = await importRows([{ name: 'wto-off', priority: 'urgent' }]);
-    expect(verdicts(off.json)[0]?.ok, JSON.stringify(off.json)).toBe(false);
+    expect(verdicts(off.json), JSON.stringify(off.json)).toEqual([
+      { ok: false, action: 'failed', field: 'priority', code: 'invalid_option' },
+    ]);
 
     const patched = await call('PATCH', `/data/${ITEM}/${stored.id}`, { priority: 'urgent' });
     expect(patched.status, JSON.stringify(patched.json)).toBe(400);
@@ -171,7 +173,7 @@ describe('records-forms.write-time-option-and-element-shape-judgement — over R
       expect(res.json.code).toBe('VALIDATION_FAILED');
       const [entry] = res.json.fields ?? [];
       expect(entry, `${label}: ${JSON.stringify(res.json)}`).toMatchObject({ field: 'refs', code: 'invalid_type' });
-      expect(JSON.stringify(entry), `${label}: the refusal names the index`).toMatch(/\b1\b/);
+      expect(String(entry.constraint?.detail), `${label}: the refusal names the index`).toMatch(/^at index 1:/);
       expect(await stack.rows(ITEM, { name })).toHaveLength(0);
     }
     // Control: well-formed ids are stored.
