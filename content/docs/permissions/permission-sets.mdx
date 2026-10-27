@@ -82,10 +82,12 @@ Two consequences worth stating plainly:
   without a read grant exports nothing — `export = list ∧ allowExport`.
 - **`viewAllRecords` / `modifyAllRecords` do not imply it.** Separating "may see
   all data" from "may take a bulk copy of it" is the segregation-of-duties case
-  the axis exists for. The built-in `admin_full_access` and `organization_admin`
-  sets carry `allowExport: true` explicitly; remove that line to get the
-  separation. `member_default` deliberately does not carry it, so ordinary
-  authenticated users have no export by default.
+  the axis exists for. No built-in set carries `allowExport`: not
+  `admin_full_access`, not `organization_admin`, not `member_default`. An
+  admin holding only the built-in sets sees no Export control, and the export
+  route answers `403 EXPORT_NOT_PERMITTED`. To let an admin export, bind them
+  to an app or environment permission set that names each object to export
+  with `allowRead: true, allowExport: true`.
 
 A set carrying `allowExport` is treated as **high-privilege** and cannot be
 bound to the `everyone` or `guest` audience anchors — binding it there would
