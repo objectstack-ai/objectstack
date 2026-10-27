@@ -6,7 +6,7 @@
 
 fix(react,components,app-shell): a delegated admin's out-of-scope save shows the server's reason instead of the fixed no-permission line
 
-Clause-②: no
+Clause-②: yes (widening: `@object-ui/react` exports a new `delegationScopeMessage`)
 Metadata-protocol: none
 
 When a delegated administrator saved something outside their own scope, the server answered `403 DELEGATION_SCOPE_VIOLATION` with the boundary that refused it (a business unit outside the delegated subtree, a permission set not in the scope's allowlist, a target user outside the subtree). The console read every 403 as a plain denial, so the toast and the in-form banner said only "You don't have permission to save this record."
