@@ -575,7 +575,7 @@ describe('[#26718] a restrict on a row the cascade reaches through the record it
     await engine.delete('zz_account', { where: { id: acc.id } } as any);
 
     expect(driver.rowsOf('zz_pledge')).toHaveLength(0);
-    expect(driver.rowsOf('zz_account').map((r) => r.id)).toEqual([other.id]);
+    expect(driver.rowsOf('zz_account').map((r: Row) => r.id)).toEqual([other.id]);
   });
 
   it('control: deleting the restricted record of a pledge owned elsewhere still refuses', async () => {
