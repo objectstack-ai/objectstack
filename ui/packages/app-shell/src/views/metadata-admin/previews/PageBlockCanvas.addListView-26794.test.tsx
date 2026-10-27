@@ -85,6 +85,7 @@ function openPickerAtListView(locale: string): { row: HTMLButtonElement; heading
 describe('the add-block picker offers list-view (objectstack#26794)', () => {
   it('lists it under the Data heading, named in the designer locale', () => {
     for (const locale of ['en-US', 'zh-CN']) {
+      renderCanvas(locale);
       const { row, heading } = openPickerAtListView(locale);
       expect(heading).toBe(t(CATEGORY_LABEL_KEY.data, locale));
       expect(within(row).getByText(t('engine.pageBlockCanvas.type.listView', locale))).toBeTruthy();
