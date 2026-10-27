@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 240 — spawns the real producer once per single-cause fixture: seventeen spawns of the source CLI in five row beforeAll hooks, each a distinct fixture or flag: eight `os serve` boots read through the metadata and data doors, two refused `os serve` boots, five `os build`, two `os validate`; slowest CI reading 191.07 s (run 40392443783) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * #22521 — a CONFIG boot of a multi-package stack answers for the stack's
