@@ -107,6 +107,11 @@ const SPEC_TRANSLATION_GROUPS = [
   // objectstack #25788 serves `reports` (a report's label and description are
   // translatable), copied through onto `app` the same way.
   'reports',
+  // objectstack #26170 serves `hooks` (a hook's declared refusal messages,
+  // `hooks.<hook>.refusals.<CODE>.message`); the server answers a refusal
+  // already translated, so nothing here reads it, but a payload carrying it
+  // is namespaced like any other group.
+  'hooks',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

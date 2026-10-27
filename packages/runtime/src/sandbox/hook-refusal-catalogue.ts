@@ -15,7 +15,8 @@
  *    `message` — served as the error's caller-facing sentence (`innerMessage`)
  *    and marked as the end user's (`userMessage`, the objectui#5210 opt-in);
  *  - the status is the declared `status`, else 400;
- *  - the code is the declared code, so the caller can branch on it.
+ *  - the code is the declared code — on the wire, `declaredCode` beside the
+ *    status's registered `code` — so the caller can branch on it.
  *
  * **Picked here, before the refusal leaves.** A hook refusal reaches the
  * caller already rendered — the error envelope every door builds from the

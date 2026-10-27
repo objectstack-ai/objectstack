@@ -25,9 +25,9 @@
 
 /**
  * The spelling of a declared refusal code: SCREAMING_SNAKE, the one wire
- * vocabulary of an error code (ADR-0112). The code a body throws is the
- * `code` the caller's envelope carries, so it is spelled as every other code a
- * client branches on.
+ * vocabulary of an error code (ADR-0112). The code a body throws reaches the
+ * caller's envelope (as `declaredCode`, beside the status's registered `code`),
+ * so it is spelled as every other code a client branches on.
  */
 export const HOOK_REFUSAL_CODE_PATTERN = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/;
 

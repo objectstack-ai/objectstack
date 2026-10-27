@@ -71,7 +71,10 @@ describe('[#26170] a declared code is answered with the catalogue entry', () => 
         expect(err).toBeInstanceOf(SandboxError);
         const wire = mapDataError(err, 'order');
         expect(wire.status).toBe(DEFAULT_HOOK_REFUSAL_STATUS);
-        expect(wire.body.code).toBe('CREDIT_LIMIT');
+        // An author's code is not an ADR-0112 registered one: the wire `code` is
+        // the status's registered code, and the declared one rides beside it.
+        expect(wire.body.code).toBe('VALIDATION_ERROR');
+        expect(wire.body.declaredCode).toBe('CREDIT_LIMIT');
         expect(wire.body.userMessage).toBe(REFUSALS.CREDIT_LIMIT.message);
         // The body's own sentence is not what the caller reads.
         expect(JSON.stringify(wire.body)).not.toContain('internal detail');
@@ -83,7 +86,7 @@ describe('[#26170] a declared code is answered with the catalogue entry', () => 
         )(ctx()));
         const wire = mapDataError(err, 'order');
         expect(wire.status).toBe(409);
-        expect(wire.body.code).toBe('ACCOUNT_ON_HOLD');
+        expect(wire.body.declaredCode).toBe('ACCOUNT_ON_HOLD');
         expect(wire.body.userMessage).toBe('The account is on hold.');
     });
 
@@ -112,7 +115,7 @@ describe('[#26170] a declared code is answered with the catalogue entry', () => 
 
     it('`e.code = …; throw e` is the same refusal', async () => {
         const err = await rejectionOf(boundHook("const e = new Error('x'); e.code = 'CREDIT_LIMIT'; throw e;")(ctx()));
-        expect(mapDataError(err, 'order').body.code).toBe('CREDIT_LIMIT');
+        expect(mapDataError(err, 'order').body.declaredCode).toBe('CREDIT_LIMIT');
     });
 });
 
@@ -142,7 +145,8 @@ describe('[#26170] what the body did not make passes through untouched', () => {
         )(ctx()));
         const wire = mapDataError(err, 'order');
         expect(wire.status).toBe(422);
-        expect(wire.body.code).toBe('ANY_CODE');
+        expect(wire.body.declaredCode).toBe('ANY_CODE');
+        expect(wire.body.userMessage).toBeUndefined();
     });
 
     it('a crash stays a crash', async () => {
@@ -185,7 +189,7 @@ describe('[#26170] what the body did not make passes through untouched', () => {
         } as any)!;
         const err = await rejectionOf(fn(ctx()));
         expect(mapDataError(err, 'order').status).toBe(409);
-        expect(mapDataError(err, 'order').body.code).toBe('ACCOUNT_ON_HOLD');
+        expect(mapDataError(err, 'order').body.declaredCode).toBe('ACCOUNT_ON_HOLD');
     });
 });
 

@@ -47,6 +47,7 @@ import {
   ShieldCheck,
   SquareChevronDown,
   Users,
+  Webhook,
   Workflow,
 } from 'lucide-react';
 import { EmptyDescription } from '@object-ui/components';
@@ -98,6 +99,7 @@ const CATEGORY_DEFS = {
   reports: { label: 'engine.translationPreview.category.reports', icon: BarChart3, flat: false },
   pages: { label: 'engine.translationPreview.category.pages', icon: PanelsTopLeft, flat: false },
   flows: { label: 'engine.translationPreview.category.flows', icon: Workflow, flat: false },
+  hooks: { label: 'engine.translationPreview.category.hooks', icon: Webhook, flat: false },
   positions: { label: 'engine.translationPreview.category.positions', icon: Users, flat: false },
   permissions: { label: 'engine.translationPreview.category.permissions', icon: ShieldCheck, flat: false },
   metadataForms: { label: 'engine.translationPreview.category.metadataForms', icon: FileText, flat: false },

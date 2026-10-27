@@ -1006,8 +1006,9 @@ defineHook({
 });
 ```
 
-- **Codes** are SCREAMING_SNAKE (`CREDIT_LIMIT`); the caller's error envelope
-  carries the code, so a client can branch on it.
+- **Codes** are SCREAMING_SNAKE (`CREDIT_LIMIT`). The error envelope carries
+  it as `declaredCode`, beside the status's registered `code`
+  (`VALIDATION_ERROR` for 400), so a client can branch on it.
 - **The message is translated** through
   `hooks.<hook>.refusals.<CODE>.message` in the caller's locale; `os i18n
   extract` scaffolds one key per declared entry and `os i18n check` counts them.
