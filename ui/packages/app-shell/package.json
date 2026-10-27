@@ -1,6 +1,7 @@
 {
   "name": "@object-ui/app-shell",
   "version": "18.1.0",
+  "private": true,
   "type": "module",
   "sideEffects": [
     "./dist/index.js",

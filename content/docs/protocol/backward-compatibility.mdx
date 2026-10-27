@@ -116,7 +116,7 @@ Read the **Breaking?** column, not the version number: in the 17.x minors every 
 1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `protocol:breaking` label.
 2. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
 3. **Migration Guide** — A detailed migration guide is published before the removal lands, in the release notes for the version that carries it.
-4. **Release** — In the 17.x minors the breaking change shipped in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`, and `scripts/check-changeset-no-major.mjs` failed a pull request that declared a `major` bump, because under lockstep one `major` would promote all 110 published packages. During the v18 prerelease it shipped in the next `18.0.0-next.N`, because the guard stood aside in pre mode and a pull request could declare a major bump. Changesets has exited pre mode, so the guard fails a `major` bump again. See [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
+4. **Release** — In the 17.x minors the breaking change shipped in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`, and `scripts/check-changeset-no-major.mjs` failed a pull request that declared a `major` bump, because under lockstep one `major` would promote all 109 published packages. During the v18 prerelease it shipped in the next `18.0.0-next.N`, because the guard stood aside in pre mode and a pull request could declare a major bump. Changesets has exited pre mode, so the guard fails a `major` bump again. See [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 
 ---
 
@@ -196,7 +196,7 @@ The `@objectstack/spec` package provides additional stability guarantees:
 
 ### Which surfaces this covers
 
-**All of them.** It was not scoped to an experimental corner or a pre-release channel: all **110** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface was exempt.
+**All of them.** It was not scoped to an experimental corner or a pre-release channel: all **109** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface was exempt.
 
 The convention was enforced rather than informal — `scripts/check-changeset-no-major.mjs` failed a pull request that introduced a `major` bump, because under lockstep a single `major` on one package would promote the entire stack. During the v18 prerelease Changesets was in pre mode with the tag `next` and the guard stood aside, so a pull request on the v18 line could declare a major bump. Changesets has exited pre mode, and the guard fails a `major` bump again.
 
