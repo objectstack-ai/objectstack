@@ -80,7 +80,7 @@ import { BulkActionBar } from './components/BulkActionBar';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
-import { type ObjectGridColumn, type ObjectGridColumnDraft } from './objectGridColumns';
+import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
