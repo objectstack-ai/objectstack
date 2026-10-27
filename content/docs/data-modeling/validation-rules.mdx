@@ -28,7 +28,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `hidden` | `boolean` | `false` | Excluded from default UI rendering |
 | `readonly` | `boolean` | `false` | Blocks user edits in UI forms; server-enforced on **both create and update** — a non-system write to the field is silently dropped from the payload (system-context writes such as import/seed/migration are exempt) |
 | `sortable` | `boolean` | `true` | Whether field appears in list view sort options |
-| `externalId` | `boolean` | `false` | Marks field as external ID for upsert operations |
+| `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
 | `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
 | `visibleWhen` | `string \| Expression` | — | CEL predicate; field is shown only when `TRUE` |
 | `readonlyWhen` | `string \| Expression` | — | CEL predicate; field is read-only when `TRUE` |

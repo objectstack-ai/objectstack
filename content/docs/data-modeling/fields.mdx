@@ -369,7 +369,7 @@ These properties are available on all field types:
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `searchable` | `boolean` | `false` | Include in full-text search |
-| `externalId` | `boolean` | `false` | Mark as external system identifier |
+| `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
 
 Database indexes are declared at the object level in the object's `indexes[]` array — there is no per-field `index` flag. See [Indexing](/docs/data-modeling/indexing).
 
