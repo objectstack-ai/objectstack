@@ -135,8 +135,8 @@
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
 - coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
-- 常设档位令 = 维护者在席位线程或决策卡一次明言:卡线程按 `--tier` 的 MANDATORY 档跑。
-- 令可同定 p1/`security` 的 effort;席位引令 id 与时刻作 `reason:`,⛔ 不逐卡附原话;无令才附。
+- 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
+- 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
