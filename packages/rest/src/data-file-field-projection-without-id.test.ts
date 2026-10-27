@@ -175,7 +175,7 @@ describe('[#26672] a file field reads the same with or without `id` in the proje
   const as = (user: string) => { caller = user; };
 
   it('the refusal it starts from: the reader may not read sys_file directly', async () => {
-    const direct = await engine.find('sys_file', { context: { userId: READER } } as any).then(() => null, (e: any) => e);
+    const direct = await engine.find('sys_file', { context: { userId: READER } }).then(() => null, (e: any) => e);
     expect({ code: direct?.code, status: direct?.statusCode ?? direct?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
