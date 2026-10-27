@@ -4,7 +4,7 @@
 
 fix(metadata-core)!: a package built for a NEWER protocol major than the runtime is told to upgrade the runtime, not to run `migrate meta`
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (runtime-interface-only packages/metadata-core/src/protocol-handshake.ts#ProtocolIncompatibleDiagnostic) The one narrowing is an output member of a published runtime TypeScript interface: `migrateCommand` on `ProtocolIncompatibleDiagnostic` becomes optional. No Zod schema, no spec declaration and no stored representation carries it, so there is nothing for the metadata migration to rewrite and no tombstone; a TypeScript reader that dereferences the member is told by its compiler. -->
