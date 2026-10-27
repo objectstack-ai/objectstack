@@ -4,7 +4,7 @@ Primary AI instruction file for this repo — and the human contributors' source
 Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other agents — no
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
-`docs/NORTH-STAR.md`, the one North Star (先做什么: goals, priority), outranks it; `content/docs/concepts/architecture-overview.mdx` = architecture.
+`docs/NORTH-STAR.md`, the North Star, outranks it; `content/docs/concepts/architecture-overview.mdx` = architecture.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
