@@ -315,12 +315,12 @@ describe('a genuine not-found is never masked (objectstack#26589)', () => {
     const dataSource = makeDataSource([OTHER_RECORD_ID]);
     const view = render(page(dataSource, RECORD_ID));
     await waitFor(() => expect(decisionButton('approval_approve')).toBeTruthy());
-    revokesOnDecision = false;
-    const readsBefore = dataSource.findOne.mock.calls.length;
     fireEvent.click(decisionButton('approval_approve')!);
-    await waitFor(() => expect(dataSource.findOne.mock.calls.length).toBeGreaterThan(readsBefore));
+    // The decision ended the read on THIS record, and the page says so.
+    await screen.findByTestId('record-access-ended');
 
-    // Same mounted page, moved to a record that does not exist.
+    // Same mounted page, moved to a record that does not exist: that 404 is
+    // not this viewer's decision, so it stays "Record not found".
     view.rerender(page(dataSource, OTHER_RECORD_ID));
 
     await screen.findByText('Record not found');
