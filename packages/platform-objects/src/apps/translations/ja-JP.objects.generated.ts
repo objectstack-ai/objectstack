@@ -3457,11 +3457,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       old_hash: {
         label: "変更前ハッシュ",
-        help: "変更前の値の SHA-256（正規化済み）。未設定の場合は null。"
+        help: "変更前の値のダイジェスト（平文ではない）：通常の値は sha256: の16進ダイジェスト、機密値は鍵付きの hmac-sha256: ダイジェスト。未設定の場合、または鍵付きダイジェストを得られない機密値の場合は null。"
       },
       new_hash: {
         label: "変更後ハッシュ",
-        help: "新しい値の SHA-256（正規化済み）。リセット時は null。"
+        help: "新しい値のダイジェスト（平文ではない）：通常の値は sha256: の16進ダイジェスト、機密値は鍵付きの hmac-sha256: ダイジェスト。リセット時、または鍵付きダイジェストを得られない機密値の場合は null。"
       },
       encrypted: {
         label: "暗号化",
