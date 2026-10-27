@@ -1,0 +1,306 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * One-off rewrite of the key material this plugin's writer copied into the
+ * ledger before it omitted it.
+ *
+ * `writeAudit` COPIES the audited row into `sys_audit_log.new_value` /
+ * `old_value` and into both halves of `sys_activity.metadata`. For the objects
+ * `key-material-copy.ts` lists, that copy carried an encrypted-key-material
+ * column into a second, at-rest store, and kept it after the source row was
+ * rotated or deleted. The writer omits those columns now (`ledgerView`), but
+ * only on NEW writes: rows copied before keep them. This module removes them,
+ * with the writer's own helper ({@link omitKeyMaterialFromCopy}), so a repaired
+ * copy and a new one read the same. The shape is the mail-log body rewrite's
+ * (`mail-log-body-migration.ts`), applied to a different list.
+ *
+ * ## Pure planner, driven runner
+ *
+ * The decision is pure ({@link planKeyMaterialAuditRowPatch} /
+ * {@link planKeyMaterialActivityRowPatch}); {@link migrateKeyMaterialCopies}
+ * pages the two tables through the engine and rewrites only the rows a planner
+ * changed — and in a row, only the column holding the copy, under
+ * `preserveAudit` with the row's stored `updated_at`, so no other column of the
+ * row moves. Nothing else in the copy moves either: the other keys of the
+ * snapshot and of the activity pair are re-serialized as they were read.
+ *
+ * ## Idempotent, its own verification
+ *
+ * A copy without the columns has nothing to remove, so a second run finds
+ * nothing to rewrite, and re-running and reading a clean report is the check.
+ * No `sys_migration` flag is recorded: nothing gates irreversible behaviour on
+ * it. The report holds counts only; no log line names a value.
+ *
+ * ## The archive, through the same runner
+ *
+ * `sys_audit_log` declares `lifecycle.archive`: the Archiver copies its rows
+ * past the hot window to the archive datasource VERBATIM, and the engine never
+ * routes `sys_audit_log` there. {@link migrateArchivedKeyMaterialCopies} drives
+ * the very same pages and planners through the archive datasource's DRIVER, as
+ * the mail-log rewrite does.
+ */
+
+import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import { isMissingTableError } from '@objectstack/types';
+import { KEY_MATERIAL_COPY_OBJECTS, omitKeyMaterialFromCopy } from './key-material-copy.js';
+import type { MigrationLogger } from './stored-metadata-body-migration.js';
+
+/** The two audit-family tables the writer copies a row into. */
+export const KEY_MATERIAL_COPY_TABLES = ['sys_audit_log', 'sys_activity'] as const;
+
+/** One of {@link KEY_MATERIAL_COPY_TABLES}. */
+export type KeyMaterialCopyTable = (typeof KEY_MATERIAL_COPY_TABLES)[number];
+
+/** Rows read per page. */
+export const KEY_MATERIAL_MIGRATION_PAGE_SIZE = 500;
+
+/** The rewrite reads as the platform, and writes as the platform keeping each row's audit stamp. */
+const SYSTEM_CTX = { isSystem: true } as const;
+const SYSTEM_PRESERVING_CTX = { isSystem: true, preserveAudit: true } as const;
+
+/** Omit the key-material columns from one parsed snapshot. A non-object, or a snapshot without them, comes back unchanged. */
+function omittedSnapshot(objectName: unknown, snapshot: unknown): { changed: boolean; value: unknown } {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return { changed: false, value: snapshot };
+  const copy = { ...(snapshot as Record<string, unknown>) };
+  return omitKeyMaterialFromCopy(objectName, copy) ? { changed: true, value: copy } : { changed: false, value: snapshot };
+}
+
+/** Parse → apply `step` → re-serialize one stored JSON string column. A non-string / unparseable value is left as-is. */
+function rewriteSerialized(
+  serialized: unknown,
+  step: (parsed: unknown) => { changed: boolean; value: unknown },
+): { changed: boolean; value: unknown } {
+  if (typeof serialized !== 'string' || serialized === '') return { changed: false, value: serialized };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    return { changed: false, value: serialized };
+  }
+  const { changed, value } = step(parsed);
+  return changed ? { changed: true, value: JSON.stringify(value) } : { changed: false, value: serialized };
+}
+
+/**
+ * The patch for one `sys_audit_log` row — its `new_value` and `old_value` with
+ * the key-material columns removed — or `null` when the row is about an object
+ * the list does not name or holds none of them.
+ */
+export function planKeyMaterialAuditRowPatch(
+  row: Record<string, unknown>,
+): { new_value?: unknown; old_value?: unknown } | null {
+  const patch: { new_value?: unknown; old_value?: unknown } = {};
+  for (const column of ['new_value', 'old_value'] as const) {
+    const out = rewriteSerialized(row[column], (parsed) => omittedSnapshot(row.object_name, parsed));
+    if (out.changed) patch[column] = out.value;
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * The patch for one `sys_activity` row — the serialized pair `{ old, new }`
+ * with each half's key-material columns removed, every other key of the pair
+ * kept — or `null` when the row needs none.
+ */
+export function planKeyMaterialActivityRowPatch(row: Record<string, unknown>): { metadata: unknown } | null {
+  const out = rewriteSerialized(row.metadata, (parsed) => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { changed: false, value: parsed };
+    const pair = parsed as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...pair };
+    let changed = false;
+    for (const half of ['old', 'new'] as const) {
+      if (!(half in pair)) continue;
+      const omitted = omittedSnapshot(row.object_name, pair[half]);
+      if (!omitted.changed) continue;
+      next[half] = omitted.value;
+      changed = true;
+    }
+    return { changed, value: changed ? next : parsed };
+  });
+  return out.changed ? { metadata: out.value } : null;
+}
+
+/** The engine surface the runner needs — the real data-engine contract's members. */
+export type KeyMaterialMigrationEngine = Pick<IDataEngine, 'find' | 'update'>;
+
+/** The driver surface the archive run needs — the real data-driver contract's members. */
+export type KeyMaterialArchiveDriver = Pick<IDataDriver, 'find' | 'update'>;
+
+/** What the runner options accept, for either store. */
+export interface KeyMaterialMigrationOptions {
+  apply?: boolean;
+  pageSize?: number;
+  /** The copy tables to walk — both by default. */
+  objects?: readonly KeyMaterialCopyTable[];
+}
+
+/** What one migration run did (or would do in dry-run). Counts only. */
+export interface KeyMaterialMigrationReport {
+  apply: boolean;
+  /** Per copy table: copy rows read, and rows rewritten (or that would be). */
+  readonly byObject: Record<string, { scanned: number; rewritten: number }>;
+  /** Copy rows read, total. */
+  scanned: number;
+  /** Rows holding key material, total — rewritten under `apply`. */
+  rewritten: number;
+  /** A failed read, or a row an `update` threw on (apply mode) — re-run to finish. */
+  failures: number;
+}
+
+interface CopyStore {
+  readPage(object: string, query: { where: Record<string, unknown>; fields: string[]; orderBy: Array<{ field: string; order: 'asc' }>; limit: number }): Promise<unknown>;
+  write(object: string, id: string, patch: Record<string, unknown>, updatedAt: unknown): Promise<void>;
+}
+
+function asArray(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) return result as Record<string, unknown>[];
+  if (result && typeof result === 'object' && Array.isArray((result as { records?: unknown }).records)) {
+    return (result as { records: Record<string, unknown>[] }).records;
+  }
+  return [];
+}
+
+/**
+ * Remove the key-material columns from every `sys_audit_log` / `sys_activity`
+ * copy of a listed object's row that still holds them. Dry-run by default;
+ * `apply` writes. Idempotent.
+ */
+export async function migrateKeyMaterialCopies(
+  engine: KeyMaterialMigrationEngine,
+  logger: MigrationLogger,
+  options: KeyMaterialMigrationOptions = {},
+): Promise<KeyMaterialMigrationReport> {
+  return runKeyMaterialCopies(
+    {
+      readPage: (object, query) => engine.find(object, query, { context: SYSTEM_CTX }),
+      // A single-id write, as the platform, keeping the row's own timestamp:
+      // removing material from a copy is not an edit of the ledger row.
+      write: async (object, id, patch, updatedAt) => {
+        await engine.update(
+          object,
+          { ...patch, id, ...(updatedAt !== undefined && updatedAt !== null ? { updated_at: updatedAt } : {}) },
+          { context: SYSTEM_PRESERVING_CTX },
+        );
+      },
+    },
+    logger,
+    options,
+    'audit/activity',
+  );
+}
+
+/**
+ * The same rewrite over an ARCHIVE datasource — the store `sys_audit_log`'s
+ * `lifecycle.archive.to` names. `driver` is that datasource's registered
+ * driver; the run reads and writes through it directly, as the Archiver does.
+ * An archive table that was never created reads as no rows; any other refused
+ * read is a failure, as on the hot run.
+ */
+export async function migrateArchivedKeyMaterialCopies(
+  driver: KeyMaterialArchiveDriver,
+  logger: MigrationLogger,
+  options: KeyMaterialMigrationOptions = {},
+): Promise<KeyMaterialMigrationReport> {
+  return runKeyMaterialCopies(
+    {
+      readPage: async (object, query) => {
+        try {
+          return await driver.find(object, query as Parameters<KeyMaterialArchiveDriver['find']>[1]);
+        } catch (e) {
+          if (isMissingTableError(e, object)) return [];
+          throw e;
+        }
+      },
+      write: async (object, id, patch, updatedAt) => {
+        const keep = updatedAt !== undefined && updatedAt !== null;
+        await driver.update(object, id, { ...patch, ...(keep ? { updated_at: updatedAt } : {}) }, keep ? { preserveAudit: true } : undefined);
+      },
+    },
+    logger,
+    options,
+    'archived audit',
+  );
+}
+
+async function runKeyMaterialCopies(
+  store: CopyStore,
+  logger: MigrationLogger,
+  options: KeyMaterialMigrationOptions,
+  label: string,
+): Promise<KeyMaterialMigrationReport> {
+  const apply = options.apply === true;
+  const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : KEY_MATERIAL_MIGRATION_PAGE_SIZE;
+  const only = options.objects ? new Set<string>(options.objects) : undefined;
+  const report: KeyMaterialMigrationReport = { apply, byObject: {}, scanned: 0, rewritten: 0, failures: 0 };
+
+  const tables: ReadonlyArray<{
+    object: KeyMaterialCopyTable;
+    fields: readonly string[];
+    plan: (row: Record<string, unknown>) => Record<string, unknown> | null;
+  }> = [
+    { object: 'sys_audit_log' as const, fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: planKeyMaterialAuditRowPatch },
+    { object: 'sys_activity' as const, fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: planKeyMaterialActivityRowPatch },
+  ].filter((t) => !only || only.has(t.object));
+
+  for (const { object, fields, plan } of tables) {
+    const stats = (report.byObject[object] = { scanned: 0, rewritten: 0 });
+    // Keyset paging on `id`: a rewritten row keeps its id and is never read
+    // twice in one run.
+    let after: string | undefined;
+    for (;;) {
+      const copies: Record<string, unknown> = { object_name: { $in: [...KEY_MATERIAL_COPY_OBJECTS] } };
+      const where = after === undefined ? copies : { $and: [copies, { id: { $gt: after } }] };
+      let rows: Record<string, unknown>[];
+      try {
+        rows = asArray(
+          await store.readPage(object, { where, fields: [...fields], orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize }),
+        );
+      } catch (e) {
+        // A table this run could not read is NOT a clean table: counted, so the
+        // run says so.
+        report.failures += 1;
+        logger.warn(
+          `[key-material-copy-migration] could not read ${object} — its remaining rows were NOT examined: ` +
+            `${(e as Error)?.message ?? String(e)}`,
+        );
+        break;
+      }
+      if (rows.length === 0) break;
+
+      for (const row of rows) {
+        report.scanned += 1;
+        stats.scanned += 1;
+        const patch = plan(row);
+        if (!patch) continue;
+        report.rewritten += 1;
+        stats.rewritten += 1;
+        if (!apply) continue;
+        const id = row.id;
+        if (typeof id !== 'string' || id === '') {
+          report.failures += 1;
+          logger.warn(`[key-material-copy-migration] ${object} row has no id — cannot rewrite it`);
+          continue;
+        }
+        try {
+          await store.write(object, id, patch, row.updated_at);
+        } catch (e) {
+          report.failures += 1;
+          logger.warn(
+            `[key-material-copy-migration] failed to rewrite ${object}/${id}: ${(e as Error)?.message ?? String(e)}`,
+          );
+        }
+      }
+
+      const last = rows[rows.length - 1]?.id;
+      if (rows.length < pageSize || typeof last !== 'string' || last === '') break;
+      after = last;
+    }
+  }
+
+  logger.info?.(
+    `[key-material-copy-migration] ${apply ? 'removed' : 'would remove'} key material from ${report.rewritten} of ` +
+      `${report.scanned} ${label} cop(ies)` +
+      (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
+  );
+  return report;
+}
