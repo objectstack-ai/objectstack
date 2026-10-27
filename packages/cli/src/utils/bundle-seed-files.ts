@@ -1,0 +1,218 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { isSeedFileReference, type SeedFileContent, type SeedFileReference } from '@objectstack/spec/data';
+
+/**
+ * [#25779] The CLI's half of a seed file — the files seed records name with
+ * `seedFile(path)`, read off disk and carried in the artifact, so every boot
+ * that loads it has the bytes: `os dev`, `os serve`, a published package, an
+ * artifact URL.
+ *
+ * Two calls, split the way the package docs are (`collectAndLintDocs` /
+ * `placeCollectedDocs`):
+ *
+ *  - {@link collectSeedFiles} — the GATE, run by `os validate` and `os build`
+ *    alike. It reads each file, relative to the directory holding the config
+ *    (the root a declarative connector's file ref resolves against too) and
+ *    confined to it, and refuses a path that names no file, or a file whose
+ *    type cannot be told from its extension and that no reference names a
+ *    `contentType` for: the seed would otherwise load without the file its
+ *    field requires. It writes nothing.
+ *  - {@link placeSeedFiles} — `os build`'s ASSEMBLY: each dataset's bytes into
+ *    its `files` map. It judges nothing.
+ */
+
+/** A refusal, located in the artifact like a schema issue is. */
+export interface SeedFileBundleIssue {
+  /** Where the reference sits, e.g. `data[2].records[0].file`. */
+  location: string;
+  message: string;
+}
+
+export interface CollectedSeedFiles {
+  /** Each dataset that names a seed file, with the `files` map it is to carry. */
+  datasets: Map<object, Record<string, SeedFileContent>>;
+  /** Files read, counted once per dataset that carries them. */
+  files: number;
+  /** Their bytes, before base64. */
+  bytes: number;
+  issues: SeedFileBundleIssue[];
+}
+
+/**
+ * Media types by extension: the seed file's `contentType` when no reference
+ * names one. Deliberately the common document, image and media types only; any
+ * other file states its type with `seedFile(path, { contentType })`.
+ */
+const SEED_FILE_TYPES: Readonly<Record<string, string>> = {
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
+  '.html': 'text/html',
+  '.rtf': 'application/rtf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.zip': 'application/zip',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+};
+
+/** One dataset of the artifact, as far as this pass reads it. */
+interface DatasetLike {
+  records?: unknown;
+  files?: Record<string, SeedFileContent>;
+}
+
+/**
+ * Every seed dataset in the stack, with where it sits: the top level's
+ * `data`, the manifest's, and each `packages[i].manifest` body's. Read by
+ * position, off the objects themselves, because {@link placeSeedFiles} writes
+ * into these very datasets — the ones the artifact serializes.
+ */
+function datasetsOf(stack: Record<string, unknown>): Array<{ dataset: DatasetLike; location: string }> {
+  const found: Array<{ dataset: DatasetLike; location: string }> = [];
+  const seen = new Set<unknown>();
+  const take = (list: unknown, location: string): void => {
+    if (!Array.isArray(list)) return;
+    list.forEach((dataset, i) => {
+      if (!dataset || typeof dataset !== 'object' || seen.has(dataset)) return;
+      seen.add(dataset);
+      found.push({ dataset: dataset as DatasetLike, location: `${location}[${i}]` });
+    });
+  };
+  take(stack.data, 'data');
+  const manifest = stack.manifest as { data?: unknown } | undefined;
+  if (manifest && typeof manifest === 'object') take(manifest.data, 'manifest.data');
+  if (Array.isArray(stack.packages)) {
+    stack.packages.forEach((pkg, i) => {
+      const body = (pkg as { manifest?: { data?: unknown } } | null)?.manifest;
+      if (body && typeof body === 'object') take(body.data, `packages[${i}].manifest.data`);
+    });
+  }
+  return found;
+}
+
+/** The seed file references of one dataset, by path, with where each one sits. */
+function referencesOf(
+  dataset: DatasetLike,
+  location: string,
+): Map<string, Array<{ reference: SeedFileReference; location: string }>> {
+  const byPath = new Map<string, Array<{ reference: SeedFileReference; location: string }>>();
+  if (!Array.isArray(dataset.records)) return byPath;
+  dataset.records.forEach((record, r) => {
+    if (!record || typeof record !== 'object') return;
+    for (const [field, value] of Object.entries(record as Record<string, unknown>)) {
+      const elements = Array.isArray(value) ? value : [value];
+      elements.forEach((element, e) => {
+        if (!isSeedFileReference(element) || typeof element.$file !== 'string') return;
+        const at = `${location}.records[${r}].${field}${Array.isArray(value) ? `[${e}]` : ''}`;
+        const list = byPath.get(element.$file) ?? [];
+        list.push({ reference: element, location: at });
+        byPath.set(element.$file, list);
+      });
+    }
+  });
+  return byPath;
+}
+
+/**
+ * Read every seed file the stack's datasets name — the top level's, the
+ * manifest's and each package body's, where each dataset sits — and judge it.
+ * `configPath` is the config's path; seed file paths resolve against its
+ * directory. Reads only: the stack is not changed.
+ */
+export function collectSeedFiles(configPath: string, stack: Record<string, unknown>): CollectedSeedFiles {
+  const result: CollectedSeedFiles = { datasets: new Map(), files: 0, bytes: 0, issues: [] };
+  const root = path.dirname(path.resolve(configPath));
+  const read = new Map<string, Buffer | null>();
+  for (const { dataset, location } of datasetsOf(stack)) {
+    const byPath = referencesOf(dataset, location);
+    if (byPath.size === 0) continue;
+    const files: Record<string, SeedFileContent> = { ...(dataset.files ?? {}) };
+    for (const [seedPath, references] of byPath) {
+      const first = references[0].location;
+      const absolute = path.resolve(root, seedPath);
+      const relative = path.relative(root, absolute);
+      if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+        result.issues.push({
+          location: first,
+          message: `seedFile('${seedPath}') climbs out of the package root ${root}; a seed file path stays inside it.`,
+        });
+        continue;
+      }
+      if (!read.has(absolute)) {
+        let bytes: Buffer | null = null;
+        try {
+          if (fs.statSync(absolute).isFile()) bytes = fs.readFileSync(absolute);
+        } catch {
+          bytes = null;
+        }
+        read.set(absolute, bytes);
+      }
+      const bytes = read.get(absolute) ?? null;
+      if (bytes === null) {
+        result.issues.push({
+          location: first,
+          message:
+            `seedFile('${seedPath}') names no file: ${absolute} does not exist or is not a file. A seed file path is ` +
+            'relative to the directory holding objectstack.config.ts.',
+        });
+        continue;
+      }
+      // A type the author names wins over the one the extension suggests.
+      const declared = references.map((r) => r.reference.contentType).find((t) => typeof t === 'string');
+      const contentType = declared ?? SEED_FILE_TYPES[path.extname(seedPath).toLowerCase()];
+      if (!contentType) {
+        result.issues.push({
+          location: first,
+          message:
+            `seedFile('${seedPath}'): the file's type cannot be told from its extension. Name it on the reference: ` +
+            `seedFile('${seedPath}', { contentType: 'application/octet-stream' }) — or the type it really is.`,
+        });
+        continue;
+      }
+      files[seedPath] = {
+        contentType,
+        size: bytes.byteLength,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        data: bytes.toString('base64'),
+      };
+      result.files += 1;
+      result.bytes += bytes.byteLength;
+    }
+    result.datasets.set(dataset, files);
+  }
+  return result;
+}
+
+/**
+ * Write what {@link collectSeedFiles} read into the datasets it read it for:
+ * each one's `files` map. Run after the gate passed, on the stack it read.
+ */
+export function placeSeedFiles(collected: CollectedSeedFiles): void {
+  for (const [dataset, files] of collected.datasets) {
+    (dataset as DatasetLike).files = files;
+  }
+}
