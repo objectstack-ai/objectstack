@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-calendar",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Calendar view plugins for Object UI - includes both ObjectQL-integrated and standalone calendar components",

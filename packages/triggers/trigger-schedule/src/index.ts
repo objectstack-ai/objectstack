@@ -13,6 +13,10 @@ export type {
     FlowTrigger,
     FlowTriggerBinding,
     JobServiceSurface,
+    // [#25235] In `JobServiceSurface.readArming` and
+    // `ScheduleDispatchLedger.recordMissedRun`'s signatures.
+    JobArmingReading,
+    MissedScheduledRunInput,
     TriggerLogger,
     ReplayGuard,
     ReplayGuardDecision,

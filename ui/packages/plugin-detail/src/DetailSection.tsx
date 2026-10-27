@@ -772,7 +772,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    // A real Tab stop, so it is revealed on keyboard focus as
+                    // well as on hover, like the pencil above (objectstack#26329).
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
                     // objectui#12625 — an icon-only button; the tooltip is
                     // closed at rest, so without this it has no name.
                     aria-label={t('detail.copyToClipboard')}

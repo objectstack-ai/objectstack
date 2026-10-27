@@ -138,7 +138,7 @@ const CALLERS: Record<string, Classification> = {
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
     decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
     also:
-      'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served). ' +
+      // [#25522 cut 14] The validation-predicate reads moved to `engine-master-detail-related.ts` (its row).
       "The engine's privileged callers (a flow's `config.expand`, a hook's read) never pass the door, by design.",
   },
   'packages/services/service-analytics/src/dimension-labels.ts': {
@@ -216,6 +216,13 @@ const CALLERS: Record<string, Classification> = {
       'the write-path reference-existence check (`assertReferencesResolve`): it asks whether a caller-supplied id ' +
       "resolves on the target (the engine's `referenceExists` probe) and answers `reference_not_found` or nothing, " +
       'never a field of the target',
+  },
+  // [#25522 cut 14] The validation-predicate reads, moved out of engine.ts.
+  'packages/objectql/src/engine-master-detail-related.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served), and ' +
+      "`resolveOneHopRelated`, the one-hop loader they and the formula fields read through, as the caller's own `find`",
   },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',

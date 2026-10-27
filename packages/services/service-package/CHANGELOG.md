@@ -1,5 +1,113 @@
 # @objectstack/service-package
 
+## 18.2.0
+
+### Patch Changes
+
+- be78977: feat(install): a package that declares an installed app in `manifest.dependencies` may share that app's namespace, and a boot hydrates installed packages in dependency order (ADR-0141 D5)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning. The one narrowing is an install-local acceptance detail of the not-yet-released ADR-0141 D2 check (an artifact wrapper's own id no longer counts as a delivered package), plus the matching removal of the unreleased `DeclaredDependencyCheck.deliveredIds` option; there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **Namespace co-ownership by declaration.** The install gate (`SchemaRegistry.installPackage`) used to admit packages into one namespace only when one release artifact delivered them together. A module shipped as its own artifact that uses its app's namespace was refused `422 NAMESPACE_CONFLICT` beside the installed app, whatever it declared. Now an installed package P co-owns namespace N with:
+  
+  - an installed X that P declares in `manifest.dependencies`, when both use N;
+  - a sitting owner of N that declares P, which is the same relation read from the other end, so an upgrade or reinstall of the app beside its modules is admitted;
+  - a sibling S, when S and P each declare one installed package that holds N (two modules of one app, neither declaring the other).
+  
+  Only direct declarations count. The shared parent must be installed and must hold N itself.
+  
+  The object-name check reads the same co-owner set. A co-owner by declaration that defines an object name another co-owner already owns is refused `422 DUPLICATE_ARTIFACT_OBJECT_NAME` before any DDL. Examples: a module redefining its app's object, a sibling redefining the other sibling's object, or an app upgrade newly defining a name one of its modules owns. The message is worded per source (same artifact, declared dependency, sibling). `NAMESPACE_CONFLICT` now names the declaration as the fix for a package that extends the app holding the namespace.
+  
+  **Hydrate order.** The `sys_packages` hydrate and the install-local `kernel:ready` rehydrate used to register in source-listing order. Now they sort their batch by `manifest.dependencies`, with declared ids as optional edges, through `resolvePluginOrder`. Before this, a module that hydrated before the app whose namespace it shares could be refused and stay absent for the process lifetime. In the install-local rehydrate, each ledger entry is one node, so a declared id resolves to the entry that carries that package. A dependency cycle never stops a hydrate: its members keep source order and an error names them.
+  
+  **BREAKING** (an install-acceptance narrowing of the unreleased ADR-0141 D2 check) at `POST /api/v1/marketplace/install-local`. A multi-package artifact's own wrapper id no longer counts as delivered unless one of its packages carries it. A module declaring the wrapper id is judged like any other entry, because it would be `absent` on its first standalone install. `DeclaredDependencyCheck.deliveredIds` is removed with it. Also, an undecided range union whose installed version is readable is now reported `found: 'unreadable-range'` instead of `'unreadable-version'`; for example, `<5 || latest` against `7.0.0`.
+  
+  **What changes for you.**
+  
+  - A module that extends an app and uses its namespace declares the app in `manifest.dependencies`, and then installs beside it as its own artifact. Two modules of one app need not declare each other.
+  - Every package of the app's own artifact that uses the namespace should declare the app too.
+  - New exports: `@objectstack/core` exports `orderHydrationBatch` and `declaredDependencyIds`.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/metadata-core@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes
