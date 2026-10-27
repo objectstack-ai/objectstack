@@ -186,6 +186,14 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     evidence: 'packages/cli/src/utils/organization-ownership-apply.ts (deletableWhere — the mirror selector minus every claimed row)',
   },
   {
+    file: 'packages/spec/src/automation/assignment-rule.zod.ts',
+    property: 'criteria',
+    semantics: 'scope',
+    rationale:
+      "[ADR-0142 D5] Which inserted rows an assignment rule entry routes; absent = every row, the catch-all entry at the end of an ordered list (the first entry that matches decides). It selects work to route and grants nothing by itself: the author names the target explicitly, assignment runs only for a row that reaches the engine with no owner and no queue, and a parked row is readable only by members of the queue the author named. The failure direction of a missing criteria is mis-routing among the author's own targets, never a widened grant.",
+    evidence: 'packages/objectql/src/assignment-rules.ts (the first matching entry of the first matching rule decides; only rows with no owner and no queue are routed)',
+  },
+  {
     file: 'packages/spec/src/automation/flow.zod.ts',
     property: 'errorCode',
     semantics: 'scope',

@@ -33,7 +33,7 @@
  * | `business_unit`         | `BusinessUnitGraphService.expandUnitMembers` | YES |
  * | `position`              | `PositionGraphService` (`sys_user_position`, `sys_member`) | no |
  * | `unit_and_subordinates` | `BusinessUnitGraphService.expandUsers`      | YES |
- * | `queue`                 | returns `[]` (no `sys_queue` yet)           | no |
+ * | `queue`                 | the ownership-queue service's expansion of the queue's member specifications (ADR-0142 D2) | only when the queue has a `business_unit` or `unit_and_subordinates` member |
  * | `field`                 | the matched record's own user column, per record (#15072; `expandRecipientForRecord`, never rule-wide) | no |
  *
  * `business_unit` stays in that set after #7807 narrowed it to exactly one
@@ -113,10 +113,11 @@ export const BU_TREE_RECOMPUTE_PACKAGE = 'plugin-sharing:bu-tree-recompute';
  * The recipient kinds whose expansion reads the business-unit graph.
  *
  * This set is the non-regression guarantee. A rule recipient that never reads
- * the BU tree (`user` / `team` / `position` / `queue` / `field`) is not recomputed by a
+ * the BU tree (`user` / `team` / `position` / `field`) is not recomputed by a
  * BU write at all — not more cheaply, not at all — so a deployment whose rules
  * are all `user`-recipient pays one `sys_sharing_rule` read per BU write and
- * nothing else.
+ * nothing else. A `queue` recipient is decided per rule, by its queue's
+ * members ({@link QueueReadsBusinessUnits}), so it is not in this set.
  */
 export const BU_TREE_RECIPIENT_TYPES: ReadonlySet<SharingRuleRecipientType> = new Set<SharingRuleRecipientType>([
   'business_unit',
@@ -154,6 +155,14 @@ interface MinimalEngine {
   ): void;
   unregisterHooksByPackage(packageId: string): number;
 }
+
+/**
+ * [ADR-0142 D2] Does the queue a `queue`-recipient rule names read the
+ * business-unit graph — has it a `business_unit` or `unit_and_subordinates`
+ * member? Answered by the ownership-queue service; absent, no queue rule is
+ * recomputed by a BU write.
+ */
+export type QueueReadsBusinessUnits = (rule: SharingRuleRow) => Promise<boolean>;
 
 /** The slice of {@link SharingRuleService} this module drives. */
 export interface BuTreeRecomputeRuleService {
@@ -224,6 +233,7 @@ export function bindBusinessUnitTreeRecompute(
   engine: MinimalEngine,
   service: BuTreeRecomputeRuleService,
   logger?: OptionalSharingLogger,
+  queueReadsBusinessUnits?: QueueReadsBusinessUnits,
 ): void {
   if (typeof engine.registerHook !== 'function') return;
   if (typeof engine.unregisterHooksByPackage === 'function') {
@@ -264,6 +274,13 @@ export function bindBusinessUnitTreeRecompute(
       if (!writeCanChangeExpansion(objectName, event, hookCtx)) return;
       const rules = await service.listRules({ activeOnly: true }, SYSTEM_CTX as any);
       const affected = (rules ?? []).filter((r) => BU_TREE_RECIPIENT_TYPES.has(r.recipient_type));
+      // [ADR-0142 D2] A queue recipient reads the BU tree exactly when its
+      // queue has a business-unit member; asked per queue rule, never assumed.
+      if (queueReadsBusinessUnits) {
+        for (const r of rules ?? []) {
+          if (r.recipient_type === 'queue' && (await queueReadsBusinessUnits(r).catch(() => true))) affected.push(r);
+        }
+      }
       if (affected.length === 0) return;
       for (const rule of affected) {
         // Safety half — synchronous and complete. Failing one rule must not

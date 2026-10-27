@@ -94,6 +94,13 @@ export const ExplainMatchedRuleSchema = lazySchema(() => z.object({
     'team',            // team / account-team membership grant
     'territory',       // territory assignment grant
     'rls_policy',      // a business RLS policy predicate
+    // [ADR-0142 D3] the record sits in a queue the principal is a member of
+    // (`owner_id IS NULL AND queue IN current_user.queues`) — read, update and
+    // transfer, never delete.
+    'queue_membership',
+    // [ADR-0142 D4] the transfer is a claim: the record is unowned, the new
+    // owner is the principal, and the sharing model positively admits them.
+    'queue_claim',
   ]).describe('The row-visibility source kind evaluated for this record at this layer.'),
   /** Identifier of the concrete rule/share/policy (sharing-rule name, policy id, share row id). */
   name: z.string().describe('Stable identifier of the concrete rule, share, or policy that was evaluated.'),

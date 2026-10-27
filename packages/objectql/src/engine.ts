@@ -246,6 +246,8 @@ import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectst
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
+import { ConcurrentUpdateError } from './concurrent-update-error.js';
+import { AssignmentRuleEvaluator, ASSIGNMENT_RULE_TYPE, OWNERSHIP_QUEUE_SOURCE_SLOT, type AssignmentQueueService } from './assignment-rules.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
@@ -3880,6 +3882,24 @@ export interface OperationContext {
    * write is one it does not gate. The engine never invents one.
    */
   postHookWriteImageCheck?: PostHookWriteImageCheck;
+
+  /**
+   * [ADR-0142 D4] The by-id write PRECONDITION: an equality predicate over the
+   * stored row (`{ <field>: <value> }`) the write is conditional on. Set by an
+   * enforcement layer's middleware — the ownership gate sets `{ owner_id: null }`
+   * on a claim, so two members claiming at once produce exactly one owner — and
+   * by the engine's own assignment cursor (`{ version }`). Engine-internal:
+   * reachable from no data door, and read only on a by-id `update`.
+   *
+   * The engine lowers the write to the driver's conditional
+   * `updateMany(object, { where: { id, ...expect } }, data)`; one affected row
+   * is re-read by id and the by-id branch continues unchanged (hooks, formulas,
+   * the event, the roll-up, the response); zero rows answer 409
+   * `CONCURRENT_UPDATE` ("the record was taken"). A driver with no `updateMany`
+   * degrades to the pre-image check its setter already made, and the write
+   * goes through unconditionally, logged once per process at `warn`.
+   */
+  writePrecondition?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -4185,6 +4205,11 @@ const METADATA_ARRAY_KEYS = [
   // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
   // `roles` stays in the list as the inert retired spelling it already was.
   'roles', 'positions', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
+  // [ADR-0142 D1/D5] Ownership queues and the assignment rules that route
+  // inserted rows into them — both read from the registry on every use (the
+  // queue service, the assignment seam), so a declaration must reach it with
+  // its package stamped, as every collection on this list does.
+  'queues', 'assignmentRules',
   // AI Protocol
   'agents', 'tools', 'skills', 'ragPipelines',
   // API Protocol
@@ -4639,6 +4664,14 @@ export type UnservableControlledByParentMaster = {
  * ESM and CJS — names the one slot.
  */
 export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectstack.objectql.securityServiceSource');
+
+/**
+ * [ADR-0142 D4] The engine's own channel for {@link OperationContext.writePrecondition}
+ * on an `update` it issues itself (the assignment cursor). A module-private
+ * symbol, so no options object a door builds — and nothing outside this
+ * module — can carry it.
+ */
+const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
 export class ObjectQL implements IObjectQLEngine {
   /**
@@ -14642,6 +14675,77 @@ export class ObjectQL implements IObjectQLEngine {
    * returned row would make every update of a row carrying a retired column
    * record that column as changed, its stored value included.
    */
+  /**
+   * [ADR-0142 D4] The by-id write under {@link OperationContext.writePrecondition}:
+   * the driver's conditional `updateMany` over `{ id, ...expect }`, then a
+   * readback by id. Zero rows matched is {@link ConcurrentUpdateError}. A driver
+   * with no `updateMany` writes unconditionally, logged once per process.
+   */
+  private async updateByIdExpecting(
+    driver: IDataDriver,
+    object: string,
+    id: unknown,
+    data: Record<string, unknown>,
+    expect: Readonly<Record<string, unknown>>,
+    options: Parameters<IDataDriver['findOne']>[2],
+  ): Promise<unknown> {
+    if (typeof driver.updateMany !== 'function') {
+      if (!this.preconditionDegradedWarned) {
+        this.preconditionDegradedWarned = true;
+        this.logger.warn(
+          `[objectql] the driver for '${object}' has no conditional update (updateMany), so a by-id write ` +
+            'precondition degrades to the pre-image check and the write goes through unconditionally: two ' +
+            'concurrent claims of one record may both land, and the round-robin cursor may repeat a member.',
+          { object },
+        );
+      }
+      return driver.update(object, id as string, data, options);
+    }
+    const affected = await driver.updateMany(object, { object, where: { ...expect, id } } as QueryAST, data, options);
+    if (!(Number(affected) > 0)) throw new ConcurrentUpdateError(object, String(id));
+    return driver.findOne(object, { object, where: { id }, limit: 1 } as QueryAST, options);
+  }
+
+  /** [ADR-0142 D4] Set once the precondition's no-`updateMany` degradation has been logged. */
+  private preconditionDegradedWarned = false;
+
+  /** [ADR-0142 D5] The assignment seam, built on first use. */
+  private assignmentEvaluator?: AssignmentRuleEvaluator;
+
+  /** The registered ownership-queue service, through the plugin's slot — `null` on every other state. */
+  private ownershipQueueService(): AssignmentQueueService | null {
+    const source = (this as unknown as Record<symbol, unknown>)[OWNERSHIP_QUEUE_SOURCE_SLOT];
+    if (typeof source !== 'function') return null;
+    try {
+      const svc = (source as () => unknown)();
+      return svc && typeof (svc as AssignmentQueueService).resolveQueue === 'function'
+        && typeof (svc as AssignmentQueueService).expandMembers === 'function'
+        ? (svc as AssignmentQueueService)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private assignment(): AssignmentRuleEvaluator {
+    if (!this.assignmentEvaluator) {
+      this.assignmentEvaluator = new AssignmentRuleEvaluator({
+        listRules: () => this._registry.listItems(ASSIGNMENT_RULE_TYPE) as unknown[],
+        getSchema: (object) => this._registry.getObject(object),
+        hasObject: (object) => Boolean(this._registry.getObject(object)),
+        queues: () => this.ownershipQueueService(),
+        find: async (object, where, context, limit) =>
+          (await this.find(object, { where, ...(limit ? { limit } : {}) } as EngineQueryOptions, { context: context as ExecutionContext })) as Record<string, unknown>[],
+        count: (object, where, context) => this.count(object, { where } as EngineCountOptions, { context: context as ExecutionContext }),
+        insert: (object, data, context) => this.insert(object, data, { context: context as ExecutionContext }),
+        updateExpecting: (object, id, data, expect, context) =>
+          this.update(object, { ...data, id }, { context: context as ExecutionContext, [WRITE_PRECONDITION_OPTION]: expect } as any),
+        logger: this.logger,
+      });
+    }
+    return this.assignmentEvaluator;
+  }
+
   private async readUpdatePriorRow(
     object: string,
     id: unknown,
@@ -15368,6 +15472,10 @@ export class ObjectQL implements IObjectQLEngine {
       //    the platform's.
       //  - `normalizeMultiValueFields` coerces a declared multi-value field to
       //    its stored array shape.
+      //  - [ADR-0142 D5] the assignment seam writes `owner_id` and `queue` onto a
+      //    row whose owner and queue are both still EMPTY — routing chosen by a
+      //    declared rule, never a value the caller supplied (a supplied one
+      //    means the row is not evaluated at all).
       //
       // So the invariant this seam buys is stated to its real edge: a stored row
       // satisfies the insert `check` on every field the CALLER can steer. ⛔ It
@@ -15419,6 +15527,32 @@ export class ObjectQL implements IObjectQLEngine {
         opCtx.context,
         rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>),
       );
+
+      // [ADR-0142 D5] The assignment seam — after every `beforeInsert` hook
+      // and the organization the row lands in, before the write. It writes
+      // `owner_id` / `queue` onto a row whose owner and queue are both still
+      // empty, as the platform, and never refuses: see `assignment-rules.ts`.
+      // An engine-owned producer like the two above, so the post-hook `check`
+      // (judged above, on the row as the hooks left it) does not see the owner
+      // a rule picks — that owner is the platform's routing, not the caller's
+      // steering. Free for every object no rule names (`rulesFor` is a registry
+      // read).
+      {
+        const evaluator = this.assignment();
+        if (evaluator.rulesFor(object).length > 0) {
+          const activeOrg = opCtx.context?.tenantId ? String(opCtx.context.tenantId) : null;
+          const candidates = [];
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            const row = rows[i];
+            if (!row || typeof row !== 'object') continue;
+            const own = (row as Record<string, unknown>).organization_id;
+            const organizationId = own != null && own !== '' ? String(own) : activeOrg ?? derivedOrganizationId ?? null;
+            candidates.push({ row: row as Record<string, unknown>, organizationId });
+          }
+          await evaluator.apply(object, candidates);
+        }
+      }
       const optionsBase = rowHookContexts[0]?.input.options as any;
       const driverOptions = this.buildDriverOptions(
         object,
@@ -16092,6 +16226,12 @@ export class ObjectQL implements IObjectQLEngine {
        options,
        context: options?.context,
      };
+     // [ADR-0142 D4] The engine's own precondition (the assignment cursor). A
+     // middleware sets the member directly; nothing else can reach it.
+     const internalPrecondition = (options as Record<symbol, unknown> | undefined)?.[WRITE_PRECONDITION_OPTION];
+     if (internalPrecondition && typeof internalPrecondition === 'object') {
+       opCtx.writePrecondition = internalPrecondition as Record<string, unknown>;
+     }
 
      // [#2982] A no-single-id update routes to `driver.updateMany` below with
      // an AST that used to be REBUILT from `options.where` AFTER the
@@ -17376,7 +17516,13 @@ export class ObjectQL implements IObjectQLEngine {
                // there would attribute a violation raised by a nested driver
                // call inside a hook to THIS object.
                try {
-                   result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+                   // [ADR-0142 D4] A write under a precondition is the driver's
+                   // conditional update plus a readback — see
+                   // `OperationContext.writePrecondition`.
+                   const precondition = opCtx.writePrecondition;
+                   result = precondition && Object.keys(precondition).length > 0
+                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, hookContext.input.options as Parameters<IDataDriver['findOne']>[2])
+                     : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }

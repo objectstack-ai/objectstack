@@ -110,8 +110,15 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_user_permission_set',
     'sys_user_position',
   ],
-  /** `@objectstack/plugin-sharing` — record shares & share links. */
-  'plugin-sharing': ['sys_record_share', 'sys_share_link', 'sys_sharing_rule'],
+  /** `@objectstack/plugin-sharing` — record shares & share links; ownership queues and the assignment cursor (ADR-0142). */
+  'plugin-sharing': [
+    'sys_assignment_cursor',
+    'sys_queue',
+    'sys_queue_member',
+    'sys_record_share',
+    'sys_share_link',
+    'sys_sharing_rule',
+  ],
   /** `@objectstack/plugin-webhooks` — outbound webhook registrations. */
   'plugin-webhooks': ['sys_webhook'],
   /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow credentials. */
