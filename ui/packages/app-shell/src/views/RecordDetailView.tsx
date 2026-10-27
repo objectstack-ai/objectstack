@@ -3694,7 +3694,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
 
   return (
-    <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative">
+    <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. */}
       {!pageDeclaresPrint && (
