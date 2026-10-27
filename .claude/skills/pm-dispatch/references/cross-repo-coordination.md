@@ -41,7 +41,7 @@
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
 - 跨座位请求骑在它所关的既有卡上:请求席在自卡写 `Blocked-by:`,并在目标卡留一条评论。
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
-- 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):要读或改 cloud 代码、cloud 生产方、cloud 事实,或带 cloud 半边。
-- 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`;他仓卡能转即转 cloud 仓,否则在本仓立 `repo:cloud` 承接卡写全所求、源卡 `Blocked-by:` 它。
-- ⛔ 不拆半边、不留本仓车道等 cloud 读数;在飞卡见涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,报告与已测读点留卡。
-- cloud PM 跟到关卡,余下纯本仓活由它立新卡写明 cloud 事实;其他不可达仓照旧按仓拆:可达席立该仓前置卡,本卡 `pm:blocked`+`Blocked-by:`。
+- 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):要读改 cloud 代码、生产方、事实或带 cloud 半边。
+- 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`。
+- 他仓卡能转即转 cloud 仓,否则本仓立 `repo:cloud` 承接卡写全所求;⛔ 不拆半边等读数。
+- 在飞卡见涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,已测读点留卡。

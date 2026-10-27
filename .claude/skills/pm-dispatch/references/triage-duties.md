@@ -52,7 +52,7 @@
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
 - 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
 - 只报告仪器(放宽 tell、半状态巡查)的修复卡首触即关 not_planned,引裁决 208;在途只有删除。
-- 路由是分诊的技术判断,⛔ 永不升级哪个仓的问题;涉 cloud 恒整卡路由 cloud 车道(判据见 `cross-repo-coordination.md`);父单永不派发。
+- 路由是分诊的技术判断,⛔ 不升级哪个仓的问题;涉 cloud 整卡归 cloud 车道;父单永不派发。
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
