@@ -148,6 +148,25 @@ async function storedViewBody(name: string, item: unknown): Promise<any> {
     return JSON.parse(row!.metadata);
 }
 
+/**
+ * [#26711] Save a view the door refuses: the 422 envelope, NO row written, and
+ * the `unrecognized_keys` issue the claimed member raised for the undeclared keys.
+ */
+async function refusedUndeclared(item: Record<string, unknown>): Promise<{ message: string }> {
+    const { protocol, rows } = makeProtocol();
+    let err: any;
+    try {
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name as string, item });
+    } catch (e) { err = e; }
+    expect(err?.code).toBe('INVALID_METADATA');
+    expect(err?.status).toBe(422);
+    expect(Array.from(rows.values()).filter((r) => r.type === 'view')).toHaveLength(0);
+    const issue = (err.issues as Array<{ code?: string; message: string }>)
+        .find((i) => i.code === 'unrecognized_keys');
+    expect(issue, JSON.stringify(err.issues)).toBeDefined();
+    return { message: issue!.message };
+}
+
 /** The one section every fixture below declares, in the authored spelling. */
 const SECTION = { label: 'About you', fields: ['name', 'email'] };
 const SHARING = { allowAnonymous: true, publicLink: '/forms/contact-us' };
@@ -214,22 +233,23 @@ describe('#7134 the save path persists the folded `sections`, at every depth a f
         expect(body).not.toHaveProperty('groups');
     });
 
-    it('[#20051] the fold and the form overlay\'s declared keys coexist on one save; its undeclared ones do not', async () => {
-        // Re-judged at stage (iv) of #20051, which stores a view's parsed
-        // body. The fold is stored, and so is `isDefault`, which the flattened
-        // FORM overlay declares. `isPinned` and `sortOrder` are the list
-        // switcher's row state: the form member declares neither and the
-        // console writes neither on a form row (`VIEW_CONSOLE_ROUND_TRIP_KEYS`
-        // maps no key to `formOverlay`), so the stored row drops both.
-        const body = await storedViewBody(
-            'contact_us',
-            flatForm({ groups: [SECTION], isPinned: true, isDefault: false, sortOrder: 3 }),
-        );
+    it('[#26711] the fold and the form overlay\'s declared keys coexist on one save; its undeclared ones are refused by name', async () => {
+        // Re-judged twice. At stage (iv) of #20051, which stores a view's parsed
+        // body, the undeclared keys were dropped from the row on a `200`. Since
+        // #26711 the form member is closed, so they are refused. The fold is
+        // stored, and so is `isDefault`, which the flattened FORM overlay
+        // declares. `isPinned` and `sortOrder` are the list switcher's row
+        // state: the form member declares neither and the console writes
+        // neither on a form row (`VIEW_CONSOLE_ROUND_TRIP_KEYS` maps no key to
+        // `formOverlay`).
+        const body = await storedViewBody('contact_us', flatForm({ groups: [SECTION], isDefault: false }));
         expect(body.sections).toEqual([SECTION]);
         expect(body).not.toHaveProperty('groups');
         expect(body.isDefault).toBe(false);
-        expect(body).not.toHaveProperty('isPinned');
-        expect(body).not.toHaveProperty('sortOrder');
+        const refusal = await refusedUndeclared(
+            flatForm({ groups: [SECTION], isPinned: true, isDefault: false, sortOrder: 3 }),
+        );
+        expect(refusal.message).toMatch(/^Unrecognized key\(s\) on this inline form view: `isPinned`, `sortOrder`\./);
     });
 });
 
@@ -258,22 +278,22 @@ describe('#7134 what the save path must NOT change', () => {
         expect(await storedViewBody(authored.name, authored)).toEqual(authored);
     });
 
-    it('[#20051] a form authored with canonical `sections` is stored as authored — no section default, no `sharing.enabled`, no undeclared key', async () => {
+    it('[#20051] a form authored with canonical `sections` is stored as authored — no section default, no `sharing.enabled`', async () => {
         // Re-judged at stage (iv): was "stored byte-identical", with an
-        // `isPinned` the form member does not declare riding along. The parse
-        // adds `collapsible` / `collapsed` to the section and `enabled: false`
-        // to `sharing`; ruling B stores none of them (ADR-0087's `storable`
-        // rule), and the undeclared `isPinned` is dropped. A section's `columns`
-        // has no default: undeclared, the parse adds no key (the renderer picks
-        // the density by available width).
-        const authored = flatForm({ sections: [SECTION], isPinned: true });
+        // `isPinned` the form member does not declare riding along, which the
+        // row then dropped. The parse adds `collapsible` / `collapsed` to the
+        // section and `enabled: false` to `sharing`; ruling B stores none of
+        // them (ADR-0087's `storable` rule). A section's `columns` has no
+        // default: undeclared, the parse adds no key (the renderer picks the
+        // density by available width). [#26711] The undeclared `isPinned` is
+        // now refused by name (the test above), so the fixture no longer
+        // carries it and the row is the body as authored.
+        const authored = flatForm({ sections: [SECTION] });
         const parsed = (ViewMetadataSchema as any).parse(authored);
         expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false });
         expect('columns' in parsed.sections[0]).toBe(false);
         expect(parsed.sharing.enabled).toBe(false);
-        const body = await storedViewBody('contact_us', authored);
-        const { isPinned: _dropped, ...declared } = authored as Record<string, unknown>;
-        expect(body).toEqual(declared);
+        expect(await storedViewBody('contact_us', authored)).toEqual(authored);
     });
 
     it('GUARD: a LIST overlay is untouched — this walk is form-shaped only', async () => {
@@ -511,7 +531,10 @@ describe('#20186 the save door judges a flattened overlay by the member its view
     });
 
     it('a column-less list overlay that names a `type`: 422 at `columns`, with the prescription', async () => {
-        const issue = at(await refused({ ...LIST, type: 'kanban', groupByField: 'stage' }), 'columns');
+        // [#26711] The kanban setting goes where the list view declares it: a
+        // top-level `groupByField` is now refused as an unknown key, before
+        // the column check runs.
+        const issue = at(await refused({ ...LIST, type: 'kanban', kanban: { groupByField: 'stage', columns: ['name'] } }), 'columns');
         expect(issue.code).toBe('custom');
         expect(issue.message).toMatch(/^This list view overlay sets `type` but lists no `columns`\./);
     });
@@ -583,9 +606,14 @@ describe('[#20051] stage (iv): a saved view stores the parsed value of every key
         expect(stored.sort).toEqual([{ field: 'name', order: 'desc' }]);
     });
 
-    it('an undeclared key is dropped: the saved-view toolbar toggle\'s `id` / `objectName`, and a form-only `layout`', async () => {
-        // W6b's shape: `buildPersistedViewBody`'s saved-view branch writes the
-        // whole tab back, and the tab carries `id` and `objectName`.
+    it('[#26711] an undeclared key is refused by name: a saved-view tab\'s `id` / `objectName`, and a form-only `layout`', async () => {
+        // W6b's shape: `buildPersistedViewBody`'s saved-view branch wrote the
+        // whole tab back, and the tab carried `id` and `objectName`. At stage
+        // (iv) the row dropped them on a `200`; since #26711 the list member is
+        // closed and the save is refused, naming each key and pointing the two
+        // alias spellings at the declared ones. The console no longer writes
+        // this shape: `buildViewConfigSaveBody` copies only the list view's
+        // declared keys under the ViewItem envelope.
         const declared = {
             name: 'crm_lead.my_leads',
             object: 'crm_lead',
@@ -596,10 +624,12 @@ describe('[#20051] stage (iv): a saved view stores the parsed value of every key
             data: { provider: 'object', object: 'crm_lead' },
             isDefault: false,
         };
-        const stored = await storedViewBody(declared.name, {
+        expect(await storedViewBody(declared.name, declared)).toEqual(declared);
+        const refusal = await refusedUndeclared({
             ...declared, id: 'crm_lead.my_leads', objectName: 'crm_lead', layout: 'diagonal',
         });
-        expect(stored).toEqual(declared);
+        expect(refusal.message).toMatch(/^Unrecognized key\(s\) on this inline list view: `id`, `objectName`, `layout`\./);
+        expect(refusal.message).toContain('Did you mean `id` → `name`, `objectName` → `object`?');
     });
 
     it('a declared key keeps its normalised value', async () => {
@@ -641,7 +671,7 @@ describe('[#20051] stage (iv): a saved view stores the parsed value of every key
     it('the persisted body parses to exactly what the save parsed', async () => {
         const bodies: Array<Record<string, unknown>> = [
             ...TOOLBAR_SAVES.map(([, patch]) => ({ ...patch, ...OVERLAY_ID })),
-            flatForm({ groups: [SECTION], isPinned: true }),
+            flatForm({ groups: [SECTION], isDefault: true }),
             {
                 name: 'lead.contact_us', object: 'lead', viewKind: 'form', label: 'Contact us',
                 config: { type: 'simple', data: DATA, sharing: SHARING, groups: [SECTION] },
