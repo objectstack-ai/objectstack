@@ -713,14 +713,20 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'platform\'s injected per-record owner — updates that row by id with READ access to the master, ' +
       'and the detail\'s own policies then decide as authored. Everyone else, and every insert, delete, ' +
       'multi-row update and on-behalf-of write, still needs edit access to the master. The opt-in ' +
-      'reads `owner_id` and nothing else: a policy keyed on another field stays a narrowing even ' +
-      'after it, so key the policy on `owner_id` or declare what the other field means in prose.',
+      'reads the stored `owner_id` and nothing else, and only on a detail that carries that column ' +
+      '(`ownership: \'user\'`, the default; never `\'business_unit\'`, `\'org\'` or `\'none\'`). So the ' +
+      'rule prescribes the opt-in only for a policy that keys the caller on `owner_id` there. A policy ' +
+      'keyed only on another user field — `owner == current_user.id`, where `owner` is the detail\'s own ' +
+      'accountable-person field — stays a narrowing with or without the opt-in, and the rule says so in ' +
+      'both states instead of prescribing an opt-in that would not admit that user.',
     'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
-      'editors may update), and no runtime door refuses the shape. To fix it, declare the opt-in on ' +
-      'the detail when the owner is meant to write with read on the master, or drop the policy when ' +
-      'the master gate alone is the intended rule. The opt-in is refused by the parse on an object ' +
-      'whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where nothing ' +
-      'reads it.',
+      'editors may update), and no runtime door refuses the shape. To fix a policy keyed on `owner_id`, ' +
+      'declare the opt-in on the detail when the owner is meant to write with read on the master, or ' +
+      'drop the policy when the master gate alone is the intended rule. To fix a policy keyed on another ' +
+      'user field, keep the accountable person in `owner_id` (the column the master gate compares the ' +
+      'caller against) and key the policy on it, or drop the policy. The opt-in is refused by the parse ' +
+      'on an object whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where ' +
+      'nothing reads it.',
   ],
 };
 
