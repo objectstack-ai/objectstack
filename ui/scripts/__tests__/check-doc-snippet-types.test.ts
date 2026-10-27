@@ -670,20 +670,37 @@ describe('objectui#7856 — the root docs/*.md pages are in the scan set, and on
   it('listDocuments reaches them', () => {
     const documents = listDocuments(repoRoot);
     for (const doc of rootDocsPages(repoRoot)) expect(documents).toContain(doc);
-    // Non-vacuous: the leg reaches a real page, not an empty directory.
-    expect(rootDocsPages(repoRoot)).toContain('docs/app-shell-extraction-guide.md');
+    // Non-vacuous on a fixture: the tree's one root page, the app-shell
+    // extraction guide, was retired with the package's publishing (#25922),
+    // so the real `docs/` holds no top-level page today and the loop above
+    // has nothing to iterate. The leg still has to reach one when it exists.
+    const root = tempTree({ 'docs/PAGE.md': '# top level\n' });
+    try {
+      expect(rootDocsPages(root)).toEqual(['docs/PAGE.md']);
+      expect(listDocuments(root)).toContain('docs/PAGE.md');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('the widening judges something — the leg contributes blocks to the compiled tier', () => {
-    // Being IN the walk is one fact; being compiled is the other, and this card
-    // delivered both (no `UNGATED_DOCS` entry was needed — the blocks were
-    // repaired). A leg whose pages all sat on the ledger would be visible to the
-    // accounting and judged by nothing, which is a weaker claim than this test
-    // makes.
-    const state = analyze({});
-    const leg = new Set(rootDocsPages(repoRoot));
-    expect((state.covered as string[]).filter((d) => leg.has(d)).sort()).toEqual([...leg].sort());
-    expect((state.compiled as { doc: string }[]).some((b) => leg.has(b.doc))).toBe(true);
+    // Being IN the walk is one fact; being compiled is the other. A leg whose
+    // pages all sat on the ledger would be visible to the accounting and judged
+    // by nothing, which is a weaker claim than this test makes. Measured on a
+    // fixture page because the real `docs/` has no top-level page since #25922;
+    // every real page the leg reaches must still be covered.
+    const real = new Set(rootDocsPages(repoRoot));
+    expect((analyze({}).covered as string[]).filter((d) => real.has(d)).sort()).toEqual([...real].sort());
+    const root = tempTree({
+      'docs/PAGE.md': ['# T', '', `${FENCE}ts`, 'export const a = 1;', FENCE].join('\n'),
+    });
+    try {
+      const state = analyze({ root, ungated: {} });
+      expect(state.covered as string[]).toContain('docs/PAGE.md');
+      expect((state.compiled as { doc: string }[]).some((b) => b.doc === 'docs/PAGE.md')).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('stops at the top level: a page in a subdirectory is NOT collected BY THIS LEG', () => {
