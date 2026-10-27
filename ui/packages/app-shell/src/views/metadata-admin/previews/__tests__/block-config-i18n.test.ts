@@ -392,9 +392,10 @@ describe('placeholders that must NOT be translated (#3979)', () => {
       because: "a row limit — DEFAULT_KANBAN_FETCH_BATCH_SIZE, the board's fetch batch when the box is empty",
     },
     'record:details.sections.columns': { literal: '2', because: 'a column count' },
+    'list-view.limit': { literal: '5', because: "a row limit — the capped list's row count when the box is empty" },
   };
 
-  it('collects all 17 placeholders — 6 keyed, 11 literal', () => {
+  it('collects all 18 placeholders — 6 keyed, 12 literal', () => {
     // Guards the walk: if placeholder collection silently found nothing, every
     // assertion here would pass over an empty list.
     //
@@ -406,10 +407,12 @@ describe('placeholders that must NOT be translated (#3979)', () => {
     // `DEFAULT_KANBAN_FETCH_BATCH_SIZE`), so it lands on the literal side and the keyed
     // half is what stays untouched this time. Then 18 / 7 / 11 until
     // objectui#8280 removed the `ai:input` panel, whose `agentName` box was a
-    // KEYED placeholder — the palette never offered that block.
-    expect(PLACEHOLDERS.length).toBe(17);
+    // KEYED placeholder — the palette never offered that block. Then 17 / 6 / 11
+    // until objectstack#26703 gave `list-view` its row-cap box, a VALUE
+    // placeholder (`5`, the capped list's own count).
+    expect(PLACEHOLDERS.length).toBe(18);
     expect(PLACEHOLDERS.filter((p) => p.spec.key !== undefined).length).toBe(6);
-    expect(PLACEHOLDERS.filter((p) => p.spec.literal !== undefined).length).toBe(11);
+    expect(PLACEHOLDERS.filter((p) => p.spec.literal !== undefined).length).toBe(12);
   });
 
   it('every placeholder declares exactly one of key / literal', () => {

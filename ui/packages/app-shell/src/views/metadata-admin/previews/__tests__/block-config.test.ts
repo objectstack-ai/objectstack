@@ -252,6 +252,11 @@ describe('record:details sections ↔ spec section-entry coverage (#3819)', () =
  * from the enum instead, so every value must be an explicit decision —
  * offered, or excluded with a documented reason.
  */
+/** Blocks with a config panel and no palette entry, each with why it is still authorable. */
+const PANEL_WITHOUT_PALETTE: Readonly<Record<string, string>> = {
+  'list-view': 'a public block that published pages place; the panel edits the node a page already carries (objectstack#26703)',
+};
+
 describe('page palette ↔ spec PageComponentType coverage', () => {
   const specNames: string[] = enumOptions(PageComponentType);
 
@@ -339,9 +344,27 @@ describe('page palette ↔ spec PageComponentType coverage', () => {
     // curated panel and no way to author it (objectui#8280). Palette membership
     // is the question this case asks, so the palette is the only thing it
     // reads — `TYPES_BY_CATEGORY`, the list the page canvas's picker renders.
+    //
+    // `PANEL_WITHOUT_PALETTE` names the blocks that are authorable WITHOUT the
+    // palette, each with the stored documents that carry it, so a panel for one
+    // is an edit of a real node rather than an advert for an unauthorable one.
+    // `list-view` (objectstack#26703): a public block (`core/src/registry/
+    // public-blocks.ts`) that published pages place, such as
+    // `packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json`,
+    // and whose row cap the designer could otherwise set only in JSON.
     const offered = new Set<string>(TYPES_BY_CATEGORY.flatMap((g) => g.types));
-    const orphanPanels = Object.keys(BLOCK_CONFIG).filter((t) => !offered.has(t));
+    const orphanPanels = Object.keys(BLOCK_CONFIG).filter((t) => !offered.has(t) && !(t in PANEL_WITHOUT_PALETTE));
     expect(orphanPanels, 'these expose a config panel but cannot be authored').toEqual([]);
+  });
+
+  it('every palette-less panel is still palette-less and still has a panel', () => {
+    // Self-deleting, like the schema-parity EXEMPT rows: the day the palette
+    // offers the block, or its panel goes, the row must go too.
+    const offered = new Set<string>(TYPES_BY_CATEGORY.flatMap((g) => g.types));
+    for (const type of Object.keys(PANEL_WITHOUT_PALETTE)) {
+      expect(offered.has(type), `'${type}' is offered now — delete its row`).toBe(false);
+      expect(blockHasConfig(type), `'${type}' has no panel — delete its row`).toBe(true);
+    }
   });
 
   describe("record:quick_actions `location` — the designer's action-location dropdown", () => {
