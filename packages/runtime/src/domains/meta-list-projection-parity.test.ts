@@ -1248,13 +1248,15 @@ describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route Re
 
     it('[#26690] the tree serves the request locale: a zh-CN reader gets the book title and section titles, an en-US reader the authored ones', async () => {
         for (const [transport, boot] of [['rest', bootRest], ['dispatcher', bootDispatcher]] as const) {
+            // The authored group only: the synthetic `uncategorized` orphan group is not a book key.
+            const authored = (tree: any) => tree?.groups?.filter((g: any) => g.key === 'start');
             const zh = served(await boot('holder').read('/meta/book/help_center/tree', {}, { 'accept-language': 'zh-CN' }), transport) as any;
-            expect([zh?.label, zh?.groups?.map((g: any) => g.label)], transport).toEqual(['帮助中心', ['开始']]);
+            expect([zh?.label, authored(zh)?.map((g: any) => g.label)], transport).toEqual(['帮助中心', ['开始']]);
             // The entry beneath keeps its own `doc.translations` localization.
-            expect(zh?.groups?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['入门']);
+            expect(authored(zh)?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['入门']);
             const en = served(await boot('holder').read('/meta/book/help_center/tree', {}, { 'accept-language': 'en-US' }), transport) as any;
-            expect([en?.label, en?.groups?.map((g: any) => g.label)], transport).toEqual(['Help Centre', ['Start']]);
-            expect(en?.groups?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['Getting started']);
+            expect([en?.label, authored(en)?.map((g: any) => g.label)], transport).toEqual(['Help Centre', ['Start']]);
+            expect(authored(en)?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['Getting started']);
         }
     });
 });
