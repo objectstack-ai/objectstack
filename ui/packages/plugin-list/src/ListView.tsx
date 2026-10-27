@@ -42,7 +42,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, GanttConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -4344,12 +4344,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // FIRST and validates it against the spec's `GanttConfigSchema`.
         //
         // It is handed on under the two conditions the renderer's flat branch
-        // applied to the flat spelling, so a view draws exactly as it did:
-        // only once BOTH date fields are declared (otherwise no block, and the
+        // applied to the flat spelling: only once BOTH date fields are declared (otherwise no block, and the
         // node reaches the renderer's "configuration required" screen, as a
         // partial flat spelling did), and with `titleField` floored at `'name'`
         // (the flat branch's own floor — a display-name default, not a date
         // axis — which the block, requiring `titleField`, cannot leave to it).
+        // The one outcome that moves: the flat branch never validated, so a
+        // binding carrying a value the spec refuses (a pre-door stored
+        // `options.gantt`, say) used to draw and now reaches the renderer's
+        // `gantt-invalid-config` refusal screen. Such a row is converted at the
+        // store (ADR-0087), never tolerated here.
         const ganttBlock =
           startDateField && endDateField
             ? {
@@ -4434,16 +4438,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // block (`object` / `value`) must reach ObjectGantt, whose
           // getDataConfig prefers schema.data over the objectName fallback.
           ...(schema.data ? { data: schema.data } : {}),
-          // ⚠️ A block the spec's `GanttConfigSchema` refuses goes out FLAT, the
-          // spelling this branch wrote before objectstack#25923. `getGanttConfig`
-          // validates a `gantt` block and shows its refusal screen on a bad one,
-          // but its flat branch never validated anything, so a stored view whose
-          // legacy `options.gantt` (or an older `gantt` block) carries a value the
-          // spec now refuses kept drawing. Handing that one block flat keeps it
-          // drawing exactly as before; every valid block goes out nested.
-          ...(ganttBlock
-            ? GanttConfigSchema.safeParse(ganttBlock).success ? { gantt: ganttBlock } : ganttBlock
-            : {}),
+          ...(ganttBlock ? { gantt: ganttBlock } : {}),
         };
       }
       case 'map': {

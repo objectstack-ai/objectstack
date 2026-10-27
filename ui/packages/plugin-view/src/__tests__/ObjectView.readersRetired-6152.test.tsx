@@ -131,14 +131,11 @@ describe('2 · the declared keys keep their route; the undeclared ones do not (o
     expect(declared.length).toBeGreaterThan(20);
     const block = Object.fromEntries(declared.map((k) => [k, `V_${k}`]));
     const node = await generatedNode('gantt', { gantt: { ...block, zzzUndeclared: 1 } });
-    // objectstack#25923 — the placeholder strings are values the spec's
-    // `GanttConfigSchema` refuses (e.g. `capacity`), so the producer hands this
-    // binding FLAT, as before, rather than as a `gantt` block the renderer would
-    // refuse; a valid binding goes out nested (`ObjectView.ganttBinding-7070`).
-    // Either way every declared key reaches the gantt.
-    expect(node).not.toHaveProperty('gantt');
-    for (const k of declared) expect(node[k], k).toBe(`V_${k}`);
+    // objectstack#25923 — they reach it as the node's own `gantt` block, never flat.
+    for (const k of declared) expect(node.gantt?.[k], k).toBe(`V_${k}`);
+    for (const k of declared) expect(node, `flat ${k}`).not.toHaveProperty(k);
     expect(node).not.toHaveProperty('zzzUndeclared');
+    expect(node.gantt).not.toHaveProperty('zzzUndeclared');
   });
 
   it('timeline: EVERY key the spec declares on the block reaches the timeline flat; the `dateField` alias does not', async () => {

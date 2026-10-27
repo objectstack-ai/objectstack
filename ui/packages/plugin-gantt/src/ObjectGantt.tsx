@@ -633,7 +633,10 @@ function warnOnShadowedFlatGanttKeys(schema: ObjectGanttHandoff): void {
  * `ObjectView`'s `generateViewSchema` hand the view's block on as `gantt` —
  * only once both date fields are declared, and with `titleField` floored at
  * `'name'` there, the two conditions branch 2 applies here — so a view renders
- * exactly as it did when they flattened it. Branch 2 stays for a host that
+ * as it did when they flattened it, except that the block is validated here and
+ * branch 2 never was: a binding carrying a value the spec refuses, which branch
+ * 2 drew, now reaches the refusal screen (a pre-door stored row like that is
+ * converted at the store, ADR-0087, never tolerated). Branch 2 stays for a host that
  * mounts this component with the flat keys ({@link ObjectGanttFlatFields}).
  *
  * The block is taken WHOLE, not merged over the flat keys. That is the ruling's

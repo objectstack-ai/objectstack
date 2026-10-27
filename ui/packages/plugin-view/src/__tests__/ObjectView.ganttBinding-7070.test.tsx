@@ -188,26 +188,3 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
     expect(blockOf(await renderGanttView({ gantt: { ...AXIS } }))).toEqual({ ...AXIS, titleField: 'name' });
   });
 });
-
-describe('ObjectView.generateViewSchema — a block the spec refuses goes out flat, as before (objectstack#25923)', () => {
-  it('a stored gantt config carrying a refused value is handed flat, so the renderer still draws it', async () => {
-    // `getGanttConfig` validates a `gantt` block (objectui#13459) and never
-    // validated the flat branch: nested, this view would move from drawing to
-    // the refusal screen (`plugin-gantt`'s `ObjectGantt.legacyFlatDraws-25923`).
-    // The stored row's legacy `options.gantt` reaches this same leg through
-    // app-shell's ObjectView relay, unvalidated.
-    const schema = await renderGanttView({ gantt: { ...AXIS, viewMode: 'hour' } });
-    expect(schema).not.toHaveProperty('gantt');
-    expect([schema.startDateField, schema.endDateField, schema.titleField, schema.viewMode]).toEqual([
-      'planned_start',
-      'planned_end',
-      'name',
-      'hour',
-    ]);
-  });
-
-  it('CONTROL: the same view with a valid value goes out nested', async () => {
-    const schema = await renderGanttView({ gantt: { ...AXIS, viewMode: 'week' } });
-    expect(blockOf(schema)).toEqual({ ...AXIS, titleField: 'name', viewMode: 'week' });
-  });
-});
