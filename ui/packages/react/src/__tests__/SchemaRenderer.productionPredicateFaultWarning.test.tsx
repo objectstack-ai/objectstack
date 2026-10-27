@@ -261,7 +261,7 @@ describe('#6038 group 1 — a faulting node gate is loud in production', () => {
   });
 
   it('the `hidden` leg — the NON-negated polarity — reports too, and still hides', async () => {
-    // `hidden` / `hiddenOn` are the two legs whose fail-soft `true` means HIDE.
+    // `hidden` is the one leg whose fail-soft `true` means HIDE.
     // A fault there removes the node, which is the louder screen symptom and
     // the quieter console one; it must not be a second silence.
     await inProduction((mount) => {

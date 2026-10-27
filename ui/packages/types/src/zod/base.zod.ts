@@ -476,17 +476,33 @@ const BaseSchemaCore = z.object({
 
   /**
    * Canonical conditional-visibility predicate (ADR-0089) — shown when truthy.
-   * The spec folds the deprecated `visibleOn` / `visibility` aliases into this.
+   * The one node-level show predicate: the objectui dialect `visibleOn` is a
+   * retired spelling of it (the alias refusal one member down).
    * The spec's evaluated-slot input, by reference and untransformed — see
    * `VisibleWhenInputSchema` above (objectui#8347).
    */
   visibleWhen: VisibleWhenInputSchema.optional().describe('Canonical conditional-visibility predicate (ADR-0089)'),
 
   /**
-   * Conditional visibility expression
-   * @deprecated ADR-0089 — use `visibleWhen`.
+   * RETIRED SPELLING of `visibleWhen` — refused by name (ADR-0049, ADR-0089).
+   *
+   * Mirrors `BaseSchema.visibleOn?: never` (`../base.ts`). An `aliasKeyRefusal`
+   * rather than an `.omit()`: `BaseSchemaCore` ends `.passthrough()`, so an
+   * omitted key would be KEPT unexamined and silently inert, while this arm
+   * answers `invalid_type` at `['visibleOn']` with the canonical spelling in
+   * the issue message. `objectui validate` / `objectui check` judge through the
+   * strict authoring face, which inherits this member, so the refusal reaches
+   * the public door with its remedy. ONE string feeds the issue message and
+   * this member's `.describe()`, so the two cannot drift.
    */
-  visibleOn: z.string().optional().describe('[DEPRECATED → visibleWhen] Expression for conditional visibility'),
+  visibleOn: aliasKeyRefusal(
+    'visibleOn',
+    'visibleWhen',
+    'this node',
+    'The node-level `visibleOn` spelling is retired — `visibleWhen` is the one '
+    + 'conditional-visibility predicate at every layer (ADR-0089), evaluated with the same '
+    + 'polarity (shown when truthy). Rename the key; the value is unchanged.',
+  ),
 
   /**
    * Hidden control -- a boolean, or the predicate STRING the renderer evaluates.
@@ -510,9 +526,21 @@ const BaseSchemaCore = z.object({
   hidden: z.union([z.boolean(), ExpressionWireSchema]).optional().describe('Hidden control (boolean, predicate expression string, or CEL envelope object)'),
 
   /**
-   * Conditional hidden expression
+   * RETIRED SPELLING of `hidden` — refused by name (ADR-0049).
+   *
+   * Mirrors `BaseSchema.hiddenOn?: never` (`../base.ts`). `hidden` takes the
+   * predicate string and the CEL envelope itself, so this dialect carried
+   * nothing the canonical key does not; same arm shape and same reasoning as
+   * `visibleOn` above.
    */
-  hiddenOn: z.string().optional().describe('Expression for conditional hiding'),
+  hiddenOn: aliasKeyRefusal(
+    'hiddenOn',
+    'hidden',
+    'this node',
+    'The node-level `hiddenOn` spelling is retired — `hidden` takes the same predicate '
+    + 'string or CEL envelope and is evaluated with the same polarity (hidden when truthy). '
+    + 'Rename the key; the value is unchanged.',
+  ),
 
   /**
    * Disabled state — a boolean, or the predicate STRING the renderer evaluates.
@@ -529,9 +557,21 @@ const BaseSchemaCore = z.object({
   disabled: z.union([z.boolean(), ExpressionWireSchema]).optional().describe('Disabled state (boolean, predicate expression string, or CEL envelope object)'),
 
   /**
-   * Conditional disabled expression
+   * RETIRED SPELLING of `disabled` — refused by name (ADR-0049).
+   *
+   * Mirrors `BaseSchema.disabledOn?: never` (`../base.ts`). `disabled` takes
+   * the predicate string and the CEL envelope itself, so this dialect carried
+   * nothing the canonical key does not; same arm shape and same reasoning as
+   * `visibleOn` above.
    */
-  disabledOn: z.string().optional().describe('Expression for conditional disabling'),
+  disabledOn: aliasKeyRefusal(
+    'disabledOn',
+    'disabled',
+    'this node',
+    'The node-level `disabledOn` spelling is retired — `disabled` takes the same predicate '
+    + 'string or CEL envelope and is evaluated with the same polarity (disabled when truthy). '
+    + 'Rename the key; the value is unchanged.',
+  ),
 
   /**
    * Test ID for automated testing

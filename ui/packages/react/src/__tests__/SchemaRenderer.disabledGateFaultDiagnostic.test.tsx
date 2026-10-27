@@ -7,7 +7,8 @@
  */
 
 /**
- * objectui#6445 — the `disabled` / `disabledOn` node gate reports a faulting
+ * objectui#6445 — the `disabled` node gate (then a `disabled` / `disabledOn`
+ * pair; the second spelling is retired) reports a faulting
  * predicate, in BOTH builds, and says something TRUE about what its fail-soft
  * default did.
  *
@@ -45,7 +46,7 @@
  * printed. Neither pin alone can tell a working dedupe from a broken one, so
  * every dedupe case here pins both halves, and two cases pin the direction this
  * new call site made possible: the SAME predicate source authored on `disabled`
- * and on `visibleWhen` (and on `disabled` and `disabledOn`) must produce TWO
+ * and on `visibleWhen` must produce TWO
  * lines. Without those, a key that collapsed the gates together would look
  * exactly like a working rate limit.
  *
@@ -354,18 +355,6 @@ describe('#6445 group 1 — a faulting `disabled` gate is loud, and still disabl
     });
   });
 
-  it('the `disabledOn` alias reports too — the same wiring, not a copy of it', async () => {
-    await inProduction((mount) => {
-      const warn = spyWarn();
-      mount([{ id: 'n1', disabledOn: FAULT_BARE }]);
-      expect(disabledProp()).toBe('true');
-      const lines = reports(warn);
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain('disabledOn');
-      expect(allWarnings(warn)).toHaveLength(1);
-    });
-  });
-
   it('a `{ dialect: "cel" }` envelope fault warns ONCE — the engine\'s generic line is replaced, not joined', async () => {
     // The canonical engine already printed its own line here. The risk of this
     // wiring was two lines for one fault; the total-count pin refuses it.
@@ -472,23 +461,6 @@ describe('#6445 group 2 — deduped per predicate SOURCE and per GATE', () => {
     });
   });
 
-  it('SEPARATING HALF, across KEYS: the same source on `disabled` and on `disabledOn` is two lines', async () => {
-    // `key` is in the dedupe key, so the two legs of this gate cannot silence
-    // each other. An author who wrote the same broken predicate on both hears
-    // about both.
-    await inProduction((mount) => {
-      const warn = spyWarn();
-      mount([
-        { id: 'n1', disabled: FAULT_BARE },
-        { id: 'n2', disabledOn: FAULT_BARE },
-      ]);
-      const lines = reports(warn);
-      expect(lines).toHaveLength(2);
-      expect(lines.some((l) => l.includes('  disabled: '))).toBe(true);
-      expect(lines.some((l) => l.includes('  disabledOn: '))).toBe(true);
-    });
-  });
-
   it('SEPARATING HALF, across GATES: the same source on `disabled` and on `visibleWhen` is two lines, one per gate', async () => {
     // The direction this new call site made possible. Both gates share one
     // reporter and one `Set`; if the key ever stopped separating them, the
@@ -553,9 +525,8 @@ describe('#6445 group 3 — nothing else became loud', () => {
         { id: 'e2', disabled: null },
         { id: 'e3', disabled: '   ' },
         { id: 'e4', disabled: { dialect: 'cel', source: '' } },
-        { id: 'e5', disabledOn: '' },
       ]);
-      expect(shownCount()).toBe(5);
+      expect(shownCount()).toBe(4);
       expect(disabledProp()).toBe('absent');
       expect(reports(warn)).toHaveLength(0);
       const blank = allWarnings(warn).filter((m) => m.includes('[blank]'));
@@ -605,7 +576,7 @@ describe('#6445 group 3 — nothing else became loud', () => {
  * wrong object), so none of it belongs on `reports()` / `UNRESOLVABLE_ENABLEMENT_PREFIX`.
  * -------------------------------------------------------------------------- */
 
-describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled` / `disabledOn`', () => {
+describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled`', () => {
   it('THE acceptance criterion: the card\'s repro shape reports, dev-only, and the verdict is untouched (constant-FALSE direction)', async () => {
     await inDevelopment((mount) => {
       const warn = spyWarn();
@@ -705,14 +676,6 @@ describe('#6504 group 6 — the adapter-only diagnostic, extended to `disabled` 
       mount([{ id: 'n1', disabled: 'data.total > 0' }], scopeWithData({ total: 99 }));
       expect(disabledProp()).toBe('true'); // a REAL verdict, from a real read
       expect(adapterOnlyReports(warn)).toHaveLength(0);
-    });
-  });
-
-  it('`disabledOn` reports too — the same wiring as `disabled`, not a copy of it', async () => {
-    await inDevelopment((mount) => {
-      const warn = spyWarn();
-      mount([{ id: 'n1', disabledOn: "data.status == 'locked'" }]);
-      expect(adapterOnlyReports(warn)[0]).toContain('disabledOn');
     });
   });
 
