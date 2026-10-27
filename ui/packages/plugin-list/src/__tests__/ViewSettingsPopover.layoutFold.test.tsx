@@ -31,7 +31,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { I18nProvider, useObjectTranslation } from '@object-ui/i18n';
 import type { ListViewVisualization } from '@object-ui/core';
-import { ViewSettingsPopover } from '../components/ViewSettingsPopover';
+import { ViewSettingsPopover, type ViewSettingsPopoverProps } from '../components/ViewSettingsPopover';
 import { ViewSwitcherDropdown } from '../ViewSwitcher';
 
 /** `w-80`: the popover's width, which this card must not change. */
@@ -41,7 +41,8 @@ const ROW_CHROME = 24 + 12;
 
 function textWidth(text: string): number {
   let w = 0;
-  for (const ch of text) w += /[　-鿿]/.test(ch) ? 12 : 7;
+  // CJK punctuation through the unified ideographs: one em wide at `text-xs`.
+  for (const ch of text) w += ch.codePointAt(0)! >= 0x3000 && ch.codePointAt(0)! <= 0x9fff ? 12 : 7;
   return w;
 }
 
@@ -125,7 +126,7 @@ function Harness({ layout }: { layout: React.ReactNode }) {
   const { t } = useObjectTranslation();
   return (
     <ViewSettingsPopover
-      t={t as (key: string, opts?: any) => string}
+      t={t as ViewSettingsPopoverProps['t']}
       allFields={[]}
       layout={() => layout}
     />
