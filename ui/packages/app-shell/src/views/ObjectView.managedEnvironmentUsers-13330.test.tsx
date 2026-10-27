@@ -66,10 +66,11 @@ const POSITIONS = [
   { name: 'everyone', permissionSets: ['member_default'] },
   { name: 'guest', permissionSets: [] },
   { name: 'sales_rep', permissionSets: ['sales'] },
-  // Lists only the baseline; its holders get the `closer` set by name.
+  // Lists only the baseline, and shares its name with a permission set
+  // `closer`: its holders are not granted that set (the position-name fold is
+  // retired, objectstack-ai/objectstack#24757).
   { name: 'closer', permissionSets: ['member_default'] },
 ];
-const PERMISSION_SETS = [{ name: 'member_default' }, { name: 'sales' }, { name: 'closer' }];
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/react')>();
   const none: never[] = [];
@@ -83,10 +84,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
     error: null,
     refresh: async () => {},
     invalidate: () => {},
-    ensureType: async (type: string) => (type === 'position' ? POSITIONS : type === 'permission' ? PERMISSION_SETS : []),
+    ensureType: async (type: string) => (type === 'position' ? POSITIONS : []),
     getItem: async () => null,
     getItemsByType: () => [],
-    getTypeStatus: () => 'ready' as const,
   });
   return { ...actual, useMetadata: () => store };
 });
@@ -138,7 +138,7 @@ const GRANTS = [
 ];
 const ASSIGNMENTS = [
   { id: 'a1', user_id: 'u_cy', position: 'sales_rep' },
-  // Granted the `closer` set by the position's name alone.
+  // Holds a position that only shares its name with a set: nothing beyond the baseline.
   { id: 'a3', user_id: 'u_eve', position: 'closer' },
   // The anchor: every user holds it, and it lists only the baseline.
   { id: 'a2', user_id: 'u_ada', position: 'everyone' },
@@ -206,15 +206,16 @@ describe('objectui#13330 — Setup → Users on a managed environment', () => {
     expect(line).toHaveTextContent(/Invite people to your organization there/);
   });
 
-  it('marks the users who hold nothing beyond the baseline, and only them', async () => {
+  it('marks the users who hold nothing beyond the baseline, and only them — a position grants by its definition, never by its name', async () => {
     mountUsers({ admin: true, cloudManaged: true });
-    for (const name of ['Ada Baseline', 'Dee Expired']) {
+    // Eve holds `closer`, which lists only the baseline; the set named `closer` is not granted to her.
+    for (const name of ['Ada Baseline', 'Dee Expired', 'Eve Folded']) {
       const row = await rowOf(name);
       await waitFor(() => expect(within(row).getByTestId('managed-users-unauthorized')).toHaveTextContent('Not authorized'), {
         timeout: 5000,
       });
     }
-    for (const name of ['Bob Direct', 'Cy Position', 'Eve Folded']) {
+    for (const name of ['Bob Direct', 'Cy Position']) {
       expect(within(await rowOf(name)).queryByTestId('managed-users-unauthorized')).toBeNull();
     }
     // One read per object answers the whole page, asked by user.
