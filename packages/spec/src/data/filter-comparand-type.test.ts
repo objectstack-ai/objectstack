@@ -21,6 +21,7 @@ import {
   normalizeFilterComparandTypes,
   parseFilterAST,
   FieldOperatorsSchema,
+  NowAnchorSchema,
 } from './index';
 import { StandardErrorCode } from '../api/errors.zod';
 
@@ -293,5 +294,59 @@ describe('parseFilterAST is the compile face that runs the door', () => {
       .toEqual({ $and: [{ priority: 'high' }, { status: 'active' }] });
     expect(parseFilterAST([])).toBeUndefined();
     expect(parseFilterAST(null)).toBeUndefined();
+  });
+});
+
+describe('[#26413] the now-anchor is closed at the door, as NowAnchorSchema declares', () => {
+  const EXTRA_KEY_ANCHORS: Array<[string, Record<string, unknown>, string]> = [
+    ['a subDays beside an integer offset', { $now: true, addDays: -30, subDays: 7 }, 'subDays'],
+    ['a note beside a { $field } offset', { $now: true, addDays: { $field: 'sla_days' }, note: 'x' }, 'note'],
+    ['the resolved form the engine hands the executors', { $now: '2026-03-03T12:00:00.000Z', addDays: 0, note: 'x' }, 'note'],
+  ];
+
+  it('the door\'s key set is the schema\'s shape: $now and addDays, nothing else', () => {
+    expect(Object.keys(NowAnchorSchema.shape).sort()).toEqual(['$now', 'addDays']);
+  });
+
+  it('refuses an undeclared key at every scalar comparison, naming the key', () => {
+    for (const [label, anchor, key] of EXTRA_KEY_ANCHORS) {
+      for (const op of ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']) {
+        const err = refusalOf(() => normalizeFilterComparandTypes({ opened_at: { [op]: anchor } }));
+        expect(err?.code, `${label} ${op}`).toBe('INVALID_FILTER');
+        expect(err?.status, `${label} ${op}`).toBe(400);
+        expect(err?.message, `${label} ${op}`).toContain(`undeclared key "${key}"`);
+        expect(err?.message, `${label} ${op}`).toContain('the anchor takes $now and addDays only');
+      }
+    }
+  });
+
+  it('refuses it under $and / $or / $not and through parseFilterAST\'s two forms', () => {
+    const anchor = { $now: true, addDays: 1, subDays: 1 };
+    for (const filter of [
+      { $and: [{ status: 'open' }, { opened_at: { $lt: anchor } }] },
+      { $or: [{ opened_at: { $gte: anchor } }] },
+      { $not: { opened_at: { $lt: anchor } } },
+    ]) {
+      expect(refusalOf(() => normalizeFilterComparandTypes(filter))?.code, JSON.stringify(filter)).toBe('INVALID_FILTER');
+    }
+    expect(refusalOf(() => parseFilterAST({ opened_at: { $lt: anchor } }))?.code).toBe('INVALID_FILTER');
+    expect(refusalOf(() => parseFilterAST(['opened_at', '<', anchor]))?.code).toBe('INVALID_FILTER');
+  });
+
+  it('names every undeclared key, and names it before a malformed offset', () => {
+    const err = refusalOf(() => normalizeFilterComparandTypes({ opened_at: { $lt: { $now: true, subDays: 7, note: 'x' } } }));
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.message).toContain('undeclared key "subDays", "note"');
+  });
+
+  it('keeps a well-formed anchor, on both offset arms and in its resolved form, by reference', () => {
+    for (const anchor of [
+      { $now: true, addDays: -30 },
+      { $now: true, addDays: { $field: 'sla_days' } },
+      { $now: '2026-03-03T12:00:00.000Z', addDays: 0 },
+    ]) {
+      const filter = { opened_at: { $lt: anchor } };
+      expect(normalizeFilterComparandTypes(filter)).toBe(filter);
+    }
   });
 });

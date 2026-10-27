@@ -365,7 +365,7 @@ describe('what the lock leaves open', () => {
             `/${PACKAGED}/toggle`, 'POST', { enabled: false }, AUTHOR(), undefined,
         );
         expect(statusOf(response)).toBe(200);
-        expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false);
+        expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false, expect.anything());
     });
 
     it('[ADR-0131 D6] the operator hatch (OS_METADATA_WRITABLE) opens this door exactly as it opens /meta: not at all', async () => {
@@ -396,7 +396,7 @@ describe('what the lock leaves open', () => {
             `/${PACKAGED}/toggle`, 'POST', { enabled: false }, AUTHOR(), undefined,
         );
         expect(statusOf(toggle.response)).toBe(200);
-        expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false);
+        expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false, expect.anything());
     });
 });
 

@@ -16,9 +16,11 @@
  * expected digests are computed here with `node:crypto`, independently of the
  * implementation.
  *
- * A secret-valued key is the CONTROL: its keyed fingerprint path
- * (`hmac-sha256:…`, `secretAuditDigest`) is untouched, so its rows keep a null
- * `old_hash` and a keyed `new_hash`.
+ * [#26534] A secret-valued key records the SAME keyed digest on both columns
+ * (`hmac-sha256:…`, `secretAuditDigest`): `old_hash` is the keyed digest of
+ * the previous value, read back and decrypted inside the write, so it equals
+ * the previous row's `new_hash`. No row ever carries an unkeyed digest of a
+ * secret.
  */
 
 import { createHash } from 'node:crypto';
@@ -182,7 +184,7 @@ class MockHttp implements IHttpServer {
 }
 
 /** The pieces the running server binds: real engine, real objects, the plugin's audit writer, real routes. */
-async function boot() {
+async function boot(opts: { cryptoProvider?: LocalCryptoProvider } = {}) {
   const engine = new ObjectQL();
   const { driver, rowsOf } = makeMemoryDriver();
   engine.registerDriver(driver, true);
@@ -190,11 +192,19 @@ async function boot() {
   for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit, SysPlatformSettingAudit]) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
+  // The plugin's own `sys_secret` store, with its reads recorded: which
+  // handles a write dereferences is what the cost cases measure.
+  const store = (new SettingsServicePlugin() as any).buildSecretStore(engine);
+  const secretReads: string[] = [];
+  const secretStore = {
+    ...store,
+    get: async (id: string) => { secretReads.push(id); return store.get(id); },
+  };
   const svc = new SettingsService({
     env: {},
     engine: withEngineRegistry(wrapEngineAsSettingsEngine(engine as any), engine),
-    cryptoProvider: new LocalCryptoProvider(),
-    secretStore: (new SettingsServicePlugin() as any).buildSecretStore(engine),
+    cryptoProvider: opts.cryptoProvider ?? new LocalCryptoProvider(),
+    secretStore,
     auditWriter: buildSettingAuditWriter(engine as any),
   });
   for (const m of [TENANT_MANIFEST, GLOBAL_MANIFEST, USER_MANIFEST]) svc.registerManifest(m);
@@ -238,7 +248,19 @@ async function boot() {
   const auditOf = (object: 'sys_setting_audit' | 'sys_platform_setting_audit', key: string) =>
     [...rowsOf(object).values()].filter((r) => r.key === key);
 
-  return { put, auditOf, asUser: (id: string) => { userId = id; } };
+  /** The `sys_secret` handle the global row of `key` names now. */
+  const handleOf = (key: string) =>
+    [...rowsOf('sys_platform_setting').values()].find((r) => r.key === key)?.value_enc as string | undefined;
+
+  return {
+    put,
+    auditOf,
+    asUser: (id: string) => { userId = id; },
+    svc,
+    rowsOf,
+    secretReads,
+    handleOf,
+  };
 }
 
 describe('#26465 — old_hash / new_hash on the tenant rung (sys_setting_audit)', () => {
@@ -330,8 +352,36 @@ describe('#26465 — the global rung (sys_platform_setting_audit) records the sa
       [sha256Of('smtp2.example.com'), sha256Of('smtp2.example.com')],
     ]);
   });
+});
 
-  it('CONTROL — a secret value keeps its keyed path: keyed new_hash, null old_hash, no unkeyed digest anywhere', async () => {
+/** The unkeyed digests a leak of `value` would carry, for the "never in any row" check. */
+const unkeyedOf = (value: string) => [
+  sha256Of(value).slice('sha256:'.length),
+  createHash('sha256').update(value, 'utf8').digest('hex'),
+];
+const expectNoUnkeyedDigest = (rows: Record<string, unknown>[], values: string[]) => {
+  for (const row of rows) {
+    for (const v of values) {
+      expect(JSON.stringify(row)).not.toContain(v);
+      for (const d of unkeyedOf(v)) expect(JSON.stringify(row)).not.toContain(d);
+    }
+  }
+};
+
+describe('#26534 — a secret value records the keyed digest of its previous value as old_hash', () => {
+  it('first write: old_hash null, keyed new_hash', async () => {
+    const { put, auditOf } = await boot();
+
+    await put('hash_global', { api_key: 'pw-alpha' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'api_key');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ action: 'set', encrypted: true, old_hash: null });
+    expect(rows[0].new_hash).toMatch(KEYED_SHAPE);
+    expectNoUnkeyedDigest(rows, ['pw-alpha']);
+  });
+
+  it('overwrite: old_hash is the previous row\'s keyed new_hash, and no unkeyed digest is anywhere in a row', async () => {
     const { put, auditOf } = await boot();
 
     await put('hash_global', { api_key: 'pw-alpha' });
@@ -341,11 +391,135 @@ describe('#26465 — the global rung (sys_platform_setting_audit) records the sa
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.encrypted).toBe(true);
-      expect(row.old_hash).toBeNull();
       expect(row.new_hash).toMatch(KEYED_SHAPE);
     }
-    expect(rows[1].new_hash).not.toBe(rows[0].new_hash);
-    const unkeyed = [sha256Of('pw-alpha'), sha256Of('pw-beta'), 'sha256:' + createHash('sha256').update('pw-alpha').digest('hex')];
-    for (const row of rows) for (const d of unkeyed) expect(JSON.stringify(row)).not.toContain(d.slice('sha256:'.length));
+    expect(rows[1].old_hash).toMatch(KEYED_SHAPE);
+    expect(rows[1].old_hash).toBe(rows[0].new_hash);
+    expect(rows[1].new_hash).not.toBe(rows[1].old_hash);
+    expectNoUnkeyedDigest(rows, ['pw-alpha', 'pw-beta']);
+  });
+
+  it('same-value rewrite: old_hash equals new_hash, so a rotation that changed nothing is visible', async () => {
+    const { put, auditOf } = await boot();
+
+    await put('hash_global', { api_key: 'pw-alpha' });
+    await put('hash_global', { api_key: 'pw-alpha' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'api_key');
+    expect(rows).toHaveLength(2);
+    expect(rows[1].old_hash).toMatch(KEYED_SHAPE);
+    expect(rows[1].old_hash).toBe(rows[1].new_hash);
+    expect(rows[1].old_hash).toBe(rows[0].new_hash);
+    expectNoUnkeyedDigest(rows, ['pw-alpha']);
+  });
+
+  it('set → reset → set: the reset carries the previous keyed digest and no new one; the next set starts from unset', async () => {
+    const { put, auditOf } = await boot();
+
+    await put('hash_global', { api_key: 'pw-alpha' });
+    await put('hash_global', { api_key: null });
+    await put('hash_global', { api_key: 'pw-beta' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'api_key');
+    expect(rows.map((r) => r.action)).toEqual(['set', 'reset', 'set']);
+    expect(rows[1]).toMatchObject({ old_hash: rows[0].new_hash, new_hash: null });
+    expect(rows[1].old_hash).toMatch(KEYED_SHAPE);
+    expect(rows[2].old_hash).toBeNull();
+    expect(rows[2].new_hash).toMatch(KEYED_SHAPE);
+    expectNoUnkeyedDigest(rows, ['pw-alpha', 'pw-beta']);
+  });
+
+  it('cost: only a secret overwrite pays one more read of the previous handle, and that secret is still reaped after it', async () => {
+    /** The reads of the previous handle one overwrite makes, on a fresh boot. */
+    const overwriteReads = async (provider?: LocalCryptoProvider) => {
+      const { put, auditOf, rowsOf, secretReads, handleOf } = await boot({ cryptoProvider: provider });
+      // A non-secret write never touches sys_secret.
+      await put('hash_global', { host: 'smtp.example.com' });
+      expect(secretReads).toEqual([]);
+      // A first write has no previous handle to read: every read is of the
+      // handle it just wrote (the response's re-resolve).
+      await put('hash_global', { api_key: 'pw-alpha' });
+      const first = handleOf('api_key')!;
+      expect(first).toMatch(/^sec_/);
+      expect(secretReads.every((id) => id === first)).toBe(true);
+      secretReads.length = 0;
+      await put('hash_global', { api_key: 'pw-beta' });
+      // The rotated-away secret is reaped AFTER the old_hash read (#8030).
+      expect(rowsOf('sys_secret').has(first)).toBe(false);
+      expect(rowsOf('sys_secret').has(handleOf('api_key')!)).toBe(true);
+      return {
+        reads: secretReads.filter((id) => id === first).length,
+        oldHash: auditOf('sys_platform_setting_audit', 'api_key')[1].old_hash,
+      };
+    };
+    // The baseline: with no keyed digest the write skips the old_hash read,
+    // and what is left is the read the write path already made before this
+    // rule (`validatePatch` resolves the key's current value).
+    const unkeyed = new LocalCryptoProvider();
+    (unkeyed as any).keyedDigest = undefined;
+    const baseline = await overwriteReads(unkeyed);
+    const keyed = await overwriteReads();
+
+    expect(baseline.oldHash).toBeNull();
+    expect(keyed.oldHash).toMatch(KEYED_SHAPE);
+    expect(keyed.reads - baseline.reads).toBe(1);
+  });
+
+  it('no keyed digest available: old_hash null like new_hash, and the write lands', async () => {
+    const provider = new LocalCryptoProvider();
+    (provider as any).keyedDigest = undefined;
+    const { put, auditOf, svc } = await boot({ cryptoProvider: provider });
+
+    await put('hash_global', { api_key: 'pw-alpha' });
+    await put('hash_global', { api_key: 'pw-beta' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'api_key');
+    expect(rows.map((r) => [r.old_hash, r.new_hash])).toEqual([[null, null], [null, null]]);
+    expect((await svc.get('hash_global', 'api_key')).value).toBe('pw-beta');
+    expectNoUnkeyedDigest(rows, ['pw-alpha', 'pw-beta']);
+  });
+
+  it('a previous handle that no longer resolves records old_hash null and the write still lands', async () => {
+    const { put, auditOf, rowsOf, handleOf, svc } = await boot();
+
+    await put('hash_global', { api_key: 'pw-alpha' });
+    rowsOf('sys_secret').delete(handleOf('api_key')!);
+    await put('hash_global', { api_key: 'pw-beta' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'api_key');
+    expect(rows).toHaveLength(2);
+    expect(rows[1].old_hash).toBeNull();
+    expect(rows[1].new_hash).toMatch(KEYED_SHAPE);
+    expect((await svc.get('hash_global', 'api_key')).value).toBe('pw-beta');
+  });
+
+  it('a key whose manifest changes between non-secret and secret never records an unkeyed digest of a secret', async () => {
+    // Not reachable through PUT: `encrypted` is the manifest's, and only a
+    // re-registration (a deploy that edits the manifest) changes it.
+    const { put, auditOf, svc } = await boot();
+    const asSecret = (secret: boolean): SettingsManifest => ({
+      ...GLOBAL_MANIFEST,
+      specifiers: [
+        secret
+          ? { type: 'password', key: 'host', label: 'Host', required: false, encrypted: true }
+          : { type: 'text', key: 'host', label: 'Host', required: false },
+      ],
+    });
+
+    await put('hash_global', { host: 'plain-value' });
+    svc.registerManifest(asSecret(true));
+    await put('hash_global', { host: 'secret-value' });
+    svc.registerManifest(asSecret(false));
+    await put('hash_global', { host: 'plain-again' });
+
+    const rows = auditOf('sys_platform_setting_audit', 'host');
+    expect(rows.map((r) => r.encrypted)).toEqual([false, true, false]);
+    // non-secret → secret: the previous row held no secret, so no keyed digest of it.
+    expect(rows[1].old_hash).toBeNull();
+    expect(rows[1].new_hash).toMatch(KEYED_SHAPE);
+    // secret → non-secret: the previous value was a secret, so no unkeyed digest of it.
+    expect(rows[2].old_hash).toBeNull();
+    expect(rows[2].new_hash).toBe(sha256Of('plain-again'));
+    expectNoUnkeyedDigest(rows, ['secret-value']);
   });
 });

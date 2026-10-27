@@ -2447,6 +2447,16 @@ export class SettingsService {
       };
       const { previousEnc, previous } = await this.upsertRow(rowForKey);
 
+      // The audit's `old_hash`, taken HERE: after the upsert's probe named the
+      // previous row, and before the reap below destroys the ciphertext a
+      // secret's previous handle points at (#26534). Only an audited write
+      // pays for it, and only a secret overwrite pays a read and a decrypt.
+      const oldHash = !this.auditWriter
+        ? null
+        : isEncrypted
+          ? await this.previousSecretAuditDigest(namespace, key, previous)
+          : SettingsService.previousAuditDigest(previous);
+
       // Destroy the ciphertext the row USED to name (#8030) — but only once a
       // re-read confirms the row really stopped naming it (#8262); "a new
       // ciphertext was written" is not evidence that the repoint landed.
@@ -2497,10 +2507,9 @@ export class SettingsService {
             // [ADR-0131 D3/D9] The organization whose value changed — the same
             // owner the settings row carries; none for a global value.
             ...(organizationId ? { organizationId } : {}),
-            // #26465: the previous value's digest, off the row the upsert
-            // already read. A secret write keeps no old fingerprint (its keyed
-            // digest path is unchanged), see `previousAuditDigest`.
-            oldHash: isEncrypted ? null : SettingsService.previousAuditDigest(previous),
+            // #26465 / #26534: the previous value's digest, off the row the
+            // upsert already read — keyed for a secret, see `oldHash` above.
+            oldHash,
             newHash: isNull ? null : digest,
             encrypted: isEncrypted,
             requestId: ctx.requestId,
@@ -3267,12 +3276,57 @@ export class SettingsService {
    *
    * A row that held a SECRET also answers `null`: its value is ciphertext or a
    * handle, and an unkeyed hash of the decrypted secret is exactly the
-   * fingerprint the audit trail must never carry (see `secretAuditDigest`).
+   * fingerprint the audit trail must never carry (see `secretAuditDigest`). A
+   * secret write takes its keyed `old_hash` from `previousSecretAuditDigest`.
    */
   private static previousAuditDigest(previous: SettingsRow | null): string | null {
     if (!previous || previous.encrypted) return null;
     if (previous.value === null || typeof previous.value === 'undefined') return null;
     return settingAuditDigest(stableStringify(previous.value));
+  }
+
+  /**
+   * The `old_hash` of a secret write (#26534): the SAME keyed digest
+   * `new_hash` records ({@link secretAuditDigest}), taken over the value the
+   * row held before, so an overwrite's `old_hash` is the previous row's
+   * `new_hash` and a same-value rewrite reads `old_hash === new_hash`.
+   *
+   * `null` when the row held no secret (no row, a reset row, or a row written
+   * while the key was not secret-valued), and `null` when no keyed digest can
+   * be had — the rule `new_hash` follows. Never a digest of the ciphertext:
+   * that changes on every re-encryption, so it cannot say whether the value
+   * changed. Never an unkeyed hash of the plaintext, either.
+   *
+   * The provider is checked BEFORE the read, so a write whose `new_hash` would
+   * be `null` anyway pays no `sys_secret` read and no decrypt. The previous
+   * plaintext lives only in this frame: it is digested and dropped, never
+   * logged, returned or stored. A previous value that cannot be read back (its
+   * handle already gone, or a data key that no longer opens it) records `null`,
+   * says so on the logger, and never fails the write, the rule both audit
+   * seams follow.
+   */
+  private async previousSecretAuditDigest(
+    namespace: string,
+    key: string,
+    previous: SettingsRow | null,
+  ): Promise<string | null> {
+    if (!previous || previous.encrypted !== true) return null;
+    if (SettingsService.handleOf(previous.value_enc) === null) return null;
+    const provider = this.cryptoProvider;
+    if (!provider || typeof provider.keyedDigest !== 'function') return null;
+    let plain: string | null;
+    try {
+      plain = await this.decryptStored(previous);
+    } catch (err) {
+      const message =
+        `[SettingsService] ${namespace}.${key}: the audit trail records this overwrite with no ` +
+        `old_hash because the previous value could not be decrypted (${(err as Error)?.message ?? err}).`;
+      if (this.logger?.warn) this.logger.warn(message);
+      else console.warn(message);
+      return null;
+    }
+    if (plain === null) return null;
+    return this.secretAuditDigest(namespace, key, plain);
   }
 
   /**
@@ -3496,39 +3550,47 @@ export class SettingsService {
     else console.error(message);
   }
 
+  /**
+   * The plaintext an encrypted row's `value_enc` stands for, or `null` when
+   * it names nothing (no value, or a `sys_secret` handle whose row is gone).
+   * Throws when the decrypt does; each caller decides what that means.
+   */
+  private async decryptStored(row: SettingsRow): Promise<string | null> {
+    if (!row.value_enc) return null;
+    // Phase 3: when the value_enc looks like a sys_secret handle and
+    // both the secretStore + cryptoProvider are wired, dereference
+    // through sys_secret. Otherwise (legacy rows or in-memory tests)
+    // fall back to inline crypto-adapter decryption.
+    if (
+      this.cryptoProvider &&
+      this.secretStore &&
+      typeof row.value_enc === 'string' &&
+      row.value_enc.startsWith('sec_')
+    ) {
+      const secret = await this.secretStore.get(row.value_enc);
+      if (!secret) return null;
+      return this.cryptoProvider.decrypt(
+        {
+          id: secret.id,
+          kmsKeyId: secret.kms_key_id,
+          alg: secret.alg,
+          version: secret.version,
+          ciphertext: secret.ciphertext,
+        },
+        { scope: 'settings', namespace: row.namespace, key: row.key },
+      );
+    }
+    return this.crypto.decrypt(row.value_enc, {
+      namespace: row.namespace,
+      key: row.key,
+    });
+  }
+
   private async materialiseRow(row: SettingsRow): Promise<unknown> {
     if (row.encrypted) {
-      if (!row.value_enc) return null;
-      let plain: string;
+      let plain: string | null;
       try {
-        // Phase 3: when the value_enc looks like a sys_secret handle and
-        // both the secretStore + cryptoProvider are wired, dereference
-        // through sys_secret. Otherwise (legacy rows or in-memory tests)
-        // fall back to inline crypto-adapter decryption.
-        if (
-          this.cryptoProvider &&
-          this.secretStore &&
-          typeof row.value_enc === 'string' &&
-          row.value_enc.startsWith('sec_')
-        ) {
-          const secret = await this.secretStore.get(row.value_enc);
-          if (!secret) return null;
-          plain = await this.cryptoProvider.decrypt(
-            {
-              id: secret.id,
-              kmsKeyId: secret.kms_key_id,
-              alg: secret.alg,
-              version: secret.version,
-              ciphertext: secret.ciphertext,
-            },
-            { scope: 'settings', namespace: row.namespace, key: row.key },
-          );
-        } else {
-          plain = await this.crypto.decrypt(row.value_enc, {
-            namespace: row.namespace,
-            key: row.key,
-          });
-        }
+        plain = await this.decryptStored(row);
       } catch (err) {
         // Decrypt failures are almost always operational: the crypto
         // provider's data key changed (e.g. InMemoryCryptoProvider
@@ -3545,6 +3607,7 @@ export class SettingsService {
         );
         return null;
       }
+      if (plain === null) return null;
       // Try JSON parse so non-string secrets round-trip.
       try {
         return JSON.parse(plain);
