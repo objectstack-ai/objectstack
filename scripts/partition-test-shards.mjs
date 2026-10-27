@@ -1214,10 +1214,18 @@ export function densityCapOf(timings, excluded, shardCount) {
 // Deterministic (candidates in bin and item order, the first strictly best
 // kept), and it terminates: every accepted move lowers the sum of squared bin
 // totals. A split already within the cap comes back unchanged.
+//
+// ⛔ A whole package that rides with the declaration-reading slice (`rideWith`,
+// DECLARATION_READER_PACKAGES) stays put like the slice itself: moved off, it
+// would take declarations to a second shard, which then builds the closure the
+// slice pin exists to build once.
 export function refineToCap(bins, items, cap) {
   const weightOf = new Map(items.map((i) => [i.name, i.weight]));
-  const slices = new Set(items.filter((i) => i.slice).map((i) => i.name));
-  const movable = (name) => !slices.has(name);
+  const present = new Set(items.map((i) => i.name));
+  const fixed = new Set(
+    items.filter((i) => i.slice || (i.rideWith !== undefined && present.has(i.rideWith))).map((i) => i.name)
+  );
+  const movable = (name) => !fixed.has(name);
   const out = bins.map((b) => ({ total: b.total, names: [...b.names] }));
   const EPSILON = 1e-9;
   for (let step = 0; step < 10_000; step++) {
@@ -1746,9 +1754,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 1 grades the committed dataset's split; 4 are fixtures, both directions.
   'the whole-package leg cap and the load-sensitive pair (#25870)': 5,
   // 4 grade the committed dataset and the live tree, 1 drives planRun() on
-  // both document shapes, 10 are fixtures (7 of the three spellings, 3 of the
-  // placement).
-  'the declaration-reading slice carries the closure (#25870)': 15,
+  // both document shapes, 11 are fixtures (7 of the three spellings, 3 of the
+  // placement, 1 of the cap repair).
+  'the declaration-reading slice carries the closure (#25870)': 16,
   'predicted-vs-measured drift (#16173)': 9,
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
@@ -2426,6 +2434,25 @@ function selfTest() {
       if (items.some((i) => i.closure !== undefined || i.rideWith !== undefined) ||
           JSON.stringify(partition(items, 2)) !== JSON.stringify(partition(expandSlices(whole, NO_DECLARATION_READERS), 2))) {
         throw new Error('declaration closure: a run with no reader slice was charged or re-placed');
+      }
+    });
+    check(() => {
+      // The cap repair moves whole packages off the densest bin; the whole
+      // reader riding with the reader slice is not one it may move. Here moving
+      // `m` would strictly lower the 800s bin (to 600s / 500s), so only the
+      // rider rule keeps it beside `a 1/2`.
+      const items = [
+        { name: 'a 1/2', weight: 500, pkg: 'a', slice: { index: 1, count: 2 }, tasks: 1 },
+        { name: 'a 2/2', weight: 300, pkg: 'a', slice: { index: 2, count: 2 }, tasks: 1 },
+        { name: 'm', weight: 300, pkg: 'm', slice: null, tasks: 1, rideWith: 'a 1/2' },
+      ];
+      const bins = [
+        { total: 800, names: ['a 1/2', 'm'] },
+        { total: 300, names: ['a 2/2'] },
+      ];
+      const out = refineToCap(bins, items, 600);
+      if (binOf(out, 'm') !== binOf(out, 'a 1/2')) {
+        throw new Error(`declaration closure: the cap repair moved the whole reader off the reader slice's shard: ${JSON.stringify(out)}`);
       }
     });
   }
