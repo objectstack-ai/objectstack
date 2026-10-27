@@ -3489,7 +3489,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3504,9 +3504,9 @@
           "tokens minted over the API as the liaison member per the API item's step shapes (plain, password, audience signed_in, short-expiry) — this item drives only the RENDERING; the mint/resolve/revoke API clauses stay on the API item"
         ],
         "knownGaps": [
-          "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
+          "automated.ref names objectui code imported into this repository: the pin is ui/apps/console/src/pages/shared-record-shape.test.ts in this checkout (RUNNER's ui/ standing fact), so run it from this tree at the run's framework sha and cite that sha — there is no separate objectui revision to name. It pins the 401 envelope fold only: everything rendered is still driven by hand in the browser",
           "the ai_conversations transcript branch (objectui SharedRecordPage.tsx: the SharedRecordPage component's ai_conversations branch, with its messages-fetch effect and the ChatbotEnhanced readOnly transcript) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
-          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (the objectui pin when revision 3 was written). The pin is retired (#25745): the console a run boots is built from this repo's ui/ by `pnpm console:build` into packages/console/dist (gitignored; `pnpm build` does not refresh it), so re-read ui/apps/console/src/pages/SharedRecordPage.tsx at the run's own framework sha: SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
+          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (the objectui revision when revision 3 was written). The pin is retired (#25745): the console a run boots is built from this repo's ui/ by `pnpm console:build` into packages/console/dist (gitignored; `pnpm build` does not refresh it), so re-read ui/apps/console/src/pages/SharedRecordPage.tsx at the run's own framework sha: SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The pins are ui/apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and ui/apps/console/src/pages/shared-record-shape.test.ts ('reads each 401 code as its gate'), run from this checkout like knownGaps[0]"
         ]
       },
       "steps": [
@@ -3571,7 +3571,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui apps/console/src/pages/shared-record-shape.test.ts (the envelope fold + the redactFields→redactedFields rename — the #3983 pin); objectui-repo-only, see knownGaps. Everything rendered stays manual"
+        "ref": "ui/apps/console/src/pages/shared-record-shape.test.ts (the envelope fold + the redactFields→redactedFields rename — the #3983 pin); objectui code imported under ui/, run from this checkout, see knownGaps[0]. Everything rendered stays manual"
       },
       "source": [
         "objectui apps/console/src/App.tsx (the /s/:token route, mounted outside the authenticated shell)",
@@ -3610,6 +3610,12 @@
           "date": "2026-10-26",
           "change": "Retired-pin text (#26035, which left area files to these ledger cards): knownGaps[2] told the run to re-read SharedRecordPage.tsx 'at whatever pin the run boots', naming this repo's .objectui-sha. The pin is retired (#25745); the console builds from ui/ with `pnpm console:build` into packages/console/dist, which `pnpm build` does not refresh. The row now says so and points at ui/apps/console/src/pages/SharedRecordPage.tsx, read on main b4199c96 (resolveGateOf and both named pins present under ui/apps/console/src/pages/). knownGaps[0] and automated.ref still call the ref objectui-repo-only, in step with RUNNER.md's standing fact, which #25850 owns. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0], knownGaps[2] and automated.ref re-pointed off the retired objectui-repo wording: the three pins they name live in this checkout under ui/apps/console/src/pages/ and run from this tree at the run's framework sha, so knownGaps[0] no longer tells a runner they are unrunnable here (#26626, maintainer-directed). Measured revisions and historical objectui issue numbers kept. No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
