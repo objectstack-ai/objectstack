@@ -898,6 +898,7 @@ export type Iso_data_hookBody__HookBodyCapability = Assert<Eq< z.input< typeof M
 // data/hook.zod.ts
 export type Iso_data_hook__HookContextSchema = Assert<Eq< z.input< typeof M69.HookContextSchema >, z.infer< typeof M69.HookContextSchema > >>;
 export type Iso_data_hook__HookEvent = Assert<Eq< z.input< typeof M69.HookEvent >, z.infer< typeof M69.HookEvent > >>;
+export type Iso_data_hook__HookRefusalSchema = Assert<Eq< z.input< typeof M69.HookRefusalSchema >, z.infer< typeof M69.HookRefusalSchema > >>;
 
 // data/mapping.zod.ts
 export type Iso_data_mapping__TransformType = Assert<Eq< z.input< typeof M179.TransformType >, z.infer< typeof M179.TransformType > >>;
