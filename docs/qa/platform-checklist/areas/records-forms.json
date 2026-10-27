@@ -4363,7 +4363,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4376,24 +4376,24 @@
           "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts and semantic-zoo.object.ts — NEITHER carries visibleWhen"
         ],
         "knownGaps": [
-          "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qa_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
+          "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qagroup_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
           "the console leg at objectui 1fb1ced36243: BOTH adapters carry the predicate. The FORM adapter copies the key (plugin-form fieldGroups.ts passes visibleWhen onto the derived section). The DETAIL page writes each declared group as the spec's `{ group }` reference (plugin-detail buildDefaultPageSchema.ts resolveDetailSections), and record:details resolves it and evaluates the group's visibleWhen per record (renderers/record-details.tsx; pin record-details.groupVisibleWhen-11630.test.tsx) — objectui#11630 is fixed. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
         ]
       },
       "steps": [
         "boot the showcase on its own port and DB; sign in as the seeded admin; keep an API token",
-        "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
+        "author the scratch carrier: install a scratch package that DECLARES its namespace — POST /api/v1/packages { manifest: { id: 'com.objectstack.qa.group', name: 'QA field-group fixture', version: '1.0.0', type: 'app', namespace: 'qagroup' }, enableOnInstall: true } (a manifest with no namespace gets one derived from the id's last segment, and the object save then answers 422 NAMESPACE_PREFIX; not 'qa', which attachments-storage's qa-scratch-authz package owns — a second 'qa' install answers 422 NAMESPACE_CONFLICT) — then PUT /api/v1/meta/object/qagroup_group_gate?package=com.objectstack.qa.group with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
-        "console leg: open a qa_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
+        "console leg: open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
         "display-tier probe: with kind=basic (predicate FALSE), pre-fill a pro_details member value via API, open the form, save an unrelated edit, then re-read the member field over the API"
       ],
       "acceptance": [
         {
           "clause": "authoring accepts both the bare CEL string and the {dialect:'cel',source} envelope on fieldGroups[].visibleWhen; the schema parse normalizes the string to the envelope (batch20 pin), the meta API serves the body as authored, and either form gates the group identically at render.",
           "oracle": "api",
-          "verify": "PUT + GET round-trip of qa_group_gate with each spelling: the GET body's fieldGroups[0].visibleWhen is what was PUT (every type but view persists the request body verbatim — ADR-0005 appendix (c), metadata-protocol saveMetaItem); the normalization is the parse's (ExpressionInputSchema), pinned by object-strictness-batch20.test.ts's re-opened predicate slot; the render half is read on the form in clause 4",
+          "verify": "PUT + GET round-trip of qagroup_group_gate with each spelling: the GET body's fieldGroups[0].visibleWhen is what was PUT (every type but view persists the request body verbatim — ADR-0005 appendix (c), metadata-protocol saveMetaItem); the normalization is the parse's (ExpressionInputSchema), pinned by object-strictness-batch20.test.ts's re-opened predicate slot; the render half is read on the form in clause 4",
           "evidence": "the two PUT payloads + the GET bodies' fieldGroups entries + the pin run"
         },
         {
@@ -4481,6 +4481,12 @@
           "date": "2026-10-26",
           "change": "acceptance[3].verify ran its detail pin from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout, where the file is on main cc378e93. Carried for #26035. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "steps[1] names the scratch package and DECLARES its namespace (manifest id com.objectstack.qa.group, namespace 'qagroup'), and the scratch object is renamed qa_group_gate → qagroup_group_gate in fixtures.knownGaps[0], steps[1], steps[5] and acceptance[0].verify (#26876, the triage sweep of the qa-feeds-disabled pattern this step reuses). Replayed on a fresh stock showcase boot at main a51ba639 (REST only): with no namespace the install derived 'group' from the id and the object save answered 422 NAMESPACE_PREFIX, so the item's carrier could not be authored as written. Not 'qa': qa-scratch-authz's package owns it, and a second 'qa' install answers 422 NAMESPACE_CONFLICT. With 'qagroup', beside the qa, qamedia and qafeeds recipe packages on one boot (no collision), the install answered 201, the active PUT 200, the GET read fieldGroups[0].visibleWhen back as the bare string authored and highlightFields ['kind'], the visibleOn draft answered 422 INVALID_METADATA (fieldGroups.0 unrecognized_keys), a record POST 201, and the teardown DELETE 200. No clause's assertion or oracle changed",
+          "ref": "#26876"
         }
       ]
     },
