@@ -14,7 +14,7 @@ Metadata-protocol: narrowed (an object's `fieldGroups[].visibleWhen` may no long
 
 **BREAKING** accept-set narrowing at the object save door (`PUT /api/v1/meta/object/:name`, draft promotion, package draft publish) and in `os validate` / `os build`.
 
-- **Before.** A field group `visibleWhen` with an unknown field, a bare field reference, an unregistered function, a syntax error or a `current_user` read saved, and the group was hidden on every form and detail page with nothing said.
+- **Before.** A field group `visibleWhen` with an unknown field, a bare field reference, an unregistered function or a syntax error saved, and the group was hidden on every form and detail page with nothing said. A `current_user` read saved too, and hid the group everywhere except in a form whose host binds the user.
 - **Now.** Each answers `422 INVALID_METADATA` at the door (and an `expression-invalid` error at build), located at the group's key.
 - **Unchanged.** A group predicate over the object's declared fields (`record.stage == 'won'`, `previous.stage != record.stage`) saves as before, and a group with no `visibleWhen` is untouched. No example, template or platform object in this repository declares a group `visibleWhen`.
 
