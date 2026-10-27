@@ -232,6 +232,19 @@ describe('[#22661] a second-object read serves only a target whose declared expo
         }
       });
 
+      // [#26572] The refusal LOCATES the condition: the position is
+      // `filter.REL` on the GET and the POST door alike (the query route's
+      // `where` is judged under the name `filter`), and the location is
+      // carried in the refusal's own sentence.
+      it('nested-relation condition: the refusal locates the condition at filter.REL, on both doors', async () => {
+        for (const rel of Object.keys(REFUSED_CONDITION) as Rel[]) {
+          for (const res of await conditionAnswers(rel, MARK[rel])) {
+            const body: any = await res.json();
+            expect(String(body?.error), rel).toContain(`'filter.${rel}'`);
+          }
+        }
+      });
+
       it('CONTROL: the target\'s own route refusal names the target and is unchanged', async () => {
         for (const [rel, [status, code]] of Object.entries(REFUSED_CONDITION) as Array<[Rel, readonly [number, string]]>) {
           const res = await stack.apiAs(token[persona], 'GET', `/data/${TARGETS[rel].object}`);
@@ -250,6 +263,34 @@ describe('[#22661] a second-object read serves only a target whose declared expo
             }
           }
         }
+      });
+
+      // [#26572] An `internal: true` field on the addressed object is refused
+      // in every evaluate position with 400 INVALID_FIELD naming the object
+      // and the field — never a 200 (a filter would confirm a guessed value by
+      // whether the row comes back) and never a 500.
+      const internalPositions: Array<[string, () => Promise<Response>]> = [
+        ['filter (GET)', () => stack.apiAs(token[persona], 'GET', `/data/sox_source?filter=${encodeURIComponent(JSON.stringify([['internal_f', '=', 'x']]))}`)],
+        ['filter (POST where)', () => stack.apiAs(token[persona], 'POST', '/data/sox_source/query', { where: { internal_f: 'x' } })],
+        ['sort (GET)', () => stack.apiAs(token[persona], 'GET', '/data/sox_source?sort=internal_f')],
+        ['groupBy (POST)', () => stack.apiAs(token[persona], 'POST', '/data/sox_source/query', { groupBy: ['internal_f'], aggregations: [{ function: 'count', alias: 'n' }] })],
+        ['aggregate operand (POST)', () => stack.apiAs(token[persona], 'POST', '/data/sox_source/query', { aggregations: [{ function: 'max', field: 'internal_f', alias: 'm' }] })],
+      ];
+      for (const [position, send] of internalPositions) {
+        it(`internal field, ${position}: 400 INVALID_FIELD naming sox_source and internal_f`, async () => {
+          const res = await send();
+          const body: any = await res.json();
+          expect({ status: res.status, code: body?.code, object: body?.object, field: body?.field }, JSON.stringify(body))
+            .toEqual({ status: 400, code: 'INVALID_FIELD', object: 'sox_source', field: 'internal_f' });
+        });
+      }
+
+      it('CONTROL internal field: the same positions on an ordinary column are served, and no row carries internal_f', async () => {
+        const res = await stack.apiAs(token[persona], 'GET', '/data/sox_source?sort=name');
+        expect(res.status, await res.clone().text()).toBe(200);
+        const rows = rowsOf(await res.json());
+        expect(rows.length).toBeGreaterThan(0);
+        for (const row of rows) expect(Object.keys(row)).not.toContain('internal_f');
       });
 
       it('dataset sort-key pass: an order on a withheld dimension sorts by the stored id', async () => {

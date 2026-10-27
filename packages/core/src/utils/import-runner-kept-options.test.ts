@@ -77,8 +77,9 @@ function makeProvider(shape: 'inline' | 'createMany' | 'insertMany' | 'update' |
   }
   if (shape === 'validate') {
     p.validateData = vi.fn(async (args: ValidateArgs) => {
-      calls.push({ kind: 'validateData', rows: [args.data as Record<string, unknown>], context: args.context });
-      return { results: [{ valid: true, errors: [] }] } as any;
+      const rows = (Array.isArray(args.data) ? args.data : [args.data]) as Array<Record<string, unknown>>;
+      calls.push({ kind: 'validateData', rows, context: args.context });
+      return { results: rows.map(() => ({ valid: true, errors: [] })) } as any;
     });
   }
   return { p, calls };
@@ -135,14 +136,22 @@ describe('runImport — createMissingOptions hands the kept values to the write 
     expect(calls[0].context.keptOptionValues).toEqual({ priority: ['Bogus'] });
   });
 
-  it('the dry run asks validateData with the same per-row context the write would carry', async () => {
+  it('the dry run asks validateData with the context the batch write would carry: the union of its rows\' kept values', async () => {
+    // [#26684] The dry run previews the create rows as the batch the commit
+    // writes them in, so its one call carries that batch call's context.
     const { p, calls } = makeProvider('validate');
     const summary = await runImport({ ...baseOpts, p, dryRun: true, rows: ROWS });
     expect(summary.created).toBe(3);
-    expect(calls.map((c) => c.kind)).toEqual(['validateData', 'validateData', 'validateData']);
-    expect(calls[0].context.keptOptionValues).toEqual({ priority: ['Bogus'] });
-    expect(calls[1].context).not.toHaveProperty('keptOptionValues');
-    expect(calls[2].context.keptOptionValues).toEqual({ tags: ['Other'] });
+    expect(calls.map((c) => c.kind)).toEqual(['validateData']);
+    expect(calls[0].rows).toHaveLength(3);
+    expect(calls[0].context.keptOptionValues).toEqual({ priority: ['Bogus'], tags: ['Other'] });
+  });
+
+  it('a dry run whose rows kept nothing carries the import\'s write context unchanged', async () => {
+    const { p, calls } = makeProvider('validate');
+    await runImport({ ...baseOpts, p, dryRun: true, rows: [{ code: 'b', priority: 'High' }] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].context).not.toHaveProperty('keptOptionValues');
   });
 
   it('with the option off, an unmatched cell fails at coercion and no write carries the key', async () => {

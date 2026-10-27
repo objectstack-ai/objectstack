@@ -50,6 +50,7 @@
 import { isUniqueViolationError, operatorFacingErrorText } from '@objectstack/types';
 
 import { driverCanRunSql, resolveDriverClientName, resolveDriverExec } from './driver-exec.js';
+import { catalogFamilyOf, isResultSet, normalizeRows } from './read-probe.js';
 
 /**
  * Raw-SQL seam. The surface is resolved by `./driver-exec.ts`: `execute()`
@@ -331,6 +332,53 @@ export function classifyIndexFailure(error: unknown): PartialIndexStatus {
 }
 
 /**
+ * [#26630] How many identity keys the existing rows duplicate, and how many rows
+ * hold them — the count a `'conflict'` report owes the operator (ADR-0120 D4),
+ * read through the caller's own duplicate probe so the two can never disagree
+ * about what counts as a duplicate.
+ *
+ * Counts only. ⛔ No key value leaves this function: the rows being counted can
+ * be secret settings, and the caller already prints the statement that lists
+ * them for an operator who decides to look.
+ *
+ * `duplicateProbeSql` must be a grouped statement projecting `duplicate_rows`
+ * (both identity migrations' `build…DuplicateProbeSql` are). Answers `undefined`
+ * when the count cannot be read, and the report then simply carries no count —
+ * a best-effort addition must never cost the report it is added to.
+ */
+export async function countDuplicateKeys(
+    exec: IndexExec,
+    duplicateProbeSql: string,
+): Promise<{ keys: number; rows: number } | undefined> {
+    try {
+        const result = await exec(
+            `SELECT COUNT(*) AS duplicate_keys, SUM(duplicate_rows) AS duplicate_rows ` +
+                `FROM (${duplicateProbeSql}) duplicates`,
+        );
+        if (!isResultSet(result)) return undefined;
+        const row = normalizeRows(result)[0];
+        const keys = Number(row?.duplicate_keys ?? 0);
+        const rows = Number(row?.duplicate_rows ?? 0);
+        if (!Number.isFinite(keys) || !Number.isFinite(rows)) return undefined;
+        return { keys, rows };
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The count as the clause a `'conflict'` line carries, or `''` when there is
+ * none to give. Shared so both identity migrations word it the same way.
+ */
+export function describeDuplicateKeys(count: { keys: number; rows: number } | undefined): string {
+    if (!count || count.keys < 1) return '';
+    return (
+        ` (${count.keys} duplicated ${count.keys === 1 ? 'key' : 'keys'}, ` +
+        `held by ${count.rows} ${count.rows === 1 ? 'row' : 'rows'})`
+    );
+}
+
+/**
  * `DROP INDEX IF EXISTS`, swallowing everything.
  *
  * Best-effort by contract. MySQL has no `DROP INDEX IF EXISTS <name>` form at
@@ -352,6 +400,15 @@ export interface ProbeThenReplaceOptions {
     probeIndexName: string;
     /** Builds the tighter `CREATE …` statement for a given index name. */
     buildSql: (indexName: string) => string;
+    /**
+     * [#26630] The table the index is on, and the knex client name of the seam
+     * (`resolveIndexSeamForTable`'s `client`). Together they select the
+     * PostgreSQL arm of the replace step — see {@link probeThenReplaceIndex}.
+     * Either one missing keeps the dialect-blind order exactly as it was, which
+     * is what SQLite and every caller that does not pass them still get.
+     */
+    table?: string;
+    client?: string;
 }
 
 export interface ProbeThenReplaceOutcome {
@@ -368,8 +425,80 @@ export interface ProbeThenReplaceOutcome {
      * real name was dropped and the rebuild then failed anyway (a race with
      * another process is the only way to get here). The caller owes the loudest
      * report it has: this is the one branch where the name may now hold nothing.
+     *
+     * `'verify'` — [#26630] PostgreSQL only. Every statement ran, but the
+     * definition read back under the real name is not the one the probe built,
+     * so the tighter key is NOT in place. The one way there is the name still
+     * being held by what the drop could not remove (`detail` carries the
+     * refusal), and `CREATE … IF NOT EXISTS` then succeeding as a no-op. The
+     * previous index is what is enforcing, so it is reported as `'failed'` with
+     * the caller's "existing index unchanged" wording, never as `'created'`.
      */
-    failedAt?: 'probe' | 'replace';
+    failedAt?: 'probe' | 'replace' | 'verify';
+}
+
+/**
+ * The definition PostgreSQL holds under `indexName`, from the part after ` ON `
+ * — the table, the access method and the key parts — so two indexes built from
+ * one statement under two names compare equal. `pg_get_indexdef` prints both
+ * the same way (it, not this repo, normalizes `''` to `''::text`), which is why
+ * the probe's own definition is the target rather than a literal of ours.
+ *
+ * Resolved through `to_regclass` and the search path, the way `read-probe.ts`'s
+ * PostgreSQL arm resolves a table, so it answers about the index the unqualified
+ * DDL above it just touched. `undefined` = no index holds the name.
+ */
+async function readPostgresIndexDefinition(
+    exec: IndexExec,
+    indexName: string,
+): Promise<{ definition?: string } | { error: string }> {
+    let result: unknown;
+    try {
+        result = await exec(`SELECT pg_get_indexdef(to_regclass('"${indexName}"')) AS indexdef`);
+    } catch (err: unknown) {
+        return { error: operatorFacingErrorText(err) };
+    }
+    if (!isResultSet(result)) {
+        return { error: `the read-back of '${indexName}' returned no result set` };
+    }
+    const value = normalizeRows(result)[0]?.indexdef;
+    if (typeof value !== 'string') return { definition: undefined };
+    const on = value.indexOf(' ON ');
+    return { definition: on < 0 ? value : value.slice(on) };
+}
+
+/**
+ * [#26630] Free `indexName` on PostgreSQL, where it can be held by a CONSTRAINT.
+ *
+ * knex's `table.unique()` — what `SqlDriver.syncDeclaredIndexes` calls for a
+ * declared unique with no NULL-safe column — compiles there to `ALTER TABLE …
+ * ADD CONSTRAINT … UNIQUE`, and `DROP INDEX` on the index backing it is refused
+ * (2BP01). The spelling is the driver's own `dropIndexIfExists`: the constraint
+ * form first, then the index form, each `IF EXISTS` so whichever one does not
+ * hold the name is a no-op. ⛔ No `CASCADE`: nothing else may depend on an
+ * identity key, and if something does the refusal is the report.
+ *
+ * Returns the first refusal's text, or `undefined` when both ran. It is not
+ * the verdict — the read-back after the create is — only what `detail` names
+ * when the read-back says the name is still held.
+ */
+async function freePostgresIndexName(
+    exec: IndexExec,
+    table: string,
+    indexName: string,
+): Promise<string | undefined> {
+    let refusal: string | undefined;
+    for (const sql of [
+        `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${indexName}`,
+        `DROP INDEX IF EXISTS ${indexName}`,
+    ]) {
+        try {
+            await exec(sql);
+        } catch (err: unknown) {
+            refusal ??= operatorFacingErrorText(err);
+        }
+    }
+    return refusal;
 }
 
 /**
@@ -381,8 +510,11 @@ export interface ProbeThenReplaceOutcome {
  */
 export async function probeThenReplaceIndex(
     exec: IndexExec,
-    { indexName, probeIndexName, buildSql }: ProbeThenReplaceOptions,
+    { indexName, probeIndexName, buildSql, table, client }: ProbeThenReplaceOptions,
 ): Promise<ProbeThenReplaceOutcome> {
+    if (table !== undefined && catalogFamilyOf(client) === 'postgres') {
+        return probeThenReplaceIndexPostgres(exec, { indexName, probeIndexName, buildSql, table });
+    }
     // ── Step 1: prove the form is possible WITHOUT touching the index that is
     // currently protecting the table. The leading drop clears residue from a
     // process that died mid-probe on an earlier boot. ─────────────────────────
@@ -414,4 +546,71 @@ export async function probeThenReplaceIndex(
         return { status: 'failed', detail, failedAt: 'replace' };
     }
     return { status: 'created' };
+}
+
+/**
+ * [#26630] The same order on PostgreSQL, with the two steps the dialect-blind
+ * order gets wrong there.
+ *
+ * 1. **The drop.** The real name can be held by a UNIQUE CONSTRAINT (see
+ *    {@link freePostgresIndexName}), which `DROP INDEX` cannot remove. Measured
+ *    on 18.2.0 against PostgreSQL 16: both identity migrations printed a 2BP01
+ *    on every boot and left the plain, NULL-distinct key in place.
+ * 2. **The verdict.** Both callers build `CREATE UNIQUE INDEX IF NOT EXISTS`,
+ *    and under a name still held that statement succeeds and does nothing — so
+ *    `'created'` was reported for a no-op. Here `'created'` is only answered
+ *    after the definition under the real name READS BACK equal to the one the
+ *    probe built. Anything else is `'failed'` at `'verify'`.
+ *
+ * The probe step is unchanged except for reading the probe's definition before
+ * dropping it; a probe whose definition cannot be read fails at `'probe'`,
+ * before anything that is enforcing was touched.
+ */
+async function probeThenReplaceIndexPostgres(
+    exec: IndexExec,
+    { indexName, probeIndexName, buildSql, table }: ProbeThenReplaceOptions & { table: string },
+): Promise<ProbeThenReplaceOutcome> {
+    await dropIndexQuietly(exec, probeIndexName);
+    try {
+        await exec(buildSql(probeIndexName));
+    } catch (err: unknown) {
+        const detail = operatorFacingErrorText(err);
+        await dropIndexQuietly(exec, probeIndexName);
+        return { status: classifyIndexFailure(err), detail, failedAt: 'probe' };
+    }
+    const target = await readPostgresIndexDefinition(exec, probeIndexName);
+    await dropIndexQuietly(exec, probeIndexName);
+    if ('error' in target || target.definition === undefined) {
+        return {
+            status: 'failed',
+            detail:
+                'error' in target
+                    ? target.error
+                    : `the probe index '${probeIndexName}' was created but its definition could not be read back`,
+            failedAt: 'probe',
+        };
+    }
+
+    const refusal = await freePostgresIndexName(exec, table, indexName);
+    try {
+        await exec(buildSql(indexName));
+    } catch (err: unknown) {
+        const detail = operatorFacingErrorText(err);
+        return { status: 'failed', detail, failedAt: 'replace' };
+    }
+    const landed = await readPostgresIndexDefinition(exec, indexName);
+    if (!('error' in landed) && landed.definition === target.definition) return { status: 'created' };
+    const found =
+        'error' in landed
+            ? `its definition could not be read back (${landed.error})`
+            : landed.definition === undefined
+              ? 'no index holds that name'
+              : `it reads back as '${landed.definition.trim()}'`;
+    return {
+        status: 'failed',
+        detail:
+            `'${indexName}' does not carry the tighter definition (${target.definition.trim()}): ${found}` +
+            (refusal ? `. The drop was refused: ${refusal}` : ''),
+        failedAt: 'verify',
+    };
 }

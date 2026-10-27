@@ -187,7 +187,7 @@ For runtime validation, use the included Zod schemas:
 ```typescript
 import { 
   AppComponentSchema,
-  ActionSchema,
+  CRUDActionSchema,
   ReportComponentSchema
 } from '@object-ui/types/zod';
 

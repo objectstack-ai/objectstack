@@ -483,9 +483,9 @@ const ELEMENT_API_NO_CREDENTIALS =
  * ## Rendered by the console, on a page element
  *
  * The console reads this binding on every page element, whatever its type
- * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+ * (ui/packages/react/src/SchemaRenderer.tsx, which calls
  * `useElementApiDataSource` for each node it renders; the read itself is
- * objectui: packages/react/src/element-data-source/useElementApiDataSource.ts).
+ * ui/packages/react/src/element-data-source/useElementApiDataSource.ts).
  * It parses the binding with this schema before anything else, so a binding
  * refused here is refused there, with this schema's own message, and nothing
  * is read.
@@ -498,7 +498,7 @@ const ELEMENT_API_NO_CREDENTIALS =
  * answer, a body that is not JSON, a `path` that selects nothing) draws an
  * error panel naming which. The element's `visibleWhen` is decided only once
  * the value is in. The console's generic `stat`, `usage-bar` and `checklist`
- * blocks (objectui: packages/app-shell/src/console/blocks/productBlocks.tsx)
+ * blocks (ui/packages/app-shell/src/console/blocks/productBlocks.tsx)
  * are built to take it as their `dataSource`. Measured at the console pin
  * (`.objectui-sha` `0707b4ae37`), which carries the renderer
  * (objectui#12197). The liveness record is the `liveness/page.json` `_note`:
@@ -751,7 +751,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * {@link ElementApiDataSourceSchema}): on an element whose `dataSource` is
    * `{ provider: 'api', … }`, `data` is the value the binding selects, in
    * that element's own `visibleWhen` and in every element nested inside it
-   * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+   * (ui/packages/react/src/SchemaRenderer.tsx, which calls
    * `useElementApiDataSource` for the node and publishes the value to its
    * subtree through `PredicateScopeProvider`). So `data.used < data.limit`
    * gates there. That `visibleWhen` is decided once the read has answered:

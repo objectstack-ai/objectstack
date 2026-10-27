@@ -1279,7 +1279,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       const writeResults: BulkWriteRowResult[] = await bulkWrite(
         batch.map(b => b.record),
         {
-          batchSize: SeedLoaderService.BULK_BATCH_SIZE,
+          batchSize: insertBatchSize,
           writeBatchPartial: async (rows, { attempt }) => {
             let toInsert = rows;
             let existing = new Map<string, any>();
@@ -1399,6 +1399,18 @@ export class SeedLoaderService implements ISeedLoaderService {
       organizationId: config.organizationId ?? this.fallbackOrgId ?? null,
       dryRun: config.dryRun === true,
     });
+    /**
+     * [#26670] Rows per buffered-insert batch. A row holding seed files costs
+     * its insert the file-reference hooks, about 7 ms a row on sqlite against
+     * well under 1 ms for a plain row, and one `insertMany` is one unbroken
+     * run on a synchronous driver: 200 such rows held the event loop for about
+     * 1.5 s, and a sign-in waited behind it. A dataset that carries seed files
+     * is written in small batches instead, so a request waits behind a few
+     * rows; every other dataset keeps the full batch.
+     */
+    const insertBatchSize = datasetFiles?.carriesFiles
+      ? SeedLoaderService.SEED_FILE_BATCH_SIZE
+      : SeedLoaderService.BULK_BATCH_SIZE;
     /** Record index → the files that row's slots must own once it lands. */
     const fileClaimsByRecordIndex = new Map<number, { claims: SeedFileClaims; organizationId: string | null }>();
     /**
@@ -2119,7 +2131,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           } else {
             // Insert: buffer for the batched flush rather than writing now.
             pendingInserts.push({ recordIndex: i, externalIdValue, record });
-            if (pendingInserts.length >= SeedLoaderService.BULK_BATCH_SIZE) {
+            if (pendingInserts.length >= insertBatchSize) {
               await flushPendingInserts();
             }
           }
@@ -2937,6 +2949,9 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   /** Rows per batch for the buffered-insert flush. See framework#2678. */
   private static readonly BULK_BATCH_SIZE = 200;
+
+  /** [#26670] Rows per buffered-insert batch for a dataset that carries seed files (see `insertBatchSize`). */
+  private static readonly SEED_FILE_BATCH_SIZE = 20;
 
   /**
    * Decide what {@link loadDataset}'s non-self-referencing (batched) path

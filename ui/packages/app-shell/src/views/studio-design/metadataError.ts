@@ -26,7 +26,7 @@ import {
   type MetadataValidationIssue,
 } from '@object-ui/data-objectstack';
 import { FlowSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { ActionSchema, DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import type { MetadataSelection } from '../metadata-admin/preview-registry.js';
@@ -40,6 +40,7 @@ import {
 } from '../metadata-admin/inspectors/flow-node-config.js';
 import { specRequiresField } from '../metadata-admin/inspectors/flow-required-keys.js';
 import { navEntryLabelText, type NavEntryLike } from '../metadata-admin/previews/navItemLabel.js';
+import { TARGET_INPUT_KEYS } from './actionPresets.js';
 
 /** A single failed draft from a publish response's `data.failed[]`. */
 export interface PublishFailure {
@@ -284,9 +285,66 @@ export function objectFieldLocator(sent: SentBody, locale: string): IssueLocator
   };
 }
 
+/**
+ * objectstack#26736 — an action's label in the designer locale, its API name
+ * when it has none. Read off a body the spec may have refused, so a label that
+ * is not an `I18nLabel` reads as the name rather than throwing.
+ */
+function actionLabelOf(action: SentBody, name: string, locale: string): string {
+  if (typeof action.label === 'string') return action.label.trim() || name;
+  if (!isSentBody(action.label)) return name;
+  try {
+    return resolveI18nLabel(action.label as I18nLabel, locale)?.trim() || name;
+  } catch {
+    return name;
+  }
+}
+
+/** The inspector input an action's top-level key is edited in, by the action's type. */
+function actionInputKeyOf(action: SentBody, key: string | undefined): string | null {
+  switch (key) {
+    case 'body':
+      return 'engine.inspector.action.scriptBody';
+    case 'target':
+      return TARGET_INPUT_KEYS[typeof action.type === 'string' ? action.type : 'script'] ?? null;
+    case 'method':
+      return 'engine.inspector.action.method';
+    case 'bodyShape':
+      return 'engine.inspector.action.bodyShape';
+    case 'ai':
+      return 'engine.inspector.action.ai';
+    default:
+      return null;
+  }
+}
+
+/**
+ * objectstack#26736 — Data pillar: `actions.INDEX…` on the object body that
+ * was sent, placed on that action, and on its inspector input when the key
+ * under the action is one the inspector edits. The selection opens the action
+ * on the Actions view.
+ */
+export function objectActionLocator(sent: SentBody, locale: string): IssueLocator {
+  return (path) => {
+    if (path[0] !== 'actions' || !/^\d+$/.test(path[1] ?? '')) return null;
+    const action = Array.isArray(sent.actions) ? sent.actions[Number(path[1])] : undefined;
+    if (!isSentBody(action) || typeof action.name !== 'string' || action.name === '') return null;
+    const label = actionLabelOf(action, action.name, locale);
+    const inputKey = actionInputKeyOf(action, path[2]);
+    return {
+      where: inputKey
+        ? tFormat('engine.studio.refusal.actionInput', locale, { input: t(inputKey, locale), action: label })
+        : tFormat('engine.studio.refusal.action', locale, { action: label }),
+      selection: { kind: 'action', id: action.name },
+    };
+  };
+}
+
 /** A refused save of an object body, as the Data pillar's strip shows it. */
 export function objectSaveRefusal(e: unknown, sent: SentBody, locale: string): StudioRefusal {
-  return guardRefusalOf(e, sent, locale) ?? issueRefusal(e, locale, objectFieldLocator(sent, locale));
+  const fields = objectFieldLocator(sent, locale);
+  const actions = objectActionLocator(sent, locale);
+  return guardRefusalOf(e, sent, locale) ?? issueRefusal(e, locale, (path) => fields(path) ?? actions(path));
 }
 
 /**
@@ -413,15 +471,17 @@ function guardNeedOf(def: SentBody): 'options' | 'target' | null {
 
 /**
  * The edit the Data pillar holds for `body`, the object document its autosave
- * would send, or `null` when the write guard lets it through.
+ * would send, or `null` when nothing in it is merely unfinished.
  *
  * The field is the first one the guard refuses on its own, in the guard's own
  * order, as {@link guardRefusalOf} finds it. A field the editor cannot select
  * (an array entry with no name) or a refusal naming neither options nor target
  * is not held: the save is sent, and its refusal shows as it always did.
+ * objectstack#26736 — when the guard lets the fields through, an action still
+ * waiting for an input is held the same way ({@link actionHeldEdit}).
  */
 export function objectHeldEdit(body: SentBody, locale: string): StudioHeld | null {
-  if (guardMessageFor(body) === null) return null;
+  if (guardMessageFor(body) === null) return actionHeldEdit(body, locale);
   for (const { name, def, named } of guardFieldEntries(body.fields)) {
     if (guardMessageFor({ fields: { [name]: def } }) === null) continue;
     const need = guardNeedOf(def);
@@ -433,6 +493,66 @@ export function objectHeldEdit(body: SentBody, locale: string): StudioHeld | nul
         { field: fieldLabelOf(name, def) },
       ),
       target: { kind: 'field', id: name },
+    };
+  }
+  return null;
+}
+
+/**
+ * objectstack#26736 — the catalogue key of the input `action` still needs
+ * before the spec accepts it, or `null` when it is not merely unfinished.
+ *
+ * The judge is the spec's own `ActionSchema`, asked of the action as it
+ * stands. Unfinished means every issue it names is an input the action
+ * inspector offers that holds no value yet: a script's source (absent, or
+ * blank), the body itself on a script with neither a body nor a `target`, the
+ * `target` a type requires, or the AI description an exposed action requires
+ * (absent, or still shorter than the spec's minimum while it is typed). Any
+ * other issue is finished but wrong: the action is sent, and the refusal it
+ * draws shows ({@link objectActionLocator}).
+ */
+export function actionHeldInput(action: unknown): string | null {
+  if (!isSentBody(action)) return null;
+  const parsed = ActionSchema.safeParse(action);
+  if (parsed.success) return null;
+  const body = isSentBody(action.body) ? action.body : undefined;
+  const ai = isSentBody(action.ai) ? action.ai : undefined;
+  let needed: string | null = null;
+  for (const issue of parsed.error.issues) {
+    const path = issue.path.map(String).join('.');
+    let input: string | null = null;
+    if (path === 'body.source' && body && (body.source === undefined || isBlankText(body.source))) {
+      input = 'engine.inspector.action.scriptBody';
+    } else if (path === 'body' && action.body === undefined && !action.target) {
+      input = 'engine.inspector.action.scriptBody';
+    } else if (path === 'target' && (action.target === undefined || action.target === '')) {
+      input = actionInputKeyOf(action, 'target');
+    } else if (path === 'ai.description' && ai && (ai.description === undefined || issue.code === 'too_small')) {
+      input = 'engine.inspector.action.aiDescription';
+    }
+    if (input === null) return null;
+    needed ??= input;
+  }
+  return needed;
+}
+
+/**
+ * The edit the Data pillar holds for an object `body` whose fields the write
+ * guard lets through: the first named action the spec refuses only for an
+ * input it has not been given yet ({@link actionHeldInput}).
+ */
+function actionHeldEdit(body: SentBody, locale: string): StudioHeld | null {
+  if (!Array.isArray(body.actions)) return null;
+  for (const action of body.actions) {
+    if (!isSentBody(action) || typeof action.name !== 'string' || action.name === '') continue;
+    const input = actionHeldInput(action);
+    if (input === null) continue;
+    return {
+      clause: tFormat('engine.studio.held.actionNeedsInput', locale, {
+        input: t(input, locale),
+        action: actionLabelOf(action, action.name, locale),
+      }),
+      target: { kind: 'action', id: action.name },
     };
   }
   return null;

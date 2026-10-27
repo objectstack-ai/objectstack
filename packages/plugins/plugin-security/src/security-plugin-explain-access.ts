@@ -72,7 +72,7 @@ import { OWNERSHIP_QUEUE_SERVICE, type AuthoredRowWriteOperation, type IOwnershi
 import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
 import { absentUnderCallerRead, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
-import { PermissionDeniedError } from './errors.js';
+import { ExplainUserNotFoundError, PermissionDeniedError } from './errors.js';
 import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
@@ -80,6 +80,7 @@ import {
   delegatedOrganizationRefusal,
   explainAccessForAsker,
   intersectDelegatedScope,
+  readSysUserRow,
   resolveDelegatorContext,
 } from './explain-engine.js';
 
@@ -163,6 +164,15 @@ export async function explainAccessForCaller(
           );
         }
       }
+    }
+    // [#26641] ...and only a user who exists is explained. The resolver
+    // synthesises the baseline anchor and sets for ANY id, so an id no
+    // `sys_user` row has was explained as a baseline member, `allowed: true`.
+    // Asked here, after the caller is admitted and never before, so a caller
+    // who may not explain others learns nothing about which ids exist; read
+    // through the delegator path's own existence read (`readSysUserRow`).
+    if (!(await readSysUserRow(this.ql, request.userId))) {
+      throw new ExplainUserNotFoundError(request.userId);
     }
     // [#20515] Resolved in the CALLER's organization — the one the explain
     // right above was checked in. Grants scoped to any other organization do

@@ -23,6 +23,8 @@
 //   - the shipped form is served to both anonymous doors;
 //   - the admin's save with an active organization is environment-wide, and its
 //     withdrawal closes both doors (`404 FORM_NOT_FOUND`) with nothing landing;
+//   - that withdrawal is what a session with NO organization active reads back
+//     at the same /meta door (#26571);
 //   - open environment-wide (control): both doors accept, and the row lands in
 //     the organization the doors resolve.
 
@@ -108,8 +110,31 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
 
   it('withdrawn by an admin WITH an active organization: the save is environment-wide, and it closes the form', async () => {
     await scope(organizationId);
-    expect(await saved(false), 'an org-active admin\'s save is environment-wide (ADR-0131 D6)').toMatch(/env-wide/);
+    const message = await saved(false);
+    expect(message, 'an org-active admin\'s save is environment-wide (ADR-0131 D6)').toMatch(/env-wide/);
+    // negative[1]: a 200 that names the active organization is the D6 failure.
+    expect(message, 'the save names no organization scope').not.toContain(organizationId);
     expect(await probe()).toEqual(CLOSED);
+  });
+
+  // [#26571] acceptance[0] / negative[1]: the withdrawal is the ENVIRONMENT's,
+  // so a session with no organization active is served it too. Read through the
+  // same /meta door the editor saves to, then the organization is made active
+  // again for the control below.
+  it('the withdrawal is served to a session with no organization active (ADR-0131 D6)', async () => {
+    await scope(null);
+    try {
+      const res = await stack.apiAs(admin, 'GET', VIEW);
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { item?: Record<string, any> };
+      const item = (json.item ?? json) as Record<string, any>;
+      expect(item.config?.sharing, 'the no-organization read serves the withdrawal').toMatchObject({
+        allowAnonymous: false,
+        publicLink: published.config.sharing.publicLink,
+      });
+    } finally {
+      await scope(organizationId);
+    }
   });
 
   it('open environment-wide (control): both doors accept and the row lands in the organization', async () => {

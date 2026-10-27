@@ -72,7 +72,7 @@ export default defineStack({
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
-| Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
+| Action labels, confirm text, success messages, disabled reasons | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |

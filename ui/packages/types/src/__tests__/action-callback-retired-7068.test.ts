@@ -59,7 +59,7 @@ import ts from 'typescript';
 import { ActionSchema as SpecActionSchema } from '@objectstack/spec/ui';
 import * as crudZod from '../zod/crud.zod.js';
 import * as zodBarrel from '../zod/index.zod.js';
-import { ActionSchema, DetailSchema } from '../zod/crud.zod.js';
+import { CRUDActionSchema, DetailSchema } from '../zod/crud.zod.js';
 import { BaseSchema } from '../zod/base.zod.js';
 import { safeValidateSchema } from '../zod/index.zod.js';
 import type { ActionSchema as ActionSchemaTS } from '../crud.js';
@@ -105,9 +105,9 @@ type Issue = { code: string; path: PropertyKey[]; message: string; expected?: st
 const flatIssues = (issues: Issue[]): Issue[] =>
   issues.flatMap((i) => (i.code === 'invalid_union' && i.errors ? i.errors.flat().flatMap((e) => flatIssues([e])) : [i]));
 
-/** The lazy mirror's object shape — `ActionSchema` is `z.lazy(() => BaseSchema.extend(…))`. */
+/** The lazy mirror's object shape — `CRUDActionSchema` is `z.lazy(() => BaseSchema.extend(…))`. */
 const actionShape = (): Record<string, { description?: string }> =>
-  (ActionSchema as unknown as { _def: { getter: () => { shape: Record<string, { description?: string }> } } })._def.getter().shape;
+  (CRUDActionSchema as unknown as { _def: { getter: () => { shape: Record<string, { description?: string }> } } })._def.getter().shape;
 
 /* ── the Zod half: refused BY NAME, with the guidance in the message ─────── */
 
@@ -120,7 +120,7 @@ describe.each([
     // .optional()`). Asserting the ENVELOPE — code, path, expected and the exact
     // message — so the pin cannot be satisfied by an unrelated rejection, and a
     // WELL-FORMED callback so it is the KEY that is refused, not its members.
-    const result = ActionSchema.safeParse({ ...LEGACY_ACTION, [key]: value });
+    const result = CRUDActionSchema.safeParse({ ...LEGACY_ACTION, [key]: value });
     expect(result.success, `an authored \`${key}\` was ACCEPTED`).toBe(false);
     if (result.success) return;
 
@@ -157,7 +157,7 @@ describe.each([
     // exactly this acceptance, kept the callback unvalidated, and stayed green.
     const doc = { ...LEGACY_ACTION, [key]: CALLBACKS[0][1] };
     expect(BaseSchema.safeParse(doc).success).toBe(true);
-    expect(ActionSchema.safeParse(doc).success).toBe(false);
+    expect(CRUDActionSchema.safeParse(doc).success).toBe(false);
   });
 
   it('keeps the key DECLARED, with the same guidance on `.describe()` — one string, both channels', () => {
@@ -171,14 +171,14 @@ describe.each([
 
 describe('the retirement narrows exactly `onSuccess` / `onFailure` (objectui#7068)', () => {
   it('a legacy action WITHOUT the two keys still parses, and its values survive', () => {
-    const result = ActionSchema.safeParse(LEGACY_ACTION);
+    const result = CRUDActionSchema.safeParse(LEGACY_ACTION);
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.api).toBe('/api/data');
   });
 
   it('control: the adjacent `successMessage` / `errorMessage` — NOT retired — still parse and survive', () => {
-    const result = ActionSchema.safeParse({ ...LEGACY_ACTION, successMessage: 'Loaded', errorMessage: 'Failed' });
+    const result = CRUDActionSchema.safeParse({ ...LEGACY_ACTION, successMessage: 'Loaded', errorMessage: 'Failed' });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.successMessage).toBe('Loaded');
@@ -186,19 +186,19 @@ describe('the retirement narrows exactly `onSuccess` / `onFailure` (objectui#706
   });
 
   it('control: the mirror did not stop validating — a wrong-typed `successMessage` is still refused', () => {
-    const result = ActionSchema.safeParse({ ...LEGACY_ACTION, successMessage: 42 });
+    const result = CRUDActionSchema.safeParse({ ...LEGACY_ACTION, successMessage: 42 });
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.issues.map((i) => i.path.join('.'))).toContain('successMessage');
   });
 
   it('control: `chain` and `redirect` — the declared follow-up and post-action keys — still parse', () => {
-    const result = ActionSchema.safeParse({ ...LEGACY_ACTION, chain: [{ type: 'action', label: 'Next' }], redirect: '/done' });
+    const result = CRUDActionSchema.safeParse({ ...LEGACY_ACTION, chain: [{ type: 'action', label: 'Next' }], redirect: '/done' });
     expect(result.success).toBe(true);
   });
 
   it('an UNDECLARED key still rides `.passthrough()` — the contrast the tombstones exist for, measured live', () => {
-    const result = ActionSchema.safeParse({ ...LEGACY_ACTION, notAKeyAtAll: 'anything' });
+    const result = CRUDActionSchema.safeParse({ ...LEGACY_ACTION, notAKeyAtAll: 'anything' });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect((result.data as unknown as Record<string, unknown>).notAKeyAtAll).toBe('anything');
@@ -212,7 +212,7 @@ describe('`ActionCallback` / `ActionCallbackSchema` are DELETED, not tombstoned 
     expect('ActionCallbackSchema' in crudZod).toBe(false);
     expect('ActionCallbackSchema' in zodBarrel).toBe(false);
     // Non-vacuity: the neighbours the barrel still carries.
-    expect('ActionSchema' in crudZod).toBe(true);
+    expect('CRUDActionSchema' in crudZod).toBe(true);
     expect('ActionExecutionModeSchema' in zodBarrel).toBe(true);
   });
 

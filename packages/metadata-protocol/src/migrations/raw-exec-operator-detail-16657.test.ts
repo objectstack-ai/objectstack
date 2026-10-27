@@ -85,6 +85,7 @@ import {
     SEQUENCES_TABLE,
 } from './seed-tenancy-backfill.js';
 import { readTablePresence } from './read-probe.js';
+import { ensureSysSettingIdentityIndex } from './sys-setting-identity-index.js';
 import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
@@ -544,6 +545,114 @@ describe('[#21418] a bound sentinel reaches no carrier at any site in this packa
             expect(inspect(outcome)).not.toContain(SENTINEL);
             expect(outcome.detail).toContain("for key 't.idx_real'");
         }
+    });
+
+    /**
+     * [#26630] The PostgreSQL arm's four sites: the probe build, the definition
+     * read-back, the constraint-first drop and the replace build. Each refusal is
+     * the raw path's envelope with the sentinel bound into the statement, and
+     * every carrier it can reach is checked — the outcome (`detail`), and, for
+     * the `verify` leg, the caller's degradation line and the `Error` handed to
+     * it, through `ensureSysSettingIdentityIndex` on a `pg` seam.
+     */
+    it('partial-index-probe — the PostgreSQL arm, every site and the degradation line it feeds', async () => {
+        const refused = (sql: string, diagnostic: string): Error =>
+            rawStatementFault(knexDump(`${sql} -- ?`, [SENTINEL], diagnostic));
+        const TARGET = " ON public.t USING btree (COALESCE(k, ''::text))";
+        const options = {
+            indexName: 'idx_real',
+            probeIndexName: 'idx_probe',
+            buildSql: (name: string) => `CREATE UNIQUE INDEX IF NOT EXISTS ${name} ON t (COALESCE(k, ''))`,
+            table: 't',
+            client: 'pg',
+        };
+        /** A `pg` seam whose catalog answers from `defs`, refusing what `refuse` names. */
+        const pgSeam =
+            (defs: Record<string, string>, refuse: (sql: string) => string | undefined): IndexExec =>
+            async (sql: string) => {
+                const diagnostic = refuse(sql);
+                if (diagnostic) throw refused(sql, diagnostic);
+                const read = /to_regclass\('"(\w+)"'\)/.exec(sql);
+                return { rows: read ? [{ indexdef: defs[read[1]!] ?? null }] : [] };
+            };
+        const readable = { idx_probe: `CREATE UNIQUE INDEX idx_probe${TARGET}` };
+
+        const atProbe = await probeThenReplaceIndex(
+            pgSeam(readable, (sql) =>
+                sql.startsWith('CREATE UNIQUE INDEX IF NOT EXISTS idx_probe') ? 'syntax error at or near "("' : undefined,
+            ),
+            options,
+        );
+        const atReadBack = await probeThenReplaceIndex(
+            pgSeam(readable, (sql) => (sql.startsWith('SELECT pg_get_indexdef') ? 'permission denied for function' : undefined)),
+            options,
+        );
+        const atReplace = await probeThenReplaceIndex(
+            pgSeam(readable, (sql) =>
+                sql.startsWith('CREATE UNIQUE INDEX IF NOT EXISTS idx_real') ? 'could not extend file' : undefined,
+            ),
+            options,
+        );
+        // The drop is refused, the IF NOT EXISTS create no-ops, and the name
+        // still reads back as the constraint's plain index.
+        const heldSeam = pgSeam(
+            { ...readable, idx_real: 'CREATE UNIQUE INDEX idx_real ON public.t USING btree (k)' },
+            (sql) =>
+                /^(ALTER TABLE t DROP CONSTRAINT|DROP INDEX IF EXISTS idx_real)/.test(sql)
+                    ? 'cannot drop index idx_real because constraint idx_real on table t requires it'
+                    : undefined,
+        );
+        const atVerify = await probeThenReplaceIndex(heldSeam, options);
+
+        expect([atProbe.failedAt, atReadBack.failedAt, atReplace.failedAt, atVerify.failedAt]).toEqual([
+            'probe',
+            'probe',
+            'replace',
+            'verify',
+        ]);
+        expect(atProbe.status).toBe('unsupported');
+        for (const [outcome, dialect] of [
+            [atProbe, 'syntax error at or near'],
+            [atReadBack, 'permission denied for function'],
+            [atReplace, 'could not extend file'],
+            [atVerify, 'cannot drop index idx_real'],
+        ] as const) {
+            expect(inspect(outcome)).not.toContain(SENTINEL);
+            expect(outcome.detail).toContain(dialect);
+        }
+
+        // The caller's carrier: the degradation line and its Error, on a `pg`
+        // seam where the same refusal holds the sys_setting name.
+        const settingSeam: IndexExec = async (sql: string) => {
+            if (isTablePresenceCatalogSql(sql, 'sys_setting')) return { rows: TABLE_IS_PRESENT_ROWS };
+            if (/^(ALTER TABLE sys_setting DROP CONSTRAINT|DROP INDEX IF EXISTS uniq_)/.test(sql)) {
+                throw refused(sql, 'cannot drop index because constraint requires it');
+            }
+            const read = /to_regclass\('"(\w+)"'\)/.exec(sql);
+            if (!read) return { rows: [] };
+            return {
+                rows: [
+                    {
+                        indexdef: read[1]!.startsWith('idx_')
+                            ? `CREATE UNIQUE INDEX ${read[1]} ON public.sys_setting USING btree (k, COALESCE(user_id, ''::text))`
+                            : `CREATE UNIQUE INDEX ${read[1]} ON public.sys_setting USING btree (k, user_id)`,
+                    },
+                ],
+            };
+        };
+        const reports: string[] = [];
+        const result = await ensureSysSettingIdentityIndex(
+            settingSeam,
+            {
+                warn: (message: string, meta?: unknown) => reports.push(`${message} ${inspect(meta, { depth: 8 })}`),
+                error: (message: string, error?: Error) => reports.push(`${message} ${inspect(error)}`),
+            },
+            { client: 'pg' },
+        );
+        expect(result.status).toBe('failed');
+        expect(reports).toHaveLength(1);
+        expect(reports[0]).toContain('cannot drop index because constraint requires it');
+        expect(`${reports[0]} ${inspect(result)}`).not.toContain(SENTINEL);
     });
 
     /**

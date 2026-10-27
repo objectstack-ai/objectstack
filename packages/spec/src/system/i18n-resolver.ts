@@ -15,6 +15,7 @@
  *   objects.<object>._actions.<action_name>.description
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._actions.<action_name>.disabledReason
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -46,8 +47,8 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.* /
- *     .resultDialog.*
+ *     .successMessage / .disabledReason / .outcomeMessages.<outcome> /
+ *     .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -222,6 +223,11 @@ export interface ActionLike {
    */
   confirmText?: string | { dialect: 'template'; source: string };
   successMessage?: string | { dialect: 'template'; source: string };
+  /**
+   * `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+   * action shows. Narrowed to `string` for the same reason `description` is.
+   */
+  disabledReason?: string;
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
    * narrowed to `string` values for the same reason `successMessage` is.
@@ -648,7 +654,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1427,9 +1433,9 @@ export function translateView<T extends ViewLike>(
 
 /**
  * Apply the active locale to an action metadata document by overwriting
- * `label`, `description`, `confirmText`, `successMessage`, each declared
- * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy with
- * translated values when available. The
+ * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
+ * each declared `outcomeMessages` entry, the `params[]` copy and the
+ * `resultDialog` copy with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1458,6 +1464,9 @@ export function translateAction<T extends ActionLike>(
   const description = lookupActionField(bundle, action, 'description', opts) ?? action.description;
   const confirmText = resolveActionConfirm(bundle, action, opts);
   const successMessage = resolveActionSuccess(bundle, action, opts);
+  // [#26619] Display-only copy, overlaid exactly like `description`: the
+  // bundle's sentence when there is one, else the authored value as written.
+  const disabledReason = lookupActionField(bundle, action, 'disabledReason', opts) ?? action.disabledReason;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1467,6 +1476,7 @@ export function translateAction<T extends ActionLike>(
     ...(description !== undefined ? { description } : {}),
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
+    ...(disabledReason !== undefined ? { disabledReason } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
