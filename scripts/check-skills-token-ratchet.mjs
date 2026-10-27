@@ -552,16 +552,16 @@ export const CEILINGS = new Map([
   // 2026-10-24 (project decision list item 9), verbatim and untranslated, the
   // line for item 8 of the same message elided:
   // 「9. 技能文档 security.md 的 token 上限 2543 → 2563 … 同意」.
-  // 2563 -> 2957 (#26179): the field permission row condition `when` — the
+  // 2563 -> 2956 (#26179): the field permission row condition `when` — the
   // choice rule (a lock for everyone is a validation; a lock that depends on
   // who edits is `when` on that set's field entries), one example and the
   // four boundaries — which the file did not teach, so an author locked the
-  // fields for every user. +396 tokens on a landed 2561, 2 absorbed by
-  // headroom, ceiling +394. The file carries no duplicated passage to cut
+  // fields for every user. +395 tokens on a landed 2561, 2 absorbed by
+  // headroom, ceiling +393. The file carries no duplicated passage to cut
   // first (measured: no sentence repeats in the file). Maintainer ruling
   // 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/security.md', 2957],
+  ['skills/objectstack-data/rules/security.md', 2956],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

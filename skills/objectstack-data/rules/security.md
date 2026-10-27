@@ -124,8 +124,8 @@ A set's `fields` entry (`'OBJECT.FIELD': { readable, editable }`) may carry
 
 - Locked for **everyone** at that stage → a [validation rule](./validation.md)
   on the object (`readonlyWhen` likewise strips the write for everyone).
-- Locked for **some roles** only → `when` on the field entries of each set
-  that loses the edit; the other sets keep their grant.
+- Locked for **some permission sets** only → `when` on the field entries of
+  each set that loses the edit; the other sets keep their grant.
 
 ```typescript
 // finance may not change the contract's legal terms after approval
@@ -137,7 +137,7 @@ fields: {
 - **Edit vote only.** Reads are row-blind; `readable: false` beside `when` is
   refused at parse time.
 - **Same object.** Fields of the entry's object vs a literal or `current_user.*`;
-  no relation reach (refused at `os validate` / publish, never dropped).
+  no relation reach (refused at `os validate` / publish).
 - **Pre-image.** An update is judged on the stored row, so a write cannot unlock
   itself by moving `status` back; an insert on the row as sent.
 - **Locks, never grants.** On unmatched rows the entry is absent; another held
