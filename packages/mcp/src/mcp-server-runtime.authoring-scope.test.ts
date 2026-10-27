@@ -102,7 +102,6 @@ function makeAuthoringRegistry(
     arities,
     getAll: () => tools,
     async execute(toolCall: ToolCallPart, context: McpAuthoringToolContext): Promise<ToolExecutionResult> {
-      // eslint-disable-next-line prefer-rest-params
       arities.push(arguments.length);
       calls.push({ toolCall, context });
       if (behaviour === 'throw') throw new Error(`refused: ${toolCall.toolName}`);
@@ -515,7 +514,6 @@ describe('[#26464] stdio parity — bridgeTools still calls its ToolRegistry wit
     const legacy: ToolRegistry = {
       getAll: () => AUTHORING_TOOLS,
       async execute(toolCall: ToolCallPart): Promise<ToolExecutionResult> {
-        // eslint-disable-next-line prefer-rest-params
         arities.push(arguments.length);
         calls.push(toolCall);
         return {
