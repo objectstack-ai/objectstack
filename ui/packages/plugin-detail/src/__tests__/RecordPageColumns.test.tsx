@@ -68,12 +68,15 @@ describe('RecordPageColumns — three columns (objectstack#26678)', () => {
     expect(lists[0].parentElement).toBe(lists[1].parentElement);
   });
 
-  it('collapses a column with nothing in it', () => {
+  it('collapses a column with nothing in it; the footer then closes the details column', () => {
     const bare = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }, { hideDiscussion: true }))!;
-    const { container } = render(<RecordPageColumns tier="three-column" columns={bare} />);
+    const { container } = render(
+      <RecordPageColumns tier="three-column" columns={bare} footer={<p data-testid="meta-footer">meta</p>} />,
+    );
     expect(column(container, 'details')).not.toBeNull();
     expect(column(container, 'timeline')).toBeNull();
     expect(column(container, 'related')).toBeNull();
+    expect(within(column(container, 'details')!).getByTestId('meta-footer')).toBeTruthy();
   });
 });
 

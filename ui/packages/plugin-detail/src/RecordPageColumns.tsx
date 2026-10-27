@@ -12,6 +12,7 @@ import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import type { DefaultPageColumns } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
+import { RelatedListCompactContext } from './relatedListCompact';
 
 export interface RecordPageColumnsProps {
   /** The column tier to draw; the tabbed tier is the page itself, drawn by its host. */
@@ -20,7 +21,8 @@ export interface RecordPageColumnsProps {
   columns: DefaultPageColumns;
   /**
    * The record's provenance footer, which the host draws once per page: under
-   * the related column in the three-column tier, under the columns in the
+   * the related column in the three-column tier (under the details column
+   * when the page has no related column), under the columns in the
    * two-column tier (where the related column is a rail that may be closed).
    */
   footer?: React.ReactNode;
@@ -49,6 +51,20 @@ function drawNodes(nodes: any[]): React.ReactNode {
   ));
 }
 
+/** The related column's nodes: its lists draw as compact cards. */
+function drawRelatedNodes(nodes: any[]): React.ReactNode {
+  return <RelatedListCompactContext.Provider value>{drawNodes(nodes)}</RelatedListCompactContext.Provider>;
+}
+
+/**
+ * A column stacks its blocks 16 px apart. A related list folded into its
+ * stack's empty line stays MOUNTED with its content `hidden`
+ * (`RelatedListStackSlot`), which leaves a zero-height root that a flex gap
+ * would still space out — eight folded lists, eight empty gaps. A child whose
+ * only child is hidden draws nothing, so it is taken out of the flow.
+ */
+const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)]:hidden';
+
 /**
  * The synthesized default record page in its column tiers (objectstack#26678):
  * one record header, then details | timeline | related as resident columns.
@@ -76,30 +92,33 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({ tier, colu
   const hasRelated = columns.related.length > 0;
   const relatedLabel = t('detail.related');
 
+  // The provenance footer closes the related column; a page with no related
+  // column (three-column tier) closes its details column with it instead.
+  const footerUnderDetails = tier === 'three-column' && !hasRelated;
   const detailsColumn = (
-    <div className="flex min-w-0 flex-col gap-4" data-record-column="details">
+    <div className={COLUMN_STACK} data-record-column="details">
       {drawNodes(columns.details)}
+      {footerUnderDetails && footer}
     </div>
   );
   const timelineColumn = hasTimeline ? (
-    <div className="flex min-w-0 flex-col gap-4" data-record-column="timeline">
+    <div className={COLUMN_STACK} data-record-column="timeline">
       {drawNodes(columns.timeline)}
     </div>
   ) : null;
 
   let body: React.ReactNode;
   if (tier === 'three-column') {
-    const showRelated = hasRelated || footer != null;
     const template = hasTimeline
-      ? showRelated ? THREE_COLUMN_TEMPLATE.all : THREE_COLUMN_TEMPLATE.noRelated
-      : showRelated ? THREE_COLUMN_TEMPLATE.noTimeline : THREE_COLUMN_TEMPLATE.detailsOnly;
+      ? hasRelated ? THREE_COLUMN_TEMPLATE.all : THREE_COLUMN_TEMPLATE.noRelated
+      : hasRelated ? THREE_COLUMN_TEMPLATE.noTimeline : THREE_COLUMN_TEMPLATE.detailsOnly;
     body = (
       <div className={cn('grid items-start gap-6', template)} data-record-columns="">
         {detailsColumn}
         {timelineColumn}
-        {showRelated && (
-          <aside className="flex min-w-0 flex-col gap-4" data-record-column="related" aria-label={relatedLabel}>
-            {drawNodes(columns.related)}
+        {hasRelated && (
+          <aside className={COLUMN_STACK} data-record-column="related" aria-label={relatedLabel}>
+            {drawRelatedNodes(columns.related)}
             {footer}
           </aside>
         )}
@@ -151,7 +170,10 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({ tier, colu
             <aside
               id={railId}
               aria-label={relatedLabel}
-              className="absolute right-0 top-0 z-20 flex min-h-full w-80 max-w-full flex-col gap-4 border-l border-border bg-background pb-4 pl-4 shadow-[-12px_0_24px_-20px_rgba(0,0,0,0.35)]"
+              className={cn(
+                COLUMN_STACK,
+                'absolute right-0 top-0 z-20 min-h-full w-80 max-w-full border-l border-border bg-background pb-4 pl-4 shadow-[-12px_0_24px_-20px_rgba(0,0,0,0.35)]',
+              )}
               data-record-column="related"
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
@@ -160,7 +182,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({ tier, colu
                 }
               }}
             >
-              {drawNodes(columns.related)}
+              {drawRelatedNodes(columns.related)}
             </aside>
           )}
         </div>
