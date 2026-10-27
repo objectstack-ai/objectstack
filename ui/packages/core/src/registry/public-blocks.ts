@@ -152,7 +152,7 @@ export const PUBLIC_BLOCKS: readonly string[] = [
   // `inputs`: `components/src/renderers/layout/page.tsx` builds the JSX-page
   // compiler's manifest from `getKnownTypes()`, registry-wide. What this list
   // gates is `getPublicConfigs()` — the curated AI-authoring vocabulary, and
-  // through `sdui-parser/scripts/gen-manifest.ts` the published
+  // through `apps/console/scripts/gen-manifest.ts` the published
   // `sdui.manifest.json` and `sdui-intrinsics.d.ts`. THAT is the surface `box`
   // was missing from, which is a narrower and truer statement of the gap than
   // "the contract does not know it".

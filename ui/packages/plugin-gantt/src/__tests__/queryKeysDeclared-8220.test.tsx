@@ -61,7 +61,7 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 

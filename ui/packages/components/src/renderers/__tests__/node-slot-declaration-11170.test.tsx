@@ -49,8 +49,8 @@ import { describe, expect, it } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { AdapterCtx, SchemaRenderer } from '@object-ui/react';
-import { inputTypeArms, manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { SchemaElement } from '@object-ui/sdui-parser';
+import { inputTypeArms, manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { SchemaElement } from '@objectstack/sdui-parser';
 import {
   NODE_SLOT_DECLARATIONS,
   nodeSlotPathSegments,

@@ -87,8 +87,8 @@ import { join } from 'node:path';
 import { render, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, AdapterCtx } from '@object-ui/react';
-import { CHILD_LIST_KEY, manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { CHILD_LIST_KEY, manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // §测试纪律 — an unbounded module load must not be billed to a bounded window).

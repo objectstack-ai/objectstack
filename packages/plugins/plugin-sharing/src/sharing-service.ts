@@ -335,6 +335,9 @@ function hasOwnerField(schema: any): boolean {
  * precisely what `filter(Boolean)` used to drop — so the non-null path is
  * unchanged and only the nullish rows are newly excluded.
  */
+/** [#26180] No pending approval grants a read: the fail-closed answer. */
+const NO_APPROVAL_GRANTS: ReadonlyMap<string, readonly string[]> = new Map();
+
 function grantedRecordIds(grants: unknown): string[] {
   if (!Array.isArray(grants)) return [];
   return grants
@@ -460,6 +463,21 @@ export interface SharingTenancyProbe {
   readonly isolationActive?: boolean;
 }
 
+/**
+ * [#26180 · ruling 6429330267, letter A] The one member of the `approvals`
+ * service the read filter asks: the records of an object the caller may READ
+ * because a pending approval step waits on them (record id → the pending
+ * request ids that grant it). Structural, as {@link SharingSecurityProbe} is:
+ * this plugin does not depend on `@objectstack/plugin-approvals`, it declares
+ * the slice it reads, and a stack without approvals grants nothing.
+ */
+export interface SharingApprovalReadProbe {
+  pendingApproverReadGrants?(
+    object: string,
+    context: ExecutionContext,
+  ): Promise<ReadonlyMap<string, readonly string[]>>;
+}
+
 export interface SharingServiceOptions {
   engine: SharingEngine;
   /** Object names that bypass sharing — typically platform internals. */
@@ -491,6 +509,13 @@ export interface SharingServiceOptions {
    * refuses: an unresolvable posture must not be read as "no wall, carry on".
    */
   tenancy?: () => SharingTenancyProbe | null | undefined;
+  /**
+   * [#26180] Late-bound lookup for the `approvals` service, asked by
+   * {@link SharingService.buildReadFilter} for the records a pending approver
+   * may read. Absent / throwing / returning null → no approval grant: the
+   * filter is the owner-match and the record shares, as without approvals.
+   */
+  approvals?: () => SharingApprovalReadProbe | null | undefined;
   /** [#5103] Optional logger for the record-delete cascade / orphan sweep. */
   logger?: {
     info?: (msg: any, ...rest: any[]) => void;
@@ -540,6 +565,7 @@ export class SharingService implements ISharingService {
   private readonly hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
   private readonly securityService?: () => SharingSecurityProbe | null | undefined;
   private readonly tenancy?: () => SharingTenancyProbe | null | undefined;
+  private readonly approvals?: () => SharingApprovalReadProbe | null | undefined;
   private readonly logger?: SharingServiceOptions['logger'];
 
   /**
@@ -567,6 +593,7 @@ export class SharingService implements ISharingService {
     this.hierarchyResolver = options.hierarchyResolver;
     this.securityService = options.securityService;
     this.tenancy = options.tenancy;
+    this.approvals = options.approvals;
     this.logger = options.logger;
     this.bypassObjects = new Set([
       'sys_record_share',
@@ -658,7 +685,13 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
 
-    const grantedIds: string[] = grantedRecordIds(grants);
+    // [#26180] …and the records a pending approval step waits on the caller
+    // for: READ only (no write gate reads this), only while the step is
+    // pending, never across organizations — the approvals service's rules.
+    const approvalIds = [...(await this.pendingApproverReadGrants(object, context)).keys()];
+    const grantedIds: string[] = approvalIds.length === 0
+      ? grantedRecordIds(grants)
+      : [...new Set([...grantedRecordIds(grants), ...approvalIds])];
 
     if (grantedIds.length === 0) {
       return ownerMatch;
@@ -670,6 +703,48 @@ export class SharingService implements ISharingService {
         { id: { $in: grantedIds } },
       ],
     };
+  }
+
+  /**
+   * [#26180] The pending approval requests that grant the caller READ of
+   * `recordId` — what `explain` names ("via approval request N") beside the
+   * record's shares. The same answer {@link buildReadFilter} ORs in, so the two
+   * cannot disagree; empty where the filter would grant nothing.
+   */
+  async listApprovalReadGrants(object: string, recordId: string, context: ExecutionContext): Promise<string[]> {
+    return [...((await this.pendingApproverReadGrants(object, context)).get(String(recordId)) ?? [])];
+  }
+
+  /**
+   * [#26180] The `approvals` service's answer for this read, failing CLOSED:
+   * no service, no member, a delegated (on-behalf-of) principal, or a read that
+   * throws all grant nothing, and the read goes on with the owner-match and the
+   * record shares alone. The grant is the person's own, as they act themselves:
+   * an agent acting on their behalf is not on the slate, and its read is never
+   * widened by the delegator's grants (ADR-0090 D10).
+   */
+  private async pendingApproverReadGrants(
+    object: string,
+    context: ExecutionContext,
+  ): Promise<ReadonlyMap<string, readonly string[]>> {
+    if (!context?.userId || context.onBehalfOf?.userId) return NO_APPROVAL_GRANTS;
+    let probe: SharingApprovalReadProbe | null | undefined;
+    try {
+      probe = this.approvals?.();
+    } catch {
+      return NO_APPROVAL_GRANTS;
+    }
+    if (!probe || typeof probe.pendingApproverReadGrants !== 'function') return NO_APPROVAL_GRANTS;
+    try {
+      return (await probe.pendingApproverReadGrants(object, context)) ?? NO_APPROVAL_GRANTS;
+    } catch (e) {
+      this.logger?.warn?.(
+        `[sharing] the pending approver's read of '${object}' could not be resolved — granting none `
+          + `(fail-closed): an approver on a pending step reads only what their own grants reach until it resolves`,
+        { object, userId: context.userId, error: e instanceof Error ? e.message : String(e) },
+      );
+      return NO_APPROVAL_GRANTS;
+    }
   }
 
   /**

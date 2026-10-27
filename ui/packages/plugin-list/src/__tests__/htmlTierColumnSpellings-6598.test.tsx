@@ -33,7 +33,7 @@
  *
  * Sibling files pin the mechanisms one at a time:
  * `literal-subset-6614.test.ts` and `inert-expression-6598.test.ts` in
- * `@object-ui/sdui-parser` own the grammar and its diagnostic;
+ * `@objectstack/sdui-parser` own the grammar and its diagnostic;
  * `ListView.unauthoredColumnProjection-6598.test.tsx` owns the handoff against
  * a stub grid; `htmlTierListViewDefaultColumns-6598.test.tsx` takes the
  * unauthored case end to end.
@@ -197,21 +197,6 @@ describe("#6598 — all eight reported `columns` spellings on a kind:'html' page
       expectDefaults(await renderSpelling(`<list-view data={{provider:'object',object:'${OBJECT}'}} />`));
     });
 
-    it('form 2 — a JSON STRING where an array is declared', async () => {
-      // ⛔ Not honoured as a projection, and that is contract-first (AGENTS.md
-      // #0.1), not a gap: `columns` is declared `array`, so a string draws a
-      // warning-severity `type-mismatch` from the manifest validator and is
-      // refused. Parsing it anyway would be exactly the consumer-side tolerance
-      // alias the rule forbids. What matters to THIS card is that refusing it
-      // no longer costs the page its columns.
-      const r = await renderSpelling(`<list-view data={{provider:'object',object:'${OBJECT}'}} columns='["name","amount"]' />`);
-
-      expectDefaults(r);
-      // The string was not silently adopted as a two-column projection: the
-      // undeclared third field is on screen, so these are the defaults.
-      expect(r.headers).toContain('Stage');
-    });
-
     it('form 4 — a `viewName` reference to a saved view', async () => {
       // `viewName` is not declared by the live `list-view` registration and is
       // not a base prop, so it draws `unknown-prop`. It was never the spelling
@@ -230,6 +215,24 @@ describe("#6598 — all eight reported `columns` spellings on a kind:'html' page
   });
 
   describe('the spellings that fail LOUDLY, which is the opposite of the report', () => {
+    it('form 2 — a JSON STRING where an array is declared', async () => {
+      // ⛔ Not honoured as a projection, and that is contract-first (AGENTS.md
+      // #0.1), not a gap: `columns` is declared `array`, so a string draws a
+      // `type-mismatch` from the manifest validator. Parsing it anyway would be
+      // exactly the consumer-side tolerance alias the rule forbids. Since the
+      // one parser (#25712 item 3) every `type-mismatch` is an `error`, so the
+      // page refuses to compile and says why, where the retired ui copy warned
+      // and rendered the block's defaults. Either way the page is not the
+      // reported state, which is the only thing this card is about.
+      const r = await renderSpelling(`<list-view data={{provider:'object',object:'${OBJECT}'}} columns='["name","amount"]' />`);
+
+      expectNotTheReportedSymptom(r);
+      expect(r.compileFailed).toBe(true);
+      // The author is told which prop, on the page.
+      expect(r.text).toContain('columns');
+      expect(r.headers).toEqual([]);
+    });
+
     it('form 6 — child <column> elements', async () => {
       const r = await renderSpelling(
         `<list-view data={{provider:'object',object:'${OBJECT}'}}><column field="name" /><column field="amount" /></list-view>`,

@@ -60,7 +60,7 @@
     "@object-ui/permissions": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@object-ui/react": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
