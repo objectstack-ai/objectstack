@@ -1294,9 +1294,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // this id: the surface renders "package not found" instead of a builder
   // whose every save the server refuses. Only a positive answer sets it — a
   // read still in flight or one that failed leaves the builder as it was, the
-  // same fail direction as the writability gate above. Read from the ids the
-  // list serves (`fetchListedPackageIds`, the same request), not from the
-  // switcher's entries, which hide the kernel packages that ARE installed.
+  // same fail direction as the writability gate above. A switcher entry is
+  // installed; an id with none is then looked up in every id the list serves
+  // (`fetchListedPackageIds`, the same request), because the switcher's
+  // entries hide the kernel packages that ARE installed.
   const [pkgMissing, setPkgMissing] = React.useState(false);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
@@ -1305,19 +1306,23 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     let cancelled = false;
     setPkgWritable(undefined);
     setPkgMissing(false);
-    fetchListedPackageIds().then(
-      (ids) => {
-        if (!cancelled) setPkgMissing(!ids.has(packageId));
-      },
-      // The failure is reported once, by the entries read below (one request).
-      () => {},
-    );
+    // Asked beside the entries read, so both share its one request. A failure
+    // is reported once, by the entries read below.
+    const listedIds = fetchListedPackageIds();
+    listedIds.catch(() => {});
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
         setPkgWritable(entry?.writable ?? null);
         setPkgEntry(entry);
+        if (entry) return;
+        listedIds.then(
+          (ids) => {
+            if (!cancelled) setPkgMissing(!ids.has(packageId));
+          },
+          () => {},
+        );
       })
       .catch((e: unknown) => {
         // Staying ungated is still right — the server gate is the authority
