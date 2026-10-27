@@ -65,17 +65,20 @@
  *      resolving, and the census's symbol set for that file stops matching the
  *      page's.
  *   ⚠️ Delete ONE of several reads inside a symbol that keeps at least one, and
- *      the symbol set does not move, so this gate may NOT red.
+ *      the symbol set does not move, so the ANCHOR checks (A-D) may NOT red.
  *
  * That second line is the precision the line numbers had and these anchors do
  * not. It is the reason the page carries the same warning where a reader meets
  * the anchors: a gap stated on the instrument and not on the artifact is a gap
- * only the instrument's author knows about. ⛔ It is NOT closed by adding a
+ * only the instrument's author knows about. ⛔ It is NOT closed by a HAND-WRITTEN
  * count of reads per file -- a count of reads cannot be satisfied by a page whose
  * anchors are symbols, which is precisely why the population rule is per file and
- * per symbol.
+ * per symbol. Since #26442 the GENERATED site register counts reads per symbol,
+ * so that edit drifts the register and F reds until it is regenerated: a tripwire
+ * in the diff, cleared by `--write` without any row edit (section F says what that
+ * does and does not prove).
  *
- * ## The four checks
+ * ## The checks
  *
  *   A  RESOLUTION   delegated WHOLE to `sweepCorpus` over the `CORPUS`
  *                   registration below: every anchor names a tracked file, every
@@ -94,6 +97,14 @@
  *   D  CLASSIFICATION  a symbol anchor the census does not call an elevation read
  *                   must be a declared `NON_READ_ANCHORS` row, and that row's
  *                   symbol must still be declared by its file.
+ *   E  ROW REFERENCES  every `row N` in the prose and the ledger is held to the
+ *                   row its seam names (`PAGE_ROW_REFERENCES`).
+ *   F  SITE REGISTER   (#26442) every census read is owned by a row that names its
+ *                   symbol, every row key names a read, and the generated register
+ *                   is byte-equal to what `--write` produces from the tree. ⭐ Since
+ *                   the rows name symbols and the register writes the anchors, F is
+ *                   where POPULATION's editorial half now lives: B holds the
+ *                   register's anchors, F holds who owns them.
  *
  * ## ⭐ The page states no totals (#22927), and the text decomposition is dated
  *
@@ -163,20 +174,27 @@
  * undeclared overlap reads as a row that excuses an anchor when it does not, and a
  * declared overlap that has ended is a row nobody re-examined.
  *
- * ## ⛔ `--fix` is retired, and refuses rather than vanishing
+ * ## ⛔ `--fix` is retired, and refuses rather than vanishing; `--write` is the one writer
  *
  * It had two lives. It re-anchored a pure line shift until symbol anchors gave
  * that repair no subject (#15921), then rewrote the declared counts (#16919) until
- * the counts left the page (#22927). Nothing on the page is generated any more,
- * so `gen:system-context-census` and the page's `merge=os-regen` route went too.
- * ⛔ The flag is NOT silently accepted -- a `--fix` that writes nothing and exits 0
- * reads exactly like a repair that worked, and a branch cut before #22927 still
- * carries a merge-driver row that names the generator. It refuses with exit 2 and
- * says why.
+ * the counts left the page (#22927), and `gen:system-context-census` and the
+ * page's `merge=os-regen` route went with them. ⛔ The flag is NOT silently
+ * accepted -- a `--fix` that writes nothing and exits 0 reads exactly like a repair
+ * that worked, and a branch cut before #22927 still carries a merge-driver row that
+ * names the generator. It refuses with exit 2 and names `--write`.
  *
- * ⇒ Every red here is a HUMAN edit: a symbol was renamed (update the anchor),
- * a read arrived or vanished (write or delete the row), or a citation moved out of
- * the symbol that held it.
+ * `--write` (#26442) rebuilds the page's one generated half, the site register
+ * (section F), and touches no byte outside its marker pair. The page is still not
+ * `merge=os-regen` routed: like `tenant-audit-census.mdx`, it text-merges, the
+ * register's one-line-per-symbol shape keeps two read-adding branches apart, and a
+ * merge that leaves the region wrong is F's drift refusal in the merge queue.
+ *
+ * ⇒ A `[register-drift]` alone is `--write`. Every other red here is a HUMAN
+ * edit: a read arrived in a symbol no row names (add the name to the row that
+ * describes it, or a row), a row's key names nothing (re-key or drop the row), a
+ * name two files share (pin it), or a citation in the prose moved out of the
+ * symbol that held it.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -263,20 +281,23 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dated decomposition: present and dated, never compared': 3,
   '⛔ and the half that must NOT have moved: the contract still reds': 2,
   'absence is loud': 1,
-  '⛔ --fix is retired: the gate writes nothing, and the flag refuses': 4,
+  '⛔ --fix is retired, and only --write writes: the register, nothing else': 5,
   '⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT': 5,
-  '⭐ the precision this trades away, pinned so nobody rediscovers it as a bug': 2,
+  '⭐ the precision the anchors trade away, and the register count that now catches it': 3,
   'the refusal has to SHOW its work (both counts, the symbol, the file)': 2,
   '⭐ CORPUS REGISTRATION: one resolver, not a second implementation': 3,
   'WIRING: this gate, and its self-test, really run in CI': 2,
   'POPULATION DECLARATION: what the dispatch derivation is told this gate reads': 6,
   '⭐ ROW REFERENCES: held by seam, and the insertion that was silent (#15869)': 23,
+  '⭐ THE SITE REGISTER: generated, drift-checked, and every read owned by a row (#26442)': 12,
+  '⭐ THE REAL PAGE: the register is current, and an unregenerated read change reds it': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. (18 -> 16 when #22927
-// retired the counts: 'counts' and the CRITERION battery tested only them.)
-const SELF_TEST_BATTERY_FLOOR = 16;
+// retired the counts: 'counts' and the CRITERION battery tested only them;
+// 16 -> 18 when #26442 generated the site register.)
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1763,7 +1784,7 @@ function run() {
       `cites ${stats.citedSymbols} symbol(s) against ${stats.requiredSymbols} required, over ` +
       `${stats.anchors} anchors and ${stats.fileLevelAnchors} file-level citation(s); ` +
       `${stats.nonReadAnchors} declared non-read; ${stats.collapsingFiles} file(s) hold more than one ` +
-      `read in one symbol (the declared precision loss); ${stats.rowRefsHeld} row reference(s) resolve ` +
+      `read in one symbol (counted per symbol in the register); ${stats.rowRefsHeld} row reference(s) resolve ` +
       `to their keyed row, ${stats.rowRefsUnheld} declared unheld; ${register.stats.keys} key(s) in ` +
       `${register.stats.rows} row(s) own every read, and the generated register (${register.stats.registered} ` +
       'symbol(s)) matches the tree.\n'
@@ -2016,6 +2037,48 @@ function fixtureUnenforcedTable({ linesTotal = 6, dropTestsRow = false, dated = 
   ].join('\n');
 }
 
+/**
+ * ── The SITE REGISTER fixture (#26442) ──────────────────────────────────────
+ *
+ * Two rows keyed by NAME, two census sites in two files, and a register generated
+ * by the same three calls `--write` makes. Every case below changes ONE input --
+ * the census or one key -- so the difference it reports is that change's alone.
+ */
+const REGISTER_FIXTURE_CENSUS = {
+  ...FIXTURE_CENSUS,
+  sites: [
+    { file: 'pkg/a.ts', line: 2, receiver: 'ctx', package: 'pkg', symbol: 'handler', text: 'if (ctx.isSystem) return ALLOW;' },
+    { file: 'pkg/b.ts', line: 4, receiver: 'ctx', package: 'pkg', symbol: 'carry', text: 'isSystem: ctx.isSystem,' },
+  ],
+  files: ['pkg/a.ts', 'pkg/b.ts'],
+};
+
+/** The fixture's prose: a `Symbol`-keyed table and an EMPTY marker pair. */
+function registerFixtureProse({ keys = ['`handler`', '`carry`'], header = KEY_COLUMN, markers = true } = {}) {
+  return [
+    '---',
+    'title: register fixture',
+    '---',
+    '',
+    `| # | Behaviour | ${header} |`,
+    '|:--|:---|:---|',
+    `| 1 | **The short-circuit** runs first | ${keys[0]} |`,
+    `| 1b | carries the flag onward | ${keys[1]} |`,
+    '',
+    '## Site register',
+    '',
+    ...(markers ? [REGISTER_BEGIN, REGISTER_END] : []),
+    '',
+  ].join('\n');
+}
+
+/** Generate the fixture's register exactly as `--write` does: split, key, resolve, render, splice. */
+function generateRegister(pageText, census) {
+  const split = splitRegister(pageText);
+  const resolved = resolveRowKeys(extractRowKeys(split.prose), census);
+  return { page: spliceRegister(pageText, renderRegister(resolved)), problems: resolved.problems };
+}
+
 // Set by `selfTest()` only after its verdict is printed, and read at the
 // dispatch: a `return` that leaves the function above that line prints nothing
 // and still exits 0 — a self-test that never finished, reported as one that
@@ -2263,14 +2326,15 @@ function selfTest() {
   const noAnchors = run('---\ntitle: x\n---\n\nnothing here.\n');
   t('ABSENCE: a page with no anchors refuses', noAnchors.problems.some((p) => p.startsWith('[no-anchors]')));
 
-  // ── ⛔ --fix is retired: the gate writes nothing, and the flag refuses ─────
+  // ── ⛔ --fix is retired, and only --write writes: the register, nothing else ──
   //
-  // ⭐ Two failures this pins, in opposite directions. A `--fix` that quietly ran
-  // the check would read as a regeneration that worked, so the flag must REFUSE --
-  // run as a child, because the refusal is the dispatch's. And a gate that writes
-  // the page again -- the retired line-shift repair, or a count regenerator -- is a
-  // generated half coming back to a page #22927 made pure prose.
-  battery('⛔ --fix is retired: the gate writes nothing, and the flag refuses');
+  // ⭐ Three failures this pins. A `--fix` that quietly ran the check would read as
+  // a regeneration that worked, so the flag must REFUSE -- run as a child, because
+  // the refusal is the dispatch's. A gate that rewrites the page's PROSE again --
+  // the retired line-shift repair, or a count regenerator -- is a generated half
+  // coming back where #22927 ruled it out. And the one write that is allowed,
+  // `--write` (#26442), must touch the register and not one byte around it.
+  battery('⛔ --fix is retired, and only --write writes: the register, nothing else');
   let ownSourceForFix = null;
   try {
     ownSourceForFix = readFileSync(join(ROOT, 'scripts/check-system-context-census.mjs'), 'utf8');
@@ -2283,10 +2347,28 @@ function selfTest() {
       !/\bfixAnchors\b/.test(ownSourceForFix),
       'the retired line-shift repair is back in this file'
     );
+    const pageWrites = ownSourceForFix.match(/writeFileSync\(\s*join\(ROOT, PAGE\)/g) ?? [];
+    const writeBody = /\nfunction write\(\) \{[\s\S]*?\n\}\n/.exec(ownSourceForFix)?.[0] ?? '';
     t(
-      '--fix: nothing here writes the page, and no count regenerator survives -- the page is pure prose',
-      !/writeFileSync\(\s*join\(ROOT, PAGE\)/.test(ownSourceForFix) &&
-        !/^export (?:const|function) (?:DECLARED_COUNTS|regenerateDeclaredCounts)\b/m.test(ownSourceForFix)
+      '--write: the page is written in exactly ONE place, inside `write()`, and from a splice -- no ' +
+        'count regenerator survives',
+      pageWrites.length === 1 &&
+        /writeFileSync\(\s*join\(ROOT, PAGE\), next\)/.test(writeBody) &&
+        /const next = spliceRegister\(pageText, renderRegister\(resolved\)\);/.test(writeBody) &&
+        !/^export (?:const|function) (?:DECLARED_COUNTS|regenerateDeclaredCounts)\b/m.test(ownSourceForFix),
+      `${pageWrites.length} page write(s); write() found: ${writeBody.length > 0}`
+    );
+  }
+  {
+    const prose = ['intro', '', REGISTER_BEGIN, '| `old` |', REGISTER_END, '', 'outro `pkg/a.ts#handler`', ''].join('\n');
+    const spliced = spliceRegister(prose, [REGISTER_BEGIN, '| `new` |', REGISTER_END].join('\n'));
+    const before = splitRegister(prose);
+    const after = splitRegister(spliced);
+    t(
+      '--write: a splice replaces the register and leaves EVERY byte outside the marker pair identical',
+      !('error' in after) && after.prose === before.prose && after.region.includes('`new`') &&
+        !spliced.includes('`old`'),
+      JSON.stringify(spliced)
     );
   }
   let fixRun = null;
@@ -2305,9 +2387,11 @@ function selfTest() {
     `status ${fixRun?.status}`
   );
   t(
-    '--fix REFUSES: and says why, naming where the live count lives now',
-    /RETIRED/.test(fixRun?.stderr ?? '') && /node scripts\/isystem-census\.mjs/.test(fixRun?.stderr ?? ''),
-    (fixRun?.stderr ?? '').replace(/\s+/g, ' ').slice(0, 160)
+    '--fix REFUSES: and says why, naming `--write` and where the live count lives now',
+    /RETIRED/.test(fixRun?.stderr ?? '') &&
+      /check-system-context-census\.mjs --write/.test(fixRun?.stderr ?? '') &&
+      /node scripts\/isystem-census\.mjs/.test(fixRun?.stderr ?? ''),
+    (fixRun?.stderr ?? '').replace(/\s+/g, ' ').slice(0, 200)
   );
 
   // ── ⭐ THE RULED RED-FIRST PAIR, on a real tree ─────────────────────────────
@@ -2407,7 +2491,7 @@ function selfTest() {
   // something else. Two reads inside ONE symbol, one of them added or deleted: the
   // symbol set does not move, and this gate does not red. (Until #22927 the page's
   // site total moved on that edit -- see the header for what that tripwire was.)
-  battery('⭐ the precision this trades away, pinned so nobody rediscovers it as a bug');
+  battery('⭐ the precision the anchors trade away, and the register count that now catches it');
   const twoInOne = {
     ...FIXTURE_CENSUS,
     sites: [
@@ -2418,11 +2502,33 @@ function selfTest() {
   const bothPresent = run(fixturePage(), twoInOne);
   const oneDeleted = run(fixturePage(), FIXTURE_CENSUS);
   t(
-    '⛔ THE DECLARED GAP: adding or deleting one of two reads inside one symbol does NOT red -- ' +
-      'stated here rather than discovered later',
+    '⛔ THE DECLARED GAP, in the ANCHOR verdict: adding or deleting one of two reads inside one symbol ' +
+      'does NOT red `evaluate` -- stated here rather than discovered later',
     bothPresent.problems.length === 0 && oneDeleted.problems.length === 0,
     `${bothPresent.problems.join(' | ')} // ${oneDeleted.problems.join(' | ')}`
   );
+  {
+    /* ⭐ #26442: the register counts reads PER SYMBOL, so the same edit moves a
+     * generated line and the WHOLE gate reds until it is regenerated. A tripwire
+     * in the diff, not a row requirement -- the header says so. */
+    const oneRead = generateRegister(registerFixtureProse(), REGISTER_FIXTURE_CENSUS).page;
+    const secondRead = {
+      ...REGISTER_FIXTURE_CENSUS,
+      sites: [
+        ...REGISTER_FIXTURE_CENSUS.sites,
+        { file: 'pkg/a.ts', line: 3, receiver: 'opts', package: 'pkg', symbol: 'handler', text: 'opts.isSystem' },
+      ],
+    };
+    const counted = evaluateRegister({ pageText: oneRead, census: secondRead });
+    t(
+      '⭐ and the REGISTER closes it: the second read inside `handler` moves its count, so the committed ' +
+        'register drifts -- red, with no row-key finding, until `--write` regenerates it',
+      counted.problems.length === 1 &&
+        counted.problems[0].startsWith('[register-drift]') &&
+        counted.problems[0].includes('| `pkg/a.ts#handler` | 2 | 1 |'),
+      counted.problems.join(' | ')
+    );
+  }
   t(
     '⭐ and the half that DOES hold: deleting the whole symbol reds, so the gap is bounded',
     run(fixturePage(), { ...FIXTURE_CENSUS, sites: [{ file: 'pkg/a.ts', line: 8, receiver: 'ctx', package: 'pkg', symbol: 'unrelated', text: 'x' }] })
@@ -2684,6 +2790,209 @@ function selfTest() {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  // ── ⭐ THE SITE REGISTER: generated, drift-checked, every read owned by a row ──
+  //
+  // #26442. The page's census half is generated, so the two things this battery
+  // must show are the two the card was ruled on: a symbol MOVE needs no hand edit
+  // (the key is a name; regenerating moves the path), and the drift check still
+  // reds every read added, deleted or moved without regenerating. Plus the refusals
+  // that keep the CENSUS -> PAGE direction a human's: a read no row names, a key
+  // that names nothing, a name two files share.
+  battery('⭐ THE SITE REGISTER: generated, drift-checked, and every read owned by a row (#26442)');
+  const regGreen = generateRegister(registerFixtureProse(), REGISTER_FIXTURE_CENSUS);
+  const regCheck = (page, census = REGISTER_FIXTURE_CENSUS) => evaluateRegister({ pageText: page, census });
+  const regCodes = (result) => result.problems.map((p) => p.slice(0, p.indexOf(']') + 1));
+  t(
+    'REGISTER control: a page whose register was generated from this census reports nothing, and the ' +
+      'register really lists both sites with their owning rows',
+    regGreen.problems.length === 0 &&
+      regCheck(regGreen.page).problems.length === 0 &&
+      regGreen.page.includes('| `pkg/a.ts#handler` | 1 | 1 |') &&
+      regGreen.page.includes('| `pkg/b.ts#carry` | 1 | 1b |'),
+    regCheck(regGreen.page).problems.join(' | ')
+  );
+
+  // ⭐ the MOVE: `carry` leaves pkg/b.ts for pkg/c.ts, name unchanged.
+  const movedCensus = {
+    ...REGISTER_FIXTURE_CENSUS,
+    sites: REGISTER_FIXTURE_CENSUS.sites.map((site) => (site.symbol === 'carry' ? { ...site, file: 'pkg/c.ts' } : site)),
+  };
+  const staleAfterMove = regCheck(regGreen.page, movedCensus);
+  t(
+    '⭐ MOVE, not regenerated: the committed register DRIFTS and the refusal names the new path -- ' +
+      'and the move raises no row-key finding, because no row has to change',
+    regCodes(staleAfterMove).join(',') === '[register-drift]' &&
+      staleAfterMove.problems[0].includes('pkg/c.ts#carry'),
+    staleAfterMove.problems.join(' | ')
+  );
+  const regenerated = generateRegister(regGreen.page, movedCensus);
+  t(
+    '⭐ MOVE, regenerated: `--write` clears it with ZERO hand edits -- every byte outside the register is ' +
+      'the page before the move',
+    regenerated.problems.length === 0 &&
+      regCheck(regenerated.page, movedCensus).problems.length === 0 &&
+      splitRegister(regenerated.page).prose === splitRegister(regGreen.page).prose &&
+      regenerated.page.includes('| `pkg/c.ts#carry` | 1 | 1b |') &&
+      !regenerated.page.includes('pkg/b.ts#carry'),
+    regCheck(regenerated.page, movedCensus).problems.join(' | ')
+  );
+
+  // ⭐ the ARRIVAL: a read in a symbol no key names.
+  const arrivedCensus = {
+    ...REGISTER_FIXTURE_CENSUS,
+    sites: [
+      ...REGISTER_FIXTURE_CENSUS.sites,
+      { file: 'pkg/b.ts', line: 9, receiver: 'ctx', package: 'pkg', symbol: 'fresh', text: 'if (ctx.isSystem) skip();' },
+    ],
+  };
+  const unowned = regCheck(regGreen.page, arrivedCensus);
+  t(
+    '⭐ ARRIVAL: a read in a symbol no row names is `[read-without-a-row]`, naming the anchor -- and the ' +
+      'register drifts too',
+    unowned.problems.some((p) => p.startsWith('[read-without-a-row] pkg/b.ts#fresh holds 1')) &&
+      regCodes(unowned).includes('[register-drift]'),
+    unowned.problems.join(' | ')
+  );
+  t(
+    '⭐ ARRIVAL: and `--write` REFUSES over it -- the generator never assigns a read to a row, a human does',
+    generateRegister(regGreen.page, arrivedCensus).problems.some((p) => p.startsWith('[read-without-a-row]'))
+  );
+
+  // the DELETION shape: the row stands, its read is gone.
+  const deletedCensus = { ...REGISTER_FIXTURE_CENSUS, sites: [REGISTER_FIXTURE_CENSUS.sites[0]] };
+  const orphaned = regCheck(regGreen.page, deletedCensus);
+  t(
+    'DELETION: a key whose name no census read carries is `[row-key-no-read]`, and the row that keyed ' +
+      'only it is `[row-without-a-read]`',
+    orphaned.problems.some((p) => p.startsWith('[row-key-no-read] row 1b') && p.includes('`carry`')) &&
+      orphaned.problems.some((p) => p.startsWith('[row-without-a-read] row 1b')),
+    orphaned.problems.join(' | ')
+  );
+
+  // a NAME two files share must be pinned.
+  const collidingCensus = {
+    ...REGISTER_FIXTURE_CENSUS,
+    sites: [
+      ...REGISTER_FIXTURE_CENSUS.sites,
+      { file: 'pkg/d.ts', line: 1, receiver: 'ctx', package: 'pkg', symbol: 'carry', text: 'ctx.isSystem' },
+    ],
+  };
+  const ambiguous = regCheck(regGreen.page, collidingCensus);
+  t(
+    'COLLISION: a bare key two files hold reads under is `[row-key-ambiguous]`, naming both files',
+    ambiguous.problems.some(
+      (p) => p.startsWith('[row-key-ambiguous] row 1b') && p.includes('pkg/b.ts') && p.includes('pkg/d.ts')
+    ),
+    ambiguous.problems.join(' | ')
+  );
+  const pinnedProse = registerFixtureProse({ keys: ['`handler`', '`pkg/b.ts#carry`, `pkg/d.ts#carry`'] });
+  const pinned = generateRegister(pinnedProse, collidingCensus);
+  t(
+    'COLLISION: PINNING the key with its full anchor resolves it -- both sites owned, nothing refused',
+    pinned.problems.length === 0 &&
+      regCheck(pinned.page, collidingCensus).problems.length === 0 &&
+      pinned.page.includes('| `pkg/d.ts#carry` | 1 | 1b |'),
+    [...pinned.problems, ...regCheck(pinned.page, collidingCensus).problems].join(' | ')
+  );
+
+  // absence is loud, here too.
+  t(
+    'ABSENCE: a page with no marker pair is `[no-register]` -- never "nothing to compare"',
+    regCodes(regCheck(registerFixtureProse({ markers: false }))).join(',') === '[no-register]'
+  );
+  t(
+    'ABSENCE: a SECOND marker pair is refused as well -- the gate does not guess which one is the register',
+    regCodes(regCheck(`${regGreen.page}\n${REGISTER_BEGIN}\n${REGISTER_END}\n`)).join(',') === '[no-register]'
+  );
+  t(
+    'ABSENCE: a key column renamed away from `Symbol` leaves ZERO keyed rows, which REFUSES rather than ' +
+      'generating an ownerless register',
+    regCodes(regCheck(generateRegister(registerFixtureProse(), REGISTER_FIXTURE_CENSUS).page.replace(
+      `| # | Behaviour | ${KEY_COLUMN} |`, '| # | Behaviour | Anchor |'
+    ))).join(',') === '[no-row-keys]'
+  );
+  t(
+    'REFUSAL: the drift refusal SHOWS its work -- the committed line, the census line and the fix command',
+    /committed : \| `pkg\/b\.ts#carry` \| 1 \| 1b \|/.test(staleAfterMove.problems[0] ?? '') &&
+      /census {4}: \| `pkg\/c\.ts#carry` \| 1 \| 1b \|/.test(staleAfterMove.problems[0] ?? '') &&
+      (staleAfterMove.problems[0] ?? '').includes('node scripts/check-system-context-census.mjs --write'),
+    staleAfterMove.problems[0]
+  );
+
+  // ── ⭐ THE REAL PAGE: its register is current, and the real tree's reads still red it ──
+  //
+  // The fixture proves the mechanism; this proves the PAGE carries it. The real
+  // census is mutated IN MEMORY -- one read added inside a keyed symbol, one keyed
+  // symbol moved to a new file, one read in a symbol no row names -- and the real
+  // page is never written (its bytes are compared before and after).
+  battery('⭐ THE REAL PAGE: the register is current, and an unregenerated read change reds it');
+  let realRegisterPage = null;
+  let realCensus = null;
+  try {
+    realRegisterPage = readFileSync(join(ROOT, PAGE), 'utf8');
+    realCensus = runCensus({ root: ROOT });
+  } catch (err) {
+    t('REAL: the page and the census are readable', false, err.code ?? err.message);
+  }
+  if (realRegisterPage !== null && realCensus !== null) {
+    const pageHash = createHash('sha256').update(realRegisterPage).digest('hex');
+    const today = evaluateRegister({ pageText: realRegisterPage, census: realCensus });
+    t(
+      "⭐ TODAY'S TREE: every read on the real page is owned by a keyed row and the committed register is " +
+        'exactly what the tree generates',
+      today.problems.length === 0 && today.stats.rows > 0 && today.stats.registered > 0,
+      today.problems.join(' | ').slice(0, 400)
+    );
+    const probe = realCensus.sites.find((site) => site.file === 'packages/objectql/src/engine-driver-options.ts' && site.symbol === 'buildDriverOptions');
+    if (!probe) {
+      t('REAL: the probe symbol `engine-driver-options.ts#buildDriverOptions` still holds a read', false, 're-pick a probe');
+    } else {
+      const added = evaluateRegister({
+        pageText: realRegisterPage,
+        census: { ...realCensus, sites: [...realCensus.sites, { ...probe, line: probe.line + 1 }] },
+      });
+      t(
+        '⭐ REAL, ADDED: one more read inside `buildDriverOptions` (a symbol row 24 keys) reds the real page ' +
+          'with the drift refusal alone -- no row has to change, the count does',
+        regCodes(added).join(',') === '[register-drift]' &&
+          added.problems[0].includes('packages/objectql/src/engine-driver-options.ts#buildDriverOptions'),
+        added.problems.join(' | ').slice(0, 400)
+      );
+      const movedReal = {
+        ...realCensus,
+        sites: realCensus.sites.map((site) =>
+          site.symbol === 'buildDriverOptions' ? { ...site, file: 'packages/objectql/src/engine-moved-for-the-probe.ts' } : site
+        ),
+      };
+      const moved = evaluateRegister({ pageText: realRegisterPage, census: movedReal });
+      const regenReal = generateRegister(realRegisterPage, movedReal);
+      t(
+        '⭐ REAL, MOVED: `buildDriverOptions` moved to another file reds the real page with the drift refusal ' +
+          'alone, and regenerating clears it with every byte outside the register unchanged',
+        regCodes(moved).join(',') === '[register-drift]' &&
+          regenReal.problems.length === 0 &&
+          evaluateRegister({ pageText: regenReal.page, census: movedReal }).problems.length === 0 &&
+          splitRegister(regenReal.page).prose === splitRegister(realRegisterPage).prose,
+        moved.problems.join(' | ').slice(0, 400)
+      );
+      const strayReal = evaluateRegister({
+        pageText: realRegisterPage,
+        census: { ...realCensus, sites: [...realCensus.sites, { ...probe, symbol: 'aSymbolNoRowNames' }] },
+      });
+      t(
+        '⭐ REAL, ARRIVED: a read in a symbol no row names is `[read-without-a-row]` on the real page',
+        strayReal.problems.some((p) =>
+          p.startsWith('[read-without-a-row] packages/objectql/src/engine-driver-options.ts#aSymbolNoRowNames')
+        ),
+        strayReal.problems.join(' | ').slice(0, 400)
+      );
+    }
+    t(
+      '⛔ REAL, SAFETY: the real page was never written -- same bytes before and after',
+      createHash('sha256').update(readFileSync(join(ROOT, PAGE), 'utf8')).digest('hex') === pageHash
+    );
   }
 
   battery('WIRING: this gate, and its self-test, really run in CI');

@@ -26,24 +26,25 @@ context whenever one exists.
 </Callout>
 
 <Callout type="info">
-**Every anchor, and the population behind it, is checked by CI.**
+**Every row, and the population behind it, is checked by CI.**
 `scripts/check-system-context-census.mjs` re-runs the AST census over the whole
-repo on each PR and refuses the page when an anchor names a symbol its file no
-longer declares, or — the check that matters most — when the code holds an
-elevation read that no row here anchors. The page states no totals: run
-`node scripts/isystem-census.mjs` for a live count. The six raw text counts in
-[Maintaining this table](#maintaining-this-table) are a dated snapshot, and say
-there when they were measured.
+repo on each PR and refuses the page when the code holds an elevation read that
+no row here names — the check that matters most — when a row names a symbol
+that holds no read any more, or when the generated
+[site register](#site-register) differs from what the tree produces. The page
+states no totals: run `node scripts/isystem-census.mjs` for a live count. The
+six raw text counts in [Maintaining this table](#maintaining-this-table) are a
+dated snapshot, and say there when they were measured.
 
-⚠️ **What these anchors buy, and what they cost — read this before trusting a
-row.** Every anchor here is a `path#symbol` citation. Nothing encodes a
-position, so an unrelated edit above a site cannot rot one, and a repair is
-never mechanical: there are no numbers to renumber. The price is granularity.
-Several reads inside one function collapse onto one anchor, so **deleting a
-whole symbol reds this page, and adding or deleting one of several reads inside
-a symbol that keeps at least one does not.** The gap is real, it is priced
-below, and it is left open deliberately rather than hidden — see
-[Maintaining this table](#maintaining-this-table).
+⚠️ **What the rows say, and what is generated — read this before trusting a
+row.** A row names the symbols its behaviour lives in, by name, in its
+`Symbol` column; which file holds each one is the site register's to say, and
+the register is rebuilt from the tree. So a refactor that moves a symbol to
+another file changes the register and no row. The row itself is a human's
+claim: several reads inside one function share one name, so adding or deleting
+one of them moves only that symbol's read count in the register — CI reds until
+the register is regenerated, and whether the row still describes the symbol is
+the reviewer's call. See [Maintaining this table](#maintaining-this-table).
 </Callout>
 
 ## Which `isSystem` this page is about
@@ -88,9 +89,11 @@ context is never elevated.
 
 ## The table
 
-Grouped by lane. Every row cites the site that reads the flag. "What you lose"
-is the part that costs app-side bugs — it is the protection or the side effect
-that silently does not happen.
+Grouped by lane. Every row names, in its `Symbol` column, the symbols whose
+reads it describes; the [site register](#site-register) at the foot of the page
+gives each one's file. A name two files share is written as a full
+`path#symbol` anchor instead. "What you lose" is the part that costs app-side
+bugs — it is the protection or the side effect that silently does not happen.
 
 ### 1. Authorization and scoping
 
@@ -340,9 +343,10 @@ or, bumping it to the same number, text-merge clean to a total neither tree
 holds, which is how this page once went silently wrong (#16919). So the totals
 are computed where they are read: the census prints them for the tree you run
 it on, and the check below prints them again on every pass. What CI holds is
-the register itself — every elevation read anchored, every anchor resolving —
-not a sum of it. A site that arrived or vanished is a human's editorial call:
-add or drop its row.
+the list itself — every elevation read owned by a row, every anchor resolving —
+not a sum of it. Where a read lives is generated; which row describes it is a
+human's editorial call: name the read's symbol in a row's `Symbol` cell, or
+drop the row whose reads are gone.
 
 **⛔ Not a `grep`.** A text scan is where a census *starts* and it cannot be where
 one ends: it returns prose inside comments and strings, the three unrelated
@@ -379,7 +383,7 @@ restates none of its figures:
 | Appearances parsed as a property **read** | every read, before the collision is subtracted |
 | Appearances parsed in some other syntactic position | a local, a cast, a conditional |
 | Of those reads: reads of one of the unrelated metadata fields | subtracted — the collision this page opens with |
-| Of those reads: reads of `ExecutionContext.isSystem` | **the census answer**: every one sits in a symbol a row above anchors |
+| Of those reads: reads of `ExecutionContext.isSystem` | **the census answer**: every one sits in a symbol a row above names |
 | — behaviour-bearing (rows 1–62 above) | sections 1 to 5 |
 | — carry the flag onward only (rows 63–65 above) | section 6 |
 
@@ -447,7 +451,11 @@ every path in full from the repository root. Each anchor is
 `packages/…/file.ts#symbol`, resolved by the shared symbol-anchor resolver
 (`scripts/symbol-anchors.mjs`) against that file's own declaration sites — the
 same resolver, and the same registration shape, that holds `docs/adr/**`.
-Renaming a symbol is now a loud red instead of a silent misdirection.
+Renaming a symbol is now a loud red instead of a silent misdirection. The rows
+no longer write those anchors: a row names its symbols, and the
+[site register](#site-register) — generated, so a moved symbol needs no hand
+edit — writes one anchor per symbol. Only a name two files share is pinned in
+its row as a full anchor, and moves like one.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
 cannot say WHICH read inside a function it means, and several of the anchored
@@ -460,35 +468,42 @@ second one is a hole:
 - **Delete a whole symbol and this page reds** — the anchor stops resolving and
   the symbol set stops matching, in the same run.
 - **Add or delete one of several reads inside a symbol that keeps at least one,
-  and the symbol set does not move, so it does not red.** While this page stated
-  totals, the site count moved on that edit — but the repair it prescribed was a
-  generator rewriting the number, never a row. The previous edition's line
-  numbers did close this one: both reads lost in the last drift lived inside
-  `callerContext()` helpers that still exist under the same names. Closing it
-  again means a span-aware resolver and per-read disambiguation in those files;
-  that is its own card, and it is deliberately not folded in here.
+  and the symbol set does not move — but that symbol's read count in the site
+  register does, so CI reds until the register is regenerated.** That is a
+  tripwire in the pull request's diff, not a row requirement: regenerating
+  clears it without touching the row, exactly as the old site total's generator
+  did, so whether the row still describes the symbol is the reviewer's call.
+  The previous edition's line numbers did close this one: both reads lost in the
+  last drift lived inside `callerContext()` helpers that still exist under the
+  same names. Closing it fully means a span-aware resolver and per-read
+  disambiguation in those files; that is its own card, and it is deliberately
+  not folded in here.
 
 Resolving anchors is nevertheless the *second* check, not the first. ⭐ **A gate
 that only checks what the page already says can never find what the page failed
 to say.** Re-resolving every anchor of the edition before last would have passed
 while it was missing 32 sites and its headline was 29 too low. So the
 load-bearing direction runs census → page: every elevation read in the code must
-be anchored here, and a symbol whose last read vanishes from the code leaves an
-anchor that names no read site, which is what makes a row describing a
+be owned by a row here, and a symbol whose last read vanishes from the code
+leaves a row key that names no read, which is what makes a row describing a
 protection that no longer exists fail.
 
-Four checks run, in `scripts/check-system-context-census.mjs`:
+Six checks run, in `scripts/check-system-context-census.mjs`:
 
 | Check | What fails |
 |:---|:---|
-| **Population** | a file holding an elevation read with no anchor here, or a symbol holding one that no anchor here names |
+| **Population** | an elevation read in a symbol no row's `Symbol` cell names — `--write` refuses to generate over it — or a file holding reads the page does not anchor |
+| **Row keys** | a key naming a symbol no census read lives in any more, a bare name two files share (pin it as `path#symbol`), or a row with no key that resolves to a read |
+| **Register** | a [site register](#site-register) that is not what `--write` generates from the tree: a read added, deleted or moved, or a key changed, without regenerating |
 | **Resolution** | an anchor naming no tracked file, or naming a symbol that file does not declare — and any surviving line number, which is no longer an anchor form |
 | **Classification** | an anchor that is not a read site and is not a declared non-read citation |
 | **Dated snapshot** | a raw-text row above reworded off the page, or its measurement date dropped — the numbers themselves are never compared |
 
 A new read of `ExecutionContext.isSystem` belongs in this table in the same PR
-that introduces it — CI will say so when it lands in a symbol no row anchors
-yet; inside a symbol that already has one, only the reviewer will.
+that introduces it — CI will say so when it lands in a symbol no row names
+yet; inside a symbol a row already names, the register's read count moves and
+CI reds until it is regenerated, and only the reviewer can say whether the row
+still describes it.
 
 ## Site register
 
