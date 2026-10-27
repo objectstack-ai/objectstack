@@ -8,13 +8,21 @@
 // answer off the thrown error; the item scores these clauses at the `api`
 // oracle, so this file drives the REST data door:
 //
-//   - acceptance[2] / negative[0] (stock single posture): a showcase
-//     contributor POSTs an invoice line naming another contributor's invoice
-//     (owner RLS `owner == current_user.email` hides it from them) and one
-//     naming an invoice id that exists nowhere. Both answer 400 with the
-//     reference_not_found code, and the two bodies are equal field by field
-//     once the id each names is normalised — no existence oracle. The
-//     invoice's own owner, posting the same line, lands it (the control);
+//   - acceptance[2] / negative[0] (stock single posture), on a plain
+//     master_detail detail: a member holding a scratch task-writer set, whose
+//     row policy selects no `showcase_project`, POSTs a `showcase_task` naming
+//     a seeded project it cannot read and one naming a project id that exists
+//     nowhere. Both answer 400 with the reference_not_found code, and the two
+//     bodies are equal field by field once the id each names is normalised —
+//     no existence oracle. The admin, who reads the project, lands the same
+//     task (the control);
+//   - negative[0] on the controlled_by_parent invoice line: a showcase
+//     contributor names another contributor's invoice (owner RLS
+//     `owner == current_user.email` hides it) and one that exists nowhere.
+//     The ADR-0055 §3 master-edit gate answers before the reference check, so
+//     both get its one 403 PERMISSION_DENIED body, identical once the id is
+//     normalised. The invoice's own owner (C1) lands the same line (the
+//     control);
 //   - acceptance[1] (walled: `multiTenant: 'posture-only'`, a real `isolated`
 //     posture with the Layer 0 wall active): an organization owner who is not
 //     the platform administrator PATCHes their own record with
