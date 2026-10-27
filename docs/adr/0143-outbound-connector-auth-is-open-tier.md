@@ -8,15 +8,13 @@ act. The five amendment notes this record names land in the same PR and take eff
   signing, the three recommendations of the MCP / OpenAPI directory survey: 「三条行动建议 立卡」 →
   「建议 1+2立卡」 → 「3 不考虑」 (recommendation 2 is request signing).
 - **Amends**: the outbound-connector-auth tier placement — and nothing else — in
+  [ADR-0018](./0018-unified-node-action-registry.md) "Out of scope (deliberately not baseline)",
   [ADR-0022](./0022-connectors-vs-messaging-channels.md) §4,
   [ADR-0023](./0023-openapi-to-connector-generator.md) §4,
   [ADR-0024](./0024-mcp-connectors.md) §3–§4 and
   [ADR-0097](./0097-declarative-connector-instances.md) §3 and its "Open / enterprise line"; and the
   attribution of that placement to [ADR-0015](./0015-external-datasource-federation.md), which never drew
-  it (see [Context](#where-the-enterprise-placement-came-from)). Each carries a dated amendment note.
-  [ADR-0018](./0018-unified-node-action-registry.md)'s "Out of scope" paragraph (line 229) places
-  "OAuth2 token refresh" in the enterprise tier too; it is amended by this record in substance, but its
-  note is outside the file surface of the PR that lands this file and is owed separately.
+  it (see [Context](#where-the-enterprise-placement-came-from)). All six carry a dated amendment note.
 - **Builds on**: [ADR-0097](./0097-declarative-connector-instances.md) (`credentialRef`, the
   `CredentialResolver` seam, degrade-don't-die), [ADR-0073](./0073-automation-execution-identity.md)
   (whose grant a run uses), [ADR-0100](./0100-credential-field-channels.md) (the encrypted `secret`
@@ -364,4 +362,3 @@ Each slice is its own card and lands after this record is accepted.
 | providers: MCP authorization flow, OpenAPI `securitySchemes`, REST; the `RequestSigner` seam and first signers | `domain:server` | #26702 item 6, #26710 items 3–4 |
 | Console Connect / Reconnect and connection status | `domain:ui` | #26702 item 7 |
 | the cloud-repository record ([Provenance](#provenance--read-this-before-citing-this-file)) | the commercial repository | #26702 item 1, #26768 item 3 |
-| ADR-0018's amendment note (line 229) | `domain:skills` | — |
