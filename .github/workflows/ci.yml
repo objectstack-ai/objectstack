@@ -117,13 +117,13 @@ concurrency:
 # A `pull_request` or `merge_group` run carries the FAST SET: `Build Core`,
 # `Test Core` (affected-only) and `Build Docs`. `main`'s 4-hourly `schedule` run,
 # its `push` runs and an on-demand `workflow_dispatch` carry the FULL BATTERY:
-# the fast set plus the three jobs below that spell
+# the fast set plus the four jobs below that spell
 #
 #     github.event_name != 'pull_request' && github.event_name != 'merge_group'
 #
-# in their `if:` — `temporal-conformance`, `dogfood` (three shards) and
-# `dogfood-verify`. Nothing is deleted: the jobs moved off the
-# per-PR path. A red in one of them is a main-red for the owning lane, and the
+# in their `if:` — `temporal-conformance`, `dogfood` (three shards),
+# `dogfood-verify` and `ui-published-artifacts`. Nothing is deleted: the jobs
+# moved off the per-PR path, the last one never had one (#26717). A red in one of them is a main-red for the owning lane, and the
 # publish lane reads the full battery before its approval (release.yml's
 # `full-battery` job, `scripts/ci/scheduled-full-run.mjs --release-gate`).
 #
@@ -4237,6 +4237,74 @@ jobs:
           fi
           echo "Console build artifact is ready."
 
+      # ── Two objectui gates that read this job's build (#26717) ──────────
+      # Rows 7 and 22 of the objectstack#25697 workflow roster, "kept,
+      # follow-up port": objectui ran them in its own workflows, which have run
+      # nowhere since #26058 deleted `ui/.github/workflows/`. Folded in here
+      # because this job already builds what they read, so neither pays a
+      # build of its own (row 22's note: no second Console build).
+      #
+      # The Console's eager-closure budget (objectui's performance-budget.yml).
+      # The Vite build above writes `ui/apps/console/dist/eager-closure.json`
+      # and `chunk-membership.json` in every build; the checker weighs them
+      # against the ceilings it carries, next to the reasoning behind each, so
+      # no size is copied into this file. Exit 1 is a size verdict, exit 2 a
+      # gauge that produced no trustworthy reading; both fail the step.
+      #
+      # On a pull request the checker also asks whether the ceilings it was
+      # checked out with are still the ones on the base branch (objectui#6245:
+      # GitHub does not re-run a PR's checks when the base moves). This step
+      # hands it the base branch's copy of the checker at two commits. It is
+      # `continue-on-error` and that is NOT a fail-open: when it cannot write
+      # both files the checker finds the variables unset and exits 2.
+      - name: check:eager-closure — resolve the base-branch ceiling constants
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          CHECKER='ui/scripts/check-eager-closure-budget.mjs'
+          OUT="${RUNNER_TEMP}/eager-closure-ceilings"
+          mkdir -p "$OUT"
+
+          # The commit the merge ref was computed against.
+          if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+          fi
+          git cat-file -p "${PR_BASE_SHA}:${CHECKER}" > "$OUT/pr-base.partial"
+          mv "$OUT/pr-base.partial" "$OUT/pr-base.mjs"
+
+          # The base branch as it stands now, which the merge would land on.
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          BASE_SHA=$(git rev-parse "refs/remotes/origin/${BASE_REF}")
+          git cat-file -p "${BASE_SHA}:${CHECKER}" > "$OUT/base.partial"
+          mv "$OUT/base.partial" "$OUT/base.mjs"
+
+          # Written only after both moves: a half-written pair would let the
+          # checker compare against a file it takes for the base branch.
+          {
+            echo "EAGER_CLOSURE_PR_BASE_SOURCE=$OUT/pr-base.mjs"
+            echo "EAGER_CLOSURE_BASE_SOURCE=$OUT/base.mjs"
+            echo "EAGER_CLOSURE_PR_BASE_SHA=$PR_BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_SHA=$BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_REF=$BASE_REF"
+          } >> "$GITHUB_ENV"
+
+          echo "Ceilings resolved: ${PR_BASE_SHA} (this checkout's base) vs ${BASE_SHA} (${BASE_REF} now)"
+
+      - name: check:eager-closure — weigh the Console's eager closure against its budget
+        run: pnpm --dir ui run check:eager-closure
+
+      # The built-artifact pins of @object-ui/components (objectui's ci.yml
+      # "Test (dist pins)"). They import the package's `dist/`, which the
+      # Test UI lane never builds (it resolves every package to `src`), so this
+      # is the only lane that runs them. The task's `dependsOn: ["build"]`
+      # replays the build the SDUI manifest step above already ran.
+      - name: test:dist — run the built-artifact pins of @object-ui/components
+        run: pnpm exec turbo run test:dist --filter=@object-ui/components
+
       - name: Get the Playwright version
         id: playwright-version
         run: |
@@ -4289,3 +4357,77 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+  # ── UI Published Artifacts: two objectui gates over a full build (#26717) ─
+  # Rows 23 and 21 of the objectstack#25697 workflow roster, "kept, follow-up
+  # port" (objectui's published-dist-gate.yml and node-esm-load-gate.yml), both
+  # of which have run nowhere since #26058 deleted `ui/.github/workflows/`.
+  # Each one grades BUILT artifacts of every published @object-ui package, so
+  # each costs a full build, and objectui#4846's ruling (comment 5307574139)
+  # refused that build on every pull request. So this job is in the full
+  # battery only (THE TWO SPEEDS above `jobs:`): a pull request and a queue
+  # entry skip it, `main`'s push and schedule runs carry it, and the publish
+  # lane reads it before its approval. The blocking copy of the published-dist
+  # scan is on the publish path itself, `scripts/release-publish.sh`, which
+  # refuses to run `changeset publish` when the scan exits non-zero.
+  # `ui/scripts/__tests__/check-published-dist-tooling.test.ts` pins both
+  # halves of that.
+  #
+  # The build is the release's own (`pnpm build`, the first command of
+  # `pnpm run release`), and both gates then read it with `--no-build`, the
+  # order the publish path runs the scan in. `--no-build` cannot pass
+  # vacuously: a published package with nothing built is `no-build-output`,
+  # each gate asserts a floor on how much it inspected, and the ESM gate's
+  # provenance leg refuses an artifact whose turbo task log names another tree.
+  ui-published-artifacts:
+    name: UI Published Artifacts
+    needs: filter
+    # Build & E2E UI's condition, in the full battery only.
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+    runs-on: ubuntu-latest
+    # objectui gave each gate's full build 60 minutes, "generous, because a
+    # timeout here reads as a gate failure". One build now serves both.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Restore-only: the per-push jobs above own saving the store and the
+      # turbo seeds.
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-store: 'false'
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-ui-deps-${{ github.ref_name }}-
+
+      - name: Build every package the release publishes
+        id: build
+        run: pnpm build
+
+      # objectui#4846: no published tarball may carry tooling material
+      # (`__tests__/`, `*.test.*`, `*.bench.*`, a `*.tsbuildinfo`, …). The file
+      # list is `npm pack --dry-run`'s, i.e. what npm would publish.
+      - name: check:published-dist — scan every published @object-ui tarball for tooling files
+        run: pnpm --dir ui run check:published-dist --no-build
+
+      # objectui#4538: every published ESM entry must load under Node's own
+      # resolver, with no bundler. The per-PR half is the specifier leg in
+      # Type Check UI (`check:esm-specifiers`); this is the load leg, the only
+      # one that sees a package broken by a DEPENDENCY. It runs whatever the
+      # scan above said, so one run reports both.
+      - name: check:node-esm-load — import every published ESM entry under plain Node
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: pnpm --dir ui run check:node-esm-load --no-build
