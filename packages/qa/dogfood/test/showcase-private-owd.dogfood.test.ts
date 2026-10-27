@@ -18,30 +18,38 @@ import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_private_note';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
+const recordOf = (b: any) => b?.record ?? b?.data ?? b;
+const rowsOf = (b: any) => b?.records ?? b?.data ?? (Array.isArray(b) ? b : []);
+const filterOf = (where: Record<string, unknown>) => encodeURIComponent(JSON.stringify(where));
 
 describe('showcase: declarative private OWD (ADR-0056)', () => {
   let stack: VerifyStack;
+  let adminToken: string;
   let aToken: string;
   let bToken: string;
   let aNoteId: string;
+  let aNote2Id: string;
   let bNoteId: string;
 
   beforeAll(async () => {
     stack = await getSharedShowcase();
-    await stack.signIn(); // seed dev admin (first user)
+    adminToken = await stack.signIn(); // seed dev admin (first user)
     aToken = await stack.signUp('owd-alice@verify.test');
     bToken = await stack.signUp('owd-bob@verify.test');
 
     const a1 = await stack.apiAs(aToken, 'POST', OBJ, { title: 'Alice private 1', body: 'a-body' });
     expect(a1.status, 'alice creates note').toBeLessThan(300);
     aNoteId = idOf(await a1.json());
-    await stack.apiAs(aToken, 'POST', OBJ, { title: 'Alice private 2' });
+    const a2 = await stack.apiAs(aToken, 'POST', OBJ, { title: 'Alice private 2' });
+    expect(a2.status, 'alice creates a second note').toBeLessThan(300);
+    aNote2Id = idOf(await a2.json());
 
     const b1 = await stack.apiAs(bToken, 'POST', OBJ, { title: 'Bob private 1' });
     expect(b1.status, 'bob creates note').toBeLessThan(300);
     bNoteId = idOf(await b1.json());
 
     expect(aNoteId, 'alice note id').toBeTruthy();
+    expect(aNote2Id, 'alice second note id').toBeTruthy();
     expect(bNoteId, 'bob note id').toBeTruthy();
   }, 60_000);
 
@@ -82,5 +90,37 @@ describe('showcase: declarative private OWD (ADR-0056)', () => {
     expect(titles).not.toContain('Alice private 1');
     const foreign = await stack.apiAs(bToken, 'GET', `${OBJ}/${aNoteId}`);
     expect(foreign.status).not.toBe(200);
+  });
+
+  // ── access-security.rls-both-sides a2/a3/n0 + owd-sharing-matrix a0 (#26571) ──
+  // The two halves the member-only cases above leave open: the admin re-read
+  // that proves a refused foreign write changed nothing (a 4xx over a mutated
+  // row is still the failure), and the entitled side of the same gate.
+
+  it('a foreign by-id read is non-2xx, not merely not-200', async () => {
+    const r = await stack.apiAs(aToken, 'GET', `${OBJ}/${bNoteId}`);
+    expect(r.status, 'any 2xx is a read of a row owner isolation hides').toBeGreaterThanOrEqual(300);
+  });
+
+  it('a refused foreign PATCH leaves the row byte-identical on the admin re-read', async () => {
+    const read = async () => {
+      const r = await stack.apiAs(adminToken, 'GET', `${OBJ}/${bNoteId}`);
+      expect(r.status, 'the admin reads the foreign note').toBe(200);
+      return recordOf(await r.json());
+    };
+    const before = await read();
+    const forged = await stack.apiAs(aToken, 'PATCH', `${OBJ}/${bNoteId}`, { body: 'forged' });
+    expect(forged.status, 'the forged foreign write is refused').toBeGreaterThanOrEqual(400);
+    const after = await read();
+    expect(after, 'the refused write changed nothing on the row').toEqual(before);
+    expect(after.body, 'the forged value never landed').not.toBe('forged');
+  });
+
+  it('the admin (platform posture) lists every note this file created — the entitled side', async () => {
+    const ids = [aNoteId, aNote2Id, bNoteId];
+    const r = await stack.apiAs(adminToken, 'GET', `${OBJ}?$filter=${filterOf({ id: { $in: ids } })}`);
+    expect(r.status).toBe(200);
+    const listed = rowsOf(await r.json()).map((x: any) => x.id);
+    expect([...listed].sort(), 'both owners’ rows, from the server row set').toEqual([...ids].sort());
   });
 });

@@ -69,6 +69,10 @@ export const Source = ObjectSchema.create({
     listonly: Field.lookup('sox_listonly', { label: 'List only' }),
     open: Field.lookup('sox_open', { label: 'Open' }),
     private: Field.lookup('sox_private', { label: 'Private' }),
+    // [#26572] An `internal: true` column on the addressed object itself, so
+    // the internal-field refusal is driven on an authored field over HTTP and
+    // its body read for the object and field it names.
+    internal_f: Field.text({ label: 'Internal', internal: true }),
   },
 });
 
