@@ -51,14 +51,6 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key like `roles:` or `policies:` is **not** a silent
-no-op — the top level refuses it and the stack fails to load:
-
-```
-defineStack validation failed (1 issue):
-
-  ✗ (root): Unrecognized key(s) on this stack definition: `policies`. …
-```
 
 Undeclared keys are handled per surface, and the two postures are worth
 keeping straight:
@@ -118,8 +110,7 @@ Runtime rule of thumb:
 | Control plane | Published JSON in metadata storage | Environment revisions, history, overlays |
 
 When generating `objectstack.config.ts`, keep object names short and
-`snake_case`; never set `tableName`, and do not add `sys_metadata` objects to an
-environment runtime manifest.
+`snake_case`; never set `tableName`.
 
 ---
 
@@ -174,8 +165,6 @@ what the platform owns.
   so it is machine-visible; before resuming, confirm the version you **pin**
   carries the fix (merged upstream ≠ present on your pin) and re-run the
   defect's own reproduction.
-- **A bad platform default is a default to fix**, not something to work around
-  at every call site.
 
 ---
 
@@ -258,11 +247,10 @@ Drivers are the storage layer. Pick based on your environment:
 ### Wiring a driver — you usually do not
 
 Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
-from the database URL and registers `DriverPlugin` for you (memory in dev, SQL
-in prod). Do **not** put a driver in your config's `plugins:` array: no example
-app does, and the `plugins:` key is for plugins the CLI cannot infer (connector
-executors, your own plugins). Pick a driver by setting the DB URL, not by
-writing code.
+from the database URL and registers `DriverPlugin` for you. Do **not** put a
+driver in your config's `plugins:` array: no example app does, and the
+`plugins:` key is for plugins the CLI cannot infer (connector executors, your
+own plugins). Pick a driver by setting the DB URL, not by writing code.
 
 Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
 via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:
@@ -450,14 +438,19 @@ signing in with the seed password (`--admin-password`, default `admin123`) —
 an entry carries no `password`:
 
 ```typescript
-demoStaff: [{ name: 'Legal Counsel 1', email: 'counsel1@example.com',
-  position: 'legal_counsel', permissionSets: ['contracts_editor'] }],
+demoStaff: [
+  { name: 'Legal Lead', email: 'lead@example.com' },
+  { name: 'Legal Counsel 1', email: 'counsel1@example.com', manager: 'lead@example.com',
+    position: 'legal_counsel', permissionSets: ['contracts_editor'] }],
 ```
 
 `name` is what a seed reference resolves by; `position` / `permissionSets`
 name only what this stack declares (a platform set such as
-`admin_full_access` is refused); `os build` drops the key and a non-dev boot
-creates nothing. `devLogins` creates and grants nothing — it only prints an
+`admin_full_access` is refused); `manager` is another entry's `email` — the
+boot writes `sys_user.manager_id` itself once every account exists and keeps
+one set by hand, so no seed hook writes it; a display name, an address no
+entry has, the entry itself or a loop is refused at load; `os build` drops
+the key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
 existing account on the boot banner. Pick `demoStaff` whenever the demo
 needs an account to exist.
 
