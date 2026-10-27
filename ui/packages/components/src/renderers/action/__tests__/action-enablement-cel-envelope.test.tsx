@@ -125,7 +125,7 @@ describe.each(['action:button', 'action:icon'] as const)(
   (type) => {
     // The `fails: false` half is what a flattened envelope could not produce:
     // on the broken tree BOTH rows came out disabled.
-    it.each(['disabled', 'disabledOn'])(
+    it.each(['disabled'])(
       'properties.%s: the holding row is disabled, the failing row is usable',
       (key) => {
         expect(pair(type, key)).toEqual({ holds: true, fails: false });

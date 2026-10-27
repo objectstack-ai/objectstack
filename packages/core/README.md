@@ -5,6 +5,8 @@
 [![npm](https://img.shields.io/npm/v/@objectstack/core.svg)](https://www.npmjs.com/package/@objectstack/core)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../../LICENSING.md)
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Overview
 
 `@objectstack/core` is the foundation every ObjectStack runtime is built on. It hosts two kernels, a plugin lifecycle, a typed service registry, a structured logger, and a plugin-to-plugin event bus:

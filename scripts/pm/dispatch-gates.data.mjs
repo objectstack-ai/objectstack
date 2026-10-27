@@ -759,9 +759,9 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *
  * ⚠ Its known limit, stated here rather than discovered later: `exclude` drops
  * files only from tsc's INITIAL WALK, so sources under an excluded directory
- * that a root script IMPORTS are pulled into the program anyway — the ledger
- * note for this entry records 4 of its 80 errors arriving exactly that way,
- * from the showcase example. A path-shaped trigger cannot see an import graph,
+ * that a root script IMPORTS are pulled into the program anyway — the root's
+ * DEBT note recorded 4 of its 80 errors arriving exactly that way, from the
+ * showcase example, before the root graduated. A path-shaped trigger cannot see an import graph,
  * so a card editing only such a file is still not sent here. That is
  * deliberately NOT closed on this card: the direction is the safe one (this
  * entry under-covers rather than over-covers), and closing it means resolving
@@ -978,8 +978,8 @@ export const CHANGE_KIND_ROWS = [
     matches: 'root-ts-program',
     gates: [
       {
-        name: 'check:type-check-debt',
-        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only — ⛔ MAINTAINER-ONLY under the #8435 convention — never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+        name: 'typecheck:root',
+        why: 'nothing else type-checks this program: it belongs to no package, so the turbo typecheck never reads a file here, and the root has no ledger entry left to absorb an error. lint.yml runs this script in the Type Check source-gates lane, and one new error reds that lane. The repair is to make the file typecheck, never to add an exclude or bring back a DEBT entry. It needs no build: the program reads no package dist. The program carries lib ES2022 and types node, so `process`, `console` and the `node:*` builtins resolve without a reference line',
       },
     ],
   },

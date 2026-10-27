@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `objectstack cloud whoami` — display the active ObjectStack Cloud
+ * `objectstack cloud whoami` — display the active ObjectOS Cloud
  * identity (read from ~/.objectstack/cloud.json) and verify the token
  * with a /get-session call against the cloud control plane.
  */

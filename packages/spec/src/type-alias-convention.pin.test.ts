@@ -278,12 +278,14 @@ import type * as M190 from './kernel/execution-context.zod.js';
 import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
 // [#25761] The one column apply-on vocabulary both write doors read -- new module, next free index.
 import type * as M192 from './data/column-apply-on.zod.js';
+// [#25779] A seed file's package-relative path -- new module, next free index.
+import type * as M193 from './data/seed-file.zod.js';
 // [ADR-0142] Ownership queues and assignment rules -- new modules, next free indices.
-import type * as M193 from './automation/assignment-rule.zod.js';
-import type * as M194 from './security/queue.zod.js';
+import type * as M194 from './automation/assignment-rule.zod.js';
+import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 794 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 795 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -726,8 +728,8 @@ export type Iso_automation_approval__ApproverType = Assert<Eq< z.input< typeof M
 export type Iso_automation_approval__DecisionOutputDefSchema = Assert<Eq< z.input< typeof M37.DecisionOutputDefSchema >, z.infer< typeof M37.DecisionOutputDefSchema > >>;
 
 // automation/assignment-rule.zod.ts
-export type Iso_automation_assignmentRule__AssignmentStrategy = Assert<Eq< z.input< typeof M193.AssignmentStrategy >, z.infer< typeof M193.AssignmentStrategy > >>;
-export type Iso_automation_assignmentRule__AssignmentTargetSchema = Assert<Eq< z.input< typeof M193.AssignmentTargetSchema >, z.infer< typeof M193.AssignmentTargetSchema > >>;
+export type Iso_automation_assignmentRule__AssignmentStrategy = Assert<Eq< z.input< typeof M194.AssignmentStrategy >, z.infer< typeof M194.AssignmentStrategy > >>;
+export type Iso_automation_assignmentRule__AssignmentTargetSchema = Assert<Eq< z.input< typeof M194.AssignmentTargetSchema >, z.infer< typeof M194.AssignmentTargetSchema > >>;
 
 // automation/bpmn-interop.zod.ts
 export type Iso_automation_bpmnInterop__BpmnDiagnosticSchema = Assert<Eq< z.input< typeof M38.BpmnDiagnosticSchema >, z.infer< typeof M38.BpmnDiagnosticSchema > >>;
@@ -914,6 +916,9 @@ export type Iso_data_query__AggregationFunction = Assert<Eq< z.input< typeof M71
 export type Iso_data_query__AggregationNodeSchema = Assert<Eq< z.input< typeof M71.AggregationNodeSchema >, z.infer< typeof M71.AggregationNodeSchema > >>;
 export type Iso_data_query__DateGranularity = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
 export type Iso_data_query__GroupByNodeSchema = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
+
+// data/seed-file.zod.ts
+export type Iso_data_seedFile__SeedFilePathSchema = Assert<Eq< z.input< typeof M193.SeedFilePathSchema >, z.infer< typeof M193.SeedFilePathSchema > >>;
 
 // data/seed-loader.zod.ts
 export type Iso_data_seedLoader__ReferenceResolutionErrorSchema = Assert<Eq< z.input< typeof M72.ReferenceResolutionErrorSchema >, z.infer< typeof M72.ReferenceResolutionErrorSchema > >>;
@@ -1142,8 +1147,8 @@ export type Iso_security_permission__EffectiveObjectPermissionSchema = Assert<Eq
 export type Iso_security_permission__ObjectAccessScopeSchema = Assert<Eq< z.input< typeof M107.ObjectAccessScopeSchema >, z.infer< typeof M107.ObjectAccessScopeSchema > >>;
 
 // security/queue.zod.ts
-export type Iso_security_queue__DeclaredQueueMemberSchema = Assert<Eq< z.input< typeof M194.DeclaredQueueMemberSchema >, z.infer< typeof M194.DeclaredQueueMemberSchema > >>;
-export type Iso_security_queue__QueueMemberType = Assert<Eq< z.input< typeof M194.QueueMemberType >, z.infer< typeof M194.QueueMemberType > >>;
+export type Iso_security_queue__DeclaredQueueMemberSchema = Assert<Eq< z.input< typeof M195.DeclaredQueueMemberSchema >, z.infer< typeof M195.DeclaredQueueMemberSchema > >>;
+export type Iso_security_queue__QueueMemberType = Assert<Eq< z.input< typeof M195.QueueMemberType >, z.infer< typeof M195.QueueMemberType > >>;
 
 // security/rls.zod.ts
 export type Iso_security_rls__RLSEvaluationResultSchema = Assert<Eq< z.input< typeof M108.RLSEvaluationResultSchema >, z.infer< typeof M108.RLSEvaluationResultSchema > >>;
@@ -1722,7 +1727,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 794 isomorphic pins', () => {
+  it('still declares all 795 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2619,14 +2624,19 @@ describe('ADR-0122 type-alias convention', () => {
     // and no transform — so it is pinned here (Iso_data_filter__NowAnchorSchema)
     // rather than given a `…Parsed` synonym. +1 added.
     //
-    // 790 -> 794 is ADR-0142 phase 2 (#25769): the ownership queue's
+    // 790 -> 791 is #25779: `SeedFilePathSchema` (`data/seed-file.zod.ts`),
+    // the package-relative path a `seedFile(...)` reference names — a plain
+    // string with a pattern, so it is pinned here
+    // (Iso_data_seedFile__SeedFilePathSchema) rather than given a `…Parsed`
+    // synonym. +1 added.
+    // 791 -> 795 is ADR-0142 phase 2 (#25769): the ownership queue's
     // `QueueMemberType` enum and `DeclaredQueueMemberSchema`, and the assignment
     // rule's `AssignmentStrategy` enum and `AssignmentTargetSchema`, pinned here
     // (Iso_security_queue__QueueMemberType, Iso_security_queue__DeclaredQueueMemberSchema,
     // Iso_automation_assignmentRule__AssignmentStrategy,
     // Iso_automation_assignmentRule__AssignmentTargetSchema). The rule's entry
     // schema has two shapes and carries `AssignmentRuleEntryParsed` instead. +4 added.
-    expect(pins).toHaveLength(794);
+    expect(pins).toHaveLength(795);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -164,8 +164,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
-import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -402,6 +402,10 @@ import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, store
 import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protocol-object-owner.js';
 // [#25467 cut 18] The flow save's retired-spelling replay verdict (#23903 ruling B′): does a save newly introduce a retired spelling no stored row carries.
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
+// [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
+import { resolveWritePackageScope } from './protocol-write-package-scope.js';
+// [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
+import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7361,44 +7365,12 @@ export class ObjectStackProtocolImplementation implements
     private resolveWritePackageScope(
         packageId: string | null | undefined,
     ): { packageId: string; dependencies: string[] } | undefined {
-        if (typeof packageId !== 'string' || packageId === '' || packageId === 'sys_metadata') return undefined;
-        try {
-            const registry = this.engine.registry as
-                | { getPackage?: (id: string) => { manifest?: unknown } | undefined }
-                | undefined;
-            if (typeof registry?.getPackage !== 'function') return undefined;
-            // The written package itself must be readable: its manifest is the
-            // ONLY declaration of what it may reference, and narrowing without
-            // it would be narrowing on nothing.
-            if (!registry.getPackage(packageId)) return undefined;
-
-            const dependencies = new Set<string>();
-            const frontier = [packageId];
-            while (frontier.length > 0) {
-                const current = frontier.pop() as string;
-                const manifest = registry.getPackage(current)?.manifest as
-                    | { dependencies?: Record<string, unknown> }
-                    | undefined;
-                const declared = manifest?.dependencies;
-                if (!declared || typeof declared !== 'object') continue;
-                for (const dep of Object.keys(declared)) {
-                    // A dependency the registry cannot resolve is still IN the
-                    // closure: the package declared it, so an object stamped
-                    // with it is reachable by declaration. Only the transitive
-                    // walk stops there — `getPackage` returns undefined and the
-                    // loop above simply contributes nothing further.
-                    if (dep === packageId || dependencies.has(dep)) continue;
-                    dependencies.add(dep);
-                    frontier.push(dep);
-                }
-            }
-            return { packageId, dependencies: [...dependencies] };
-        } catch {
-            // Context gathering must never fail a write (the same contract
-            // `listCollection` above holds). An unreadable registry means an
-            // unnarrowed gate, not a refused publish.
-            return undefined;
-        }
+        // [#25467 cut 19] The body moved to `protocol-write-package-scope.ts` (see `WritePackageScopeHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof resolveWritePackageScope> = {
+            get engine() { return readEngine(); },
+        };
+        return resolveWritePackageScope.call(host, packageId);
     }
 
     /**
@@ -9360,44 +9332,12 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         packageId?: string,
     ): Promise<{ data: unknown; degraded: boolean; errors: string[] }> {
-        const services = this.getServicesRegistry?.();
-        const metadataService: any = services?.get('metadata');
-        if (!metadataService || typeof metadataService.get !== 'function') {
-            return { data: undefined, degraded: false, errors: [] };
-        }
-        // ADR-0048 — thread the caller's package id so a single-item fetch is
-        // package-scoped. Passed positionally to BOTH reads, so whatever the
-        // occupant of the `metadata` slot makes of a third argument today is
-        // unchanged by which of the two methods answers.
-        const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
-            let answer: { data: unknown; degraded: boolean; errors: string[] };
-            if (typeof metadataService.getDiagnosed === 'function') {
-                const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                answer = {
-                    data: diagnosed?.data,
-                    degraded: diagnosed?.degraded === true,
-                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
-                };
-            } else {
-                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
-            }
-            // [#23645] A stored object row's copy is not a code layer. See the header.
-            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
-                ? { ...answer, data: undefined }
-                : answer;
+        // [#25467 cut 20] The body moved to `protocol-metadata-service-read.ts` (see `MetadataServiceReadHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof readItemFromMetadataService> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-
-        const primary = await read(type);
-        if (primary.data !== undefined && primary.data !== null) return primary;
-        const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        if (!alt) return { data: undefined, degraded: primary.degraded, errors: primary.errors };
-        const secondary = await read(alt);
-        if (secondary.data !== undefined && secondary.data !== null) return secondary;
-        return {
-            data: undefined,
-            degraded: primary.degraded || secondary.degraded,
-            errors: [...primary.errors, ...secondary.errors],
-        };
+        return readItemFromMetadataService.call(host, type, name, packageId);
     }
 
     /**
@@ -23137,6 +23077,9 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof applySeedBodies> = {
             get engine() { return readEngine(); },
             getMetaItem: (...a) => this.getMetaItem(...a),
+            // [#25779] The `field-files` service, so a published seed's files
+            // are stored as the boot seed's are.
+            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
         };
         return applySeedBodies.call(host, bodies);
     }

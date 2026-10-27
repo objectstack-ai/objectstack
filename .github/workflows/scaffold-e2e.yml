@@ -37,6 +37,14 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. The schedule and dispatch
+# runs share a group keyed on their own event and wait for each other instead.
+concurrency:
+  group: scaffold-e2e-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   scaffold-local:
     name: Scaffold with repo dist
@@ -248,11 +256,23 @@ jobs:
         #   2. Interactive `skills add …/framework` (no --all) relies on
         #      metadata.internal hiding — assert repo-root discovery surfaces
         #      exactly the curated set and nothing internal.
+        # The curated catalog is every skills/<dir>/ holding a SKILL.md — the
+        # same tree @objectstack/skills ships whole (packages/skills/scripts/
+        # sync-catalog.mjs), read the same way as the package-catalog step
+        # below. ⛔ Never a name glob or an allow-list here: a skill added to
+        # skills/ would red this step until a governed edit of this file.
+        # An internal skill placed in skills/ still fails: the CLI hides
+        # metadata.internal skills, so the installed set (assertion 1) or the
+        # listed count (assertion 2) falls short of the directory set.
         run: |
           cd "$RUNNER_TEMP"
           node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" skills-probe --skip-install --skip-skills
           cd skills-probe
-          expected=$(cd "$GITHUB_WORKSPACE/skills" && ls -d objectstack-*/ | tr -d '/' | sort)
+          expected=$(for d in "$GITHUB_WORKSPACE"/skills/*/; do if [ -f "${d}SKILL.md" ]; then basename "$d"; fi; done | sort)
+          if [ -z "$expected" ]; then
+            echo "::error::skills/ holds no <skill>/SKILL.md — the curated catalog this step compares against is empty"
+            exit 1
+          fi
           expected_count=$(echo "$expected" | wc -l | tr -d ' ')
 
           npx -y skills add "$GITHUB_WORKSPACE/skills" --all --copy

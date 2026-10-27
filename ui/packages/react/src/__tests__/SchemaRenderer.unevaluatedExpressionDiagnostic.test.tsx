@@ -201,10 +201,8 @@ describe('SchemaRenderer — unevaluated `${…}` diagnostic (objectui#4795)', (
     it.each([
       ['visible', '${data.n > 0}'],
       ['visibleWhen', '${data.n > 0}'],
-      ['visibleOn', '${data.n > 0}'],
-      ['hiddenOn', '${data.n < 0}'],
+      ['hidden', '${data.n < 0}'],
       ['disabled', '${data.n < 0}'],
-      ['disabledOn', '${data.n < 0}'],
     ])('stays silent for a declared `%s`', (key, expr) => {
       renderWithData({ type: 'test:probe-4795', value: 'ok', [key]: expr });
       expect(shouts(spy)).toEqual([]);

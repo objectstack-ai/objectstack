@@ -29,8 +29,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 // [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
 // envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
-import type { FileRefusedValue } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -146,6 +145,13 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
 import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
+// [#25522 cut 11] File-field hydration on read; the methods of the same names
+// below hand each body the members it reads (`FileReferenceHydrationHost`).
+import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#25522 cut 12] The driver options every driver call receives, and the tenancy
+// posture and Layer 0 verdict they are scoped by; the methods of the same names
+// below hand each body the members it reads (`DriverOptionsHost`).
+import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -175,13 +181,6 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
-  // [#22637] The caller's envelope, stripped of the operation-private `__`
-  // keys, before file-field hydration forwards it to the download door's
-  // field-owned verdict — see `readParentDerivedFiles`.
-  withoutOperationPrivateKeys,
-  // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
-  // Layer 0 — see {@link buildDriverOptions}.
-  computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
   // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
@@ -264,11 +263,8 @@ import {
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
-import { resolveTenancyPosture } from '@objectstack/types';
 import {
-  normalizeTenancyPosture,
   postureEnforcesWall,
-  TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
   postureUsesUnionScope,
@@ -793,49 +789,6 @@ function organizationPredicateDeleteRefusal(): Error {
   err.object = ORGANIZATION_OBJECT;
   return err;
 }
-
-/**
- * Is this failure the security layer refusing the CALLER's read — the
- * ADR-0112 `PERMISSION_DENIED` code — rather than the read failing?
- *
- * Asked by `resolveFileReferences`, whose `sys_file` sub-read runs as the
- * caller: a refusal there is a verdict about this reader, and is served in the
- * value (`FileRefusedValueSchema`), while every other failure is an outage that
- * fails open with a `warn`. Matched by the declared CODE alone — the closed
- * vocabulary every refusal class carries (`PermissionDeniedError` in
- * plugin-security, which this package cannot import) — ⛔ never by message
- * prose, and never by a driver's own ACL code (`42501` is the deployment's
- * database refusing the platform, not the platform refusing a reader).
- */
-function isReadRefusal(error: unknown): boolean {
-  return (error as { code?: unknown } | null | undefined)?.code === 'PERMISSION_DENIED';
-}
-
-/**
- * A servable `sys_file` row's expanded read form (`FileValueSchema`):
- * `{ id, name, size, mimeType, url }`, `url` derived from the stable
- * `/files/:fileId` resolver and never stored. ONE spelling for both arms of
- * `resolveFileReferences` — the caller's own `sys_file` read and the
- * parent-derived read a refused caller is served (#22637) — so the two can
- * never hand the same row out in two shapes.
- */
-function toFileValue(row: any): Record<string, unknown> {
-  return {
-    id: String(row.id),
-    ...(row.name != null ? { name: row.name } : {}),
-    ...(row.size != null ? { size: row.size } : {}),
-    ...(row.mime_type != null ? { mimeType: row.mime_type } : {}),
-    url: `/api/v1/storage/files/${row.id}`,
-  };
-}
-
-/**
- * [#22637] The `sys_file` columns the parent-derived read takes — the
- * ownership pair it matches on, the status the servability rule reads, and
- * the metadata `toFileValue` serves. Nothing else is read under the system
- * context that read runs in.
- */
-const PARENT_DERIVED_FILE_COLUMNS = ['id', 'name', 'size', 'mime_type', 'status', 'ref_object', 'ref_id'];
 
 /**
  * Read the counter out of ONE stored autonumber value, under #6468's anchoring
@@ -4474,16 +4427,6 @@ function staticReadonlyStoredView(
 }
 
 /**
- * [ADR-0105 D2] The context's organization access set
- * (`ExecutionContext.accessible_org_ids`), stringified — `undefined` when
- * absent or empty, which the verdict reads as "no membership" under `group`.
- */
-function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
-  const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
-  return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
-}
-
-/**
  * What the engine knows about the transaction it opened, beyond the handle
  * itself (#4619, ADR-0119 D1 follow-up).
  *
@@ -7303,117 +7246,19 @@ export class ObjectQL implements IObjectQLEngine {
     base?: any,
     scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
   ): any {
-    // The open transaction may arrive explicitly via the context, or ambiently
-    // via txStore when an internal query runs during a transactional write
-    // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
-    // whose unit has closed is no handle: work the unit started and did not
-    // await runs unenrolled (`runOpenedUnit`).
-    const explicit = execCtx?.transaction;
-    const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
-      ? explicit
-      : this.txStore.getStore()?.transaction;
-    // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
-    // driver's connection; handing it to a different driver does not put that
-    // driver's statement inside the transaction, it executes the statement on
-    // the WRONG CONNECTION — measured on knex/SQLite as `no such table` against
-    // a database that never held the object. The write path's
-    // `enforceTransactionOrigin` has already refused a business write by the
-    // time we get here (and let a system ledger through by decision), so this
-    // is the structural half: whatever survives to here, the handle only ever
-    // reaches the driver that owns it. It covers READS too, which have no gate
-    // of their own and were riding the same wrong connection.
-    const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
-    const objectSchema = this._registry.getObject(object) as any;
-    // `isFederatedObject` is the same predicate every schema-sync seam routes a
-    // federated object by — one spelling of "this schema is the remote's",
-    // not a second reading of it.
-    const isFederated = isFederatedObject(objectSchema);
-    const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
-    const tenantScope = tenantObject
-      ? scope.writeTarget
-        ? this.driverWriteTarget(execCtx)
-        : this.driverReadScope(execCtx, scope.recordedVerdict)
-      : undefined;
-    const hasTenant = tenantScope !== undefined;
-    const hasTz = execCtx?.timezone !== undefined;
-    const isSystem = execCtx?.isSystem === true;
-    // [ADR-0131 D9/D13] The tenant-audit's scope is the object's SCHEMA: a
-    // tenant column (the registered schema's, as `resolveTenantFieldName`
-    // reads it) on an object that is not federated. That is the same reading
-    // the system-insert rule takes, and there is no second, per-table one —
-    // the #13491 ledger that used to narrow this by name retired with D13. An
-    // object is outside the audit only by declaring itself outside the
-    // machinery (`tenancy.enabled: false`, `systemFields.tenant: false`, no
-    // tenant field, `external`), which `scripts/platform-object-tenancy-census.json`
-    // enumerates for the platform namespaces.
-    const isTenantAuditInScope =
-      resolveTenantFieldName(objectSchema) !== null &&
-      !isFederated;
-    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
-    // exempt platform admin's predicate write reaches the driver with no
-    // `tenantId` because the wall lifted the scope on purpose, and the
-    // driver's `[tenant-audit]` line tells such a write to declare
-    // `bypassTenantAudit: true` — an option no REST caller can set. The
-    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
-    // here as the recorded verdict; this reads it, it does not re-decide it
-    // (see {@link wallExemptedOperation}).
-    const wallExempt =
-      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
-      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
-    const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
-    const opts: any = base && typeof base === 'object' ? { ...base } : {};
-    if (hasTx && opts.transaction === undefined) {
-      opts.transaction = tx;
-    }
-    if (hasTenant && opts.tenantId === undefined) {
-      opts.tenantId = tenantScope.tenantId;
-    }
-    if (hasTenant && opts.tenantIds === undefined && tenantScope.tenantIds !== undefined) {
-      opts.tenantIds = tenantScope.tenantIds;
-    }
-    if (hasTz && opts.timezone === undefined) {
-      // Thread the business timezone so date-dependent driver generation
-      // (autonumber `{YYYYMMDD}` tokens) resolves the calendar day correctly.
-      opts.timezone = execCtx!.timezone;
-    }
-    if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
-      // [#13491 → ADR-0131 D13] The isSystem mute, cut by the object's
-      // schema alone (2026-08-31 ruling, execution point 1: the OBJECT decides,
-      // never the caller's flag).
-      //
-      // It used to mute EVERY elevated write, whatever the object was. The
-      // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
-      // (77%) were silenced here — at the control's LARGEST gate, sitting
-      // ahead of the condition the control is about — and the control has
-      // never produced a finding, while all five known instances of the defect
-      // were found by a person reading call sites.
-      //
-      // What still mutes: an object with no tenant field at all (nothing to be
-      // unscoped from — the driver would exit at `resolveTenantField` anyway)
-      // and a federated one. What does not: any object with a tenant column,
-      // platform namespace or not — a name prefix, or a hand-kept list of
-      // names, decides nothing here. A caller that means it still passes
-      // `bypassTenantAudit: true` explicitly and is honoured above — this
-      // branch only fills in a value nobody supplied.
-      //
-      // ⚠️ Direction, per execution point 3: what this ADDS is a driver WARN
-      // line. It changes nothing about what any write touches.
-      opts.bypassTenantAudit = true;
-    }
-    if (wallExempt && opts.bypassTenantAudit === undefined) {
-      // The same fill-in-only rule as the isSystem mute above: a caller's own
-      // value wins. Diagnostics only — the driver's scope is already the
-      // verdict's (no `tenantId`), and this option silences a warning and
-      // touches nothing else; on a read it is inert.
-      opts.bypassTenantAudit = true;
-    }
-    if (preserveAudit && opts.preserveAudit === undefined) {
-      // Historical import (#3493): let the driver keep a supplied `updated_at`
-      // instead of force-stamping now on the update path.
-      opts.preserveAudit = true;
-    }
-    return opts;
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTxStore = () => this.txStore;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof buildDriverOptions> = {
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      get txStore() { return readTxStore(); },
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+      get _registry() { return readRegistry(); },
+      driverWriteTarget: (...a) => this.driverWriteTarget(...a),
+      driverReadScope: (...a) => this.driverReadScope(...a),
+      wallExemptedOperation: (...a) => this.wallExemptedOperation(...a),
+    };
+    return buildDriverOptions.call(host, object, execCtx, base, scope);
   }
 
   /**
@@ -7430,22 +7275,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     recordedVerdict: unknown,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
-    switch (verdict.kind) {
-      case 'none':
-        return undefined;
-      case 'organization':
-        return { tenantId: verdict.organizationId };
-      case 'organizations':
-        return { tenantId: activeOrganization ?? verdict.organizationIds[0], tenantIds: [...verdict.organizationIds] };
-      case 'deny':
-        return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverReadScope> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return driverReadScope.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7457,21 +7291,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     activeOrganization: string | undefined,
   ): TenantLayer0Verdict {
-    return computeTenantLayer0Verdict({
-      tenancyPosture: this.resolveEnginePosture(),
-      organizationId: activeOrganization,
-      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-      // Left to the driver, which resolves the tenant column from the
-      // table it actually built (`resolveTenantField`): an object with no
-      // such column is unscoped there whatever this says. `undefined` is
-      // the verdict's "assume a tenant object", as Layer 0 reads an
-      // unresolved field set.
-      objectHasOrgIdField: undefined,
-      tenancyDisabled: false,
-      // The engine holds no permission sets: no exemption is ITS to grant.
-      posturePermitsCrossTenant: false,
-      isPlatformAdmin: false,
-    });
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof engineLayer0Verdict> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return engineLayer0Verdict.call(host, execCtx, activeOrganization);
   }
 
   /**
@@ -7491,14 +7315,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that does not parse answers false too — junk never lifts anything.
    */
   private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
-    if (recordedVerdict === undefined) return false;
-    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    if (!recorded.success || recorded.data.kind !== 'none') return false;
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof wallExemptedOperation> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return wallExemptedOperation.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7510,10 +7331,11 @@ export class ObjectQL implements IObjectQLEngine {
   private driverWriteTarget(
     execCtx: ExecutionContext | undefined,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    if (execCtx?.tenantId === undefined) return undefined;
-    const tenantIds =
-      this.resolveEnginePosture() === 'group' ? accessibleOrganizationsOf(execCtx) : undefined;
-    return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverWriteTarget> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return driverWriteTarget.call(host, execCtx);
   }
 
   /**
@@ -7538,13 +7360,12 @@ export class ObjectQL implements IObjectQLEngine {
    * be worst, so it degrades to the walled reading and the write is refused.
    */
   private resolveEnginePosture(): TenancyPosture {
-    const injected = normalizeTenancyPosture(this.tenancyPostureProvider?.());
-    if (injected) return injected;
-    try {
-      return resolveTenancyPosture();
-    } catch {
-      return 'isolated';
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTenancyPostureProvider = () => this.tenancyPostureProvider;
+    const host: ThisParameterType<typeof resolveEnginePosture> = {
+      get tenancyPostureProvider() { return readTenancyPostureProvider(); },
+    };
+    return resolveEnginePosture.call(host);
   }
 
   /**
@@ -13549,156 +13370,18 @@ export class ObjectQL implements IObjectQLEngine {
     records: any[],
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
-    if (!records || records.length === 0) return records;
-    // A caller whose subject is the STORED form — the ADR-0104 backfill /
-    // reconciliation (#3617) — opts out of resolution entirely; expanding
-    // ids before that scan would hide the very state it exists to audit.
-    if ((execCtx as any)?.[RAW_FILE_VALUES_CONTEXT_KEY] === true) return records;
-    const objectSchema = this._registry.getObject(objectName);
-    if (!objectSchema || !objectSchema.fields) return records;
-    // Nothing to resolve against if the file object is not even registered
-    // (e.g. the storage plugin is absent) — skip without a failing query.
-    if (!this._registry.getObject('sys_file')) return records;
-
-    const fileFields = Object.entries(objectSchema.fields)
-      .filter(([, def]: [string, any]) => def && FILE_REFERENCE_TYPES.has(def.type))
-      .map(([name]) => name);
-    if (fileFields.length === 0) return records;
-
-    // Collect candidate ids. A file field legitimately holds either an inline
-    // blob (an object — already the rich form, skipped) OR, in the dual-mode /
-    // legacy world, a URL string (`https://…`, `/api/…`, `data:…`, `blob:…`).
-    // Only an OPAQUE id token — the minted uuid/nanoid form, never url-shaped —
-    // is a `sys_file` reference to resolve. Filtering out url-shaped strings is
-    // what keeps a seeded `data:`/CDN image value from firing a bogus lookup.
-    const candidateIds: string[] = [];
-    const addCandidate = (v: unknown) => {
-      if (isFileIdToken(v)) candidateIds.push(v);
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof resolveFileReferences> = {
+      get _registry() { return readRegistry(); },
+      callerMayReadSysFile: (...a) => this.callerMayReadSysFile(...a),
+      serveRefusedFileHydration: (...a) => this.serveRefusedFileHydration(...a),
+      find: (...a) => this.find(...a),
+      get logger() { return readLogger(); },
+      servableFileRows: (...a) => this.servableFileRows(...a),
     };
-    for (const record of records) {
-      for (const fieldName of fileFields) {
-        const val = record[fieldName];
-        if (val == null) continue;
-        if (Array.isArray(val)) {
-          for (const v of val) addCandidate(v);
-        } else {
-          addCandidate(val);
-        }
-      }
-    }
-    const uniqueIds = [...new Set(candidateIds)];
-    if (uniqueIds.length === 0) return records; // blob-only / empty → zero cost
-
-    // [#24335] Ask before reading: a caller the security service refuses
-    // `sys_file` read is served the refused arm without the read whose
-    // refusal would have produced it.
-    if (!(await this.callerMayReadSysFile(execCtx))) {
-      return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
-    }
-
-    // One batched sys_file read. `__expandRead` mirrors the lookup-expansion
-    // sub-read (a system-built marker, never from client input). Metadata only —
-    // byte-download authorization is enforced at the /files/:fileId resolver.
-    let fileRows: any[] = [];
-    try {
-      fileRows = (await this.find(
-        'sys_file',
-        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
-      )) ?? [];
-    } catch (error) {
-      // [#6116] Fail-open is deliberate and UNCHANGED — a file-metadata read
-      // that fails must not take down the record read that asked for it, so the
-      // ids pass through un-hydrated on EVERY branch below. What changes is
-      // that the reasons stop being the same silence.
-      //
-      // Benign: `sys_file` is registered but its TABLE was never provisioned
-      // (storage plugin present, schema sync not run yet). There are genuinely
-      // no committed rows, so "leave the ids as-is" IS the truth and there is
-      // nothing to report. Discriminated through the shared `isMissingTableError`
-      // predicate (`@objectstack/metadata/errors`, #4825) — never a hand-rolled
-      // `code === '42P01'` copy — the same call `seedAutonumber` makes above.
-      //
-      // Refused: the security layer refused THIS CALLER's read of `sys_file`
-      // (ADR-0112 `PERMISSION_DENIED` — measured to arrive here as a throw,
-      // never as a short result: the object-level CRUD gate refuses the whole
-      // sub-read). The rows may well exist; this reader may not see them.
-      // Leaving the bare id made the refusal read exactly like an id with no
-      // committed row, or an outage — one value for three facts — so each id
-      // is marked `{ id, metadataRefused: true }` instead
-      // (`FileRefusedValueSchema`): the refusal reaches the reader as a
-      // refusal, in the value itself.
-      // Still fail-open — the record read that asked succeeds — and still no
-      // `name`/`size`/`mimeType`/`url`, because none was read. The download
-      // door judges bytes by the record that owns the file, on its own.
-      //
-      // `debug`, not `warn`: the failure is handed to the CALLER (AGENTS
-      // "Degradation log levels", the third legal answer), and a `warn` here
-      // fired once per read for every reader without `sys_file` read, with a
-      // storage remedy that cannot fix a permission. ⛔ Only the declared
-      // refusal code takes this arm: a database-level ACL fault (`42501`) is
-      // the deployment's outage, not this caller's verdict, and stays below.
-      //
-      // [#22637] PARENT-DERIVED: the refusal answers "may this caller read
-      // `sys_file`?", which is not the question ADR-0104 D3 asks of a file a
-      // record OWNS. The download door already answers that one from the
-      // owning record (maintainer ruling B on #22624: "a file field's metadata
-      // follows the parent-derived verdict the download door already
-      // applies"), so before marking anything the ids this result's own
-      // records own are put to that verdict — `readParentDerivedFiles` — and
-      // the ones it allows hydrate exactly as a `sys_file` reader would see
-      // them. The marker stays on everything else: an id another record owns
-      // (copied in), an attachment-only or unclaimed file, an id with no row,
-      // and every id when the verdict is unwired or cannot be asked.
-      //
-      // [#24335] A caller the security service's admission already refused
-      // never reaches this read (see {@link callerMayReadSysFile}); this arm
-      // still serves a refusal the admission did not foresee, the same way.
-      if (isReadRefusal(error)) {
-        return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
-      }
-      // Everything else (connection drop, timeout, a database-level permission
-      // fault, query error) means the rows may well exist and simply were not
-      // seen. The consumer then receives a bare id where `{ id, name, size,
-      // mimeType, url }` was due, and UI/export renders it as "this record has
-      // no attachment": a fault wearing the appearance of legitimate absent
-      // data, indistinguishable from a record that truly holds no file
-      // (ADR-0110 D3). One `warn`, not `error`, per AGENTS "Degradation log
-      // levels" — the loss is FUNCTIONAL and scoped to this response (the
-      // answer is visibly smaller, and the next read repairs it); nothing on
-      // this path claims to have persisted anything.
-      if (!isMissingTableError(error, 'sys_file')) {
-        this.logger.warn(
-          'sys_file lookup failed; file fields keep their raw ids and will render as "no file" for this read — '
-            + 'check storage/database availability, then re-read to hydrate',
-          {
-            object: objectName,
-            fields: fileFields,
-            unresolvedIds: uniqueIds.length,
-            error: (error as Error)?.message,
-          },
-        );
-      }
-      return records; // fail-open: leave ids as-is
-    }
-
-    // Servability (committed, or a tombstone something still holds) is one
-    // rule for both arms — see {@link servableFileRows}.
-    const fileMap = await this.servableFileRows(objectName, fileRows);
-    if (fileMap.size === 0) return records;
-
-    for (const record of records) {
-      for (const fieldName of fileFields) {
-        const val = record[fieldName];
-        if (val == null) continue;
-        if (Array.isArray(val)) {
-          record[fieldName] = val.map((v: any) =>
-            typeof v === 'string' && fileMap.has(v) ? toFileValue(fileMap.get(v)) : v);
-        } else if (typeof val === 'string' && fileMap.has(val)) {
-          record[fieldName] = toFileValue(fileMap.get(val));
-        }
-      }
-    }
-    return records;
+    return resolveFileReferences.call(host, objectName, records, execCtx);
   }
 
   /**
@@ -13724,14 +13407,11 @@ export class ObjectQL implements IObjectQLEngine {
    * `true` ⇒ the refused arm, which is what that read's refusal served.
    */
   private async callerMayReadSysFile(execCtx?: ExecutionContext): Promise<boolean> {
-    const security = this.resolveReadableIdsSecurity();
-    if (security.kind !== 'usable' || typeof security.svc.canReadObject !== 'function') return true;
-    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
-    try {
-      return (await security.svc.canReadObject('sys_file', caller as ExecutionContext)) === true;
-    } catch {
-      return true;
-    }
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    const host: ThisParameterType<typeof callerMayReadSysFile> = {
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+    };
+    return callerMayReadSysFile.call(host, execCtx);
   }
 
   /**
@@ -13750,36 +13430,13 @@ export class ObjectQL implements IObjectQLEngine {
     uniqueIds: string[],
     execCtx?: ExecutionContext,
   ): Promise<any[]> {
-    const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
-    this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
-      object: objectName,
-      fields: fileFields,
-      refusedIds: uniqueIds.length,
-      parentDerivedIds: owned.size,
-    });
-    const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
-    // Judged per ELEMENT and per RECORD: the verdict covers a file only on
-    // the record whose field owns it, so the same id copied into a second
-    // record is still refused there. An owned, allowed id with no servable
-    // row reads as the bare id — what a `sys_file` reader gets for it.
-    const valueFor = (record: any, v: unknown): unknown => {
-      if (!isFileIdToken(v)) return v;
-      const hit = owned.get(v);
-      if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
-      return hit.row ? toFileValue(hit.row) : v;
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveRefusedFileHydration> = {
+      readParentDerivedFiles: (...a) => this.readParentDerivedFiles(...a),
+      get logger() { return readLogger(); },
     };
-    for (const record of records) {
-      for (const fieldName of fileFields) {
-        const val = record[fieldName];
-        if (val == null) continue;
-        if (Array.isArray(val)) {
-          record[fieldName] = val.map((v: unknown) => valueFor(record, v));
-        } else {
-          record[fieldName] = valueFor(record, val);
-        }
-      }
-    }
-    return records;
+    return serveRefusedFileHydration.call(host, objectName, records, fileFields, uniqueIds, execCtx);
   }
 
   /**
@@ -13788,55 +13445,14 @@ export class ObjectQL implements IObjectQLEngine {
    * the same condition whichever read found it.
    */
   private async servableFileRows(objectName: string, rows: any[]): Promise<Map<string, any>> {
-    const fileMap = new Map<string, any>();
-    // [commit c3c72a4bc] `committed` is servable and always was. A TOMBSTONE
-    // (`status: 'deleted'` + `deleted_at`) is recoverable state, not a delete:
-    // it is a claim about the future (this row is reapable once the grace
-    // window ends) that the sweep re-checks and often withdraws. #10246 already
-    // stopped the two download endpoints treating it as the last word — they
-    // ask the reap guard's own `findFileHolder` and serve the row for as long
-    // as something still holds it. This pass did not, so one `sys_file` row
-    // answered 200 at `/files/:id` and a bare id here: two read surfaces, two
-    // answers, and consumers render the bare id as "no attachment".
-    //
-    // ⛔ The predicate is NOT re-derived here. "Still held" has ONE definition
-    // (`findFileHolder`, a deliberate union of `sys_attachment` join rows AND
-    // the `ref_*` ownership columns) and it lives in the storage package, which
-    // this one cannot import. A copy narrower by a limb would hide files the
-    // sweep refuses to reap — the same defect one limb over — so the question
-    // arrives through {@link registerHeldFileResolver} instead, the same
-    // handover `resolveFileHolder` makes to the download routes. Unwired (bare
-    // kernel, no storage plugin, tests): tombstones stay hidden, exactly as
-    // before this existed.
-    const tombstoned: any[] = [];
-    for (const row of rows) {
-      if (row?.id == null) continue;
-      if (row.status === 'committed') fileMap.set(String(row.id), row);
-      else if (row.status === 'deleted') tombstoned.push(row);
-    }
-    // Lazy by construction: a batch with no tombstone — every ordinary read —
-    // costs nothing at all, and the resolver is BATCHED, so the residual case
-    // costs one extra query for the whole read rather than one per row.
-    if (tombstoned.length > 0 && this._heldFileResolver) {
-      try {
-        const held = await this._heldFileResolver(tombstoned);
-        for (const row of tombstoned) {
-          if (held?.has(String(row.id))) fileMap.set(String(row.id), row);
-        }
-      } catch (error) {
-        // Unreadable evidence is not evidence of a holder. Keep the ids
-        // un-hydrated — the answer this pass gave before commit c3c72a4bc, and the same
-        // direction the download path fails in (`isServableForDownload`) and
-        // the reap guard fails in (it vetoes rather than reaps when it cannot
-        // tell). Distinct from the #6116 catch in `resolveFileReferences`,
-        // which covers the `sys_file` read itself and is untouched.
-        this.logger.warn(
-          'sys_file holder check failed; tombstoned file fields keep their raw ids for this read',
-          { object: objectName, tombstonedIds: tombstoned.length, error: (error as Error)?.message },
-        );
-      }
-    }
-    return fileMap;
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    const readHeldFileResolver = () => this._heldFileResolver;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof servableFileRows> = {
+      get _heldFileResolver() { return readHeldFileResolver(); },
+      get logger() { return readLogger(); },
+    };
+    return servableFileRows.call(host, objectName, rows);
   }
 
   /**
@@ -13894,57 +13510,16 @@ export class ObjectQL implements IObjectQLEngine {
     uniqueIds: string[],
     execCtx?: ExecutionContext,
   ): Promise<Map<string, { ownerId: string; row: any | null }>> {
-    const owned = new Map<string, { ownerId: string; row: any | null }>();
-    const authorize = this._fieldOwnedFileReadAuthorizer;
-    if (!authorize) return owned;
-    const recordIds = [
-      ...new Set(records.map((r) => r?.id).filter((id) => id != null && id !== '').map(String)),
-    ];
-    if (recordIds.length === 0) return owned;
-
-    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
-    try {
-      const rows: any[] = (await this.find('sys_file', {
-        where: { id: { $in: uniqueIds }, ref_object: objectName, ref_id: { $in: recordIds } },
-        fields: [...PARENT_DERIVED_FILE_COLUMNS],
-        context: { ...caller, isSystem: true } as ExecutionContext,
-      })) ?? [];
-      // The ownership pair, read off the row this answer serves: the `where`
-      // narrows the read; this is the condition the ruling serves by.
-      const candidates = rows.filter((row) =>
-        row?.id != null && row.ref_object === objectName && row.ref_id != null
-        && recordIds.includes(String(row.ref_id)));
-      if (candidates.length === 0) return owned;
-
-      const ownerIds = [...new Set(candidates.map((row) => String(row.ref_id)))];
-      const readable = await authorize(objectName, ownerIds, caller);
-      const allowed = candidates.filter((row) => readable?.has(String(row.ref_id)));
-      if (allowed.length === 0) return owned;
-
-      const servable = await this.servableFileRows(objectName, allowed);
-      for (const row of allowed) {
-        owned.set(String(row.id), { ownerId: String(row.ref_id), row: servable.get(String(row.id)) ?? null });
-      }
-      return owned;
-    } catch (error) {
-      // The widening could not be judged, so it is not served: every id keeps
-      // the refused marker, which is still true — this caller's `sys_file`
-      // read WAS refused. The record read that asked still succeeds
-      // (fail-open, #6116). `warn`, per AGENTS "Degradation log levels": the
-      // loss is FUNCTIONAL and scoped to this response — a reader the door
-      // would serve sees "details refused" — and nothing here claims to have
-      // persisted anything.
-      this.logger.warn(
-        'sys_file parent-derived check failed; file fields keep the refused marker for this read — '
-          + 'check storage/database availability, then re-read to hydrate',
-        {
-          object: objectName,
-          refusedIds: uniqueIds.length,
-          error: (error as Error)?.message,
-        },
-      );
-      return new Map();
-    }
+    // [#25522 cut 11] The body moved to `engine-file-reference-hydration.ts` (see `FileReferenceHydrationHost`).
+    const readFieldOwnedFileReadAuthorizer = () => this._fieldOwnedFileReadAuthorizer;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof readParentDerivedFiles> = {
+      get _fieldOwnedFileReadAuthorizer() { return readFieldOwnedFileReadAuthorizer(); },
+      find: (...a) => this.find(...a),
+      servableFileRows: (...a) => this.servableFileRows(...a),
+      get logger() { return readLogger(); },
+    };
+    return readParentDerivedFiles.call(host, objectName, records, uniqueIds, execCtx);
   }
 
   // ============================================

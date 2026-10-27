@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `objectstack cloud login` — authenticate against the ObjectStack Cloud
+ * `objectstack cloud login` — authenticate against the ObjectOS Cloud
  * package registry (`https://cloud.objectos.ai` by default).
  *
  * This is distinct from `os login`, which authenticates against your

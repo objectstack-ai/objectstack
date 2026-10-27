@@ -554,11 +554,19 @@ jobs:
              * construction. One deterministic break therefore ejects everyone
              * behind it, and the raw victim count measures QUEUE DEPTH.
              *
-             * ⚠️ The test is full-sha equality in the strict direction: one
-             * victim's base == another victim's head. ⛔ Never a base PREFIX and
-             * ⛔ never time ordering — both would fuse genuinely independent hits
-             * into one stack, trading this limb's false positive for a false
-             * negative, which is strictly worse. The count exists to be true.
+             * ⚠️ The test is full-sha equality in the strict direction, walked
+             * base to head: from a victim's base, through every merge_group run
+             * in `stackEdges` whose head is that sha (green, non-victim groups
+             * included), until the chain reaches another victim's head. A green
+             * group between two victims is NOT a break in the stack: its
+             * affected-only selection may simply never have run the failing
+             * package, so it carries the broken tree without failing on it.
+             * Walking only victim-to-victim read one deterministic break as two
+             * independent hits (#26265). ⛔ Never a base PREFIX and ⛔ never time
+             * ordering — both would fuse genuinely independent hits into one
+             * stack, trading this limb's false positive for a false negative,
+             * which is strictly worse. The count exists to be true. The index is
+             * data, not git, so the walk keeps a visited set and ends on a loop.
              *
              * A victim whose runs are not in the index (a run older than the
              * window, or a ref that is not a queue ref) is left as its own group:
@@ -582,6 +590,14 @@ jobs:
                 }
               }
 
+              // head sha -> the bases of EVERY indexed run that produced it,
+              // victim or not: the edges the walk below steps back along.
+              const basesOf = new Map();
+              for (const e of stackEdges.values()) {
+                if (!basesOf.has(e.head)) basesOf.set(e.head, new Set());
+                basesOf.get(e.head).add(e.base);
+              }
+
               const inherited = new Set();
               let unresolved = 0;
               for (const [pr, runs] of byPr) {
@@ -590,10 +606,18 @@ jobs:
                   const e = stackEdges.get(String(id));
                   if (!e) continue;
                   resolved = true;
-                  for (const upstream of producers.get(e.base) ?? []) {
-                    if (upstream === pr) continue;
-                    inherited.add(pr);
-                    union(pr, upstream);
+                  const visited = new Set();
+                  const frontier = [e.base];
+                  while (frontier.length > 0) {
+                    const sha = frontier.pop();
+                    if (visited.has(sha)) continue;
+                    visited.add(sha);
+                    for (const upstream of producers.get(sha) ?? []) {
+                      if (upstream === pr) continue;
+                      inherited.add(pr);
+                      union(pr, upstream);
+                    }
+                    for (const b of basesOf.get(sha) ?? []) frontier.push(b);
                   }
                 }
                 if (!resolved) unresolved++;
@@ -839,8 +863,9 @@ jobs:
                   ? [
                     "⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue",
                     'branch names: GitHub builds each queued PR on top of the previous entry, so a',
-                    "build whose BASE commit IS another victim's queue HEAD contains that victim's",
-                    'tree by construction. A single deterministic break therefore ejects every PR',
+                    "build whose BASE chain reaches another victim's queue HEAD (directly, or through",
+                    "green groups queued between them) contains that victim's tree by construction.",
+                    'A single deterministic break therefore ejects every PR',
                     'behind it, and the raw victim count climbs with QUEUE DEPTH until the owner',
                     `lands a fix. Start with the ${independent === 1 ? 'root' : 'roots'} above; an `
                       + '`inherited` row is a bystander until shown otherwise.',
@@ -866,6 +891,10 @@ jobs:
                 'line beside the FAIL line (a timeout and an assertion are the same FAIL line and',
                 'opposite diagnoses), decide the cause, and close this issue with the fix or with',
                 'the reason it is not one.',
+                '',
+                'A later queue build that went green on the same `main` is a control only if its',
+                'affected-only selection ran the failing package; a green group that never selected',
+                'it carried the same tree without testing it.',
                 '',
                 `Last refreshed by queue build [${run.id}](${run.html_url}) (PR #${prNumber}).`,
                 '',

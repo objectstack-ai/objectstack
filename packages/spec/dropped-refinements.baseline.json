@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 248,
-    "droppedRefinementSites": 858,
+    "publishedSchemasWithDroppedRefinements": 250,
+    "droppedRefinementSites": 884,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -83,6 +83,7 @@
         "manifest.dashboards.element.header.actions.element",
         "manifest.dashboards.element.widgets.element",
         "manifest.dashboards.element.widgets.element.filter",
+        "manifest.data.element.records.element.valueType",
         "manifest.datasets.element",
         "manifest.datasets.element.filter",
         "manifest.datasets.element.include.element",
@@ -162,12 +163,14 @@
     },
     "api/DisablePackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/EnablePackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
@@ -194,6 +197,7 @@
     },
     "api/GetInstalledPackageResponse": {
       "sites": [
+        "data.options[0].manifest.data.element.records.element.valueType",
         "data.options[0].manifest.navigationContributions.element.items.element.lazy",
         "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.options[1].manifest.actions.element.in",
@@ -267,6 +271,7 @@
     },
     "api/GetPackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
@@ -306,18 +311,21 @@
     },
     "api/InstallPackageRequest": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstallPackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstalledPackageAtEitherStage": {
       "sites": [
+        "options[0].manifest.data.element.records.element.valueType",
         "options[0].manifest.navigationContributions.element.items.element.lazy",
         "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "options[1].manifest.actions.element.in",
@@ -388,6 +396,7 @@
     },
     "api/ListInstalledPackagesResponse": {
       "sites": [
+        "data.packages.element.options[0].manifest.data.element.records.element.valueType",
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy",
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.packages.element.options[1].manifest.actions.element.in",
@@ -453,6 +462,7 @@
     },
     "api/ListPackagesResponse": {
       "sites": [
+        "packages.element.manifest.data.element.records.element.valueType",
         "packages.element.manifest.navigationContributions.element.items.element.lazy",
         "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
@@ -492,36 +502,42 @@
     },
     "api/PackageInstallBody": {
       "sites": [
+        "options[1].data.element.records.element.valueType",
         "options[1].navigationContributions.element.items.element.lazy",
         "options[1].navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallManifest": {
       "sites": [
+        "data.element.records.element.valueType",
         "navigationContributions.element.items.element.lazy",
         "navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallRequest": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallResponse": {
       "sites": [
+        "data.package.manifest.data.element.records.element.valueType",
         "data.package.manifest.navigationContributions.element.items.element.lazy",
         "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageUpgradeRequest": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/ResolveDependenciesRequest": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
@@ -1042,6 +1058,16 @@
         ""
       ]
     },
+    "data/Seed": {
+      "sites": [
+        "records.element.valueType"
+      ]
+    },
+    "data/SeedLoaderRequest": {
+      "sites": [
+        "seeds.element.records.element.valueType"
+      ]
+    },
     "data/SetOperator": {
       "sites": [
         "$in",
@@ -1101,48 +1127,56 @@
     },
     "kernel/DisablePackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/EnablePackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/GetPackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageRequest": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageResponse": {
       "sites": [
+        "package.manifest.data.element.records.element.valueType",
         "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstalledPackage": {
       "sites": [
+        "manifest.data.element.records.element.valueType",
         "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/ListPackagesResponse": {
       "sites": [
+        "packages.element.manifest.data.element.records.element.valueType",
         "packages.element.manifest.navigationContributions.element.items.element.lazy",
         "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/Manifest": {
       "sites": [
+        "data.element.records.element.valueType",
         "navigationContributions.element.items.element.lazy",
         "navigationContributions.element.items.element.lazy.options[0]"
       ]

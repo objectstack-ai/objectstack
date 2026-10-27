@@ -376,6 +376,27 @@ never deadlock against itself. The exemption is keyed on run identity rather tha
 elevation, so a `runAs:'user'` run stays row-level-security scoped while it
 writes — it does not become a system write.
 
+**Reading the lock.** Anyone who can read the record can ask whether it is
+locked, including a member who is not on the approval and so is served no
+request row:
+
+```bash
+curl -b cookies.txt \
+  "https://your-app.example.com/api/v1/approvals/records/expense/rec_123/lock"
+# → { "success": true, "data": { "locked": true } }
+```
+
+The answer is `locked` and nothing else: no request, approvers or history,
+which stay behind the object's `approvalsVisibleToReaders` switch. `locked` is
+`true` while a pending request's node has `lockRecord` other than `false`. That
+is the same check the server applies when it refuses an edit with `409
+RECORD_LOCKED`, so a page that reads it never offers an edit the server will
+refuse. The record is read as the caller: a record they cannot read answers
+`404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets. The
+SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
+member is `IApprovalService.getRecordLock`. An approvals service without that
+member answers `501`.
+
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 

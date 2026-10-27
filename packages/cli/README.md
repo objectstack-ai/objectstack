@@ -4,6 +4,8 @@ Command Line Interface for building metadata-driven applications with the Object
 
 Built on [oclif](https://oclif.io/) — commands are auto-discovered, and plugins can extend the CLI without modifying the main package.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Installation
 
 ```bash
@@ -376,6 +378,8 @@ resolve is exactly this map — a subpath is added here on purpose, with a
 | `@objectstack/cli/console` | Exactly three Console SPA mounting helpers — `resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` — consumed by cloud's `objectos-runtime` node server to mount the Console. The drift guards and the rest of `utils/console.ts` are **not** on this subpath (#16046). |
 | `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
 | `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
+
+The three code subpaths (`.`, `./console`, `./hook-body`) are **ESM**: the package is `"type": "module"` and each maps to an ES module. Load them with `import`. A CommonJS caller reaches them through `import()`, or through `require()` only on a Node that loads ES modules synchronously (22.12 and later).
 
 ### `@objectstack/cli/hook-body`
 

@@ -236,7 +236,8 @@ name, so calls are case-insensitive.
 
 ### Syntax options
 
-Each condition field has two forms — a shorthand and an `On` suffix:
+The node-level condition keys are `visibleWhen` (show), `hidden` and
+`disabled`. Each takes a boolean, a `${}` template, or a raw expression:
 
 <!-- os:check -->
 ```jsonc
@@ -250,10 +251,11 @@ Each condition field has two forms — a shorthand and an `On` suffix:
 
 <!-- os:check -->
 ```jsonc
-{ "hiddenOn": "data.status !== 'active'" } // raw expression (no ${} needed)
+{ "hidden": "data.status !== 'active'" } // raw expression (no ${} needed)
 ```
 
-The `On` variants accept raw expressions without `${}` wrapping — the entire string is the expression.
+`visibleOn` / `hiddenOn` / `disabledOn` are retired and refused by name —
+rename to `visibleWhen` / `hidden` / `disabled`; the value is unchanged.
 
 ### Visibility patterns
 
@@ -267,12 +269,6 @@ The `On` variants accept raw expressions without `${}` wrapping — the entire s
 <!-- os:check -->
 ```json
 { "visible": "${data.record.status === 'active'}" }
-```
-
-**Data-dependent:**
-<!-- os:check -->
-```json
-{ "hidden": "${!data.items || data.items.length === 0}" }
 ```
 
 **Combined conditions:**
@@ -290,13 +286,13 @@ The `On` variants accept raw expressions without `${}` wrapping — the entire s
 
 <!-- os:check -->
 ```json
-{ "disabledOn": "!data.canPerformAction || data.isLocked" }
+{ "disabled": "!data.canPerformAction || data.isLocked" }
 ```
 
 ## Field-level conditional rules (`visibleWhen` / `readonlyWhen` / `requiredWhen`)
 
 These live on the **object's field metadata**, are written in CEL, and are
-evaluated by `@objectstack/formula` -- a different tier from the `${}` / `On`
+evaluated by `@objectstack/formula` -- a different tier from the node-level
 conditions above, which are schema/widget-level and run on the recursive-descent
 `SafeExpressionParser`. **How to author them is the `objectstack-data` skill's
 job**, under "Conditional Field Rules": the predicate scope, the client-only vs
@@ -641,6 +637,6 @@ When an expression isn't working:
 1. **Which key is it on, and does that type declare the key?** `content` and the predicate keys are evaluated and read on every type. `title` / `label` / `value` / `description` are evaluated **only on the types that declare them** — `statistic` (`label` / `value` / `description`), `card` (`title` / `description`), `button` (`label`) — and read raw everywhere else, including on a namespaced spelling such as `ui:statistic`. A `${...}` inside a `props` envelope is evaluated and then discarded. (A `properties` envelope is the one that is evaluated *and* hoisted onto the node — see [`rules/protocol.md`](../rules/protocol.md) for why that is recorded, not recommended.)
 2. Is the `${}` syntax correct? Check for unmatched braces.
 3. Is the data actually available in scope? Check what the host published on `PredicateScopeProvider` — ⛔ not `SchemaRendererProvider`'s `dataSource`, which publishes no expression root.
-4. For conditions: are you using `On` suffix correctly? (`hiddenOn` takes raw expression, `hidden` needs `${}` if it's a string).
+4. For conditions: `visibleWhen` / `hidden` / `disabled` take a raw expression or a `${}` template; the `On` spellings are refused.
 5. Does the expression use a blocked pattern? Check for constructors, `eval`, `window`, etc.
 6. Is type coercion causing issues? `${0 && "yes"}` returns `0`, not `false`.

@@ -1318,6 +1318,16 @@ const zh = {
     edited: '(已编辑)',
     via: '通过 {{source}}',
     viewSource: '查看来源',
+    // objectstack#25959 — a run of consecutive updates folded into one feed row.
+    foldedUpdates: '更新了 {{fields}}',
+    foldedUpdateCount: '{{count}} 次',
+    foldedUpdateCount_one: '{{count}} 次',
+    foldedUpdateCount_other: '{{count}} 次',
+    foldedMoreFields: '其他 {{count}} 项',
+    foldedMoreFields_one: '其他 {{count}} 项',
+    foldedMoreFields_other: '其他 {{count}} 项',
+    expandFolded: '展开每次更新',
+    collapseFolded: '收起更新',
     // Replies
     replyCount: '{{count}} 条回复',
     replyCount_one: '{{count}} 条回复',

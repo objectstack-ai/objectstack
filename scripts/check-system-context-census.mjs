@@ -437,7 +437,7 @@ export const NON_READ_ANCHORS = [
     rowSeams: ['`owner_id` is not auto-stamped on INSERT', 'The whole security middleware short-circuits'],
   },
   {
-    file: 'packages/objectql/src/engine.ts',
+    file: 'packages/objectql/src/engine-driver-options.ts',
     symbol: 'buildDriverOptions',
     collapsesOntoRead: true,
     why: 'row 24 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
