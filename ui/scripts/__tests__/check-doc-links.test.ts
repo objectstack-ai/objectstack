@@ -514,7 +514,9 @@ describe('the repo it guards', () => {
     expect(scanned['README.md']).toBe(1);
     expect(scanned['CONTRIBUTING.md']).toBe(1);
     expect(scanned['ROADMAP.md']).toBe(1);
-    expect(scanned['examples']).toBeGreaterThanOrEqual(4);
+    // Three READMEs since the two host-console examples were deleted (#25922):
+    // the index, hello-world and schema-catalog.
+    expect(scanned['examples']).toBeGreaterThanOrEqual(3);
     expect(scanned['docs']).toBeGreaterThanOrEqual(15);
     expect(scanned['content/docs']).toBeGreaterThanOrEqual(100);
     // objectui#3622. 38 of the 39 package directories carry a README today

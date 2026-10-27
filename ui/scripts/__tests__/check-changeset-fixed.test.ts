@@ -118,6 +118,17 @@ describe('analyze', () => {
     expect(result.privateInFixed).toEqual([]);
   });
 
+  it('classifies a private package outside both lists only while private packages are versioned', () => {
+    // `@object-ui/app-shell` since it left npm: versioned on its own, published
+    // nowhere. Under `version: false` the same package would be treated as
+    // ignored, so it stays unclassified there.
+    const outside = [...manifests, pkg('@object-ui/private-shell', true)];
+    expect(analyze({ ...config, privatePackages: { version: true, tag: false } }, outside).unclassified).toEqual([]);
+    expect(
+      analyze({ ...config, privatePackages: { version: false, tag: false } }, outside).unclassified.map((p) => p.name)
+    ).toEqual(['@object-ui/private-shell']);
+  });
+
   it('reports a package that is in neither `fixed` nor `ignore`', () => {
     const result = analyze({ ...config, privatePackages: { version: true, tag: false } }, [
       ...manifests,

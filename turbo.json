@@ -43,7 +43,6 @@
         "$TURBO_ROOT$/ui/scripts/vite-*.ts",
         "$TURBO_ROOT$/ui/vitest.config.mts",
         "$TURBO_ROOT$/ui/tsconfig.json",
-        "$TURBO_ROOT$/ui/tsconfig.tier-base.json",
         "$TURBO_ROOT$/ui/apps/console/src/lib/auth-preflight.ts",
         "$TURBO_ROOT$/ui/eslint-rules/no-unprefixed-query-params.js",
         "$TURBO_ROOT$/ui/packages/cli/src/commands/generate.ts",
