@@ -72,10 +72,20 @@ permissions:
   contents: read
   pull-requests: write
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled.
+concurrency:
+  group: docs-drift-check-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docs-drift:
     name: Flag docs affected by code changes
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 2.1 min, max
+    # 6.2.
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
