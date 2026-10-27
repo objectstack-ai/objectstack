@@ -1,0 +1,38 @@
+{
+  "number": 26342,
+  "kind": "pull_request",
+  "title": "fix(spec,service-settings): name the hosted product \"ObjectOS Cloud\" in the AI 501 remedy, settings hints, docs and READMEs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:55:05Z",
+  "updated_at": "2026-10-26T22:50:14Z",
+  "closed_at": "2026-10-26T22:50:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T22:50:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26342",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9HSbaezN5sJxczqPerA1G27)_\nFixes #26228\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThe residue of the ObjectOS product-name ruling (model 2: ObjectOS is the product, in Community / Cloud / Enterprise editions; ObjectStack is the protocol, SDK, CLI and framework). Every remaining user-read \"ObjectStack Cloud\" now reads \"ObjectOS Cloud\". Where a sentence means the hosted control plane as a system, the same sentence says \"the ObjectOS Cloud control plane\".\n\nFive commits:\n\n1. **The AI 501 remedy, with all its pins, in one commit.** `REMEDY_DETAIL['ai']` in `packages/spec/src/system/core-services.zod.ts` now reads \"Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework\". This is the message every `/ai/*` 501 body carries and the one `/discovery` reports as `services.ai.message`. Moving with it: the exact-string pin in `packages/runtime/src/domains/ai-anonymous-deny-ordering.test.ts`; the two `docs/qa/platform-checklist/areas/ai.json` clauses, with revisions bumped (open-edition-honest-degradation 1 to 2, console-ai-surface-gating 6 to 7) and history rows appended; the `http-protocol.mdx` discovery example; and the `services-checklist.mdx` quotation.\n2. **Settings hints.** `service-settings` `ai.manifest.ts` (\"realized only by an ObjectOS Cloud tier\") and `knowledge.manifest.ts` (the turso \"Test connection\" hint, \"built in the ObjectOS Cloud monorepo\"), plus the `knowledge.manifest.test.ts` property pin.\n3. **Docs and READMEs.** `content/docs/deployment/{cloud-connection,index,publish-and-preview}.mdx`, `protocol/objectql/schema.mdx`, `protocol/kernel/metadata-service.mdx`, `ui/setup-app.mdx`, `ROADMAP.md`, and the READMEs of `adapters/hono`, `drivers/driver-memory`, `services/service-package` and `services/service-cluster-redis`.\n4. **Developer comments only.** `packages/cli/src/**` and `packages/cli/test/**` headers and measurement notes, `packages/cloud-connection/src/{marketplace-proxy-plugin,marketplace-public-url,runtime-config-plugin}.ts`, and `packages/runtime/src/http-dispatcher.ts`. Four lines were re-wrapped where the longer \"the ObjectOS Cloud control plane\" pushed them past their paragraph's width.\n5. **Changeset** `.changeset/26228-objectos-cloud-residue.md`: `patch` on `@objectstack/spec`, `@objectstack/runtime` and `@objectstack/service-settings`.\n\nUnchanged: identifiers, env vars (`OS_CLOUD_*`), paths (`~/.objectstack/cloud.json`) and `os cloud …` commands; every `CHANGELOG.md`; `content/docs/releases/**`; `.changeset/26136-objectos-cloud-naming.md`; and every `ui/` path.\n\n## Acceptance\n\nRan the card's grep, with `.changeset/26136-objectos-cloud-naming.md` also excluded as history:\n\n`git grep -n \"ObjectStack Cloud\" -- ':!**/CHANGELOG.md' ':!content/docs/releases/**' ':!ui/AGENTS.md' ':!ui/docs/adr/**' ':!.changeset/26136-objectos-cloud-naming.md'`\n\n- **Before**, at `origin/main` `61ba04f6`: 52 lines.\n- **After**, at head `40119430`: 3 lines, each kept on purpose.\n  - `CHANGELOG.md:737`, the root changelog. The pathspec `**/CHANGELOG.md` does not match the root file, and this is history, so it is left alone.\n  - `packages/cli/test/cloud-product-name.test.ts:48,51`. This guard asserts the retired name appears in no cloud-command help string, so the literal is the thing it checks for. Kept as-is.\n\nTests and pins, all at head `40119430`:\n\n- `pnpm --filter @objectstack/service-settings test`: Test Files 60 passed (60), Tests 1000 passed (1000).\n- `pnpm --filter @objectstack/runtime exec vitest run src/domains/ai-anonymous-deny-ordering.test.ts`: 13/13.\n- `pnpm --filter @objectstack/spec exec vitest run src/system/core-service-provider.test.ts`: 9/9. Its `/Cloud\\/Enterprise/` regex still holds.\n- `node scripts/check-platform-checklist.mjs`: OK, 16 areas, 329 items.\n- **Ablation** of the 501 string. With `scripts/ablation-replace.mjs`, `core-services.zod.ts` was put back to the old product name (anchor 1 to 0, blob `d9d79d6a` to `f3a93587`). The deny-ordering suite then went red: 1 failed, 12 passed, on \"keeps the 501 body string-identical to /discovery's services.ai message\". After restoring (blob equals HEAD, `git diff HEAD` empty) and rebuilding, it was 13/13 again. The dist pre-flight's marker reading does not apply here, for two reasons: the runtime suite aliases `@objectstack/spec` to source, and the spec dist spells the em dash as a `—` escape. The red/green pair is the evidence.\n- Gate families: `dispatch-gates --commands` derived 121 commands, and all 121 were run locally with exit 0 at `40119430`. `--ran` reconciliation: 121 run, 0 NOT-MEASURED, a DERIVED zero.\n- Link check: no link target changed, only link text. The card's `check:docs-links` exists as no `package.json` script; link checking is the `check-links.yml` CI job on this PR.\n\n## Acceptance notes\n\n- **\"Cloud/Enterprise\" spelling.** The card suggested \"ObjectOS Cloud / Enterprise\", with spaces. I kept the existing slash form, \"ObjectOS Cloud/Enterprise\", because `core-service-provider.test.ts` pins `/Cloud\\/Enterprise/` and that file is outside the claimed file surface. Both spellings name the same two paid editions. Changing the spacing is a one-line follow-up in that test if wanted.\n- **Not in this PR.** `ui/AGENTS.md` and `ui/docs/adr/0060-*` still carry the retired name. Both are governed (Tier H) and are out of this card's scope by its own item 5.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KCszQFMjfcrW4p59RTTn8q)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01KCszQFMjfcrW4p59RTTn8q\n"
+}

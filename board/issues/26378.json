@@ -1,0 +1,36 @@
+{
+  "number": 26378,
+  "kind": "pull_request",
+  "title": "docs: TypeScript legacy node10 resolution is unsupported for the 15 packages with subpath exports",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T01:05:37Z",
+  "updated_at": "2026-10-27T02:00:24Z",
+  "closed_at": "2026-10-27T02:00:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T02:00:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26378",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi941YjangeAFXEgevqVv4bY9)_\nFixes #26208\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：插件开发指南加一段「Module resolution」，15 个带子路径 exports 的已发布包 README 各加一行：TypeScript 老的 node10 解析不支持，请用 node16、nodenext 或 bundler。\n- 为什么改：按裁决 A（6422810199）落地。node10 不读 exports，用这种配置的使用方 import 子路径时类型静默找不到。\n- 风险与回滚：只改文档和 README，不动 exports、不加 typesVersions、不加门禁。回滚即 revert 本 PR。\n- 先看：content/docs/plugins/development.mdx（新段落），packages/spec/README.md（README 行的样子），.changeset/26208-node10-resolution-unsupported.md。\n- 两分钟验证：`pnpm check:published-readme-links`，预期 0 root-relative、锚点全部解析（含新的 #module-resolution）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `content/docs/plugins/development.mdx`: a `### Module resolution` paragraph right under the Step 1 `tsconfig.json` block (the page already shows `moduleResolution: \"bundler\"`). It states that the published packages declare entry points only through `exports`, that `node10` (`\"node\"`, the default under `module: commonjs`) ignores `exports` and is unsupported, and that `bundler`, `node16` or `nodenext` is required. Chosen over `content/docs/getting-started/**`: no page there covers TypeScript setup, and open work holds that tree (the seat-3 hand-over 6430890935 names the collisions).\n- One identical line in the README of each of the 15 packages, linking to that anchor. Placed before the first `##` heading (after the intro), appended at the end for the three READMEs that have no `##` heading (platform-objects, plugin-webhooks, service-cluster), and under the existing \"TypeScript Configuration\" section in `packages/types/README.md`.\n- Root changeset: one `patch` for the 15 packages, because each README is in its package's `files[]` and ships in the tarball.\n\n## Acceptance notes\n\n- Premise re-read on `origin/main` 6390fe52: every one of the 15 packages still has subpath `exports` (spec 19, platform-objects 10, metadata 5, cli 2, lint 2, plugin-auth 2, the other nine 1 each), and no `packages/**/package.json` declares `typesVersions` (0 files). After #26321 and #26352, metadata-core, service-cluster and cli still carry subpaths, so none was dropped from the list.\n- A scan of every non-private `packages/**/package.json` finds exactly these 15 published packages with subpath exports, so the list is complete on this tree.\n- Evidence for the claim: the attw 0.18.5 `NoResolution@node10` reading on PR #26198 (os-dev report 6419735271).\n- Out of scope, untouched: no `exports` or `typesVersions` change, no new check, no `ui/` path.\n\n## Verification\n\nAt head 894bdb38.\n\n<details><summary>Derived gate families: 92 derived, 92 run, 0 NOT-MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE` printed: `✓ dispatch-gates --ran: 92 derived famil(ies) accounted for — 92 run, 0 NOT-MEASURED (a DERIVED zero — all 92 recorded an exit code and none of them is 3).`\n\nTwo families first exited on shallow-clone prerequisites (`check-engine-split-ratio --days 90` exit 2, `check-plugin-teardown-shape --self-test` exit 3); after deepening the clone both exit 0. The build-reading families (`check:dts-closure`, `check:dual-build-cjs-loads`, `check:i18n`, spec `check:docs`, `check:skill-examples`) ran after a locked `turbo run build --filter='./packages/**'` (VERDICT command-exit 0) and exit 0.\n</details>\n\n<details><summary>Acceptance gates</summary>\n\n- `pnpm check:published-readme-links` exit 0: `567 outbound link(s) across 159 published markdown file(s): 0 root-relative, 0 non-canonical origin(s), 62 docs-site page(s) resolved (0 via redirect), 17 anchor(s) verified`.\n- `pnpm check:published-readme-exports` exit 0 (run on the built tree; outside the derivation, run because the card names it).\n- `pnpm check:doc-anchors` exit 0: 598 internal fragment links all resolve.\n- `pnpm check:doc-authoring` exit 0.\n- lychee (`check-links.yml`) not run locally; the docs paragraph adds no outbound link. Read from this PR's check-runs.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRdDB2C42HgHcE5Vrt\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRdDB2C42HgHcE5Vrt)_\n"
+}

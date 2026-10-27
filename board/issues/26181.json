@@ -2,8 +2,8 @@
   "number": 26181,
   "kind": "issue",
   "title": "plugin-approvals: approval notifications name the record by its id — \"Your Contract C8Mp7TjRYta8mOWx was approved.\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,24 @@
     "area:workflow",
     "bug",
     "domain:server",
-    "needs-user-decision",
-    "pm:awaiting-maintainer",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T14:56:24Z",
-  "updated_at": "2026-10-26T17:40:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T02:32:52Z",
+  "closed_at": "2026-10-27T02:31:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26181",
-  "body": "Filing class: ② needs a maintainer re-ruling — it revisits ruling B of #23556 / #23594 (`{{object}} {{record}}` = object label + record id). Reach: public door, measured on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`). **Reader:** the maintainer, then the approvals lane (`plugin-approvals/src/translations/messages.ts`, `approval-notification-text.ts`).\n\n## 维护者速读\n审批通知现在用记录 id 指代记录：「Approval requested — A decision on Contract C8Mp7TjRYta8mOWx is waiting on you.」「Your Contract C8Mp7TjRYta8mOWx was approved.」。收件人看不出是哪份合同，要点进去才知道。这是平台之前的裁决（#23556/#23594 方案 B）定下的写法，要改需要重新裁决。\n\n## Measured\nAll 11 notifications of one hotclm regression pass, read back from `sys_notification`: the four `approval.requested`, two `approval.approved` and one `approval.rejected` name the record as `Contract <16-char id>`. The app's own notifications in the same bell name it by title (\"Contract approved: 回归测试 订单 25万（审批阶梯）\").\n\n## Options\n- **A** — name the record by its display title (the object's title field, ADR-0079), id only when the title is empty or unreadable to the recipient.\n- **B** — title plus id (\"Contract 回归测试 订单 25万 (C8Mp…)\").\n- **C** — keep the id (current ruling).\n\nDedupe: objectstack issues (2,000 most recently updated, all states) grepped for `{{record}}`, `record by its id`, `23594` — neighbours #24375 / #24501 (object API name on the request page), none revisits this.\n\n---\n_Filed from the hotclm browser regression thread (2026-10-26); maintainer: 「平台的问题应该提交issue到平台」._"
+  "body": "Ruled: 6429362190 · letter A′ · 2026-10-26T23:01Z\n\nFiling class: ② needs a maintainer re-ruling — it revisits ruling B of #23556 / #23594 (`{{object}} {{record}}` = object label + record id). Reach: public door, measured on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`). **Reader:** the maintainer, then the approvals lane (`plugin-approvals/src/translations/messages.ts`, `approval-notification-text.ts`).\n\n## 维护者速读\n审批通知现在用记录 id 指代记录：「Approval requested — A decision on Contract C8Mp7TjRYta8mOWx is waiting on you.」「Your Contract C8Mp7TjRYta8mOWx was approved.」。收件人看不出是哪份合同，要点进去才知道。这是平台之前的裁决（#23556/#23594 方案 B）定下的写法，要改需要重新裁决。\n\n## Measured\nAll 11 notifications of one hotclm regression pass, read back from `sys_notification`: the four `approval.requested`, two `approval.approved` and one `approval.rejected` name the record as `Contract <16-char id>`. The app's own notifications in the same bell name it by title (\"Contract approved: 回归测试 订单 25万（审批阶梯）\").\n\n## Options\n- **A** — name the record by its display title (the object's title field, ADR-0079), id only when the title is empty or unreadable to the recipient.\n- **B** — title plus id (\"Contract 回归测试 订单 25万 (C8Mp…)\").\n- **C** — keep the id (current ruling).\n\nDedupe: objectstack issues (2,000 most recently updated, all states) grepped for `{{record}}`, `record by its id`, `23594` — neighbours #24375 / #24501 (object API name on the request page), none revisits this.\n\n---\n_Filed from the hotclm browser regression thread (2026-10-26); maintainer: 「平台的问题应该提交issue到平台」._\n"
 }

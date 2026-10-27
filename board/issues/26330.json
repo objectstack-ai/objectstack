@@ -1,0 +1,37 @@
+{
+  "number": 26330,
+  "kind": "pull_request",
+  "title": "fix(cli): os dev shifts off a busy port before it compiles, so the config reads the port the server binds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:20:50Z",
+  "updated_at": "2026-10-26T21:51:50Z",
+  "closed_at": "2026-10-26T21:51:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T21:51:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26330",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XBnXB7E8hqiCjc4qEdSqTRv)_\nFixes #26270\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nWhen `os dev` shifts off a busy port, the config now reads the port the server binds, through the one port channel #26243 set up (`portFlagEnv`, `OS_PORT`/`PORT`). No second copy of the precedence: the requested port is the expression `dev.ts` already had (`port ?? '3000'`), the walk is `serve.ts`'s own `getAvailablePort`, and the notice is `serve.ts`'s own wording, extracted into `formatDevPortShiftNotice`.\n\n- **`os dev` (`packages/cli/src/commands/dev.ts`).** Before the compile (the first process that evaluates the config), the parent runs the same walk from the same requested port. On a shift it prints the shift notice (stderr), exports the bound port with `portFlagEnv` (so the compile, the watch recompiles and the `serve` child read it), and forwards it as the child's `--port`, so the child binds it without walking again and a restart keeps it. An exhausted walk is left to the child, which repeats it and prints `formatExhaustedPortSearchNotice` as before.\n- **`os serve` (`packages/cli/src/commands/serve.ts`).** The development auto-shift branch now exports the port it shifted to with `portFlagEnv`, before `loadProjectEnvFiles`, the config load, and the direct `os serve --dev` boot compile (#26242). That is the same branch whether it was entered through `--dev` or `NODE_ENV=development`.\n- `utils/port-contract.ts`: `portFlagEnv`'s caller list names the shift. `examples/app-showcase/src/system/self-url.ts` is unchanged: its header claims stay true.\n\n## Measured at the public door (`examples/app-showcase`, a TCP listener holding the requested port)\n\n| boot | `main` (after #26268) | this branch |\n|---|---|---|\n| `os dev --fresh -p 41310` | shift notice 41310 → 41311; `/api/v1/meta/connector/showcase_status_api` `baseUrl` `:41310`; `POST /api/v1/automation/showcase_declarative_connector_ping/trigger` **400 FLOW_FAILED** | (41330 → 41331, 41400 → 41401 after the main merge) `baseUrl` `:41331` / `:41401`; trigger **200**, `ping.body.data.status: \"ok\"` |\n| `OS_PORT=41320 os dev --fresh` (no flag) | 41320 → 41321; `baseUrl` `:41320`; trigger **400** | (41340 → 41341) `baseUrl` `:41341`; trigger **200** |\n| `os serve --dev -p 41370` | 41370 → 41371; trigger **400** | (41350 → 41351) trigger **200**; after merging #26289: (41390 → 41391) `baseUrl` `:41391`, trigger **200** |\n| `NODE_ENV=development os serve -p 41380` | 41380 → 41381; trigger **400** | (41360 → 41361) trigger **200** |\n\nThe `main` column's failure text is `connector_action(showcase_status_api.request) failed: resilientFetch: request timed out after 30000ms` because the probe's holder accepts and never answers; with nothing answering, the card measured `fetch failed`. The ruling's scope note on `os serve` without `--dev`: it does shift, under `NODE_ENV=development` only (`portAutoShiftAllowed`), and it is the same branch through the same channel, so it is fixed by the same line. Production `os serve` still refuses a busy port, unchanged.\n\n## The pin\n\n`packages/cli/test/dev-connector-env-parity.integration.test.ts` gains a third boot: `os dev -p N` with N held for the whole boot by an HTTP neighbour answering 503. The bound port is read from the child's own banner. Three arms: the materialized connector `baseUrl`, the served `/api/v1/meta/connector/NAME` `baseUrl`, and a flow pinging `/api/v1/health` through the connector (`fxp_ping`, the fixture's `showcase_declarative_connector_ping`) answering 200.\n\n- **Red first** (commit 1084d2e6 test + 774eb26b neighbour, fix sources restored from before bc2d71ed, cli rebuilt): 3 failed, 3 passed. `expected 'http://127.0.0.1:37609' to be 'http://127.0.0.1:37610'` (twice) and `FLOW_FAILED … connector_action(fxp_self.ping) failed: health answered 503: expected 400 to be 200`. The earlier #26130/#26243 arms stayed green.\n- **Green** with the fix: 6/6, and 9/9 together with `serve-dev-connector-env-parity.integration.test.ts` after merging `main`.\n- The first red run hung: `holdPort()` from the shared helper never answers, so its `release()` waited on the CLOSE_WAIT socket the ping left behind (the hook timed out at 600 s). The file owns an answering neighbour instead, as `serve-port-drift-notice.e2e.test.ts` does; no draw is added (the port is held, not released, so the `released-port-production-spawn` ledger is unchanged).\n\n## Tests and gates (head 42bd3668)\n\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2`: lock `VERDICT command-exit 0`, Test Files 334 passed, Tests 4884 passed, at 42bd3668 (4878 before the main merge, at 4cb7cd35).\n- `--project integration` on the two parity files: 2 files, 9 tests passed.\n- `pnpm --filter @objectstack/cli typecheck` (tsc plus `check:test-typecheck`, whose project lists this test file): exit 0.\n- ESLint `--no-inline-config` on the four touched sources: exit 0.\n- `dispatch-gates --commands`: 69 families, all run, `--ran` reconciliation `69 derived … 68 run, 1 NOT-MEASURED`. Every run exited 0 except: `check:dual-build-cjs-loads` exit 3 (`Run pnpm build first`, NOT MEASURED, CI builds and runs it), and `check-plugin-teardown-shape --self-test` exit 3 on the shallow checkout, 0 after `git fetch origin 621a4876` (its pinned fixture).\n\n## Acceptance notes\n\n- **Residual window.** The parent's probe releases the port before the child binds it. If something takes it in between, the child shifts once more, says so, and exports its own port for its config, but the artifact the parent compiled (`/api/v1/meta`) keeps the probed port until the next recompile. Stated in the code and the changeset.\n- **`--port` text notice.** When the parent shifts, the child receives the bound port as a number, so `serve`'s `portTextReadNotice` (for text like `08080` read as 8080) does not print on that boot. It still prints whenever no shift happens.\n- **Test instrument.** `holdPort()` in `test/helpers/serve-process.ts` cannot be released once something has connected to it (CLOSE_WAIT, `server.close()` never calls back). Not filed: no product defect, no reach outside tests. Carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NQ4sTujBVMFFGmdXcRmdd5)_\n"
+}

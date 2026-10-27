@@ -1,0 +1,35 @@
+{
+  "number": 26319,
+  "kind": "pull_request",
+  "title": "fix(scripts): ADR-0087 registration gate reads ui workspace packages and .tsx modules",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T20:54:00Z",
+  "updated_at": "2026-10-26T21:19:06Z",
+  "closed_at": "2026-10-26T21:19:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T21:19:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26319",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Ex6pB8edHJLnCCc1tgdXz5)_\n\nPart of #26220 (parts 1 and 2 of the claim. Part 3, predicate 4 on an `any` index signature, needs ADR-0087 D8 wording and waits on the maintainer: see Acceptance notes).\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- **Part 1: the package globs come from `pnpm-workspace.yaml`.** `scripts/check-adr-0087-registration.mjs` drops its hand-kept `PACKAGE_ROOTS` (three roots that predate the `ui/` import). `workspaceGlobsAt(rev)` reads the workspace file at the judged rev through `workspace-enumerator.mjs`'s `parseWorkspaceGlobs` (the repo's one parse of it), and `isWorkspaceManifest` matches a listed `<dir>/package.json` against the `<dir>` / `<dir>/*` globs the way `expandWorkspaceGlob` expands them. A missing workspace file, an empty block and a glob richer than `<dir>/*` throw `WorkspaceEnumerationError` instead of reading as an empty workspace. A manifest nested below a member (a test fixture `package.json`) is no longer a member.\n- **Part 2: predicate 2 now locates declarations behind `.tsx` modules.** The card listed aliases, shim re-exports and `.tsx` declarations. Measured on #26219's branch, all 16 failures had one cause: the export reader's Program had no `jsx` option, so TypeScript refused every import that resolves to a `.tsx` file (TS6142) and the aliased symbol had no declaration. The alias (`MetadataPageShell` → `PageShell.tsx`) and the shim (`useRecentItems.ts` → `RecentItemsProvider.tsx`) already resolved once the target module loaded. The fix is one option, `jsx: ts.JsxEmit.Preserve`. The Program is still `noEmit` and only syntactic diagnostics are read.\n- `scripts/pm/bare-root-worklist.mjs`: its three `check-adr-0087-registration.mjs PACKAGE_ROOTS …` rows are deleted, because the bare words they judged are gone (the self-test reported them STALE: \"Delete the entry\"). The declaration battery's floor follows, 126 → 122 (two cases per row; 128 → 122 on a run), with a comment in the #24037 style.\n\n## Battery rows\n\nNew battery `WS (#26220): ui workspace packages, .tsx modules, aliases and shims`, 11 cases, floor 11, roster floor 55 → 56:\n\n- WS-G1 / G1b: a `ui/packages/*` package retires a `.tsx` export, an alias of a `.tsx` export and a type behind a `.ts` shim under `runtime-export-retired`; green, and the verdict names each declaration where the compiler resolved it (`ExpressionProvider.tsx`, `PageShell.tsx`, `RecentItemsProvider.tsx`).\n- WS-R1: the same tree with the `ui/packages/*` glob removed is refused (\"no workspace manifest … named `@object-ui/app-shell`\"), so membership comes from the workspace file only.\n- WS-R2: a rev with no `pnpm-workspace.yaml` throws, never reads as an empty workspace.\n- WS-G2: `unpublished` on a private `ui/apps/*` package is green.\n- WS-U1 to U5: unit pins on `isWorkspaceManifest` (`<dir>/*`, bare `<dir>`, nested manifest refused, `node_modules` and dot-dirs refused) and on `workspaceGlobsAt` refusing `packages/**`.\n\nThe self-test fixture repo now writes a `pnpm-workspace.yaml` that mirrors the real file's glob shapes (`build({ workspace })`, `null` writes none).\n\n## Proof on the two held PRs\n\nAll with this branch's gate, `--base origin/main --head <their head>`:\n\n- #26219 at `5bf229f6`: **exit 0**. All 54 `@object-ui/app-shell` operands verified. Before this change: exit 1 at predicate 1 on all 54; with part 1 only: exit 1 at predicate 2 on 16.\n- #26293 at `e349c832`: **exit 1**, now on predicate 4 only. Predicate 1 (`@object-ui/types`, `@object-ui/components` publish) passes. Predicate 4 is part 3, not done here.\n\n## Tests and gates\n\n- Ablation of part 2 (one-time, committed fix first, restored with `git checkout HEAD --`, blob hash re-checked): removing the `jsx` line turns `WS-G1` and `WS-G1b` red with exactly #26219's message (\"the declaration of `useExpressionContext` cannot be located at the merge base\"), 2 failures; restored, green.\n- `node scripts/check-adr-0087-registration.mjs --self-test`: exit 0, \"575 assertions over real temp git repos\" (564 before this branch), on head `ca0155f2`.\n- `node scripts/pm/bare-root-worklist.mjs --self-test`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 33 commands derived at `ca0155f2` (after merging `origin/main` `6ea429df`). All 33 exit 0, including `node scripts/check-adr-0087-registration.mjs --base origin/main` (no declared-breaking changeset in this diff), `pnpm check:changeset-gate-self-tests`, `pnpm check:pm-dispatch-gates` and `node scripts/pm/bare-root-worklist.mjs --self-test`. `--ran`: 33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN. No package is touched, so there is no build closure and no package test or typecheck to run; no test file names either edited script.\n\n## Acceptance notes\n\n- **Part 3 is not in this PR.** ADR-0087 D8 defines predicate 4 as \"`any` / `unknown` / no annotation at base, and a concrete type at HEAD\", and says to never weaken it to make something else pass. #26293's `ComponentRendererProps` is a concrete interface at base (`{ schema: TSchema; [key: string]: any; }`), and its HEAD index signature is `unknown`, which D8 also counts as erased. Admitting it changes predicate 4's definition, so it needs D8 wording first (Tier H). The proposed limb: admit an exported interface whose surface at base and HEAD is identical except that an `any` index signature carries a non-`any` value type at HEAD (`unknown` included); #6048's shape (a member removed) stays refused. The decision is with the maintainer; #26220 remains open for it.\n- `scripts/check-skill-compatibility-version.mjs` carries the same three-root `PACKAGE_ROOTS`. It is outside this claim and left unchanged; whether ui packages belong to its population is that gate's question. Noted, not filed.\n- No changeset: the diff touches only repository scripts, which no package publishes (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Am8eYNReiNP66D2JihPS1q)_\n"
+}

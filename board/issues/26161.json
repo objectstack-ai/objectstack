@@ -2,8 +2,8 @@
   "number": 26161,
   "kind": "issue",
   "title": "security: a member with no position can add a comment reaction but never remove it — the console removes by delete, and delete may not ride an everyone-anchored set",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T14:08:46Z",
-  "updated_at": "2026-10-26T18:53:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T22:41:22Z",
+  "closed_at": "2026-10-26T22:40:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26161",
   "body": "Ruled: 6422861164 · letter A · 2026-10-26T17:28Z\n\nFiling class: ① product defect (security model vs console contract) — reach: public door, measured once on `@objectstack/*` 18.1.0 by the objectstack-ai/hotclm #135 dev (os-dev-report on objectstack-ai/hotclm#135, PR objectstack-ai/hotclm#144). **Reader:** objectstack triage.\n\n## Symptom\nA member who holds no position can add a comment reaction but can never take it back.\n\n- `sys_comment_reaction` is the reactor's own row, \"made and removed, never edited\" (#22566). The console offers **remove** gated on `delete` (`RecordDetailView` `feedReactionRemove`).\n- `member_default` says delete is \"not a baseline right; grant it per object via an ordinary (position-distributed) set\".\n- An app's every-member set (`isDefault: true`, bound to the `everyone` anchor) may not carry it: `allowDelete: true` on `sys_comment_reaction` fails `os lint` and `os validate` with `security-anchor-high-privilege` (\"carries delete/purge/transfer on sys_comment_reaction — the runtime will refuse the binding\").\n\nMeasured as a plain member (`clm_requester` + `member_default`): add 👍 → `201`; click own chip → no request; `DELETE /api/v1/data/sys_comment_reaction/<own id>` → `403`. So removal works only for members whose position-bound set happens to carry delete, and two audiences behave differently in one panel.\n\n## Expected\nAn anchor-safe, own-row removal of one's own reaction for every member who may react — e.g. the platform's baseline carries an owner-scoped delete on `sys_comment_reaction` (the row is the reactor's own and is never edited), or the anchor rule treats an owner-only delete on this object as low-privilege.\n\n## Dedupe\nMCP `search_issues` on this repo: `member cannot remove own comment reaction delete everyone anchor high privilege sys_comment_reaction` → 7 hits: #22500, #22505, #22566, #22573, #23281 (closed — the reaction-as-own-row design and its migration), #24549, #4630 (closed — comment authorization). None covers removal under the anchor rule.\n\n---\n_Filed by the `repo:hotclm` PM seat from a dev report._\n\n"

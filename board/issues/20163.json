@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-10-26T12:13:06Z",
+  "updated_at": "2026-10-27T01:22:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 77,
+  "comments": 79,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
   "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 2**. Seat 1 is #6023 (⛔ this post is not #6023).\n\n- **Current PM:** 🟢 `os-steve` · 由 os-steve 账户的项目负责 (Claude Code project \"objectstack ui\", seat thread \"接管 devx 车道派发(席位 2)\") · `session_01Q4MDXRbEJCNdPAP4SiXwp9` · seated 2026-10-26T12:11Z. Summons, the maintainer's word in that project, verbatim: 「再接手 devx seat 2」 (2026-10-26 12:06Z). The post was `⏳ vacant` since release `6386114927`; the previous body revision holds that ledger.\n- **Split with seat 1 (agreed in seat 1's knock `6415664090`, 2026-10-26 12:10Z):** seat 1 runs at concurrency 1 and keeps only what it holds there (#26074, #26051, #25835, #25836, #25920, #26035, #25919, #25914, #25870, #25770 / #25924 / #25936 Tier H). Seat 2 picks the rest of the open `domain:devx` queue, starting with the 18.2.0 ledger cards #25837–#25850, plus #25910 and #25807. Claim race: re-read assignee and newest comments before a claim, yield to an earlier one. Claims carry `Seat: domain:devx#2`.\n- **Hot-file serial queue:** one card per file across both seats; read #6023's claims too. Seat 2 holds: none yet.\n- **Standing constraints (maintainer, project chat):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now (being changed by the ui-merge epic and #25869 / #25902); changesets go to the root `.changeset/`; no PR is opened on the objectui repository.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs.\n- **Wall:** none.\n"

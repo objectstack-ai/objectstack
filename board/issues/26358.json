@@ -1,0 +1,36 @@
+{
+  "number": 26358,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): the bulk confirm sentence formats numbers and dates in the display locale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T23:16:22Z",
+  "updated_at": "2026-10-27T00:20:50Z",
+  "closed_at": "2026-10-27T00:20:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T00:20:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26358",
+  "body": "Fixes #26307\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nA bulk action's confirm sentence formatted its numbers and dates in `en-US` for every viewer, while the same action's single-record confirm formats them in the viewer's language since PR #26282. `BulkActionDialog` called `bulkConfirmText(def.confirmText, { count, params, values, lookupLabels })` with no locale, so `fillTemplateHoles` fell back to `en-US`.\n\n- `ui/packages/plugin-grid/src/components/BulkActionDialog.tsx`: reads `useDisplayLocale()` from `@object-ui/i18n`, the same hook the console's action runners install (`useActionRunnerDisplayLocale` in `ui/packages/react/src/context/actionRunnerTranslator.ts`), and passes it to `bulkConfirmText`.\n- `ui/packages/plugin-grid/src/components/bulkConfirmText.ts`: `bulkConfirmText(confirmText, scope, locale?)` hands `locale` to `fillTemplateHoles`'s third parameter, the locale channel apart from the template roots, so a param named `locale` stays a value the sentence prints. No second locale resolution: with no locale handed, the engine keeps `en-US`.\n- `scripts/sdui-manifest.sources/plugin-grid.json`: re-recorded with `node scripts/gen-sdui-manifest-node.mjs` under the verify lock, on the tree after merging `origin/main` (PR #26323 had moved the same record; main's record was taken at the merge, then re-recorded). Only plugin-grid's sources digest moved; the artefact did not (`manifestSha256` unchanged). `node scripts/check-sdui-manifest.mjs`: exit 0.\n- `.changeset/26307-bulk-confirm-locale.md`: `@object-ui/plugin-grid` patch.\n\n## Red first\n\nNew pin `ui/packages/plugin-grid/src/__tests__/bulkConfirmLocale-26307.test.tsx`: the helper over `de-DE` and `zh-CN`, and the real `BulkActionDialog` under a real `I18nProvider` + `LocalizationProvider`. Expected strings are computed with `Intl` in the test, so a newer ICU cannot drift them.\n\nRed leg: the two source files restored to `a70aa00b` (the unfixed base versions) in the working tree only, at head `64e9dbc5`, under the verify lock:\n\n```text\n× formats a currency, a number and a date hole in a German display locale\n    Expected: \"Set 1.234.567,50 € on 2 records?\"   Received: \"Set €1,234,567.50 on 2 records?\"\n× formats a date hole in a Chinese display locale\n    Expected: \"Due 2026年10月26日?\"                 Received: \"Due October 26, 2026?\"\n× formats a currency hole in the tenant display locale   (BulkActionDialog)\n    Expected: \"Set the amount to 1.234.567,50 € on 2 records?\"   Received: \"Set the amount to €1,234,567.50 on 2 records?\"\nTests  3 failed | 2 passed (5)\n```\n\nThe two passing cases are the `en-US` ones (no locale handed; no tenant locale under an English UI), which hold before and after. Restored from `HEAD` (blob hashes compared, `git diff HEAD` empty), green leg: `Tests 5 passed (5)`.\n\n## Tests and gates\n\n- Pin, at head `64e9dbc5`: red 3 failed / 2 passed, then green 5 / 5 (above).\n- Full plugin-grid suite, `pnpm exec vitest run packages/plugin-grid --maxWorkers=2` from `ui/`, under the lock at `e42274e0` (the merge; same sources as `64e9dbc5`, which changes only the pin's matcher): 251 of 252 files, 2251 of 2252 tests passed. The one failure was this pin's dialog case matching with `findByText`, whose normaliser turns the no-break space `Intl` writes before a de-DE `€` into a plain space in the node text but not in the matcher string; `64e9dbc5` reads the dialog description's `textContent` instead, and the pin is 5 / 5 at that head.\n- `@object-ui/plugin-grid` `type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0 at `e42274e0`.\n- `node scripts/check-sdui-manifest.mjs`: exit 0 at `e42274e0` after the re-record.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, head `64e9dbc5`): 45 derived; 44 run, each exit 0; `pnpm check:type-check-debt` exit 3 (PREREQUISITE NOT MET: it was queued on the shared verify lock for its closure build), so NOT MEASURED locally, and CI's `Lint & Repo Gates` runs it. `--ran` reconciliation: \"45 derived famil(ies) accounted for — 44 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)\", 0 UNRUN.\n- The derivation warned that the tree is 5 commits behind `origin/main` (3 gate scripts changed across that range). Main was merged once before opening, as required; it is not merged again unless a conflict, a main-caused red or a queue removal calls for it.\n\n## Acceptance notes\n\n- `useDisplayLocale()` with no providers mounted resolves `en`, so every existing bulk dialog suite (rendered without providers) keeps its `en-US` sentences; the full plugin-grid run above confirms it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

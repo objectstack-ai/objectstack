@@ -2,8 +2,8 @@
   "number": 26228,
   "kind": "issue",
   "title": "brand(residue): \"ObjectStack Cloud\" survives outside #26136's surface — eight docs pages, ROADMAP, four package READMEs, the AI 501 remedy string and two settings-manifest messages (with their test and checklist pins), plus developer comments",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T16:15:56Z",
-  "updated_at": "2026-10-26T17:03:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T22:50:57Z",
+  "closed_at": "2026-10-26T22:50:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26228",
   "body": "Filing gate ③ — maintainer-directed brand work, the residue of #26136. Maintainer (Sam, `os-zhuang`), 2026-10-26 13:24Z, ruled model 2: ObjectOS is the product, in Community / Cloud / Enterprise editions, and ObjectStack is the protocol, SDK, CLI and framework; the hosted product reads \"ObjectOS Cloud\" wherever a user reads it. At 13:38Z: 「相关卡片都归你派发处理落地」. #26136 (PR #26215) flipped the CLI, `cli.mdx`, the Console cloud-install i18n and README.md; its report lists what the same grep still finds outside that card's surface. Business reason: after #26215 lands, a reader of the deployment docs, a package README, the AI 501 body or the settings page still meets the retired name beside the new one — two names for one product on the public developer site and in runtime text. Reader: the `domain:devx` seat dispatches one dev for the docs and READMEs; the two runtime strings and the spec remedy string are server / spec files and may be split by triage into a sibling (the pins listed below move with them). Dedupe: this repository's issues searched for \"ObjectStack Cloud naming residue ObjectOS Cloud docs rename\" → 16 hits, none a residue card (#26136 is the parent surface; #26140 is the docs-site positioning card; #26164 / #26110 are cloud-bump cards). Session `session_01FMuBZmssbfQkVrKRtxNvng`.\n\nEvidence at `f143cd88` (`main`): `git grep -n \"ObjectStack Cloud\" -- ':!**/CHANGELOG.md' ':!content/docs/releases/**'` minus the lines #26215 flips.\n\n## Scope\n\n1. **User-facing docs** (objectstack.ai/docs): `content/docs/deployment/cloud-connection.mdx` (title, description, body), `content/docs/deployment/index.mdx`, `content/docs/deployment/publish-and-preview.mdx`, `content/docs/protocol/objectql/schema.mdx`, `content/docs/protocol/kernel/metadata-service.mdx`, `content/docs/protocol/kernel/http-protocol.mdx:62` (the quoted 501 body — moves with item 3), `content/docs/ui/setup-app.mdx`, `content/docs/kernel/services-checklist.mdx`. \"ObjectStack Cloud\" → \"ObjectOS Cloud\"; where a sentence means the hosted control plane as a system rather than the product a user buys, say so in the same sentence rather than keeping the old name.\n2. **Repository prose**: `ROADMAP.md:29`; `packages/adapters/hono/README.md:79`, `packages/drivers/driver-memory/README.md:92`, `packages/services/service-package/README.md:118,136`, `packages/services/service-cluster-redis/README.md:10` (the turso driver and cluster lines: \"ships in ObjectOS Cloud\").\n3. **Runtime strings a user reads**, each with its pins: `packages/spec/src/system/core-services.zod.ts:176` — the HTTP 501 remedy \"Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework\" (ADR-0014 wording; `Cloud/Enterprise` are the two paid editions, so the line becomes \"in ObjectOS Cloud / Enterprise\"), pinned by `packages/runtime/src/domains/ai-anonymous-deny-ordering.test.ts`, `docs/qa/platform-checklist/areas/ai.json:599,694` and the `http-protocol.mdx` example; `packages/services/service-settings/src/manifests/ai.manifest.ts:358` and `knowledge.manifest.ts:196` (settings-page messages), pinned by `knowledge.manifest.test.ts:143`. The string change is a `patch` changeset on `@objectstack/spec`, `@objectstack/runtime` (if its test moves) and `@objectstack/service-settings`; the checklist clauses move in the same PR.\n4. **Developer comments**, mechanical, same PR or a rider on item 2: the 20 \"ObjectStack Cloud\" comment lines in `packages/cli/src/**` (file headers and the migration helpers' comments, listed in #26215's Acceptance notes), `packages/cloud-connection/src/marketplace-proxy-plugin.ts:7,283`, `marketplace-public-url.ts:7`, `runtime-config-plugin.ts:396`, `packages/runtime/src/http-dispatcher.ts:162`, `knowledge.manifest.ts:28`.\n5. Not in this card: `ui/AGENTS.md` and `ui/docs/adr/0060-product-neutral-renderer.md` (governed, Tier H — maintainer's hand); `content/docs/releases/**` and every CHANGELOG (history); internal identifiers (`OS_CLOUD_*`, `~/.objectstack/cloud.json`, `os cloud …`); the objectstack-ai/cloud repository's own copy.\n\n## Premises (re-check before dispatch)\n\n- P1 — #26215 has merged, so README.md and `cli.mdx` are already flipped and the grep above lists only this card's lines.\n- P2 — no governed path in the list (`check-governed-merges.mjs --pr` on the dev's PR reports 0).\n- P3 — the 501 remedy string is a shipped error text (`packages/spec` dist); the dev reads `docs/qa/platform-checklist/areas/ai.json` and the runtime test before touching it, and moves all three in one commit.\n\n## Acceptance\n\n- `git grep -n \"ObjectStack Cloud\" -- ':!**/CHANGELOG.md' ':!content/docs/releases/**' ':!ui/AGENTS.md' ':!ui/docs/adr/**'` → 0 lines.\n- `pnpm --filter @objectstack/service-settings test`, the runtime deny-ordering test and the ai.json checklist clauses agree with the new 501 body; `check:docs-links` green.\n\n## 维护者速读\n\n#26136 只改了 CLI、cli.mdx、Console 安装文案和 README；按 13:24 的裁决，仓库里还有八个文档页、ROADMAP、四个包 README、AI 501 的提示语和两条设置页提示写着「ObjectStack Cloud」。本卡一次扫完，改成「ObjectOS Cloud」，连带把测试和清单里的 pin 一起挪。ui/AGENTS.md 和 ADR-0060 是受管面，留给你。"

@@ -13,19 +13,21 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:27:25Z",
-  "updated_at": "2026-10-26T12:16:21Z",
+  "updated_at": "2026-10-27T02:13:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26086",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat (gate wiring) — one os-dev, two PRs (one per mechanism), Tier H. Dedupe: REST list (439 issues), grep `inline script|github-script` → 0 hits. **New.**\n\n**谁付代价（业务筛）:** a bug in an 872-line `github-script` body is found in production (a wrong triage comment on a real PR) because no `--self-test` can reach it; a gate whose command line is copied into YAML silently stops matching the script's `package.json` definition when someone edits one of the two.\n\n## Measured (HEAD 0d83ee8f77)\n\n- 20 inline `run:` / `github-script` bodies over 80 lines, 4,385 lines in total. Largest: `merge-queue-triage.yml` \"Post the triage comment\" (872 lines), `docs-drift-check.yml` \"Comment on PR\" (597), `cross-repo-issue-closer.yml` (416).\n- AGENTS.md 「Writing a --self-test」 (line 1049) is the repo's rule for scripts; 271 of 316 `scripts/**` entry points have one; an inline body has none by construction.\n- 16 `check:*` scripts invoked by inlining the command rather than `pnpm run check:<name>`: `check:adr-links` (`check-links.yml:115`), `check:undeclared-dep-imports` (`lint.yml:918`), `check:empty-changeset` (`pr-automation.yml:919`), `check:registry-log-declared` / `check:rest-log-declared` / `check:rest-log-spy-declared` (`lint.yml:3614-3644`), and ten more (the dev lists them with `grep -n 'node scripts/' .github/workflows/*.yml` cross-checked against `package.json` script values).\n\n## Wanted\n\n- PR 1: move each inline body over about 80 lines into `scripts/ci/<name>.mjs` with a `--self-test` (fixture event JSON in, expected comment/markdown out); the YAML step becomes `node scripts/ci/<name>.mjs` with the event passed by env or `--event-file`. ⛔ Behaviour-preserving: the self-test's expected outputs are captured from the current inline body first.\n- PR 2: replace the 16 inlined command lines with `pnpm run check:<name>` (or `pnpm check:<name>`), so `package.json` is the one definition. Where the inline copy differs from the package.json value today, the PR body says which one CI was actually enforcing.\n- Out of scope (ruled on #25919, 「存量不横扫」): rewriting the workflows' comment prose, including the stale counts at `ci.yml:23` (\"23 job-runs per PR event\") and `ci.yml:680,1557` (\"two matrix jobs\") — fix those two literals only if the step they annotate is touched.\n\n## Acceptance\n\n- No `run:` or `github-script` body in `.github/workflows/` over 80 lines (the dev states the count before/after).\n- `grep -c 'pnpm run check:\\|pnpm check:' .github/workflows/*.yml` rises by 16; the 16 inlined `node scripts/…` lines are gone.\n- Each new `scripts/ci/*.mjs` has `--self-test` wired where the other self-tests run (`lint-repo-tooling` lane).\n\n**Size:** M (PR 1), S (PR 2). **Clause-②:** no. **Metadata-protocol:** none. **Tier:** H.\n\n## Related\n\n#25919 (open, ruled A)."

@@ -2,8 +2,8 @@
   "number": 26187,
   "kind": "issue",
   "title": "Permission matrix (Setup / Studio Access): readScope and writeScope cannot be set or seen, though ADR-0084 declares the record-scope column",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T15:09:00Z",
-  "updated_at": "2026-10-26T20:12:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T00:06:10Z",
+  "closed_at": "2026-10-27T00:03:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26187",
   "body": "Filing gate ②: a maintainer ruling, carried out as child 1 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nA customer admin cannot set or see a permission set's record scope from the console. The matrix in Setup → Permission Sets and Studio → Access offers C / R / U / D / Tr / VA / MA and field read/write, but it has no control for `readScope` / `writeScope` (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`). The permission-set and position pages do not show the current scope either. The only way to set it today is `PUT /api/v1/meta/permission/:name`. Backend, enterprise resolver and explain all handle scope correctly (33/33 UI scenarios in #26059's run); only the editor is missing.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架; this card is Q1 = Q3 child 1 (ui, p1). Brief 6415795834, item-by-item reading 6415971852 (item 1).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** A customer admin who builds or changes a permission set has no way to grant org-structure scope (\"own\", \"own and reports\", \"my unit\", \"my unit and below\", \"whole org\") and cannot see what a set already grants. This is the customer-facing entry point of the RBAC + org-structure feature. Without it the feature can only be configured by a developer through the API.\n\n**Reader who acts.** The `domain:ui` execution seat, dispatch step: one os-dev, one PR in `ui/packages/app-shell/src/views/metadata-admin/` (the matrix editor, plus the permission-set and position pages).\n\n**Spec contract.** None changes. The enum (`ObjectAccessScopeSchema`) and the contradictory-pair refusal (#16870) are already in `@objectstack/spec`. No ADR change: ADR-0084:47 already declares the column.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `(readScope|writeScope|record scope|access scope).{0,200}(matrix|PermissionMatrix|select|UI|editor)` and the reverse order found 2 hits, neither about this (#23134 related-list binding, #24034 org-page decision). Triage's scan of the 600 newest (6414323834) found none.\n\n## Ruled scope (ruling Q1)\n\n- The permission matrix gains a **read-scope** and a **write-scope** select per object row. Values come from `ObjectAccessScopeSchema` (`packages/spec/src/security/permission.zod.ts:18`).\n- The selects are **greyed by the #16870 pairs** that the BASE schema already refuses (`permission.zod.ts:632`): View All beside a read depth, and Modify All beside either depth. The UI mirrors the server's refusal and does not re-implement it.\n- The three hierarchy values (`own_and_reports`, `unit`, `unit_and_below`) stay selectable when `hierarchySecurity` is not licensed, with the hint **\"requires enterprise; otherwise owner-only\"**. Hint source: `packages/spec/src/kernel/platform-capabilities.ts:224` (\"ADR-0057 hierarchy scopes ship in the enterprise edition\", token `hierarchy-security`). The open runtime fails closed to owner-only.\n- `previews/PermissionPreview.tsx` is wired **read-only** into the permission-set and position pages.\n- No spec key and no ADR change.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `docs/adr/0084-application-builder-information-architecture.md:47`: Access pillar = \"a permission **matrix** (roles × objects × CRUD + record scope)\". Holds.\n- `docs/adr/0090-permission-model-v2-concept-convergence.md:642`: the ObjectUI landing list names \"OWD context per object row\" and no scope column. Holds.\n- `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`:\n  - The modelled columns are at `:272–283`, so the ruling's `:273–283` is off by one.\n  - The #6605 ride-through comment for `readScope` / `writeScope` is at `:959–981`; the ruling's `:961–975` falls inside it.\n- `packages/spec/src/security/permission.zod.ts`:\n  - `:18` `ObjectAccessScopeSchema` holds.\n  - `:632` holds: the #16870 refusal sits on the BASE schema and is attached at `:642`.\n- `ui/packages/app-shell/src/views/metadata-admin/previews/PermissionPreview.tsx:78–137` holds:\n  - `SCOPE_ORDER` is at `:78` and the `own+reports` / `unit+below` labels at `:80–86`.\n  - The write-wider-than-read warning is at `:124–145` and the scope cells at `:261–270`.\n  - Today it is registered only as the metadata preview for `permission` / `profile` (`previews/index.ts:85–86`).\n- Permission-set page: `PermissionMatrixEditPage`, mounted from `ui/packages/app-shell/src/services/builtinComponents.tsx:21` and Studio `studio-design/StudioDesignSurface.tsx:216`. Position page: `metadata-admin/ResourceEditPage.tsx`, which already imports `PositionHoldersSection` (`:154`).\n- Open-edition fail-closed: `packages/plugins/plugin-sharing/src/sharing-service.ts:2084–2085` (`resolveOwnerScopeIds`: with no hierarchy resolver it returns `[me]`). The ruling cited `sharing-service.ts:377`, which on both `cdd4eea9` and `83a26c38` is a phantom-anchor notice comment. Corrected.\n\n**Note for the dev (found while verifying, not a new rule).** The bulk row arms interact with the new selects:\n- \"None\" replaces the row with `{}` (`:969–971`), which drops any scope. A test pins this: `PermissionMatrixEditor.bulkMergeKeys.test.tsx`.\n- \"All\" grants VA + MA while scopes ride through (`:984–987`). On a row that has a scope, that makes a pair the BASE schema refuses.\n\nSay in the PR how the greying covers these two paths. A behaviour question goes on this card and links the ruling.\n\n## Expected / acceptance\n\n- Every object row of the matrix, in Setup → Permission Sets and in Studio → Access, has a Read scope and a Write scope select. Each offers the five `ObjectAccessScopeSchema` values plus \"not set\". A chosen value saves and reloads unchanged.\n- Ticking View All disables the read-scope select, and ticking Modify All disables both selects. No save from the matrix sends a pair the BASE schema refuses (#16870).\n- On a deployment without `hierarchy-security`, the three hierarchy values stay selectable and carry the hint \"requires enterprise; otherwise owner-only\".\n- The permission-set and position pages show the current read/write scope per object read-only, through `PermissionPreview`.\n- Keys the matrix does not author still ride through a save; the #6605 pins stay green.\n- Tests cover rendering, greying, the unlicensed hint and the save round-trip. No change under `packages/spec` and no ADR change."

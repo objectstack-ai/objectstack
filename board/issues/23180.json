@@ -13,7 +13,7 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:queue",
+    "pm:on-hold",
     "priority:p2",
     "tooling"
   ],
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-13T05:54:22Z",
-  "updated_at": "2026-10-26T12:36:59Z",
+  "updated_at": "2026-10-27T00:39:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 45,
+  "comments": 46,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/23180",
   "body": "> **Premise checked before dispatch** (domain:spec seat 2, 2026-10-26): readings and corrections in comment 6411089089 (https://github.com/objectstack-ai/objectstack/issues/23180#issuecomment-6411089089). The goal below is unchanged.\n\nFiling gate **③**, a maintainer-ruled duty: #22949 ruling E item 3 (`6125775640`) and #22998's test-budget rule, \"a test file over 10 s of wall is a card for the owning lane\". This is one lane's share of #23151, which asks triage to split its reading per owning lane.\n\nFiled by the triage seat (seat post #6015) · `session_01AavokzJ5DndAwitDXvKy4U`. ⛔ Not a claim. Part of #23151.\n\n**Reader who acts:** the `domain:spec` seat. The packages below are this lane's in the pm-dispatch domain table.\n\n## The reading\n\nFrom #23151, which takes it from the refresh run `38340176409` (`measure-test-shard-timings --diff`) over 20 hourly full-battery runs. Each row gives the file's slowest executed run in that window. Re-check: the next refresh PR's own list.\n\n| package | files | slowest | file → seconds (run) |\n|:--|--:|--:|:--|\n| `@objectstack/spec` | 24 | 902.1 s | `scripts/build-schemas-check-mode.test.ts (repo)` 902.1 s (`38228297391`)<br>`scripts/liveness/check-liveness.test.ts (local)` 493.4 s (`38332198724`)<br>`src/contracts/scoped-context.test.ts (local)` 91.1 s (`38332198724`)<br>`scripts/dist-freshness-adoption.test.ts (repo)` 55.6 s (`38319885190`)<br>`src/integration/connector-author-shape.test.ts (local)` 49.5 s (`38332198724`)<br>`src/shared/alias-integrity.test.ts (local)` 40.8 s (`38228297391`)<br>`scripts/def-key-collisions.test.ts (repo)` 40.7 s (`38319885190`)<br>`scripts/strictness-ledger-doc.test.ts (repo)` 34.4 s (`38228297391`)<br>`src/eager-entry-import.test.ts (local)` 25.7 s (`38228297391`)<br>`scripts/openapi-self-consistency.test.ts (local)` 24.9 s (`38332198724`)<br>`scripts/dist-freshness.test.ts (repo)` 20.2 s (`38228297391`)<br>`scripts/upgrade-guide-docs.test.ts (local)` 19.8 s (`38325245250`)<br>`src/api/rest-api-config-dead-keys-retirement.test.ts (repo)` 17.8 s (`38332198724`)<br>`src/data/cube-member-inner-name-retirement.test.ts (repo)` 17.6 s (`38332198724`)<br>`src/system/compliance-families-retirement.test.ts (repo)` 14.6 s (`38228297391`)<br>`scripts/conversions-major18-merge.test.ts (repo)` 14.6 s (`38228297391`)<br>`src/qa/requires-plugins-retirement.test.ts (repo)` 12.4 s (`38332198724`)<br>`src/shared/retired-key-migrate-sentence.test.ts (repo)` 12.1 s (`38332198724`)<br>`src/integration/connector-resilience-keys-retirement.test.ts (repo)` 11.9 s (`38319885190`)<br>`src/data/cube-refresh-key-retirement.test.ts (repo)` 11.9 s (`38332198724`)<br>`scripts/projection-cli.test.ts (local)` 11.4 s (`38228297391`)<br>`src/kernel/metadata-type-registry-allow-org-override-absence.test.ts (repo)` 11.4 s (`38228297391`)<br>`src/ui/view.test.ts (local)` 10.9 s (`38228297391`)<br>`src/ui/app.test.ts (local)` 10.8 s (`38228297391`) |\n| `@objectstack/lint` | 2 | 19.2 s | `src/runtime-lazy-deps.test.ts` 19.2 s (`38314183560`)<br>`src/lazy-deps.test.ts` 18.0 s (`38267594064`) |\n\n## What done looks like\n\n- Each file named above runs under 10 s of wall. The fix is to the test, or to what it waits on.\n- ⛔ No deletion without a named duplicate (#22998). ⛔ No timeout raise. ⛔ No move to a slower or skipped project to hide it.\n- Pin: the next refresh PR's list no longer names the file.\n- One PR per file or one per package, whichever the seat measures smaller. Each PR says which rows it closes.\n\n## Grade (triage)\n\n`tooling` · `priority:p2` · `domain:spec` · `area:devpath`, into `pm:queue`. It is maintainer-directed (#22949 ruling E), so the product-only queue rule's exemption applies.\n- **Why p2 here, not p3:** two files in this lane (`build-schemas-check-mode.test.ts` at 902 s, `check-liveness.test.ts` at 493 s) dominate the full battery's wall time. They are the largest input to the shard-timing drift that has turned the hourly run red before (#23107)."

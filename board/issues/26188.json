@@ -2,8 +2,8 @@
   "number": 26188,
   "kind": "issue",
   "title": "metadata save + explain: an unlicensed hierarchy scope saves silently at runtime though defineStack refuses it, and explain blames the depth",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T15:09:51Z",
-  "updated_at": "2026-10-26T20:00:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T21:02:06Z",
+  "closed_at": "2026-10-26T21:00:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26188",
   "body": "Filing gate ②: a maintainer ruling, carried out as child 2 of the nine that #26059's ruling (Q3) names. ⛔ Not a claim.\n\nWhen no hierarchy resolver is mounted (community mode, no `hierarchySecurity` licence), a runtime save of a hierarchy scope is accepted without a word. `PUT` of a permission set with `readScope: 'unit_and_below'` answers 200 with `_diagnostics.valid: true` and logs nothing, and the scope then falls closed to owner-only. `defineStack` refuses the same declaration at compile time. On top of that, explain tells a manager that a subordinate's record is \"outside the caller's 'unit_and_below' read depth\" when the subordinate is in their unit. The real cause is that the resolver is absent. Neither path lets anyone see more than they should (both fail closed), but both are silent or wrong about why.\n\nPart of #26059\nRuling-ref: 6416233738 (https://github.com/objectstack-ai/objectstack/issues/26059#issuecomment-6416233738)\nRuling: batch #396 item 1, letter Q1 是 / Q2 不做 / Q3 分拆 / Q4 框架. This card is Q3 child 2 = Q4 (框架): items 9a + 9b in one dispatch (server, p2). Brief 6415795834, item-by-item reading 6415971852 (items 9a, 9b).\nFiled by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, first claimant of #26059. Domain, grade and route are triage's on first touch.\n\n**Business reason.** An admin on a community runtime, self-hosted or cloud community mode, who saves \"my unit and below\" is told the save is valid. Users then see only their own records, and explain points at the wrong cause. The metadata says one thing and the runtime does another: the inert declaration ADR-0078 forbids and ADR-0049 calls worse than absent.\n\n**Reader who acts.** The `domain:server` execution seat, dispatch step: one os-dev, one PR in framework code (the runtime metadata save door, and `packages/plugins/plugin-security/src/explain-engine.ts`). Cloud changes nothing.\n\n**Duplicate check.** A local scan of the 1,962 newest issues (all states, #22168–#26181) for `validateHierarchyScopeCapability|STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED|hierarchy.{0,40}(resolver absent|licen|enterprise).{0,200}(save|PUT|explain|diagnos)` found 1 hit, not this (#24995, webhook `requires`). #16870 (closed) is the adjacent VA-beside-depth diagnostic, not this.\n\n## Ruled scope (ruling Q3 item 2 / Q4)\n\n- **9a.** The runtime metadata save door asks the kernel whether the hierarchy resolver is mounted. When it is not, the door answers with a diagnostic that names the enterprise requirement.\n  - Without the resolver the open sharing service fails closed.\n  - The compile path already refuses: `validateHierarchyScopeCapability` / `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`. This card makes the runtime path match it (ADR-0078 / ADR-0049).\n  - **Shape, unless the maintainer says otherwise:** refuse on publish, warn on a draft save.\n- **9b.** `explain-engine.ts:2040–2075` gains a resolver-absent branch ahead of the depth verdict: **\"hierarchy resolver absent — requires enterprise; depth evaluated as 'own'\"**.\n- **Framework code only.** Cloud mounts `SecurityEnterprisePlugin` by licence (cloud `apps/objectos-ee/objectstack.config.ts:1333`, `:1597`) and changes nothing.\n\n## Anchors (re-read on `origin/main` `83a26c38`)\n\n- `packages/spec/src/stack.zod.ts`:\n  - `validateHierarchyScopeCapability` is at `:4817–4849` (doc comment `:4817–4824`, function `:4825–4849`). The ruling's `:4818–4845` has drifted to this range.\n  - The error class carrying `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED` is at `:3445–3452` and is thrown at `:5459–5464`.\n  - The code is registered at `packages/spec/src/api/error-code-ledger.zod.ts:1573`.\n- Capability token `hierarchy-security`: `packages/spec/src/kernel/platform-capabilities.ts:76`, `:221–225`.\n- Fail-closed without a resolver: `packages/plugins/plugin-sharing/src/sharing-service.ts:2084–2085` (`resolveOwnerScopeIds`: `const resolver = this.hierarchyResolver?.(); if (!resolver) return [me];`). The late-bound lookup is documented at `:468–471` (\"Returns null in the open edition\"). The ruling cited `sharing-service.ts:377`, which is a phantom-anchor notice comment on both `cdd4eea9` and `83a26c38`. Corrected.\n- Save doors: `PUT /api/v1/meta/:type/:name` (`packages/rest/src/rest-route-ledger.ts:250`, client `meta.saveItem`) and `POST /api/v1/meta/:type/:name/publish` (`:268`). The dev names the handler that holds the check.\n- `packages/plugins/plugin-security/src/explain-engine.ts:2040–2075` holds. The misleading arm is `:2061–2064` (`sharingMatches === false`, text at `:2063`); the new branch goes ahead of it.\n- Cloud `apps/objectos-ee/objectstack.config.ts:1333`, `:1597`: **not re-read**. This seat has no access to objectstack-ai/cloud, so the line numbers are the ruling's.\n\n## Expected / acceptance\n\n- On a runtime without the hierarchy resolver:\n  - Publishing a permission set whose grant uses `own_and_reports`, `unit` or `unit_and_below` is refused, with a diagnostic that names the enterprise requirement (`hierarchy-security`).\n  - A draft save succeeds and its `_diagnostics` carries the same message as a warning.\n- With the resolver mounted, nothing changes.\n- The refusal's code sits in the ADR-0112 ledger, either reused (`STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`) or a new row; the PR names which.\n- explain on a resolver-absent deployment reports \"hierarchy resolver absent — requires enterprise; depth evaluated as 'own'\" in the depth layer, not \"outside the caller's … read depth\". One pinned explain cell.\n- Tests pin both the licensed and the resolver-absent posture for 9a and 9b."

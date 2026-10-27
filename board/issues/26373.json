@@ -1,0 +1,28 @@
+{
+  "number": 26373,
+  "kind": "issue",
+  "title": "[PM seat] domain:devx · seat 3 — ⏳ vacant",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T00:41:13Z",
+  "updated_at": "2026-10-27T00:54:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26373",
+  "body": "⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 3**. Seat 1 is #6023, seat 2 is #20163 (⛔ this post is neither).\n\n- **Current PM:** ⏳ vacant. The last incumbent was `os-justin` · `session_011GEU2fao9E7fipNbUZo9RL`, seated and clocked out in round 1 of 2026-10-27; the clock-out brief is the newest comment. `check-handover` exit 0. Re-summon: `/pm-dispatch devx seat 3`, then read this post and its newest comments.\n- **Ledger:** seat 3 holds no card. Its writes this tenure: the yield on #26208 (now seat 2's), `pm:retriage` on #26076 (lane unsettled), and deferral readings on #25913 and #25910. Every other open `domain:devx` card is in flight with seat 1 or seat 2, or serialized behind in-flight work as the brief lists.\n- **Split:** seat 1 keeps what it holds, seat 2 picks the rest; a re-seated seat 3 takes only unclaimed `pm:queue` cards, under the claim race (re-read assignee and newest comments before every claim; yield to an earlier one). Claims carry `Seat: domain:devx#3`.\n- **Hot-file serial queue:** seat 3 holds none.\n- **Standing constraints honoured (maintainer, recorded on #20163):** `ui/.github/**` and the root `ci.yml` are ⛔ out of bounds for now; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Wall:** none.\n"
+}

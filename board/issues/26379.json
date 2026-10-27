@@ -1,0 +1,37 @@
+{
+  "number": 26379,
+  "kind": "pull_request",
+  "title": "fix(lint): liveness author warnings and the status census read ledger rows at every depth",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T01:12:09Z",
+  "updated_at": "2026-10-27T02:00:23Z",
+  "closed_at": "2026-10-27T02:00:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T02:00:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26379",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBXd6krbsYu1F6K7KQHMnPe9)_\n\nFixes #26146\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:liveness 作者告警(`os lint`)与状态词普查,原来只读台账顶层加一层 `children`,现在读到任意深度。\n- 为什么改:台账已有 41 行在第二层、2 行在第三层带 status,从未被评级;一个深层 `dead` 行或新状态词会悄悄漏过。\n- 风险与回滚:今天唯一新出现的告警是仪表盘 `widgets[].chartConfig` 的 5 个已退役键(schema 本就拒收);回滚即 revert 本 PR。\n- 先看:`packages/lint/src/lint-liveness-properties.ts` 的 `ledgerRows`(两处遍历共用它),再看测试文件末尾的 #26146 块。\n- 两分钟验证:`pnpm --filter @objectstack/lint exec vitest run src/lint-liveness-properties.test.ts`,预期 106 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/lint/src/lint-liveness-properties.ts`: one walk, `ledgerRows`, yields every ledger row at every depth of `children` as a dotted path, descendants before the row (the order the warn map was always filled in, so finding order at depth 0 and 1 is unchanged). `loadWarnMap` and the status census both read it, so they cannot disagree about depth again.\n- The census gains a directory seam, `ledgerStatusesIn(dir)` (module export only, the same posture as `lintLivenessPropertiesFromLedgerDir`); `shippedLedgerStatuses()` is that census over the shipped directory.\n- Docblocks re-measured. The `:303-306` count read \"423 top-level and 285 child rows carry a status, zero grandchildren do\". On `origin/main` `6390fe52` it is **528 top-level, 419 child, 41 grandchild, 2 great-grandchild**. The `WarnMap`, `loadWarnMap` and `authorWarnedProperties` docblocks now say every depth.\n- Changeset: `@objectstack/lint` patch.\n\n## Tests\n\n- New block at the end of `lint-liveness-properties.test.ts`:\n  - REAL LEDGER: `widgets.chartConfig.type` / `.xAxis` / `.yAxis` / `.series` (dead, two levels down) are in `authorWarnedProperties('dashboard')` and graded `liveness-dead-property` on an unparsed stack, through the array fan-out (the second widget authors them). The live `chartConfig.title` in the same call stays silent.\n  - PLANTED: a `dead` + `authorWarn` row two levels down warns; a `planned` + `authorWarn` row three levels down warns, while its `planned` sibling without the opt-in stays silent (so the opt-in itself reaches depth 3, not only the verdict).\n  - PLANTED: status words used only at depth 2 and depth 3 reach `ledgerStatusesIn`; the shipped census equals `ledgerStatusesIn(shippedLedgerDir())` and carries neither word.\n- The `#16094` hint pins' `shippedRows()` / `itemAuthoring` now walk every depth, so the newly warned deep rows are held to the same \"never the note, no tracker id\" rule.\n\n<details><summary>Test runs (head bec9f05846)</summary>\n\n- `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/lint-liveness-properties.test.ts`: Test Files 1 passed, Tests 106 passed.\n- `pnpm --filter @objectstack/lint typecheck && pnpm --filter @objectstack/lint test`: exit 0, Test Files 165 passed, Tests 7383 passed, 5 skipped.\n- Ablation (`scripts/ablation-replace.mjs`, mutation landed: anchor 1 to 0, blob `60014c1e09ed` to `d39fa40b0098`): `ledgerRows` limited to one `children` level reds exactly the three new tests (3 failed, 103 passed). Restored: blob back to `60014c1e09ed`, equal to the `HEAD` blob, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Seat premise 6430781250 re-measured on `6390fe52`: status rows by depth 528 / 419 / 41 / 2; `authorWarn` at depth 2 or deeper: 0; the card's one-liner reads `properties` where the ledgers key `props`.\n- The verdict-triggered half does reach authors: `dead` warns without an opt-in (#16094), so the 5 dead rows two levels down now warn: `dashboard` `widgets.chartConfig.type`, `.xAxis`, `.yAxis`, `.series`, `.aria`. Each is a retired key the schema already refuses, so only an unparsed stack (`os lint`) reaches the warning. No other deep row warns. Per triage 6417914269, no ledger row is regraded here.\n- Serial with #26138 (draft): it edits this test file and drops rows from `app.json` / `dashboard.json`. Text-disjoint from the hunks here except that its new comment in the `dashboard silence` pin says the `chartConfig.*` rows \"sit two down and were never graded\", which this PR makes false; its assertions do not depend on that. Whoever lands second merges `main` and re-measures the counts above.\n- The CLI's i18n walker reads `authorWarnedProperties('translation')`; the translation ledger has no warned row below the child level, so that set is unchanged.\n\n## Verification\n\n<details><summary>Dispatch gates (head bec9f05846)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 64 commands; 3 paths, 206 changed lines.\n- 63 exit 0. Three first answered exit 3 PREREQUISITE NOT MET (`check-plugin-teardown-shape --self-test` on the shallow clone; `check:docs-transcript-drift` and `check:lean-entry-closure` without built `lint` / `objectql`); after `git fetch --unshallow` and `pnpm --filter '@objectstack/lint...' --filter '@objectstack/objectql...' build` each re-ran exit 0.\n- NOT MEASURED: `check:dual-build-cjs-loads`, reason: it needs every package's `dist` (a full `pnpm build`, 88 packages absent); CI's `Lint & Repo Gates` runs it.\n- `--ran` reconciliation: exit 0, \"64 derived famil(ies) accounted for — 63 run, 1 NOT-MEASURED\".\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzhxSxc27ChPLkDSKEa)_\n"
+}

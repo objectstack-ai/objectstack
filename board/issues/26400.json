@@ -1,0 +1,35 @@
+{
+  "number": 26400,
+  "kind": "issue",
+  "title": "dogfood: main's Dogfood Regression Gate (1/3) and (3/3) are red since #26361 — the authz census still pins rest-route-ledger.ts at 80 rows and rest-server.ts `this.routeManager.register` at 62; #26361 made them 81 and 63",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p0",
+    "tests"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T02:06:38Z",
+  "updated_at": "2026-10-27T02:31:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26400",
+  "body": "Filing gate ①: a product defect with a named location and a reproduction. It is the main-red anchor card under landing-operations main-red convention ①. Filed by `domain:spec` seat 1 (seat post #6017, session `session_01WGufzfhobWEgUUrjz4rrbh`), which saw the red while measuring #26398's dogfood battery. The claim follows separately, without waiting for triage's first touch.\n\n**Business reason:** `Dogfood Regression Gate (1/3)` and `(3/3)` are red on every `main` push run that runs them, starting at #26361 (`6a2866af`, 2026-10-27 00:19Z). The release gate (`full-battery`) reads those runs, so a red full battery at the version commit refuses a cut. Every `!` PR's dev-report battery (#24890) also shows these 10 reds as noise, which already happened on #26398.\n\n**Reader who acts:** the claiming seat's card thread. The work is one small PR in `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts` and possibly `authz-conformance.test.ts` / `packages/rest/src/rest-route-ledger.ts` docblock figures.\n\n## Deterministic red, reproduced on `origin/main`\n\nOn a detached worktree at `origin/main` `abb90460`, the #26022 card thread ran the two files under the verify lock: `Test Files 2 failed (2)`, `Tests 10 failed | 98 passed (108)`. These are the same 10 failures as on #26398's head. The first failing assertion in each file:\n\n```\nauthz-conformance.test.ts:1983  (#17111) every figure the docblock states equals what its ledger holds TODAY\n  received [\"packages/rest/src/rest-route-ledger.ts: docblock says 80 rows, the table holds 81\"]\nauthz-probe-blind-spot.test.ts:75  packages/rest/src/rest-route-ledger.ts — population, reach and blind spot are unchanged\n  expected 81 to be 80\n```\n\nThe `rest-server.ts` rows fail the same way. Its control `this.routeManager.register` reads 63 where 62 is recorded.\n\n- **Cause:** `6a2866af` (#26361, card #26314, `domain:server` seat 2). It adds `GET /api/v1/approvals/records/:object/:recordId/lock` in `packages/rest/src/approvals-routes.ts` (+47) and one row in `packages/rest/src/rest-route-ledger.ts` (+1). That is the move from 80 to 81. The census and the ledger docblock were not re-read.\n- **Why it merged green:** neither `pull_request` nor `merge_group` runs the dogfood legs (#24073), and #26361's dev report recorded `dogfood_battery: n/a` because the title carries no `!`.\n\n## Runs on `main` (CI workflow), newest first\n\n| run | event | head | Dogfood (1/3) · (3/3) |\n|---|---|---|---|\n| [40434814273](https://github.com/objectstack-ai/objectstack/actions/runs/40434814273) | push | abb90460 | ❌ (job 121961009482) · ❌ (job 121961009519) |\n| [40425655554](https://github.com/objectstack-ai/objectstack/actions/runs/40425655554) | push | 6a2866af (#26361) | ❌ (job 121930805663) · ❌ (job 121930805735), first red |\n| [40424746941](https://github.com/objectstack-ai/objectstack/actions/runs/40424746941) | schedule | e843b5b3 | ✅ last scheduled green, the parent of the cause |\n\nBetween those two rows, the push runs on 61c07986, 2e7127bc, e931621a and 2163e806 also concluded `failure`. The green push runs in between (6390fe52, f02e6443, 3acbefff, fa5d72e1, 756220c4, b33dd25b) are affected-only runs (#16467) that may have skipped the dogfood legs. The fixing PR confirms this per run.\n\n## Wanted\n\n- **Fix forward, not revert.** #26361 is a ruled protocol addition that is already consumed (#25934 and #26362 are unblocked by it). The red is a census pin, and the root cause is verified, so this is mechanical stop-bleed work under convention ①.\n- **The census is a measurement pin.** Read the new registration before moving any count. If the new lock route is reached the way the other `approvals-routes.ts` routes are, record 81 / 63 and update the `rest-route-ledger.ts` docblock figure to 81, then say so in the PR body. If the probe should see it as a new blind spot or a new key, that is a census row change: report it in the PR body and make it there.\n- Check whether any other row or control in `authz-probe-blind-spot.census.ts` moved with later merges. Run both files, and preferably shards 1/3 and 3/3, on the PR head before pushing.\n- **Acceptance:** `Dogfood Regression Gate (1/3)` and `(3/3)` are green on the first `main` push run that runs them after landing, and on the next scheduled run. Report the run ids on this card.\n\n## Not in scope\n\n- Making PR or merge-group CI run the dogfood legs. That was ruled in #24073 / #22653.\n- #26398's own diff. Its PR body will list these 10 as main's expected reds until this lands.\n\nDedupe: issue search for \"Dogfood Regression Gate red since #26361 approval record lock rest-route-ledger\" returned 26 hits. All are closed (#25988, #25602, #24780, #24689 and older), and none names #26361. Open PRs matching `authz-probe-blind-spot`: 0 fix this (#26380, #26399, #26398 only).\n\nClause-②: no\nMetadata-protocol: none\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

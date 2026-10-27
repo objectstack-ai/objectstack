@@ -1,0 +1,36 @@
+{
+  "number": 26354,
+  "kind": "pull_request",
+  "title": "refactor(plugin-grid): move ObjectGrid's host-facing props types and FooterSummaryReport into sibling modules (slice 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T22:54:34Z",
+  "updated_at": "2026-10-26T23:28:09Z",
+  "closed_at": "2026-10-26T23:28:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T23:28:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26354",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi94Cr2fbhp665MVvsYFfqYFe)_\n\nPart of #25994 (slice 2 of the move-only split; the card stays open for the later slices).\n\nClause-②: no\nMetadata-protocol: none\n\n## What moved\n\nBase `71580254` (main with slice 1, #26323). This slice finishes the module-level part of `ui/packages/plugin-grid/src/ObjectGrid.tsx` that no test pins. It moves two groups, verbatim, into two new sibling modules:\n\n- `objectGridProps.ts`: `ObjectGridColumnState`, `ObjectGridFooterSummary` and `ObjectGridExternalPaginationProps`, with their docblocks. These are the host-facing props types that `ObjectGridComponentProps` builds on.\n- `objectGridFooterSummaryReport.tsx`: `FooterSummaryReport`, the renderless component that reports the grid's column summaries to a host.\n\n144 lines move, and `ObjectGrid.tsx` goes from 6781 to 6637 lines. `FooterSummaryReport` gains the `export` keyword in its new module. `ObjectGrid.tsx` imports the moved names back and re-exports the three types, so every name it exported is still importable from the same path. The package entry (`index.tsx`) is untouched. No identifier is renamed, no logic or DOM changes, and no new name is exported from `ObjectGrid.tsx`.\n\nMove-only proof: the multiset of non-blank lines of the base `ObjectGrid.tsx` equals the new `ObjectGrid.tsx` plus the two modules (each module's header comment dropped, the added `export` keyword normalised). Nothing is missing. The only other lines are the import lines and the one type re-export line.\n\n## Changeset correction from slice 1\n\nSlice 1's changeset (`.changeset/25994-objectgrid-helpers-split.md`, still unreleased) listed \"the record-source ladder\" among the moved query helpers, but `getDataConfig` stayed in `ObjectGrid.tsx`: exported, it would have become a shared reader for `check:doc-example-readers`. The correction lives as one sentence in this slice's own changeset (`.changeset/25994-objectgrid-props-split.md`). Slice 1's note is untouched, so `check-empty-changeset` has nothing to refuse.\n\n## What module-level code stays in `ObjectGrid.tsx`, and why\n\n- `parseSchemaSort` and its sibling `toOrderByClause`: `gridArrayArmOrderby-8973.test.tsx` asserts `export function parseSchemaSort` is in the file, and `toOrderByClause`'s docblock is written about the call sites beside it.\n- `ObjectGridComponentProps`: `bulkExecutorDataSourceFace-9722.test.ts` asserts `export interface ObjectGridComponentProps` is in the file. Its docblock sits above `ObjectGridRowOperations`, so `ObjectGridRowOperations` stays too: moving it would re-attach that docblock to a different declaration.\n- `getDataConfig`, which stays file-local (see above).\n- The schema-slot types (`RemoveIndexSignature` and the rest): `cellClassNameCensusProse-6921.test.ts` reads the census prose in their docblock from `ObjectGrid.tsx`.\n- The relational-copy-set docblock, which is prose about code in this file.\n- The group-heading date region (`TemporalGroupFace`, `temporalGroupHeading`): #26341 (#25884) is editing it.\n\nSo after this slice, the remaining work on the card is the component body.\n\n## Test edits\n\nNone.\n\n## Verification\n\nRun on head `f1e4df4c` (tree identical to the commits the tests ran on; only the commit messages were reworded before the push):\n\n- `pnpm --dir ui exec vitest run packages/plugin-grid/ --maxWorkers=2`, the whole package suite, under the verification lock: 251 of 251 files and 2247 of 2247 tests passed after the move. The before reading is the same suite on slice 1's head (`8fe81ee9`, whose tree is `main` `71580254` for this package): 251 of 251 files, 2247 of 2247 tests, locally and in CI.\n- The 52 test files outside plugin-grid that read sources (the same list slice 1 used): 52 of 52 files, 2257 of 2257 tests passed.\n\n- `pnpm --filter @object-ui/plugin-grid type-check` exit 0.\n- eslint on the three files: 0 errors.\n- `pnpm --dir ui run check:doc-example-readers` exit 0.\n- `node scripts/gen-sdui-manifest-node.mjs`: the manifest is byte-identical (sha256 `1f6e1ccb…`). Only `scripts/sdui-manifest.sources/plugin-grid.json` is re-recorded. `node scripts/check-sdui-manifest.mjs` exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 41 derived gates; `--ran` reconciles 41 of 41 (0 NOT-MEASURED, 0 UNRUN). All 41 exit 0; `check-empty-changeset` was re-run on `ba1445b9`.\n\n## Landing\n\nSeat 2's #26307 and #26341 land first on the plugin-grid line, so this stays a draft. Expect a merge of `main` and a re-record of `plugin-grid.json` before it lands.\n\nChangesets: `.changeset/25994-objectgrid-props-split.md` (patch, `@object-ui/plugin-grid`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Bdrd2yH4eqnz2QobtN3haE\n\n"
+}

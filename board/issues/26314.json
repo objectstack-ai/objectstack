@@ -1,0 +1,38 @@
+{
+  "number": 26314,
+  "kind": "issue",
+  "title": "plugin-approvals: a record-anchored lock read, `{ locked: boolean }` for every reader of the record, so a non-participant is not offered an edit the server refuses (#25934 ruling A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T20:32:02Z",
+  "updated_at": "2026-10-27T00:20:37Z",
+  "closed_at": "2026-10-27T00:19:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26314",
+  "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, carrying out the maintainer's ruling on #25934. ⛔ Not a claim. `domain:services` grades and owns this card.\n\nRuling-ref: 6422939157 (https://github.com/objectstack-ai/objectstack/issues/25934#issuecomment-6422939157). Batch #401 item 5, letter **A (readers)**, maintainer 「同意」 on 2026-10-26. The substance is the `domain:ui` seat 2 analysis 6419712936.\n\n## Business reason\n\nA member who can read and edit a record, but is not on its approval, opens a record held by a locking approval (`lockRecord: true`). The page still offers Edit and inline edit. Only on save does the server answer `409 RECORD_LOCKED`. An admin on the same record sees the lock banner. The cause: the console's only lock source is the record's approval-request read, and that door rightly gives a non-participant no rows (#8652 ruling 5299823744, `approvalsVisibleToReaders` default `false`). The page cannot tell \"you can't see the request\" from \"nothing is pending\".\n\nThe server already enforces the lock correctly, and its refusal text already tells anyone who tries to save that the record is locked (`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts:290` `recordLockRefusal`, thrown at :582). The spec contract already promises the client never has to guess (`packages/spec/src/contracts/approval-service.ts:320-336`, the `lock_record` doc block). That promise has no carrier for a reader who sees no request row. This card adds the carrier.\n\n## The contract (this card)\n\nThese are the ruling's execution parameters, adopted in the same stroke:\n- **Carrier.** A new record-anchored read on `IApprovalService` (`packages/spec/src/contracts/approval-service.ts:885`), implemented in `plugin-approvals`, plus a REST route. The dev proposes the method name and route path; register the route in the route ledger the way the other approval routes are.\n- **Disclosure.** Every caller who can read the record gets the answer: the #8652 anchor, with the record read done as the caller (`engine.find` under the caller's context). Not writers only. A caller who cannot read the record is **refused or answered empty, never in a way that leaks whether the record exists**.\n- **Payload.** `{ locked: boolean }` only. No request id, node, participants, or `pending`.\n- **One lock judgement.** Reuse the `lockRecord !== false` reading the record-lock `beforeUpdate` hook enforces (`lifecycle-hooks.ts:541`; the request-row mirror at `approval-service.ts:1289`). ⛔ No second copy of the rule.\n- ⛔ #8652's ruling stays untouched: request content (approvers, actions, comments, attachments) stays behind `approvalsVisibleToReaders`.\n\n## Tests\n\nIntegration tests against a locking pending approval, for three callers:\n1. a non-participant who can read and edit the record → `{ locked: true }`;\n2. a read-only reader → `{ locked: true }`;\n3. a caller who cannot read the record → refused or empty, with the same answer as for a record id that does not exist.\n\nPlus a case with no pending approval, or a pending node with `lockRecord: false` → `{ locked: false }`.\n\n## Declarations\n\n`Clause-②: yes (widening)` (a new method and route; no existing caller changes), `Metadata-protocol: none` (a service contract, not author-writable metadata). Precedents: #3815 (+108/−1, the `lock_record` row field) and #22660 (+604/−30, the reader tier).\n\n## The consumer half (#25934, `domain:ui`)\n\nAfter this card lands, the console feeds the signal into `resolveApprovalLock` (`ui/packages/react/src/context/InlineEditContext.tsx:82-100`) as its lock input. Rule 2 is unchanged for a composition without an approval service (no service, no signal, not locked), so objectui#12220's four tests do not flip, and a non-participant regression test is added. #25934 is `pm:blocked` with `Blocked-by:` this card. Its dispatch runs after PR #26053, which touches the same files."
+}

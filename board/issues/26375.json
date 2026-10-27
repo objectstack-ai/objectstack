@@ -1,0 +1,36 @@
+{
+  "number": 26375,
+  "kind": "pull_request",
+  "title": "docs(contributing): add a Human Minimum section and a pull request template",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T00:59:00Z",
+  "updated_at": "2026-10-27T01:19:50Z",
+  "closed_at": "2026-10-27T01:19:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T01:19:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26375",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9REjCZdpYneJCoh3iaxyQGn)_\nPart of #26081\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`CONTRIBUTING.md` 新增「Human Minimum」一节(第一个 PR 最容易犯的 8 条规则，每条一句话加指向 AGENTS.md 原文的链接，`Clause-②` 与 `Metadata-protocol` 在用到处定义);新建 `.github/PULL_REQUEST_TEMPLATE.md`,用同一份清单做勾选项，并给出正文骨架和两条声明行。\n- 为什么改：执行 #26081 裁决 A 的第二个 PR(裁决 6417533492);人类贡献者进门第一页现在把他们直接送进 82 KB 无目录的 AGENTS.md,PR 时也没有任何清单。\n- 风险与回滚：只改文档，不改任何规则、门禁或发布包;回滚即 revert 本 PR。模板里的两条声明行留的是占位值，未填时读作「无声明」,不会替作者默认填 `no`/`none`。\n- 先看：`CONTRIBUTING.md` 的 Human Minimum 第 5 条(Clause-② 定义)→ `.github/PULL_REQUEST_TEMPLATE.md` → `CONTRIBUTING.md` 其余三处指针改动。\n- 两分钟验证：在本分支上点「New pull request」,正文应自动出现模板;或打开 CONTRIBUTING.md 的 Human Minimum,逐个点 AGENTS.md 链接，都应落到对应标题。\n- 需要你做的：无，席位落地(本 PR 不碰任何受管面)。\n\n## What changes\n\n- `CONTRIBUTING.md` gains a **Human Minimum** section between *Making a Change* and *Where Things Live*: eight items, each one sentence naming the rule plus a link to the AGENTS.md heading that states it (Zod first; naming; no formatter; one issue / branch / PR and worktrees; changeset with the two declaration lines; regenerate `packages/spec` artifacts; generated and release-owned files; English artifacts). Item 5 defines `Clause-②` and `Metadata-protocol` where they are used, as the ruling asks. No rule text is copied from AGENTS.md; the section says AGENTS.md text is the rule.\n- Three existing CONTRIBUTING.md spots now point at the section: the intro paragraph, *Making a Change* step 3, and step 5 (which named `Clause-②` without defining it). *Opening the Pull Request* points at the new template. The TOC lists the section.\n- New `.github/PULL_REQUEST_TEMPLATE.md`: a `Fixes #` first line, What changes / Why / Verification headings, the two declaration lines with placeholder values, and the Human Minimum list as checkboxes linking back to CONTRIBUTING.md.\n\n## Tests\n\nDocs only: no package, test or gate script changes.\n\n## Acceptance notes\n\n- **Template placeholders are not declarations.** Measured with `scripts/pm/clause2-line.mjs`: an unfilled `Clause-②: yes | no` reads `malformed` and `Metadata-protocol: added | narrowed | semantic | none` reads `malformed`, which `check-changeset-no-major.mjs` treats as no declaration. A template default of `no` / `none` would have declared for the author, so the template does not ship one.\n- **Template binds no closing keyword:** `node scripts/check-closing-keyword-parity.mjs --body .github/PULL_REQUEST_TEMPLATE.md` reports no parser binds (3 consulted).\n- **Anchors into AGENTS.md are not gated.** `check:doc-anchors` scans `content/`, `README.md` and `ARCHITECTURE.md` only, and lychee runs with `include_fragments = \"none\"`, so the seven AGENTS.md anchors this section links were checked by hand with `github-slugger@2.0.0` (the workspace copy): all seven resolve, as do the ten in-file anchors. PR 1 of #26081 (AGENTS.md TOC and `docs/agents/`, Tier H, waiting on #26035) must keep these headings or update these links.\n- **Not done here:** AGENTS.md, CLAUDE.md, `.github/workflows/**` and `ui/` are untouched. The North Star pointer in CONTRIBUTING.md (the card cites `CONTRIBUTING.md:69`; it is line 111 on `main` and 114 after this diff) belongs to #26073 and is unchanged. The cloud#3194 precedent was read through the ruling and brief comments on #26081 (this session cannot read the cloud repository).\n- Not governed: neither path is in `GOVERNED_SURFACES` (`scripts/pm/check-governed-merges.mjs`) or CODEOWNERS.\n\n## Verification\n\nHead `891a9b7a`, base `origin/main` `6390fe52`.\n\n<details><summary>dispatch-gates families: 18 derived, 18 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 18 families for the two paths. Each ran with its exit captured before any pipe; all 18 exit 0: `check-aggregator-roster` (+ `--self-test`), `check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus`, `check-step-collectors` (+ `--self-test`), `docs-audit/check-drift-comment`, `pm/ci-failure --self-test`, and `pnpm check:` `cross-package-test-inputs`, `driver-memory-census`, `gitlink-declared`, `nul-bytes`, `pnpm-filter-targets`, `refd-timer-probe`, `required-contexts`, `shard-attestation`, `watch-hint-literal`.\n\n`--ran` reconciliation: `18 derived famil(ies) accounted for — 18 run, 0 NOT-MEASURED (a DERIVED zero — all 18 recorded an exit code and none of them is 3)`.\n</details>\n\n<details><summary>Card acceptance commands</summary>\n\n- `pnpm check:pm-governed-prose`: exit 0, `2 instruction surface(s) name all 13 registered governed surfaces`.\n- `node scripts/check-published-list-mirrors.mjs --self-test`: exit 0, `All 37 self-test cases passed.`; the scan: exit 0.\n- Link check: lychee 0.24.2 (the CI pin, built locally) with the exact `LYCHEE_ARGS` from `check-links.yml`: exit 0, `2900 Total ... 2519 OK 0 Errors 381 Excluded`; both new links to `.github/PULL_REQUEST_TEMPLATE.md` resolve `[200]`.\n- Also run: `pnpm check:doc-authoring`, `pnpm check:doc-anchors` (598 fragment links resolve), `pnpm check:adr-links`, all exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQGhbhawhbL2PcHVN8)_\n"
+}

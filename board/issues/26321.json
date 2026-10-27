@@ -1,0 +1,37 @@
+{
+  "number": 26321,
+  "kind": "pull_request",
+  "title": "fix(metadata-core,service-cluster,create-objectstack): ESM-only subpaths declare their types under import",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:01:58Z",
+  "updated_at": "2026-10-26T22:09:48Z",
+  "closed_at": "2026-10-26T22:09:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T22:09:45Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26321",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Lx3to7qftVwKKnKpjVXPLv)_\nPart of #26206\n\nClause-②: no. Amended 20:45Z: split. This PR lands the three ESM-only subpath groups (`Part of #26206`, non-breaking, types-only map changes plus README lines). The driver-memory `default` retirement waits on an ADR-0087 gate card (predicate 2 word-scans `default` across metadata surfaces and can never certify that operand)\nMetadata-protocol: none\n\n## What changes\n\nThree subpaths are ESM-only, and their export maps now say so. Each subpath's `types` moved inside its `import` condition (`{ import: { types, default } }`, the conditional shape #26198 / #26279 use). Each package's README gets one paragraph saying the subpath is ESM-only.\n\n| Entry | Before (`node16-cjs`) | Choice | Why |\n|:---|:---|:---|:---|\n| `@objectstack/metadata-core/testing` | `CJSResolvesToESM` | declared ESM-only | It imports `vitest`, whose own `require()` entry throws (\"Vitest cannot be imported in a CommonJS module using require()\"), so a CJS build could not load. Its `require` condition was already removed on purpose (the tsup config's split-by-format comment). |\n| `@objectstack/service-cluster/testing` | `CJSResolvesToESM` | declared ESM-only | Same reason: it imports `vitest`. |\n| `create-objectstack/created-summary` | `CJSResolvesToESM` | declared ESM-only | Its one consumer is `@objectstack/cli`'s `init` (ESM). A CJS build would add a `require` condition, which widens the accept set and doesn't fit `Clause-②: no`. |\n| `@objectstack/cli` `.` | `CJSResolvesToESM` | ESM-only, no manifest change | See below. |\n| `@objectstack/cli/console` | `CJSResolvesToESM` | ESM-only, no manifest change | See below. |\n| `@objectstack/cli/hook-body` | `CJSResolvesToESM` | ESM-only, no manifest change | See below. |\n\nFor the first three, runtime behaviour does not change. `require()` of each subpath already failed with `ERR_PACKAGE_PATH_NOT_EXPORTED`, because the map carried `types` + `import` and no `require` or `default`. The unconditional `types` was the inconsistency: TypeScript under `node16`/`nodenext` still resolved the declarations for a CommonJS caller, and attw reported that as `CJSResolvesToESM`. Now TypeScript resolves them for `import` only, which is what Node does.\n\n### `@objectstack/cli`: ESM-only, documented here (README follow-up)\n\nThe cli's three library entries (`.`, `./console`, `./hook-body`) map `{ types, default }` to ESM files, and they stay that way. Measured on Node 22.22.0, `require()` of all three works today through Node's `require(esm)`. The `.` barrel loads every oclif command class.\n\n- Any ESM-only map change (an `import`-only condition, or a `require` stub that throws) would break those working `require()` callers. That's a narrowing, and this card is `Clause-②: no`.\n- A CJS build of the `.` barrel means a second build of the whole oclif program, which is out of proportion for a p3.\n\nSo the attw `CJSResolvesToESM` items on these three stay, as intended ESM-only entries: the files are ESM, and CommonJS callers reach them through `import()` or Node's `require(esm)`. This card's claim kept `packages/cli/README.md` out of scope while #26215 held it, so this paragraph is the written declaration for now. **Follow-up:** add one line to `packages/cli/README.md` saying `.`, `./console` and `./hook-body` are ESM entries. #26215 has since merged, so nothing blocks that line.\n\n### Not in this PR: `@objectstack/driver-memory`'s default export\n\nThe card's driver-memory half (`FalseExportDefault`) is split out. Nothing in this repository imports the default, which is the legacy `{ id, version, onEnable }` object the kernel never calls, so retiring it is the right fix. But it retires a published export, and ADR-0087's `runtime-export-retired` disposition cannot currently certify an operand named `default`. Predicate 2 (no-metadata-surface) scans metadata surfaces for the export's name and hits every `default:` key, starting with `examples/app-crm/src/objects/account.object.ts`. The retirement waits on that gate, so #26206 stays open for it.\n\n## Evidence\n\nattw 0.18.5 on `npm pack --ignore-scripts` of each package, built at `6633075b` (before) and at this head (after):\n\n| Package | Before | After |\n|:---|:---|:---|\n| `@objectstack/cli` | `CJSResolvesToESM` on `.`, `./console`, `./hook-body` | unchanged (intended, see above) |\n| `create-objectstack` | `CJSResolvesToESM` on `./created-summary` | 0 `CJSResolvesToESM` (`./created-summary` answers `NoResolution` under `node16-cjs`, matching Node) |\n| `@objectstack/metadata-core` | `CJSResolvesToESM` on `./testing` | 0 `CJSResolvesToESM` (`NoResolution` under `node16-cjs`) |\n| `@objectstack/service-cluster` | `CJSResolvesToESM` on `./testing` | 0 `CJSResolvesToESM` (`NoResolution` under `node16-cjs`) |\n\n`NoResolution` under `node10` on every subpath is unchanged and outside the contract (legacy `node10` has no `exports` support).\n\nRuntime probes, at this head:\n\n- `import()` of all three subpaths resolves and loads.\n- `require()` of all three still answers `ERR_PACKAGE_PATH_NOT_EXPORTED`.\n- `require()` of the three cli entries still loads.\n\n## Acceptance notes\n\n- Tests and typecheck ran at `fbc38f81`. That commit carries this head's three map changes, plus the driver-memory half that `64128263` then restored byte-for-byte to `main`.\n  - Tests (`pnpm --filter … run test`): metadata-core 823/823, service-cluster 105/105, create-objectstack 269/269.\n  - Typecheck (`run typecheck`), green on 12 packages: the three changed packages, plus every in-repo consumer of these subpaths. metadata-fs, metadata-protocol, rest, runtime, service-cluster-redis and cli (`init.ts`) are all ESM (`nodenext`, or `bundler` for test configs). driver-memory, service-datasource and plugin-dev were covered for the dropped half.\n- `node scripts/check-adr-0087-registration.mjs --base origin/main` exit 0, with 1 non-breaking changeset seen. `node scripts/check-changeset-no-major.mjs` exit 0.\n- At `64128263`, all 71 `dispatch-gates --commands` families were run locally, each exit captured before any pipe. `--ran` reconciliation: 71 derived, 71 run, 0 NOT-MEASURED. The list is in the report comment on #26206.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WTCPNVkuDk7DNaZSdM3DZv\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WTCPNVkuDk7DNaZSdM3DZv)_\n"
+}

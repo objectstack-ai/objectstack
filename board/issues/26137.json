@@ -2,8 +2,8 @@
   "number": 26137,
   "kind": "issue",
   "title": "devx(sdui): CI regenerates the sdui manifest and compares it to the committed artefact, so ui PRs conflict only on real contract changes and the merge queue catches combined effects",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:30:13Z",
-  "updated_at": "2026-10-26T19:56:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T01:27:39Z",
+  "closed_at": "2026-10-27T01:27:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

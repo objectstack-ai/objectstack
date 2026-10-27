@@ -1,0 +1,37 @@
+{
+  "number": 26339,
+  "kind": "pull_request",
+  "title": "ci(typecheck): graduate the workspace root from the type-check DEBT ledger and run typecheck:root in lint.yml",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:46:56Z",
+  "updated_at": "2026-10-26T23:05:40Z",
+  "closed_at": "2026-10-26T23:05:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-26T23:05:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26339",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi95T4eukLFQZWx7jmjMoEvhv)_\nFixes #26236\n\nClause-②: no\nMetadata-protocol: none\n\n⛔ **Tier H.** This diff touches `.github/workflows/lint.yml`, so it stays a draft until an authorized APPROVED review from a `GOVERNED_APPROVERS` account. No seat readies, queues or arms it before then.\n\n## What this does\n\nWanted 2 and 3 of the card. Wanted 1 (the root program at 0 errors) landed in #26280.\n\n1. **The root graduates from the type-check DEBT ledger.** `scripts/check-type-check-coverage.mjs` deletes the `@objectstack/spec-monorepo` entry, so `DEBT` is now empty. A graduation paragraph is added in the ledger's own style, and the `ROOT_PROGRAM_COUPLED_SCRIPT` comment no longer cites the 26.\n2. **The root gets `typecheck:root`** in `package.json`: `tsc --noEmit -p tsconfig.json`.\n3. **`lint.yml` runs it.** A new step, \"Type-check the workspace root program\", sits in the `typecheck-source-gates` lane, right after the coverage meta-gate. Like every gate step in that lane, it has `continue-on-error: true` and an `id`, so `lane-verdict.mjs` reads its outcome. The root program reads no package `dist/`: `tsc --listFiles` over it lists zero paths under `packages/`, so the step needs no build.\n4. **Dispatch briefs name the new gate.** In `scripts/pm/dispatch-gates.data.mjs`, the change kind for \"adds or edits TypeScript in the ROOT tsc program\" named `check:type-check-debt`. Once the root graduates, that gate no longer measures the root, so a card editing a root `.mts` would be sent to a gate that cannot red on it, and the error would first show in CI. The kind now names `typecheck:root`, and its `why` is rewritten to match.\n   - For that name to resolve, the family parser in `scripts/pm/dispatch-gates.mjs` (`extractCheckInvocations`) reads `pnpm typecheck:root` as a family. This is the one non-`check:` name it admits.\n   - Without that, the row renders STALE: \"no workflow runs a gate under this name\".\n   - Self-test pins in `scripts/pm/dispatch-gates.self-test.mjs` follow the rename. Two parser cases are added: `typecheck:root` is read, and `typecheck`, `typecheck:rooted` and a filtered `run typecheck` are not.\n\n## Why the three move together\n\nThe coverage gate's root branch (around L2809) reports a finding when `typecheck:root` exists but `lint.yml` does not name it (`ciInvokesRoot`, around L4862). Without the script, deleting the entry reports \"no `typecheck:root` script and no ledger entry\". An entry of 0 is refused. Reverse check on this branch: with the entry deleted and the script added but no `lint.yml` step, `node scripts/check-type-check-coverage.mjs` exits 1 with \".github/workflows/lint.yml never invokes `typecheck:root`\". With the step added, it exits 0.\n\n## Acceptance\n\nAll at head d750e1f1 unless stated, exit codes captured before any pipe.\n\n- `pnpm typecheck:root`: exit 0.\n- `node scripts/check-type-check-coverage.mjs --self-test`: exit 0 (58 semantic + 97 observation + 56 re-measure + 28 built-closure + 19 auto-lowering + 18 exit-code + 19 verify-lock cases). `node scripts/check-type-check-coverage.mjs`: exit 0, \"0 in the DEBT ledger\".\n- `pnpm check:type-check-debt` (self-test, then `--re-measure` under the verify lock): exit 0, \"0 ledger entr(ies) re-measured in 540.7s, 0 raw tsc error(s) total\".\n- Reverse check (see above): without the `lint.yml` step, the coverage gate exits 1. With it, the gate exits 0.\n- `node scripts/pm/check-dispatch-gates.mjs --slow` (both tiers): exit 0, \"dispatch-gates self-test: 2166 cases pass\" (fast 1901, slow 265). `pnpm check:pm-dispatch-gates` (fast tier) re-run at d750e1f1: exit 0, 1901 cases.\n- Derived families (`dispatch-gates --commands`, unchanged between 24f2191c and d750e1f1): 65 derived, 65 run, every one exit 0. `--ran` verdict: \"65 derived famil(ies) accounted for — 65 run, 0 NOT-MEASURED (a DERIVED zero — all 65 recorded an exit code and none of them is 3)\". `check:pm-dispatch-gates` first went red at 24f2191c, on the pin \"every zero-file family left is a pnpm workspace composite — UNEXPLAINED: typecheck:root\". `typecheck:root` is a zero-file family by construction, so d750e1f1 names it in that pin with the reason. The other 64 families ran at 24f2191c; the only file that differs at d750e1f1 is `scripts/pm/dispatch-gates.self-test.mjs`, which the re-run families cover.\n\n## Acceptance notes\n\n- `scripts/check-exported-any-returns.mts` (L105–110) and the \"Why the ROOT-program entry does not weaken the ledger's discipline\" docblock in `scripts/pm/dispatch-gates.data.mjs` still tell the history of the root DEBT entry. They are historical prose, and no assertion reads them, so they are left as they are.\n- A card that edits only `.mjs` files under `scripts/` is not in the root program (no `allowJs`), so it does not derive `typecheck:root`. That is the existing, intended scope of the root-program kind.\n\n## 维护者速读(草稿)\n\n**改了什么**:仓库根目录的 `scripts/` 程序在上一个 PR(#26280)里已经做到 0 个类型错误。这个 PR 把它从类型债账本里正式毕业：删掉账本条目，新增 `pnpm typecheck:root`,并在 lint 工作流的 Type Check 流水线里加一步运行它。派发工具对「改了根目录 TS 文件」的提示也改成指向这一步。\n\n**为什么改**:之前根目录的脚本(门禁、PM 工具、发布脚本)没有任何 PR 检查会做类型检查，账本里那 26 条错误一直挂着，新脚本带进来的类型错误也拦不住。现在每个 PR 都会跑一遍，新错误当场变红。\n\n**风险与代价(含回滚)**:新增的一步只跑一次 tsc,不需要构建，耗时几秒。风险是以后改根目录脚本的人会多遇到一种红灯，这正是要的效果。回滚就是 revert 这个 PR,账本条目、脚本和工作流这一步会一起回去。\n\n**席位意见**:\n\n**你要做的**:因为改了 `.github/workflows/lint.yml`,这个 PR 需要你(GOVERNED_APPROVERS)批准，批准后由席位排队合并。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ENjVvxdwZxosWSS4Fqazu1)_\n"
+}

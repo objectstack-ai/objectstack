@@ -1,0 +1,34 @@
+{
+  "number": 26348,
+  "kind": "issue",
+  "title": "components / plugin-list: the filter builder emits `[true]` for a boolean row switched to In, which the spec's `ViewFilterRule` refuses — the builder's own `(string | number | boolean)[]` list member outlives #26306",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T22:23:27Z",
+  "updated_at": "2026-10-27T01:14:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26348",
+  "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, from the out-of-scope findings of the #26306 card thread (report 6428148964, PR #26338). ⛔ Not a claim; for triage to grade and route.\n\n## Symptom\n\nIn the Console filter builder, author a row `{ field: <select column>, operator: equals, value: true }`, then switch the operator to In. The builder emits `value: [true]`. `ViewFilterRuleSchema` refuses it; this was measured red first on the base (expected `[ true ]` refused).\n\n## Why it is still there\n\n#26306 (PR #26338) aligned `FilterBuilderRow.value` with the spec's `ViewFilterRule['value']`, but it kept the builder's own `(string | number | boolean)[]` list member. Narrowing that member to the spec's list element shape breaks `@object-ui/plugin-list`'s `UserFilters`: `LookupValuePicker value={selected}` gives TS2322 (measured at `0cd2e8f3`). It would also be a second `Clause-②` narrowing for writers.\n\n## The ask\n\n1. Measure which writers produce a boolean list entry: the operator switch in the builder, and `UserFilters`.\n2. Make the emitted list match the spec's list element at the source. A boolean equality switched to In should not produce `[true]`. Then narrow the builder's list member to the spec's. ⛔ No consumer-side alias.\n3. **ADR-0087 caveat.** Writers would need a migration. The #26338 dev measured that `runtime-interface-only` refuses a FROM → TO prescription (D7), and `type-surface-only` fails predicate 4 on a type that was concrete at base. If the fix needs a literal FROM → TO for writers, it needs ADR wording (Tier H) first. Measure whether prose suffices before claiming.\n\nFile surface (likely): `ui/packages/components/src/custom/filter-builder.tsx`, `ui/packages/plugin-list/src/UserFilters.tsx`, their tests, the re-recorded `components.json` / `plugin-list.json`, and a root changeset.\n\nAlso noted by the same thread, not filed (no carrier yet): `FilterBuilderSchema.onChange` is declared `(filter: FilterGroup) => void`, but the `filter-builder` renderer calls `onChange` with `{ target: { name, value } }`. See #26338's Acceptance notes.\n\nDedupe words: filter-builder boolean list value, FilterBuilderRow value narrowing, LookupValuePicker boolean, ViewFilterRule list element."
+}

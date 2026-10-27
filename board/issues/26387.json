@@ -1,0 +1,32 @@
+{
+  "number": 26387,
+  "kind": "issue",
+  "title": "pm-dispatch: execution seats bounce self-decidable questions to triage and serialize on rules the maintainer reads as throughput loss (spec lane, 2026-10-27)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T01:48:00Z",
+  "updated_at": "2026-10-27T01:54:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26387",
+  "body": "Filing gate ③ (maintainer-directed). The maintainer, in the `domain:spec` seat 1 project thread on 2026-10-27, verbatim:\n\n- 「任务很多，还能加速吗」 (01:39Z)\n- 「is:issue state:open label:pm:queue label:domain:spec 这么多任务，为什么只能派2个」 (01:41Z)\n- 「你两个座位可以处理10张卡啊，问题不在座位」 (01:41Z)\n- 「这种问题为什么要问分诊，你可以自己判断。#26000：带 `pm:retriage`。它和已裁的 ADR-0141 D8 冲突，在等分诊答复。」 (01:42Z)\n- 「同时立一张skills卡优化技能」 (01:42Z)\n\nFiled by `domain:spec` seat 1 (#6017) · `os-support-ai` · session `session_01WGufzfhobWEgUUrjz4rrbh`. ⛔ Not a claim. Suggested lane `domain:skills` (`.claude/skills/pm-dispatch/**`); grade and route are triage's.\n\n## What happened (one round, measured)\n\nAt 01:41Z the spec lane had 13 open `pm:queue` cards and two seats with `batch` 5 each, and three cards were dispatchable. Each of the other ten was held by a rule, not by capacity:\n\n| Held by | Cards | Rule text |\n|:--|:--|:--|\n| Area axis serial | #26170, #26142, #26112, #26128 | SKILL.md 状态模型 `area:*` row: 「同轴至多一个在飞,除非文件面不相交」 |\n| Round-trip to triage for a call the seat could make | #26000 (card vs ADR-0141 D8; seat filed `pm:retriage` `6430707402`), #25653 (remainder all `packages/spec`, card still `domain:server`; seat filed `pm:retriage` `6430736246`) | SKILL.md 红线 「执行席只在本车道认领,永不改 `domain:*`」; 状态模型 `pm:retriage` row (改判、拆卡); dispatch-runbook 「砍范围、降级、关卡是卡的命运,归人工地板」 |\n| Hot-file serial | #26324 behind #26220 | execution-duties 同区域单跨轮硬串行 |\n| No first grade | #25579 | execution-duties 无分诊审计评论即非候选 |\n| Cross-repo read unavailable | #25794 | session repo scope |\n\nAlso observed: a card thread's model and effort can only be set on the maintainer's verbatim word each time (`coordinator.md` 四), so a card whose paths carry a MANDATORY tier (#26076, `docs/adr/**`) waits for a chat message before it can start.\n\n## The ask\n\nOptimize the skill for throughput where the maintainer's words say the seat may judge. Candidate changes, for the skills lane to weigh (not rulings):\n\n1. **Seat-settled scope against governing text.** When a card's option conflicts with an accepted ADR or an existing ruling, the execution seat drops the conflicting part and dispatches the rest, citing the governing text on the card, instead of `pm:retriage`. The maintainer's word above is the source.\n2. **Lane move for an unambiguous remainder.** When a card's remaining work is entirely in one lane's package (measured file list), the seat that owns that package may relabel `domain:*` with an audit comment, instead of the triage round-trip.\n3. **Area axis serial → file-surface serial by default.** Keep 「同轴至多一个」 only where file surfaces intersect, measured per card at dispatch, not as a blanket hold behind one in-flight PR.\n4. **Standing model/effort posture per project.** Let the maintainer state once per project that MANDATORY-tier paths run at that tier (and p1/`security` at `xhigh`), so card threads do not wait on a chat message per card.\n\n## Done when\n\nThe skill text (and the ratchet budget, `check:pm-skill-ratchet`) carries whichever of these the skills lane and maintainer accept, and the next round's \"dispatchable / open `pm:queue`\" ratio for the spec lane is re-read and recorded on this card.\n"
+}

@@ -2,8 +2,8 @@
   "number": 26140,
   "kind": "issue",
   "title": "docs site: objectstack.ai becomes the developer site — one-line positioning instead of the duplicated product hero, a \"Run it: ObjectOS Community / Cloud / Enterprise\" strip, blog posts redirect to www.objectos.ai (maintainer ruling 2026-10-26)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:33:07Z",
-  "updated_at": "2026-10-26T14:36:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T01:04:44Z",
+  "closed_at": "2026-10-27T01:03:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26140",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer (Sam, `os-zhuang`), 2026-10-26: chose 「模型 2：ObjectOS 三版本」 (13:18Z) — ObjectOS is one product in three editions (Community / Cloud / Enterprise), ObjectStack the protocol and SDK; asked 「objectstack.ai 官网和 www.objectos.ai 官网不是很奇怪，区别是什么」 (13:19Z); on the answer (product site vs developer site, one blog, cross-linked navigation) wrote 「同意」 and 「立卡派发」 (13:24Z). Business reason: objectstack.ai and www.objectos.ai open with the same hero and both sell; the developer who lands here needs docs and a start command, the buyer needs the other site. Reader: the devx seat dispatches one dev; file surface `apps/docs/app/[lang]/page.tsx` (the landing), the docs layout's header / footer navigation, `apps/docs/app/[lang]/blog/**` and the site's redirects. Dedupe: issue search \"docs site homepage hero objectstack.ai landing developer portal\" → 5 hits, none open on this: #17351 (closed: count claims dropped from the homepage), #12239 (closed: homepage), #22240 (closed: compare / when-to-use pages — stay, they are developer content). Session `session_01FMuBZmssbfQkVrKRtxNvng`; siblings: objectstack-ai/www.objectos.ai (the product-site half, filed today), objectstack-ai/objectos#338 (edition model), #26136 (hosted-product name), #26129 (root README).\n\n## Roles, as agreed\n\nwww.objectos.ai is the product site (hero, editions, pricing, Build & Ask, blog); objectstack.ai is the developer site (protocol, SDK, CLI, docs, \"Build with Claude Code\"). Precedent: frappeframework.com beside frappe.io.\n\n## Scope\n\n1. **Landing (`apps/docs/app/[lang]/page.tsx`)**: the hero becomes one line of positioning — \"ObjectStack is the open protocol and SDK that ObjectOS is built on: one typed business ontology, and the database, API, Console and MCP tools derive from it.\" — followed by the start command (`npm create objectstack@latest`), the docs entry points (Getting started · Concepts · Spec · CLI · Build with Claude Code) and the GitHub link. The current sections \"The idea / The loop / The gates / The vocabulary\" either shrink to a four-link row into the docs pages that carry them, or move into a docs page; the dev proposes which in the PR.\n2. **\"Run it\" strip**: three editions in one row — ObjectOS Community (this repository's runtime image, self-hosted, free), ObjectOS Cloud, ObjectOS Enterprise — linking www.objectos.ai; replaces the footer sentence \"Rather build & ask online? Try ObjectOS\".\n3. **Navigation**: header gets \"Product → objectos.ai\"; the footer labels the two sites by role.\n4. **Blog**: www.objectos.ai becomes the one blog. Posts under `apps/docs/app/[lang]/blog/**` (at least \"the-ontology-is-the-software\") get permanent redirects to their imported counterparts once the www card lands (`Blocked-by`-style sequencing inside the card: the redirect commit waits for the www PR; the rest does not). Until then the posts stay served.\n5. Not in this card: the docs content itself, the README (#26129), positioning copy (unchanged: the slogan and the four-verb line live on in the product site and the README).\n\n## Premises (re-check before dispatch)\n\n- P1 — `grep -c \"ontology is the software\" apps/docs/app/[lang]/page.tsx` ≥ 1.\n- P2 — `ls apps/docs/app/[lang]/blog` lists the posts to redirect; `curl -s https://objectstack.ai/blog/the-ontology-is-the-software -o /dev/null -w '%{http_code}'` → 200.\n- P3 — the header component has no link to objectos.ai besides the footer sentence (grep `objectos.ai` under `apps/docs`).\n\n## Acceptance\n\n- `pnpm docs:build` green; the landing renders the one-line positioning, the start command, the docs entry points and the \"Run it\" strip; Lighthouse / link check unchanged.\n- No changeset (docs site only).\n\n## 维护者速读\n\n按你 13:24 的「同意」「立卡派发」：objectstack.ai 改成开发者站。首页不再是和 objectos.ai 相同的营销 hero，而是一行定位 + 开始命令 + 文档入口；加一条「运行它：ObjectOS Community / Cloud / Enterprise」指向 objectos.ai；博客文章在 www 那边导入后做跳转。文档内容本身不动。"

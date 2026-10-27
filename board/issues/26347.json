@@ -1,0 +1,32 @@
+{
+  "number": 26347,
+  "kind": "issue",
+  "title": "skills(objectstack-automation): teach the read-only `record_link` screen field, with an eval prompt (#26304 follow-up, #26184)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T22:18:30Z",
+  "updated_at": "2026-10-27T01:03:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26347",
+  "body": "⛔ Not a claim. For triage to grade and route. The surface is governed (`skills/**`, Tier H), so the PR needs a GOVERNED_APPROVERS approval before it lands.\n\nFiled by seat `domain:ui#1` on behalf of the #26304 + #25872 card thread (session `session_0115tbh4XfgivQD2RpHHwdMz`). The PR that lands `type: 'record_link'` (Fixes #26304, Fixes #25872) leaves the skill and eval out on purpose: `skills/**` is a governed surface, and triage 6427137154 allowed \"the PR (or a follow-up card it names)\".\n\n## What is owed (#26184)\n\n- **Owning skill package:** `skills/objectstack-automation` (its `SKILL.md` node table lists `screen`, and its eval set is `skills/objectstack-automation/evals/flows-triggers-approvals.json`).\n- **Teach:** a screen field `type: 'record_link'` shows the `reference` record whose id `defaultValue` evaluates to (a CEL envelope over a created record's output variable, e.g. `{ dialect: 'cel', source: 'account.id' }`), as a link to its record page; `reference` and `defaultValue` are required; `required` / `options` / `placeholder` / `min` / `max` are refused; the resume refuses a value under its name. Name is `record_link`, not `record` (an object field type).\n- **Eval prompt (new entry in `flows-triggers-approvals.json`):**\n  - prompt: \"Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a `crm_contact` linked to it, and ends on a screen that shows links to both new records.\"\n  - expected_output: a `screen` flow; two `create_record` nodes with `outputVariable` (e.g. `account`, `contact`); a last `screen` node whose fields are two `type: 'record_link'` fields, each with `reference` naming the object and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `'contact.id'`; no `required`, `placeholder` or `options` on them; no completed-`end` `message` and no markdown links in the screen `description`.\n  - assertions: must_contain `record_link`, `reference`, `defaultValue`, `outputVariable`, `dialect: 'cel'`; must_not_contain `type: 'record'`, `](`.\n\n## Reach\n\nThe key lands in `@objectstack/spec` minor with the PR above; until the skill teaches it, an AI author writing a result screen reaches for a completed `end` `message` (refused) or a markdown link in a screen description (renders as literal text)."
+}

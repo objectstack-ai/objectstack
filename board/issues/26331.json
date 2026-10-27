@@ -1,0 +1,37 @@
+{
+  "number": 26331,
+  "kind": "pull_request",
+  "title": "fix(cli): os create --in-repo scaffolds extend tsconfig.base.json",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:22:16Z",
+  "updated_at": "2026-10-26T21:54:29Z",
+  "closed_at": "2026-10-26T21:54:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T21:54:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26331",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9S9xCvZEBTTjGaAh4xaZyrt)_\nFixes #26209\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\n`os create plugin NAME --in-repo` wrote a `tsconfig.json` that extended the monorepo root `tsconfig.json`. Since #26203 that root file is the type-check program for `scripts/`, and its `exclude` (`packages`, `apps`, `examples`, `ui`) resolves against the root. The scaffold declared `include` but no `exclude`, so it inherited that list and matched none of its own `src/`.\n\n- `rootTsconfigExtends` is renamed `baseTsconfigExtends` and now derives the ascent to `tsconfig.base.json` (call site in the plugin template updated).\n- The in-repo template now declares the sibling shape (`packages/plugins/plugin-email` is the reference): `types: [\"node\"]` and its own `exclude: [\"dist\", \"node_modules\"]`.\n- The standalone (default) placement is unchanged.\n- Root `.changeset/` entry: `@objectstack/cli` patch.\n\n## Measured\n\n**Before, on `origin/main` 817cb898** (scaffolded with `packages/cli/bin/run-dev.js create plugin probe26209 --in-repo`, then `tsc --listFilesOnly -p tsconfig.json` in the scaffold, tsc 6.0.3):\n\n```text\nerror TS18003: No inputs were found in config file '.../packages/plugins/plugin-probe26209/tsconfig.json'. Specified 'include' paths were '[\"src/**/*\"]' and 'exclude' paths were '[\"../../../node_modules\",\"../../../packages\",\"../../../apps\",\"../../../examples\",\"../../../ui\"]'.\nexit 1\n```\n\nSo the inherited `exclude` dropped the scaffold's whole `src/`, and the template now carries its own `exclude`.\n\n**After, on this branch** (same scaffold command):\n\n```text\ntsc --listFilesOnly -p tsconfig.json   exit 0\n  SCAFFOLD/src/index.ts\n  SCAFFOLD/src/index.test.ts\n```\n\n`tsc --showConfig` of the scaffold against `packages/plugins/plugin-email`, keys compared one by one: **the only difference is `files`** (2 files against 59, each package's own `src/`). `compilerOptions`, `include` and `exclude` are byte-equal after showConfig's path normalisation (`outDir` `./dist`, `rootDir` `./src` on both). That is inside the card's allowance (`include`, `outDir`, `rootDir`).\n\n## Tests\n\n- `packages/cli/test/create.test.ts`: the in-repo `extends` arithmetic now resolves to `tsconfig.base.json`; a new case pins that the template extends the base (never the root program), owns `exclude: [\"dist\", \"node_modules\"]` and declares `types: [\"node\"]`; the function test follows the rename.\n- `packages/cli/test/init-template-comments-self-contained.test.ts`: comment only, the renamed function and the measured in-repo value; it carries no assertion on the target.\n- Ablation (one-shot, not kept): `scripts/ablation-replace.mjs` reverted the ascent target to `tsconfig.json`; `create.test.ts` went red on 3 cases (the arithmetic, the new base pin, the function test), and the restore was byte-identical to HEAD (`git diff HEAD` empty).\n- `pnpm --filter @objectstack/cli exec vitest run --project unit`: 332/334 files on the first pass; the 2 red files (`published-subpath-console.pin`, `published-subpath-hook-body.pin`) refused because `packages/cli/dist` was not built yet. After a full `pnpm build` (119/119 tasks) those two plus both touched files: 4/4 files, 84/84 tests.\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 67 families at e4865e1af; all 67 run with exit codes recorded, `--ran` reconciliation: 0 NOT-MEASURED. `check-plugin-teardown-shape --self-test` first exited 3 (shallow clone could not read its pinned fixture commit); after fetching that commit it exited 0. The `integration` CLI tier and `test:repo` are left to CI.\n\n## Acceptance notes\n\n- With the base fixed, the in-repo scaffold reaches its own `src/`, but its own `pnpm typecheck` and `pnpm build` are still red on two things this PR does not change (both were hidden behind TS18003 before):\n  1. TS5103 `Invalid value for '--ignoreDeprecations'`: the in-repo `package.json` declares `typescript` `SCAFFOLD_TYPESCRIPT_RANGE` (`^5.3.0`, resolves to 5.9.3), while `tsconfig.base.json` sets `ignoreDeprecations: \"6.0\"`, which only TypeScript 6 accepts. Siblings declare `^6.0.3`. The range is a deliberate scaffold policy in `init.ts`, so it is reported, not changed here.\n  2. TS6133 `'context' is declared but its value is never read` in the emitted `src/index.ts`, under the base's `noUnusedParameters: true` (measured with the workspace tsc 6.0.3).\n  Both are reported to the seat for a follow-up card. #26209 is not blocked by them: its acceptance diff (`showConfig` against a sibling) holds.\n- `check:type-check-debt` prints a surplus of 26 below the root ledger entry's ceiling; that entry is not touched here.\n- `origin/main` moved 11 commits since the branch point, touching other `packages/cli` files but none of this diff's; `git merge-tree` is clean. Not merged in.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B9rx6JYFJTqGy5tXRwwRfM)_\n"
+}

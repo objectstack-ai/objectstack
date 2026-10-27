@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T17:20:24Z",
-  "updated_at": "2026-10-26T17:20:24Z",
+  "updated_at": "2026-10-27T00:59:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26257",
   "body": "Filing gate: ① a measured follow-up with named locations, split out of a ruled card. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Business reason.** Ruling 6417413905 (letter A) on #26075 asks that `docs/audits/README.md` gain a lifecycle convention and that the closed 2026-06 series be archived. The convention is docs-only and rides #26075 PR 2. The archive is not, so it was split here rather than widening a docs PR into a published-package change.\n\n**Reader who acts.** The `domain:devx` seat. Any change to the liveness notes is a `@objectstack/spec` publish-surface edit, which the spec lane must review.\n\n## Measured (dev report on #26075, delta J, against `main` at 17:00Z)\n\n`docs/audits/2026-06-*.md` has 24 files.\n\n- **6 are cited by path from ADRs** (0049, 0061, 0078, 0082, 0112). ADRs are governed and append-only, so moving those 6 leaves dead links that cannot be fixed in the ADR text.\n- **14 are cited by `packages/spec/liveness/*.json` `_note` fields**, plus 3 zod comments in `packages/spec`. One is in `validation.zod.ts`, whose comment generates `content/docs/references/data/validation.mdx`. `liveness/` is in spec's `files[]`, so editing it needs an `@objectstack/spec` patch changeset and regenerated references.\n- **4 have no inbound reference at all:** `ask-build-agent-development-assessment`, `datasetschema-property-liveness`, `pageschema-property-liveness` and `system-integration-property-liveness`.\n\n## Wanted (choose in the PR, say which)\n\n- **Minimum:** move the 4 unreferenced files under `docs/audits/archive/2026-06/`, docs-only.\n- **Fuller:** also move the 14 spec-cited files, with their `_note` and zod-comment paths rewritten, a spec patch changeset and regenerated references. The 6 ADR-cited files stay in place in either case.\n\n⛔ No ADR edit. ⛔ No file deleted; archive means move.\n\n## Acceptance\n\n- No live link or `_note` path points at a moved file's old location: grep the whole tree, `pnpm check:doc-authoring` and the link check.\n- If spec files moved, `pnpm --filter @objectstack/spec build` and the references regeneration are clean, and one patch changeset is in root `.changeset/`.\n\nRelated: #26075 (ruling 6417413905)."

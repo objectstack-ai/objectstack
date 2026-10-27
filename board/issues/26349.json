@@ -1,0 +1,36 @@
+{
+  "number": 26349,
+  "kind": "issue",
+  "title": "Permission editor: pass the package binding to the delegated-admin companion list explicitly instead of inferring it from `only`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T22:27:24Z",
+  "updated_at": "2026-10-27T01:25:03Z",
+  "closed_at": "2026-10-27T01:19:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26349",
+  "body": "Filed by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, from the open question on PR #26340 (#26191). Not a claim. Domain, grade and route are triage's on first touch.\n\nFollow-up to #26191 (PR #26340).\n\n**What is left.** PR #26340 adds the delegated-admin companion-grants list to the Delegated Admin Scope block in `ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx`. Under a package binding (the package door, ADR-0086 P0) the block lists the five grants without marks and without the one-click grant, because the draft there holds only the package's own objects. The facet learns it is package-bound from a new optional `packageBound` prop, whose default is read from `only !== undefined`. That inference is true today: the Studio Access pillar is the only host that sets `only`, and it always edits under a `packageId`. But it couples two unrelated props. A future host that sets `only` without a package, or a package host that leaves `only` unset, would get the wrong face.\n\n`PermissionMatrixEditor.tsx` was out of that claim's file surface (it was held by #26284, now merged), so the explicit wiring could not land there.\n\n**Change.**\n- At both `PermissionAdvancedFacets` mounts in `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`, pass `packageBound={!!packageId}`.\n- Drop the `only`-based default from the prop (default `false`), and update its doc comment.\n- Pin: one test that mounts the editor with and without a `packageId` and reads `data-granted` on `admin-companion-setup.access` (absent under a package, present otherwise).\n\n**Acceptance.** The companion list shows marks and the grant button on Setup's permission page, and shows the unmarked list plus the package note in the Studio Access pillar, with the binding read from `packageId` and not from `only`.\n\nBlocked-by: #26191"
+}

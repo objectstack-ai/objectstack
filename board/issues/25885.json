@@ -2,8 +2,8 @@
   "number": 25885,
   "kind": "issue",
   "title": "Register page: password mismatch is a top banner instead of a field error, and there are no 隐私 / 条款 links although the login page shows them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:identity",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:42:40Z",
-  "updated_at": "2026-10-26T19:29:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T20:26:23Z",
+  "closed_at": "2026-10-26T20:24:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25885",
   "body": "Filing gate **① a reproduced UX defect** (class a, public door: `/_console/register`). `reach:` local stack, objectui pin `6f629a7`, zh-CN, 2026-10-25. Two defects on the sign-up page:\n- A mismatched confirmation shows 「两次输入的密码不一致」 as a low-contrast banner at the **top** of the form, not under the confirm field. The user's eyes are on the button at the bottom.\n- The page carries **no 隐私 / 条款 links**, while `/_console/login` shows both in its footer.\n\nUnchanged on objectui `main` `be64bf67c`.\n\nBatch-of: 10 · 2026-10-25 desktop E2E (signup · magic flow · invite), filed at the maintainer's request in session: 「必要的合理的建议都可以立卡」.\n\n**Business reason.** Sign-up is where a customer agrees to the terms. Showing them on login, but not where the account is created, is the wrong way round. The `termsUrl` / `privacyUrl` are already published by `/api/v1/auth/config`. A field error that appears far from the field costs a retry on the very first form a customer fills in.\n\n**Reader who acts.** The `repo:objectui` ui seat: `packages/auth/src/RegisterForm.tsx` and the console register page.\n\n## Where\n- `packages/auth/src/RegisterForm.tsx:172/221`: the mismatch is set as the top `AuthErrorBanner`, with no field-level error.\n- The register page (apps/console + app-shell console) has no legal links. `LoginPage.tsx:90-99` reads `features.termsUrl` / `privacyUrl`.\n\n## Expected\nThe mismatch is an inline error on the confirm field. The register page shows the same 隐私 / 条款 links as login, ideally as 「创建账户即表示同意《条款》和《隐私政策》」 under the button.\n\n## Dedupe\n`gh api search/issues`, repos cloud / objectui / objectstack, incl. closed:\n- `register page terms privacy`: 1 / 0 / 5, unrelated (connector listing, guest-model ADR, QA runs).\n- `password mismatch`: 13 / 8 / 67. objectui#12600 (closed) reworked the login page only. No card on the register page's banner or legal links."

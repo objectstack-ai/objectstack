@@ -2,8 +2,8 @@
   "number": 26236,
   "kind": "issue",
   "title": "tooling(typecheck): graduate the workspace root's DEBT entry (26 errors in scripts/) and give the root program its own typecheck step",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3",
     "tech-debt"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T16:29:15Z",
-  "updated_at": "2026-10-26T20:17:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-26T23:06:44Z",
+  "closed_at": "2026-10-26T23:05:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26236",
   "body": "Filing gate: ① a measured debt with named locations. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Business reason.** The workspace root is the program for `scripts/` (the gates, the PM tooling and the release scripts), and nothing type-checks it on a PR. Its 26 errors sit in a ratchet ledger (`scripts/check-type-check-coverage.mjs` `DEBT['@objectstack/spec-monorepo']`), so a new script can add a type error that no gate catches. #26092 expected `types: [\"node\"]` to clear it. Measured on PR #26203, the count moved by zero.\n\n**Reader who acts.** The `domain:devx` seat. The workflow step is Tier H (`.github/workflows/lint.yml`).\n\n## Measured (PR #26203 head `07de412e3c`, os-dev report 6419765137, out_of_scope_findings[1])\n\n- 17 × TS2307 and 7 × TS7006: the `scripts/analytics-reconcile` tree imports `@objectstack/*` and example sources that the root program cannot resolve, because the root package declares no workspace dependency.\n- 1 × TS2550: `scripts/check-test-typecheck.mts` calls `Object.hasOwn` under `lib: ES2020`.\n- 1 × TS6133 in `examples/app-showcase/src`, which a script imports. `exclude` only drops files from the initial walk.\n\n## Wanted\n\n1. Make the 26 go to 0 without loosening a type rule: resolve the analytics-reconcile imports (a workspace dependency, or move the tree under a package that has one), raise the root `lib`, or replace the call, and fix the showcase unused symbol.\n2. Delete the DEBT entry in the same PR (the ratchet rule).\n3. Add a `typecheck:root` script and run it in `lint.yml` (Tier H, needs a GOVERNED_APPROVERS approval).\n\n## Acceptance\n\n- `tsc --noEmit -p tsconfig.json` at the root exits 0, the DEBT entry is gone, and the lint workflow runs it.\n\nBlocked-by: #26203 (the root `tsconfig.json` becomes the `scripts/` program there). Related: #26092."

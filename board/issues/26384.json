@@ -1,0 +1,34 @@
+{
+  "number": 26384,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a member takes back their own comment reaction through the unreact door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T01:37:12Z",
+  "updated_at": "2026-10-27T02:29:56Z",
+  "closed_at": "2026-10-27T02:29:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T02:29:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26384",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9TSbb9RiQLSUNmAoRYsMSCQ)_\n\nFixes #26346\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:记录动态里点自己的回应撤回时，改走服务端新开的「撤回自己回应」专用接口 `DELETE /api/v1/comments/reactions/:id`,不再走通用数据删除接口;撤回按钮的权限判断不再要求 `delete` 授权。\n- **为什么改**:普通成员(只有全员默认授权、没有职位)能加回应却永远撤不回：通用删除要对象级 `delete` 授权，而全员授权集按 ADR-0090 D5 不能带它。服务端那一半已在 PR #26345 落地。\n- **风险与回滚**:风险低，只动回应芯片的撤回一条写路径和地图里一行;别人的回应仍然不会出现撤回(点了是加自己的)。回滚即 revert 本 PR,旧路径回来，普通成员重新撤不回。\n- **先看**:① `ui/packages/app-shell/src/views/RecordDetailView.tsx` 的 `handleToggleReaction` 里 `write` 的撤回分支;② `ui/packages/core/src/utils/affordanceGrants.ts` 的 `feedReactionRemove` 行;③ `RecordDetailView.feedGrant-12082.test.tsx` 新增的 describe 块。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/app-shell/src/views/RecordDetailView.feedGrant-12082.test.tsx`,预期全绿，其中 \"a member with no grant beyond create on sys_comment_reaction adds a reaction and takes it back\" 断言请求打到 `/api/v1/comments/reactions/new-row`、方法 DELETE。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- **The take-back's door.** On the records store, a click on the caller's own reaction chip now removes the row through the unreact door, `DELETE /api/v1/comments/reactions/:id` (mounted by `@objectstack/plugin-audit`, server half in #26345), called through the page's existing authenticated fetch and `VITE_SERVER_URL` base, the way the record page already reaches non-data routes. No body and no query parameter are sent. A non-2xx answer is a refused write: the existing settle step puts the reaction back and raises the one \"Your reaction was not saved\" toast. The generic `DELETE /api/v1/data/sys_comment_reaction/:id` is no longer called from the feed. No `@objectstack/client` method is added.\n- **The affordance row.** `feedReactionRemove` in `AFFORDANCE_GRANTS` changes value from `{ crud: 'delete', grant: 'delete' }` to `{ crud: null, grant: 'create' }`. `crud: null` because the write no longer goes through the object's data door (the same meaning the attachment rows carry); `grant: 'create'` because the take-back is offered to whoever may react. The row's TYPE keeps its shape (`AffordanceGrantRow`, same two keys) and `ConsoleAffordance` keeps the same member set; no export is added or removed.\n- **Mine.** Which chip offers a take-back is unchanged: the click handler already takes back only when the caller's id is among the emoji's reactors, and removes only the row id the read or the create recorded for the caller (`groupReactionRows` keys on the row's server-stamped `user_id`). A click on another member's chip adds the caller's own reaction.\n- **Docs.** `ui/content/docs/plugins/plugin-detail.mdx` no longer says a take-back needs the delete grant.\n- **sdui record.** None. The per-package records were retired by #26367 while this PR was open. The main merge took the modify/delete with `git rm`, and CI's Build & E2E UI regenerates the manifest (`sdui.manifest.json` unchanged: 106 components).\n\n## Tests\n\nNew regression cases (in `RecordDetailView.feedGrant-12082.test.tsx`, describe \"a take-back goes through the unreact door, and only on the caller's own reaction\"):\n\n- a member with only the create grant on `sys_comment_reaction` adds 🎉 and clicks it again: one call to `/api/v1/comments/reactions/new-row` with `{ method: 'DELETE', credentials: 'include' }`, no data-door delete, and the chip goes away;\n- another member's 👍 chip: the click creates the caller's own row, and the unreact door is never called;\n- the door answers 403: the reaction is put back (count 1) and `toast.error` is raised once.\n\nForced test edits:\n\n1. `ui/packages/app-shell/src/views/RecordDetailView.feedGrant-12082.test.tsx` — the authenticated-fetch mock now returns a hoisted mock (it returned a bare `vi.fn()`); \"a take-back asks the delete grant … writes nothing\" becomes \"a take-back reads no delete grant … removes it through the unreact door\"; the full-grant CONTROL and the registered-schema case assert the door's URL instead of `dataSource.delete(sys_comment_reaction, r1)`.\n2. `ui/packages/plugin-form/src/affordanceGrantMap-12082.test.tsx` — `EXPECTED_GRANT.feedReactionRemove` is `'create'`; the write-census entry `RecordDetailView > handleToggleReaction > write :: delete` is deleted, since that site no longer calls a `DataSource` write (the census states it does not see a write through its own route, the same as the attachment upload).\n3. `ui/packages/app-shell/src/views/RecordDetailView.reactionRecords-12078.test.tsx` — not named in the dispatch; forced because its fake server asserted the take-back as `delete(sys_comment_reaction, id)`. The fake server now also models the unreact door per member (removes the member's own row, `403` on anyone else's), and the two take-back cases assert the removed ids at the door and that `delete` is not called.\n\n## Acceptance notes\n\n- The door authorizes on the row's `created_by`; the chip decides \"mine\" on the row's `user_id`. Both are stamped server-side from the reacting session at create (the create hook stamps `user_id`, the engine stamps `created_by`), so they name the same member for every row made through the data door. Keying the chip on `created_by` was not done here (it would move the read's grouping too); noted for the seat.\n- The `feedReactionRemove` row now asks the same grant as `feedReactionAdd`, and the reaction control is only handed over when `feedReactionAdd` allows it, so on the records store the take-back is in practice decided by ownership alone, as the card asks.\n\n## Verification\n\n<details><summary>Tests and ablation</summary>\n\nCommands and readings are in the os-dev-report on #26346, taken at this PR's head.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPysaCwFvT4Pqb88z8)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmPysaCwFvT4Pqb88z8\n\n"
+}

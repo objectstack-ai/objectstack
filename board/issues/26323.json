@@ -1,0 +1,36 @@
+{
+  "number": 26323,
+  "kind": "pull_request",
+  "title": "refactor(plugin-grid): move ObjectGrid's module-level helpers into sibling modules (slice 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-26T21:04:29Z",
+  "updated_at": "2026-10-26T22:14:18Z",
+  "closed_at": "2026-10-26T22:14:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-26T22:14:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26323",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi94Cr2fbhp665MVvsYFfqYFe)_\n\nPart of #25994 (slice 1 of the move-only split; the card stays open for the later slices).\n\nClause-②: no\nMetadata-protocol: none\n\n## What moved\n\nBase `69aa630b`. This slice moves module-level helpers, types and constants, verbatim, out of `ui/packages/plugin-grid/src/ObjectGrid.tsx` into six sibling modules:\n\n- `objectGridQuery.ts`: `AuthoredGridFilters`, `HeldGridFilters`, `resolveGridFilters`, `useResolvedGridFilters`, `findParamsSignature`\n- `objectGridColumns.ts`: `CHIP_FIELD_TYPES`, `isChipFieldType`, `resolveColumnLabel`, `normalizeColumns`, and the column emit types with their docblocks (`RetiredListColumnKey`, `ObjectGridColumnHolds`, `ObjectGridRetiredOptionsTombstone`, `ObjectGridColumnDraft`, `ObjectGridColumn`)\n- `objectGridLinkCell.tsx`: `LINK_CELL_CLASS`, `LINK_CELL_CLASS_WRAP`, `rowRecordId`, `LinkCell`, `recordPointerFace`\n- `objectGridTranslations.ts`: `GRID_DEFAULT_TRANSLATIONS`, `useGridTranslation`\n- `objectGridDefaults.ts`: `RowHeightMode`, `resolveRowHeightMode`, `readSpecDisplayPageSize`, `DEFAULT_DISPLAY_PAGE_SIZE`, `DEFAULT_FETCH_BATCH_SIZE`, `DEFAULT_SELECTION_TYPE`, `readAuthoredPageSize`, `isUsablePageSize`, `resolvePageSize`, `describeNonPositivePageSize`, `NO_GROUPING_REFUSAL`\n- `objectGridRowVersion.ts`: `OCC_TOKEN_FIELD`, `rowVersionOf`, `WrittenRowVersion`, `rowVersionToSend`, `RowConflictChoice`, `BatchSaveOutcome`\n\n898 lines move. `ObjectGrid.tsx` goes from 7689 to 6781 lines. Names the component still reads gain the `export` keyword in their new module. `ObjectGrid.tsx` imports them back and re-exports the four column emit types it exported before (`RetiredListColumnKey`, `ObjectGridColumnHolds`, `ObjectGridColumnDraft`, `ObjectGridColumn`), so every name it exported is still importable from the same path. The package entry (`index.tsx`) is untouched. The import specifiers whose only readers moved now live in the new modules. No identifier is renamed, no logic or DOM changes, and no new name is exported from `ObjectGrid.tsx`.\n\nMove-only proof: the multiset of non-blank lines of the base `ObjectGrid.tsx` equals the new `ObjectGrid.tsx` plus the six modules (each module's header comment dropped, added `export` keywords normalised). Nothing is missing. The only other lines are import lines and the one type re-export line.\n\n## What stays in `ObjectGrid.tsx` on purpose\n\n- The group-heading date region (`TemporalGroupFace`, `temporalGroupHeading`): #25884 is editing it.\n- `parseSchemaSort` (and its sibling `toOrderByClause`): `gridArrayArmOrderby-8973.test.tsx` reads `ObjectGrid.tsx` and asserts `export function parseSchemaSort` is in it.\n- The public props types, `ObjectGridComponentProps` among them: `bulkExecutorDataSourceFace-9722.test.ts` asserts `export interface ObjectGridComponentProps` is in the file.\n- The schema-slot types (`RemoveIndexSignature`, `DeclaredDataTableSchema`, `ObjectGridDataTableSchemaHolds`, `ObjectGridDataTableSchema`): `cellClassNameCensusProse-6921.test.ts` reads the census prose in their docblock from `ObjectGrid.tsx`.\n- The relational-copy-set docblock and `FooterSummaryReport`.\n- `getDataConfig`, kept file-local as on `main` (commit 2978029b). Exported from a module, it becomes a shared reader for `check:doc-example-readers`, which then flags core's `record-source.ts` `@example`.\n\nRe-pointing those scans would be a test-logic edit, which this card does not allow without the seat's word, so this slice leaves them where they are.\n\n## Test edits\n\nNone.\n\n## Verification\n\nRun on head `fe3087e5`, before the merge of `main`:\n\n- `pnpm --dir ui exec vitest run packages/plugin-grid/ --maxWorkers=2`, the whole package suite: 251 of 251 files and 2247 of 2247 tests passed on the base files, and the same 251 / 2247 passed after the move.\n- 52 test files outside plugin-grid that read sources (every test naming plugin-grid that scans source, every test spelling `ObjectGrid.tsx`, plus `raw-key-call-sites-3546` and `defaults-maps-mirror-en-pack`): 52 of 52 files, 2257 of 2257 tests passed.\n- `pnpm --filter @object-ui/plugin-grid type-check` exit 0; `tsc --listFiles` includes all seven files.\n- eslint on the seven files: 0 errors.\n- `node scripts/gen-sdui-manifest-node.mjs`: the manifest is byte-identical (sha256 `1f6e1ccb…`); only `scripts/sdui-manifest.sources/plugin-grid.json` is re-recorded (38 to 44 sources).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 41 derived gates, all exit 0; `--ran` reconciles 41 of 41.\n\nAfter merging `main` (`f00cbe36`, 11 commits, none in `ObjectGrid.tsx`): `check-sdui-manifest` is green and the Console builds. The full readings are in the os-dev-report comment on the card.\n\n## Acceptance notes\n\n- Some moved prose still says \"below\" or \"above\", or \"this file\", about code that stays in `ObjectGrid.tsx` (for example the column emit docblock's \"`generateColumns()` below\"). It is kept verbatim because the slice is move-only.\n- `objectGridLinkCell.tsx` exports `rowRecordId` and `recordPointerFace` beside the `LinkCell` component, so eslint's `react-refresh/only-export-components` warns twice there. It is a warning, not an error.\n\n## Landing\n\nThis enqueues only after #25884 merges. Expect a merge of `main` and a re-record of `plugin-grid.json` before it lands. Changed lines are about 2,000, under the 3,000 line limit.\n\nChangeset: `.changeset/25994-objectgrid-helpers-split.md` (patch, `@object-ui/plugin-grid`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Bdrd2yH4eqnz2QobtN3haE)_\n\n"
+}

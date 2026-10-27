@@ -2,24 +2,35 @@
   "number": 26304,
   "kind": "issue",
   "title": "spec(automation): a read-only `record` screen field: a flow screen shows a record it created, by display name, as a link to the record page (#25872 ruling B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:workflow",
+    "domain:spec",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T19:57:46Z",
-  "updated_at": "2026-10-26T19:57:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T00:02:29Z",
+  "closed_at": "2026-10-27T00:01:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26304",
   "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, carrying out the maintainer's ruling on #25872. ⛔ Not a claim; `domain:spec` grades and owns it.\n\nRuling-ref: 6422899013 (https://github.com/objectstack-ai/objectstack/issues/25872#issuecomment-6422899013). Batch #401 item 4, letter **B**, maintainer 「同意」 2026-10-26T17:29Z. The substance is the `domain:ui` seat 2 analysis 6419689832.\n\n## Business reason\n\nA screen flow that creates records ends today with a toast, and nothing points at what it created. HotCRM's lead conversion creates an account, a contact and optionally an opportunity. The rep has to know to open the lead's Related tab. The ruled shape lets the author put a last screen of \"created records\" cards, each linking to its record page. hotcrm#2285 is blocked on it.\n\n## The contract half (this card)\n\nThese are the ruling's execution parameters, adopted in the same stroke:\n- A new `ScreenFieldConfigSchema` `type` member (`packages/spec/src/automation/builtin-node-config.zod.ts`, `type` at :913). The dev proposes the name; `record` is suggested.\n- On that member, `reference` (object name) and `defaultValue` (a `FlowValueSlotSchema` value slot that evaluates to the id) are **required**.\n- `required`, `options`, `placeholder`, `min` and `max` are **refused** on it.\n- On resume, a value submitted under that field's name is **refused loudly** and never bound to a flow variable. This is the engine rule in `screen-input-contract.ts`.\n- `visibleWhen` works as usual. An empty id renders \"—\".\n- Declarations: `Clause-②: yes (widening)`, `Metadata-protocol: added`, `@objectstack/spec` minor.\n\n## The consumer half (#25872, `domain:ui`)\n\nThe console's `ScreenFieldInput` (`ui/packages/app-shell/src/views/ScreenView.tsx`) gains a branch that renders the record's display name (ADR-0079 `nameField`, through `LookupField`'s readonly branch) as a link to the record page. It also needs a `content/docs/automation/flows.mdx` section and one dogfood proof: two created records shown and linked, and a resume carrying the field's value refused.\n\n## Landing shape (to agree with the spec seat)\n\nThe ruling allows **one PR across spec, engine and console** closing both cards, in the shape of the landed precedent #26134 (the `file` screen field, #25801: +959/−48, 14 files). That way declared = enforced ships in one release. If the spec seat prefers its own PR, the console branch lands in the same release. The `domain:ui` seat 1 card thread for #25872 is ready to build the one-PR shape on the spec seat's word.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, \"screen field read-only record reference type ScreenFieldConfigSchema record link flow end screen\": only #25872 (this card's consumer half) and closed neighbours (#25801 `file`, #17306, #14945). No open contract card."
