@@ -120,6 +120,8 @@ function seededIds(byObject: Record<string, string[]>): (object: string) => read
 }
 
 const CHUNK = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
+/** [#26825] Seeded ids one claim write carries: the claim's hand-over batch. */
+const HANDOVER_ROWS = 50;
 
 describe('claimOrgSeedOwnership', () => {
   it('returns [] when registry is unavailable', async () => {
@@ -291,26 +293,27 @@ describe('claimOrgSeedOwnership', () => {
     expect(rows.find((r) => r.id === 'owned')!.owner_id).toBe(SOMEONE);
     expect(rows.find((r) => r.id === 'foreign')!.owner_id).toBeNull();
 
-    // Three chunks, each under the ceiling; every write keeps the claim's
-    // predicate and names its chunk; nothing was read.
-    expect(writes.map((w) => w.matched.length)).toEqual([CHUNK, CHUNK, N - 2 * CHUNK]);
+    // Three chunks, each under the ceiling, [#26825] each written in hand-over
+    // batches; every write keeps the claim's predicate and names its batch;
+    // nothing was read.
+    expect(writes.map((w) => w.matched.length)).toEqual(Array.from({ length: N / HANDOVER_ROWS }, () => HANDOVER_ROWS));
     for (const w of writes) {
       expect(Object.keys(w.where).sort()).toEqual(['id', 'organization_id', 'owner_id']);
       expect(w.where).toMatchObject({ organization_id: ORG, owner_id: null });
-      expect(w.where.id.$in.length).toBeLessThanOrEqual(CHUNK);
+      expect(w.where.id.$in.length).toBeLessThanOrEqual(HANDOVER_ROWS);
       expect(w.context).toEqual({ isSystem: true, skipAutomations: true });
     }
     expect(ql.find).not.toHaveBeenCalled();
   });
 
-  it('an unreadable count is warned as unknown, counts nothing, and the next chunk still lands', async () => {
+  it('an unreadable count is warned as unknown, counts nothing, and the next write still lands', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
     const seeded = Array.from({ length: CHUNK + 1 }, (_, i) => `l${String(i).padStart(5, '0')}`);
     const rows = seeded.map((id) => ({ id, organization_id: ORG, owner_id: null as string | null }));
     const logger = makeLogger();
     let call = 0;
     const { ql } = makeQL(schemas, { crm_lead: rows }, {
-      // The first chunk's driver answers a record rather than a count.
+      // The first write's driver answers a record rather than a count.
       writeAnswer: (_object, where) => {
         call += 1;
         if (call === 1) return { id: 'not-a-count' };
@@ -323,8 +326,11 @@ describe('claimOrgSeedOwnership', () => {
 
     expect(
       await claimOrgSeedOwnership(ql, ORG, OWNER, { logger, seededRecordIds: seededIds({ crm_lead: seeded }) }),
-    ).toEqual([{ object: 'crm_lead', count: 1 }]);
-    expect(ql.update).toHaveBeenCalledTimes(2);
+    ).toEqual([{ object: 'crm_lead', count: CHUNK + 1 - HANDOVER_ROWS }]);
+    // [#26825] One write per hand-over batch: the first chunk's, then the
+    // second chunk's one id.
+    expect(ql.update).toHaveBeenCalledTimes(CHUNK / HANDOVER_ROWS + 1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('could not read an affected-row count'),
       expect.objectContaining({ object: 'crm_lead', organizationId: ORG, ids: CHUNK }),
@@ -340,13 +346,12 @@ describe('claimOrgSeedOwnership', () => {
     const leads = seeded.map((id) => ({ id, organization_id: ORG, owner_id: null as string | null }));
     const deals = [{ id: 'd1', organization_id: ORG, owner_id: null }];
     const logger = makeLogger();
-    let leadWrites = 0;
+    const secondChunk = new Set(seeded.slice(CHUNK, 2 * CHUNK));
     const { ql } = makeQL(schemas, { crm_lead: leads, crm_deal: deals }, {
-      // The second crm_lead chunk is refused outright by a code hook.
-      failWrite: (object) => {
+      // Every write of the second crm_lead chunk is refused outright by a code hook.
+      failWrite: (object, where) => {
         if (object !== 'crm_lead') return undefined;
-        leadWrites += 1;
-        return leadWrites === 2 ? new Error('a code hook refused the write') : undefined;
+        return secondChunk.has(where.id.$in[0]) ? new Error('a code hook refused the write') : undefined;
       },
     });
 
@@ -361,9 +366,10 @@ describe('claimOrgSeedOwnership', () => {
     ]);
     expect(leads.filter((r) => r.owner_id === OWNER)).toHaveLength(CHUNK + 1);
     expect(deals[0].owner_id).toBe(OWNER);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('failed for crm_lead'),
-      expect.objectContaining({ object: 'crm_lead', ids: CHUNK, error: 'a code hook refused the write' }),
+      expect.stringContaining(`failed for crm_lead in org ${ORG}: the ${CHUNK} seeded row(s) of this write stay owner-less`),
+      { object: 'crm_lead', organizationId: ORG, ids: CHUNK, error: 'a code hook refused the write' },
     );
   });
 });
