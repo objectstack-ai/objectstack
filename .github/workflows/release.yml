@@ -320,7 +320,7 @@ jobs:
       # (the publish lane runs it again — a gate on one lane is not a gate on
       # the other).
       - name: Verify Changesets "fixed" group covers every public package
-        run: node scripts/check-changeset-fixed.mjs
+        run: pnpm check:changeset-fixed
 
       # ══════════════════════════════════════════════════════════════════════
       # POST-VERSION VALIDATION — THE ONLY GATE THE RELEASE COMMIT EVER PASSES
@@ -1853,7 +1853,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify Changesets "fixed" group covers every public package
-        run: node scripts/check-changeset-fixed.mjs
+        run: pnpm check:changeset-fixed
 
       # ──────────────────────────────────────────────────────────────────────
       # ⛔ TOMBSTONE — no objectui pin is read, built or checked here, and none

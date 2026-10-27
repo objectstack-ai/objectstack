@@ -1272,12 +1272,12 @@ export function selfTest() {
   //    carded defect class, and renaming a step silently detaches it.
   const workflow = readFileSync('.github/workflows/lint.yml', 'utf8');
   //    CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so pin
-  //    the step AND the alias: shared resolver self-test, this self-test, sweep.
+  //    the step AND the alias: this self-test, then the sweep.
   check(/^\s*run: pnpm check:spec-docblock-symbol-anchors\s*$/m.test(workflow), 'lint.yml must run this gate through `pnpm check:spec-docblock-symbol-anchors`');
   const alias = JSON.parse(readFileSync('package.json', 'utf8')).scripts?.['check:spec-docblock-symbol-anchors'];
   check(
-    alias === 'node scripts/symbol-anchors.mjs --self-test && node scripts/check-spec-docblock-symbol-anchors.mjs --self-test && node scripts/check-spec-docblock-symbol-anchors.mjs',
-    `root package.json's check:spec-docblock-symbol-anchors must run the resolver's and this gate's --self-test, then the sweep -- got ${JSON.stringify(alias)}`,
+    alias === 'node scripts/check-spec-docblock-symbol-anchors.mjs --self-test && node scripts/check-spec-docblock-symbol-anchors.mjs',
+    `root package.json's check:spec-docblock-symbol-anchors must run this gate's --self-test, then the sweep -- got ${JSON.stringify(alias)}`,
   );
 
   // 7. The census declaration is intact, and its three instruments stay

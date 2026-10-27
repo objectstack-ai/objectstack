@@ -2475,16 +2475,22 @@ jobs:
       # #13788 (1,647 platform-checklist citations) joins by registering its own
       # corpus — ⛔ not by forking the resolver.
       #
-      # Each corpus runs its root alias, per the GATE INVOCATION IDIOM note at
-      # the top of this file: `pnpm check:<corpus>-symbol-anchors` is the shared
-      # resolver's `--self-test`, then the corpus's own `--self-test`, then its
-      # sweep. One step per corpus, each with an `id:` and `continue-on-error`,
-      # so a red corpus never hides the other two — the job the `run_self_test`
-      # collector that used to precede these steps did (#10814). The shared
-      # resolver's self-test (~0.2 s) runs in each step; a red there reds all
-      # three, which is what a broken resolver means. Each corpus gate's own
-      # --self-test asserts its step and its alias, so rewiring one silently
-      # reddens it.
+      # Every step here runs a root alias, per the GATE INVOCATION IDIOM note at
+      # the top of this file: `pnpm check:symbol-anchors` is the shared
+      # resolver's `--self-test`, and each `pnpm check:<corpus>-symbol-anchors`
+      # is that corpus's own `--self-test`, then its sweep. One step each, each
+      # with an `id:` and `continue-on-error`, so a red one never hides the
+      # others — the job the `run_self_test` collector that used to hold the
+      # four self-tests did (#10814). Each corpus gate's own --self-test asserts
+      # its step and its alias, so rewiring one silently reddens it. The
+      # resolver keeps its own step and alias because it declares no path
+      # population of its own (its `dispatch-gates: no-path-population` marker)
+      # while every corpus does.
+      - name: Symbol-anchor resolver self-test
+        id: symbol-anchor-resolver-self-test
+        continue-on-error: true
+        run: pnpm check:symbol-anchors
+
       - name: ADR symbol anchors resolve (no line numbers survive)
         id: adr-symbol-anchors-resolve-no-line-numbers
         continue-on-error: true
