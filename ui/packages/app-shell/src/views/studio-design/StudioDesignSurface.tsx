@@ -422,7 +422,8 @@ function interfacesSaveBody(type: string, draft: Record<string, unknown>): Recor
 /**
  * objectui#11786 — tells the surface's Publish what edit a pillar holds unsent
  * (`StudioHeld.clause`, or `null`), and takes it back when the pillar unmounts,
- * so a pillar left behind never keeps Publish refusing.
+ * so a pillar left behind never keeps Publish refusing — nor, since
+ * objectstack#26705, keeps the surface's departure guard asking.
  *
  * Keyed on the clause, a string, never on the view model's identity (AGENTS.md
  * #10); the reporter is read through a ref, so an unmemoised one cannot re-fire it.
@@ -436,6 +437,18 @@ function useHeldEditReport(report: ((clause: string | null) => void) | undefined
     reportRef.current?.(clause);
   }, [clause]);
   React.useEffect(() => () => reportRef.current?.(null), []);
+}
+
+/**
+ * objectstack#26705 — the one question Studio asks before a departure drops
+ * unsaved work: a dirty pillar's edits (objectui#2600) or an edit a pillar's
+ * autosave holds unsent (objectui#11786). The surface asks it before the header
+ * leaves the pillar; a pillar asks it before its rail opens another item, which
+ * reloads the one buffer the work lives in. `true` when nothing would be lost
+ * or the author agrees to lose it.
+ */
+function confirmDropUnsavedWork(unsaved: boolean, locale: string): boolean {
+  return !unsaved || window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
 }
 
 /**
@@ -1326,15 +1339,24 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // Pillars reset their report on unmount, so a confirmed discard clears the
   // flag by itself.
   const [pillarDirty, setPillarDirty] = React.useState(false);
-  const confirmLeavePillar = React.useCallback(() => {
-    if (!pillarDirty) return true;
-    return window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
-  }, [pillarDirty, locale]);
+  // objectui#11786 — what the open pillar's autosave holds unsent (an
+  // incomplete-but-normal edit), as the clause naming what it needs. A publish
+  // promotes the drafts the server holds, which do not carry that edit, so it is
+  // refused while one is held rather than going around it silently.
+  const [heldEdit, setHeldEdit] = React.useState<string | null>(null);
+  // objectstack#26705 — a held edit lives only in the pillar's buffer, so a
+  // departure drops it exactly as it drops a dirty pillar's edits: both are
+  // unsaved work, and every guard below reads this one bit.
+  const unsavedPillarWork = pillarDirty || heldEdit !== null;
+  const confirmLeavePillar = React.useCallback(
+    () => confirmDropUnsavedWork(unsavedPillarWork, locale),
+    [unsavedPillarWork, locale],
+  );
   // Browser-native "leave site?" prompt on tab close / reload while a pillar
   // is dirty. The matrix editor installs its own (double registration is
   // harmless); the Interfaces nav editor has none, so this closes that gap.
   React.useEffect(() => {
-    if (!pillarDirty) return;
+    if (!unsavedPillarWork) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // Required for Chrome to actually show the prompt.
@@ -1342,13 +1364,13 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [pillarDirty]);
+  }, [unsavedPillarWork]);
   // objectui#13253 — the shell's own departures (header menus, palette, inbox,
   // AI entry) leave from buttons this surface never sees, so a dirty pillar
   // registers with the shell's seam, with the same question the header asks.
   // While registered, the seam's link guard also asks before a pillar link
   // leaves, so the pillar links below no longer ask a second time.
-  useRegisterUnsavedEdits(pillarDirty, t('engine.edit.unsavedLeaveConfirm', locale));
+  useRegisterUnsavedEdits(unsavedPillarWork, t('engine.edit.unsavedLeaveConfirm', locale));
 
   // The shared authenticated metadata client for this surface. Declared here
   // rather than beside its other reader below because the publish immediately
@@ -1421,12 +1443,6 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   React.useLayoutEffect(() => {
     refreshPendingRef.current = refreshPending;
   });
-
-  // objectui#11786 — what the open pillar's autosave holds unsent (an
-  // incomplete-but-normal edit), as the clause naming what it needs. A publish
-  // promotes the drafts the server holds, which do not carry that edit, so it is
-  // refused while one is held rather than going around it silently.
-  const [heldEdit, setHeldEdit] = React.useState<string | null>(null);
 
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
@@ -1807,10 +1823,19 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     setSlotPropsClaims((n) => n + 1);
     return () => setSlotPropsClaims((n) => n - 1);
   }, []);
-  const showSlotProps = React.useCallback(() => {
+  // objectstack#26737 — a selection shows its properties at every width: a
+  // hidden slot unfolds, as `⌘.` unfolds it, so a builder who hid the panel is
+  // never left with a selection whose properties are drawn nowhere. One
+  // function for the surface's life (state, not a memo — AGENTS.md #10): the
+  // pillars ask on a new selection only, never because this was re-created.
+  const setSlotOpenRef = React.useRef(setSlotOpen);
+  React.useLayoutEffect(() => {
+    setSlotOpenRef.current = setSlotOpen;
+  });
+  const [showSlotProps] = React.useState(() => () => {
     setSlotMode('props');
-    if (isMobile) setSlotOpenMobile(true);
-  }, [isMobile]);
+    setSlotOpenRef.current(true);
+  });
   const slotHandle = React.useMemo<StudioRightSlotHandle | null>(
     () =>
       slotHost
@@ -5203,6 +5228,9 @@ export function InterfacesPillar({
                 active={current}
                 objectIcons={objectIconMap}
                 onPick={(s) => {
+                  // objectstack#26705 — another leaf's load replaces the buffer
+                  // the held widget lives in; an entry for the open leaf keeps it.
+                  if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
                   setCurrent(s);
                   if (isMobile) setRailOpen(false);
                 }}
@@ -6308,6 +6336,9 @@ export function DataPillar({
                   key={o.name}
                   active={current?.name === o.name}
                   onClick={() => {
+                    // objectstack#26705 — another object's load replaces the
+                    // buffer the held edit lives in; the open one keeps it.
+                    if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
                     setCurrent(o);
                     if (isMobile) setRailOpen(false);
                   }}
@@ -7956,6 +7987,9 @@ export function AutomationsPillar({
                       data-trigger={glyph}
                       title={[f.label, t(FLOW_GLYPH_LABEL_KEY[glyph], locale), reading?.view.label].filter(Boolean).join(' · ')}
                       onClick={() => {
+                        // objectstack#26705 — another flow's load replaces the
+                        // buffer the held step lives in; the open one keeps it.
+                        if (!active && !confirmDropUnsavedWork(flowHeld !== null, locale)) return;
                         setCurrent(f);
                         if (isMobile) setRailOpen(false);
                       }}
@@ -8473,10 +8507,10 @@ export function AccessPillar({
     },
     [],
   );
-  const confirmDiscardEdits = React.useCallback(() => {
-    if (!pillarDirty) return true;
-    return window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
-  }, [pillarDirty, locale]);
+  const confirmDiscardEdits = React.useCallback(
+    () => confirmDropUnsavedWork(pillarDirty, locale),
+    [pillarDirty, locale],
+  );
 
   const load = React.useCallback(async () => {
     try {

@@ -122,6 +122,7 @@ const ActionIconRenderer = forwardRef<
     // earns it. See `./disabled-reason`.
     const disabledReason = useDisabledReason(
       hasDeclaredVisibilityGate(schema.disabled) && isDisabledPred,
+      schema.disabledReason,
     );
 
     const Icon = resolveIcon(schema.icon);

@@ -678,9 +678,12 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     // FEWER keys — which would make every assertion below vacuously green over
     // an empty corpus. Ranges first: overlapping ones would mean the `};`
     // scan ran past a table and both sets became the same set.
+    // The table drains slice by slice into the namespace (objectstack#25922),
+    // so its floor is "non-empty"; the 3,000-key floor is held over both homes
+    // together, below.
     expect(EN_TABLE.to).toBeLessThan(ZH_TABLE.from);
-    expect(EN_TABLE.keys.length).toBeGreaterThan(1500);
-    expect(ZH_TABLE.keys.length).toBeGreaterThan(1500);
+    expect(EN_TABLE.keys.length).toBeGreaterThan(0);
+    expect(ZH_TABLE.keys.length).toBeGreaterThan(0);
     // No duplicates: a key declared twice would be a silent overwrite, and the
     // set arithmetic below would hide it.
     expect(EN_TABLE.keys.length).toBe(new Set(EN_TABLE.keys).size);
@@ -691,6 +694,8 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     expect(ZH_HOME.keys.length).toBeGreaterThan(150);
     expect(EN_KEYS.keys.length).toBe(new Set(EN_KEYS.keys).size);
     expect(ZH_KEYS.keys.length).toBe(new Set(ZH_KEYS.keys).size);
+    expect(EN_KEYS.keys.length).toBeGreaterThan(3000);
+    expect(ZH_KEYS.keys.length).toBeGreaterThan(3000);
   });
 
   it('the extractor really sees the keys the derivation implies', () => {

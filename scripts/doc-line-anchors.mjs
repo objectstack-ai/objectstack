@@ -30,15 +30,17 @@
  * `blankAnchorLineNumbers(page) === page`.
  *
  * The one in-tree importer is `scripts/git-merge-regen.mjs`: its `'line-anchors'`
- * comparator is `blankAnchorLineNumbers`, selected by that page's `mixed` field in
- * `scripts/regen-artifacts.mjs`. The identity is the intended answer there, not a
- * broken one. The driver proves a deferral lossless only when the incoming side
- * equals the ancestor or ours byte for byte, so every real edit to the page takes
- * the text-merge branch, or conflicts loudly, by design -- and the field stays,
- * because it is what sends the page through that check at all (that row's comment
- * carries the measurement). The account of `--fix` in `blankAnchorLineNumbers`'s
- * docblock below is the pre-#15921 one: the census `--fix` no longer touches
- * anchors, and regenerates only the page's declared counts.
+ * comparator is `blankAnchorLineNumbers`, the one a `REGEN_ARTIFACTS` row would
+ * select with `mixed: 'line-anchors'` in `scripts/regen-artifacts.mjs`. No row
+ * carries `mixed` today: that page was the one that did, and it left the driver at
+ * #22927, when its census totals came off it. The comparator is kept for the next
+ * `file:line` mixed artifact (its docblock in `git-merge-regen.mjs` says so), and
+ * the driver's mixed-row self-test reports nothing to prove while no row names it.
+ * The account of `--fix` in `blankAnchorLineNumbers`'s docblock below is the
+ * pre-#15921 one, and that flag is now retired outright:
+ * `check-system-context-census.mjs --fix` refuses with exit 2 and names `--write`,
+ * the one writer, which rebuilds the page's site register (#26442) and touches no
+ * anchor.
  *
  * ## The three anchor shapes, all of which were real on that page
  *
