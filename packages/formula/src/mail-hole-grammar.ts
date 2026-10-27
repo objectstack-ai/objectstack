@@ -24,9 +24,19 @@
  * literal ISO 4217 code. A refused hole is a hole — it is found, located and
  * named — and the renderer refuses to render it rather than print a wrong
  * value or formatter syntax.
+ *
+ * One argument form is the mail dialect's own: `currency:@path` reads the
+ * ISO 4217 code from the send's data (`CURRENCY_ARGUMENT_RULE`), so one
+ * template formats each record's amount in that record's currency. The path
+ * after the `@` is the same dotted path a hole names. Here it is parsed
+ * ({@link ParsedMailHole}.`codePath`), checked against the template's declared
+ * `variables` when it declares any ({@link judgeMailHoleGrammar}), and the
+ * renderer resolves it and refuses a value that is not a code
+ * (`currencyCodeValueRefusal`) — it never formats the amount in a default
+ * currency in its place.
  */
 
-import { judgeHoleFormatter, type TemplateHoleGrammarRefusal } from './template-engine';
+import { CURRENCY_ARGUMENT_RULE, currencyCodePath, judgeHoleFormatter, type TemplateHoleGrammarRefusal } from './template-engine';
 
 /** 1=open (`{{` or `{{{`), 2=brace-free inner body, 3=close (`}}` or `}}}`). */
 const MAIL_HOLE_SOURCE = String.raw`(\{\{\{?)([^{}]*)(\}\}\}?)`;
@@ -52,6 +62,12 @@ export interface ParsedMailHole {
   formatter?: string;
   /** The formatter's argument, quotes removed; absent when none was written. */
   arg?: string;
+  /**
+   * Set for `currency:@path`: the path into the send's data the currency code is
+   * read from (`currency_code`). The renderer resolves it; `arg` keeps the text
+   * as written (`@currency_code`).
+   */
+  codePath?: string;
   /** Set when the grammar refuses the hole: it is not rendered, and authoring refuses it. */
   refusal?: TemplateHoleGrammarRefusal;
 }
@@ -76,18 +92,40 @@ export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailH
     // renderer used to leave it on the page as written: a chained hole is
     // still a hole, refused by the one-formatter rule.
     const name = formatterPart.split(/[:|]/, 1)[0].trim();
-    const refusal = judgeHoleFormatter(hole, formatterPart, name, undefined);
+    const refusal = judgeHoleFormatter(hole, formatterPart, name, undefined, 'mail');
     return refusal ? { path, formatter: name, refusal } : null;
   }
   const formatter = m[1];
   const arg = m[2];
-  const refusal = judgeHoleFormatter(hole, formatterPart, formatter, arg);
+  const refusal = judgeHoleFormatter(hole, formatterPart, formatter, arg, 'mail');
+  const codePath = refusal ? undefined : currencyCodePath(formatterPart);
   return {
     path,
     formatter,
     ...(arg !== undefined ? { arg } : {}),
+    ...(codePath !== undefined ? { codePath } : {}),
     ...(refusal ? { refusal } : {}),
   };
+}
+
+/**
+ * True when a `currency:@path` path is one the template declares: a declared
+ * variable names the path itself, or a root it lies under (`contract`
+ * declares `contract.currency_code`).
+ */
+function isDeclaredPath(path: string, variables: readonly string[]): boolean {
+  return variables.some((name) => name === path || path.startsWith(`${name}.`));
+}
+
+/** What {@link judgeMailHoleGrammar} judges a face against, beyond its own text. */
+export interface MailHoleGrammarOptions {
+  /**
+   * The names of the template's declared `variables`. When the template
+   * declares any, a `currency:@path` hole whose path none of them declares is
+   * refused (`currency-code-path-undeclared`). Absent or empty, the path is
+   * judged at render, where a code that does not resolve is refused.
+   */
+  variables?: readonly string[];
 }
 
 /** One hole of a mail template face that the grammar refuses. */
@@ -100,12 +138,28 @@ export interface MailHoleGrammarFinding {
 }
 
 /** Every hole in one mail template face (`subject`, `bodyText` or `bodyHtml`) the grammar refuses, in order. */
-export function judgeMailHoleGrammar(face: string): MailHoleGrammarFinding[] {
+export function judgeMailHoleGrammar(face: string, options: MailHoleGrammarOptions = {}): MailHoleGrammarFinding[] {
   if (typeof face !== 'string' || face === '') return [];
+  const variables = options.variables ?? [];
   const findings: MailHoleGrammarFinding[] = [];
   for (const m of face.matchAll(mailHolePattern())) {
     const parsed = parseMailHole(m[2], m[0]);
-    if (parsed?.refusal) findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });
+    if (parsed?.refusal) {
+      findings.push({ start: m.index ?? 0, text: m[0], refusal: parsed.refusal });
+    } else if (parsed?.codePath !== undefined && variables.length > 0 && !isDeclaredPath(parsed.codePath, variables)) {
+      findings.push({
+        start: m.index ?? 0,
+        text: m[0],
+        refusal: {
+          rule: 'currency-code-path-undeclared',
+          message:
+            `the hole ${m[0]} reads its currency code from \`${parsed.codePath}\`, which this template's `
+            + `\`variables\` do not declare (it declares ${variables.map((v) => `\`${v}\``).join(', ')}). `
+            + `${CURRENCY_ARGUMENT_RULE} Declare \`${parsed.codePath}\` beside them, or read the code from a path `
+            + 'they declare.',
+        },
+      });
+    }
   }
   return findings;
 }
