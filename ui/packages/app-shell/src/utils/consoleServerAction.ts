@@ -49,11 +49,11 @@ import {
   resolveServerActionRecordId,
   type ActionContext,
   type ActionDef,
-  type ActionResult,
   type ServerActionFetch,
   type ServerActionHandler,
   type ServerActionRecordIdResolver,
 } from '@object-ui/core';
+import { takesNewTabUrlFastPath } from './newTabUrlFastPath.js';
 
 /**
  * i18next-style translate function: `t(key, englishDefault)` returns the
@@ -164,48 +164,6 @@ function openInTab(preOpenedTab: Window | null, url: string, t: ConsoleServerAct
       duration: 10000,
     });
   }
-}
-
-/**
- * Whether `action` takes the zero-roundtrip `newTabUrl` fast path:
- * `opensInNewTab` plus a non-empty `newTabUrl`. The spec gives that pair one
- * meaning whatever the action's `type` — navigate the pre-opened tab, no
- * request — so a host's `type: 'api'` handler asks this and hands such an
- * action to the handler {@link createConsoleServerActionHandler} builds,
- * instead of sending its own request to `target`.
- */
-export function takesNewTabUrlFastPath(action: ActionDef): action is ActionDef & { newTabUrl: string } {
-  return !!action.opensInNewTab && typeof action.newTabUrl === 'string' && action.newTabUrl !== '';
-}
-
-/**
- * A host's registered `type: 'api'` handler, made to honour the `newTabUrl`
- * fast path: an action that {@link takesNewTabUrlFastPath} goes to
- * `consoleHandler` (the handler {@link createConsoleServerActionHandler}
- * built for the same surface, so the record id resolves the way that surface
- * resolves it), and every other action to `apiHandler` unchanged.
- *
- * Without it the console's api handlers sent their request to `target` and
- * never read the pair, so a `type: 'api'` action declaring `opensInNewTab` +
- * `newTabUrl` opened no tab and POSTed instead, from the record header, its
- * more-menu and the list toolbar alike (objectstack#26747). The pair's early
- * row-count refusal is the fast path's own, forwarded only for those actions;
- * an ordinary api action keeps having none.
- */
-export function withNewTabUrlFastPath(
-  apiHandler: (action: ActionDef, context?: ActionContext) => Promise<ActionResult>,
-  consoleHandler: ServerActionHandler,
-): ServerActionHandler {
-  return Object.assign(
-    (action: ActionDef, context?: ActionContext) => (takesNewTabUrlFastPath(action)
-      ? consoleHandler(action, context)
-      : apiHandler(action, context)),
-    {
-      refuseBeforeInput: (action: ActionDef, context?: ActionContext) => (takesNewTabUrlFastPath(action)
-        ? consoleHandler.refuseBeforeInput?.(action, context)
-        : undefined),
-    },
-  );
 }
 
 export function createConsoleServerActionHandler(opts: ConsoleServerActionOptions): ServerActionHandler {
