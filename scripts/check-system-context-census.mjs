@@ -7,7 +7,8 @@
  *
  *   node scripts/check-system-context-census.mjs
  *   node scripts/check-system-context-census.mjs --self-test
- *   node scripts/check-system-context-census.mjs --fix   # RETIRED: refuses, exit 2 -- nothing on the page is generated
+ *   node scripts/check-system-context-census.mjs --write # rebuild the page's generated site register, nothing else
+ *   node scripts/check-system-context-census.mjs --fix   # RETIRED: refuses, exit 2 -- names --write
  *
  * That page declares itself "the authority" for every platform behaviour keyed off
  * `ExecutionContext.isSystem`, and says it is "built by census over the whole repo,
@@ -920,6 +921,340 @@ export function checkRowReferences({ pageText, ledger = NON_READ_ANCHORS, pageRe
   return { problems, held };
 }
 
+/* ─────────── The generated site register: the page's census half (#26442) ─────────── */
+
+/**
+ * ── Why the census half of this page is GENERATED, and the prose half is not ──
+ *
+ * Every behaviour row used to carry its anchor in full -- `packages/…/file.ts#symbol`
+ * -- so the page held two kinds of text in one cell: an editorial claim (THIS
+ * symbol's read is THIS behaviour) and a census fact (that symbol lives in THAT
+ * file). Only the first is a human's to write, and only the second churns. Measured
+ * at `00a4593ad7`: 84 commits touched the page in the 30 days before it, and 12 of
+ * them changed nothing on it but the path inside an anchor -- a refactor moved a
+ * symbol into a new file (`engine.ts` → `engine-driver-options.ts`,
+ * `security-plugin.ts` → `security-plugin-authz-middleware.ts`, …) and its author
+ * re-typed the path by hand, because this gate's `--fix` had nothing left to
+ * generate.
+ *
+ * So the two halves are split the way `scripts/tenant-audit-census.mjs` splits its
+ * page:
+ *
+ *   ROW KEYS    each behaviour row names the symbols its behaviour lives in, by
+ *               NAME, in the table's `Symbol` column -- `registerAuthzMiddleware`,
+ *               never the path. A name says which read the row is ABOUT and does
+ *               not move when the symbol moves to another file.
+ *   REGISTER    a generated region (`REGISTER_BEGIN` … `REGISTER_END`) listing
+ *               every census site as `path#symbol`, how many reads that symbol
+ *               holds, and the rows whose keys name it. `--write` rebuilds it from
+ *               the tree; the check refuses a committed region that differs.
+ *
+ * ⇒ A symbol moved to another file is a regeneration, never a hand edit: the key
+ *   still names it, and the register moves the path.
+ *
+ * ## A key is a NAME, so it must name ONE file -- or be pinned
+ *
+ * A bare key resolves when exactly one file in the census holds reads in a symbol
+ * of that name. A name two files share (`isUserContextWrite`, `onInsert`) is
+ * ambiguous and is refused, naming every file -- the row then PINS it, writing the
+ * full `path#symbol` anchor the shared resolver also checks. ⚠️ A pinned key moves
+ * like the old anchors did: that is the price of the collision, paid only where it
+ * exists, and a refusal names it the day a new collision appears.
+ *
+ * ## ⭐ What the register adds over the old anchors, and what it does not
+ *
+ *   ⭐ Every read is still owned by a row: a census site that no key names is
+ *      `[read-without-a-row]`, and `--write` refuses to generate over it, so the
+ *      mandatory CENSUS -> PAGE direction is still a human's editorial act.
+ *   ⭐ A key whose name no census read carries any more is `[row-key-no-read]` --
+ *      the deletion shape: the row stands, its site is gone.
+ *   ⭐ The register counts reads PER SYMBOL. Adding or deleting one of several
+ *      reads inside a symbol moves that count, so the committed region drifts and
+ *      the gate reds until it is regenerated -- the gap the symbol anchors
+ *      declared (see the header) now shows in the PR's diff.
+ *   ⚠️ That count is a TRIPWIRE, not a row requirement: regenerating clears it
+ *      without touching any row's prose, exactly as the retired count generator
+ *      did. Whether the row still describes the symbol is the reviewer's call; the
+ *      diff line is what tells them to make it.
+ *
+ * ## The page states no totals
+ *
+ * The register carries one line per symbol and no sum. A total line would be the
+ * one line every two read-adding PRs both rewrite (#22927's ruling, and the reason
+ * the page left `merge=os-regen`); per-symbol lines text-merge apart, and a merge
+ * that leaves the region wrong is this gate's drift refusal in the merge queue.
+ */
+export const REGISTER_BEGIN =
+  '{/* BEGIN GENERATED: system-context-census (scripts/check-system-context-census.mjs --write) — DO NOT EDIT */}';
+export const REGISTER_END = '{/* END GENERATED: system-context-census */}';
+
+/** The header a behaviour table names its key column with. */
+const KEY_COLUMN = 'Symbol';
+/** A row id: `12`, `1b`, `47f`. */
+const ROW_ID = /^\|\s*(\d+[a-z]?)\s*\|/;
+/** A bare key: an identifier, nothing else -- no path, no `#`. */
+const BARE_KEY = /^[A-Za-z_$][\w$]*$/;
+
+/** Split a markdown table line into cells, never splitting inside a code span. */
+function tableCells(line) {
+  const cells = [];
+  let cell = '';
+  let inSpan = false;
+  for (const ch of line) {
+    if (ch === '`') inSpan = !inSpan;
+    if (ch === '|' && !inSpan) {
+      cells.push(cell);
+      cell = '';
+      continue;
+    }
+    cell += ch;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+/**
+ * Cut the page into its hand-written text and its generated region.
+ *
+ * @returns {{ prose: string, region: string, begin: number } | { error: string }}
+ */
+export function splitRegister(pageText) {
+  const begins = pageText.split(REGISTER_BEGIN).length - 1;
+  const ends = pageText.split(REGISTER_END).length - 1;
+  const begin = pageText.indexOf(REGISTER_BEGIN);
+  const end = pageText.indexOf(REGISTER_END);
+  if (begins !== 1 || ends !== 1 || end < begin) {
+    return {
+      error:
+        `${PAGE} carries ${begins} BEGIN and ${ends} END marker(s) of the generated site register -- ` +
+        'exactly one of each, BEGIN first, is required. Restore the pair and run ' +
+        '`node scripts/check-system-context-census.mjs --write`; this gate does not guess where the ' +
+        'register belongs.',
+    };
+  }
+  return {
+    prose: pageText.slice(0, begin) + pageText.slice(end + REGISTER_END.length),
+    region: pageText.slice(begin, end + REGISTER_END.length),
+    begin,
+  };
+}
+
+/** Replace the generated region, and nothing else. Throws on a missing marker pair. */
+export function spliceRegister(pageText, region) {
+  const split = splitRegister(pageText);
+  if ('error' in split) throw new Error(split.error);
+  const end = pageText.indexOf(REGISTER_END) + REGISTER_END.length;
+  return pageText.slice(0, split.begin) + region + pageText.slice(end);
+}
+
+/**
+ * Every row of every table whose header carries a `Symbol` column, with the keys
+ * its `Symbol` cell writes, in page order.
+ *
+ * A code span holding a bare identifier is a BARE key. A code span the shared
+ * extractor reads as an anchor is a PINNED key -- `{ file, symbol }`, or a
+ * file-level `{ file, symbol: null }`. Any other span is prose and is ignored.
+ *
+ * @returns {{ id: string, docLine: number, keys: ({ kind: 'bare', symbol: string } | { kind: 'pinned', file: string, symbol: string|null })[] }[]}
+ */
+export function extractRowKeys(pageText) {
+  const lines = pageText.split('\n');
+  const rows = [];
+  let keyAt = -1;
+  lines.forEach((line, i) => {
+    if (!line.startsWith('|')) {
+      keyAt = -1;
+      return;
+    }
+    if (/^\|\s*:?-/.test(lines[i + 1] ?? '')) {
+      keyAt = tableCells(line).map((cell) => cell.trim()).indexOf(KEY_COLUMN);
+      return;
+    }
+    const id = ROW_ID.exec(line);
+    if (keyAt === -1 || !id) return;
+    const cell = tableCells(line)[keyAt] ?? '';
+    const keys = [];
+    for (const anchor of extractAnchors(cell).anchors) {
+      if (anchor.repo) continue;
+      keys.push({ kind: 'pinned', file: anchor.path, symbol: anchor.symbol ?? null, index: anchor.index });
+    }
+    for (const m of cell.matchAll(/`([^`]+)`/g)) {
+      if (BARE_KEY.test(m[1])) keys.push({ kind: 'bare', symbol: m[1], index: m.index });
+    }
+    keys.sort((a, b) => a.index - b.index);
+    rows.push({ id: id[1], docLine: i + 1, keys: keys.map(({ index, ...key }) => key) });
+  });
+  return rows;
+}
+
+/** A census site's register key: `path#symbol`, or the bare path for a file-level read. */
+function siteKey(site) {
+  return site.symbol === null ? site.file : `${site.file}#${site.symbol}`;
+}
+
+/**
+ * Resolve every row key against the census, and every census site to the rows
+ * that own it.
+ *
+ * @returns {{ owners: Map<string, string[]>, reads: Map<string, number>, problems: string[], keys: number }}
+ */
+export function resolveRowKeys(rows, census) {
+  const problems = [];
+  /** @type {Map<string, number>} site key -> reads in it */
+  const reads = new Map();
+  /** @type {Map<string, Set<string>>} symbol name -> files holding reads in a symbol of that name */
+  const filesBySymbol = new Map();
+  for (const site of census.sites) {
+    const key = siteKey(site);
+    reads.set(key, (reads.get(key) ?? 0) + 1);
+    if (site.symbol === null) continue;
+    if (!filesBySymbol.has(site.symbol)) filesBySymbol.set(site.symbol, new Set());
+    filesBySymbol.get(site.symbol).add(site.file);
+  }
+  /** @type {Map<string, string[]>} site key -> owning row ids, in page order */
+  const owners = new Map();
+  const own = (key, id) => {
+    if (!owners.has(key)) owners.set(key, []);
+    if (!owners.get(key).includes(id)) owners.get(key).push(id);
+  };
+  let keys = 0;
+  for (const row of rows) {
+    let ownsARead = false;
+    for (const key of row.keys) {
+      keys += 1;
+      if (key.kind === 'pinned') {
+        /* A pinned anchor that is not a census site is a CITATION (`READONLY_CLASS_REASONS`
+         * beside row 22's read). It owns nothing; CLASSIFICATION (check D) decides whether
+         * it is a declared one. */
+        const pinned = key.symbol === null ? key.file : `${key.file}#${key.symbol}`;
+        if (reads.has(pinned)) {
+          own(pinned, row.id);
+          ownsARead = true;
+        }
+        continue;
+      }
+      const files = [...(filesBySymbol.get(key.symbol) ?? [])].sort();
+      if (files.length === 0) {
+        problems.push(
+          `[row-key-no-read] row ${row.id} (${PAGE}:${row.docLine}) names \`${key.symbol}\`, and no census ` +
+            'read lives in a symbol of that name any more -- the read was deleted, or the symbol was ' +
+            'renamed under the row. Re-key the row to the symbol that holds the read now, or drop the row.'
+        );
+        continue;
+      }
+      if (files.length > 1) {
+        problems.push(
+          `[row-key-ambiguous] row ${row.id} (${PAGE}:${row.docLine}) names \`${key.symbol}\`, and ` +
+            `${files.length} files hold reads in a symbol of that name (${files.join(', ')}). A bare ` +
+            `key must name one file: pin it as \`${files[0]}#${key.symbol}\` (or whichever this row ` +
+            'is about) in every row that means one of them.'
+        );
+        continue;
+      }
+      own(`${files[0]}#${key.symbol}`, row.id);
+      ownsARead = true;
+    }
+    if (!ownsARead && row.keys.length > 0) {
+      problems.push(
+        `[row-without-a-read] row ${row.id} (${PAGE}:${row.docLine}) keys no census read at all -- its ` +
+          'Symbol cell names only citations or keys that resolved to nothing. A behaviour row is a ' +
+          'read the code holds; one whose reads are gone describes a protection that no longer exists.'
+      );
+    } else if (row.keys.length === 0) {
+      problems.push(
+        `[row-without-a-key] row ${row.id} (${PAGE}:${row.docLine}) writes nothing in its \`${KEY_COLUMN}\` ` +
+          'cell, so no read is tied to it and the register cannot name it.'
+      );
+    }
+  }
+  for (const site of [...census.sites].sort((a, b) => siteKey(a).localeCompare(siteKey(b)))) {
+    const key = siteKey(site);
+    if (owners.has(key)) continue;
+    owners.set(key, []);
+    problems.push(
+      `[read-without-a-row] ${key} holds ${reads.get(key)} elevation read(s) ` +
+        `(\`${site.text.trim().slice(0, 90)}\`) and no row's \`${KEY_COLUMN}\` cell names \`${site.symbol ?? key}\`. ` +
+        'Either the page is missing this behaviour -- add a row, or add the name to the row that ' +
+        'describes it -- or a key was renamed away from it. `--write` refuses until a row owns it.'
+    );
+  }
+  return { owners, reads, problems, keys };
+}
+
+/** Render the generated region: one line per census site, sorted, no totals. */
+export function renderRegister({ owners, reads }) {
+  const lines = [
+    REGISTER_BEGIN,
+    '',
+    '| Anchor | Reads | Rows |',
+    '|:---|--:|:---|',
+  ];
+  for (const key of [...reads.keys()].sort()) {
+    const rows = owners.get(key) ?? [];
+    lines.push(`| \`${key}\` | ${reads.get(key)} | ${rows.length > 0 ? rows.join(', ') : '—'} |`);
+  }
+  lines.push('', REGISTER_END);
+  return lines.join('\n');
+}
+
+/** The first line at which two texts differ, so a drift refusal names it. */
+function firstDifference(committed, expected) {
+  const a = committed.split('\n');
+  const b = expected.split('\n');
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    if (a[i] !== b[i]) {
+      return { line: i + 1, committed: a[i] ?? '(region ends here)', expected: b[i] ?? '(census ends here)' };
+    }
+  }
+  return null;
+}
+
+/**
+ * F. THE SITE REGISTER -- the row keys resolve, every read has a row, and the
+ * committed region is exactly what the tree generates. Pure, so `--self-test`
+ * drives it on fixtures and on the real page.
+ *
+ * @returns {{ problems: string[], expected: string|null, stats: { rows: number, keys: number, registered: number } }}
+ */
+export function evaluateRegister({ pageText, census }) {
+  const problems = [];
+  const split = splitRegister(pageText);
+  if ('error' in split) {
+    problems.push(`[no-register] ${split.error}`);
+    return { problems, expected: null, stats: { rows: 0, keys: 0, registered: 0 } };
+  }
+  const rows = extractRowKeys(split.prose);
+  if (rows.length === 0) {
+    problems.push(
+      `[no-row-keys] the page yielded ZERO rows under a \`${KEY_COLUMN}\` column, so no read could be ` +
+        'owned by anything and the register would be generated from nothing -- refusing instead. A ' +
+        `table's key column was renamed away from \`${KEY_COLUMN}\`, or the tables are gone.`
+    );
+    return { problems, expected: null, stats: { rows: 0, keys: 0, registered: 0 } };
+  }
+  const resolved = resolveRowKeys(rows, census);
+  problems.push(...resolved.problems);
+  const expected = renderRegister(resolved);
+  if (split.region !== expected) {
+    const diff = firstDifference(split.region, expected);
+    problems.push(
+      '[register-drift] the generated site register on the page is not what the tree produces -- a read ' +
+        'was added, deleted or moved, or a row key changed, and the region was not regenerated' +
+        (diff
+          ? `. First difference at register line ${diff.line}:\n` +
+            `    committed : ${diff.committed}\n` +
+            `    census    : ${diff.expected}\n`
+          : '.\n') +
+        '    Fix: node scripts/check-system-context-census.mjs --write'
+    );
+  }
+  return {
+    problems,
+    expected,
+    stats: { rows: rows.length, keys: resolved.keys, registered: resolved.reads.size },
+  };
+}
+
 /**
  * ⛔ The six numbers this gate deliberately does NOT hold to the census -- the
  * only figures the page still carries -- listed here so that stays a decision
@@ -1317,22 +1652,70 @@ function readFileAt(root) {
 /**
  * ⛔ `--fix` is RETIRED, and says so instead of exiting 0 in silence.
  *
- * Nothing on the page is generated: its anchors are symbols, which encode no
- * position to repair (#15921), and it states no census totals (#22927). A
- * recognised flag that quietly ran the check would read as a regeneration that
- * worked -- to a person, and to a branch cut before #22927 whose merge-driver row
- * still names `gen:system-context-census`. So it refuses, before any census runs.
+ * It named two repairs that are gone -- the line-shift re-anchor (#15921) and the
+ * census-total rewrite (#22927) -- and a recognised flag that quietly ran the check
+ * would read as a regeneration that worked, to a person and to a branch cut before
+ * #22927 whose merge-driver row still names `gen:system-context-census`. The page's
+ * one generated half now is the site register, and `--write` is the only flag that
+ * writes it (#26442). So `--fix` refuses, before any census runs, and names
+ * `--write`.
  */
 const FIX_RETIRED_EXIT = 2;
 
 function refuseRetiredFix() {
   process.stderr.write(
-    'check-system-context-census --fix: RETIRED -- nothing on the page is generated, so there is\n' +
-      '  nothing to rewrite. Anchors are `path#symbol` (scripts/symbol-anchors.mjs) and the page states\n' +
-      '  no census totals: `node scripts/isystem-census.mjs` prints them. Every red here is a human\n' +
-      '  edit -- a renamed symbol, or a read that arrived or vanished (add or drop its row).\n'
+    'check-system-context-census --fix: RETIRED -- it named the line-shift re-anchor and the census-total\n' +
+      '  rewrite, both gone. The page\'s one generated half is the site register:\n' +
+      '  `node scripts/check-system-context-census.mjs --write` rebuilds it and touches nothing else.\n' +
+      '  The page states no totals: `node scripts/isystem-census.mjs` prints them.\n'
   );
   return FIX_RETIRED_EXIT;
+}
+
+/**
+ * `--write`: rebuild the site register from the tree, and nothing else.
+ *
+ * ⛔ It refuses -- writing nothing -- while a row key does not resolve or a read has
+ * no row: the register's `Rows` column is the editorial claim, and a generator that
+ * filled it with a dash would land a read no row describes. Everything outside the
+ * marker pair is byte-identical after a write (`spliceRegister`).
+ */
+function write() {
+  const readFile = readFileAt(ROOT);
+  let pageText;
+  try {
+    pageText = readFile(PAGE);
+  } catch (error) {
+    process.stderr.write(`::error::[unreadable-page] ${PAGE} could not be read -- ${error.message}\n`);
+    return 1;
+  }
+  const split = splitRegister(pageText);
+  if ('error' in split) {
+    process.stderr.write(`::error::[no-register] ${split.error}\n`);
+    return 1;
+  }
+  const rows = extractRowKeys(split.prose);
+  const resolved = resolveRowKeys(rows, runCensus({ root: ROOT }));
+  if (rows.length === 0 || resolved.problems.length > 0) {
+    for (const problem of resolved.problems) process.stderr.write(`::error::${problem}\n`);
+    process.stderr.write(
+      `\ncheck-system-context-census --write: REFUSED, nothing written -- ${rows.length} keyed row(s), ` +
+        `${resolved.problems.length} problem(s). Every read needs a row that names its symbol before the ` +
+        'register can say which row owns it.\n'
+    );
+    return 1;
+  }
+  const next = spliceRegister(pageText, renderRegister(resolved));
+  if (next === pageText) {
+    process.stdout.write(`check-system-context-census --write: ${PAGE} register already current\n`);
+    return 0;
+  }
+  writeFileSync(join(ROOT, PAGE), next);
+  process.stdout.write(
+    `check-system-context-census --write: rewrote the site register in ${PAGE} ` +
+      `(${resolved.reads.size} symbol(s), ${rows.length} keyed row(s))\n`
+  );
+  return 0;
 }
 
 function run() {
@@ -1357,14 +1740,19 @@ function run() {
     return 1;
   }
 
-  const { problems, stats } = evaluate({ pageText, census, readFile, sweep });
+  const { problems: anchorProblems, stats } = evaluate({ pageText, census, readFile, sweep });
+  const register = evaluateRegister({ pageText, census });
+  const problems = [...anchorProblems, ...register.problems];
   for (const problem of problems) process.stderr.write(`::error::${problem}\n`);
   if (problems.length > 0) {
     process.stderr.write(
       `\ncheck-system-context-census: ${problems.length} problem(s) over ${stats.anchors} anchors ` +
         `and ${stats.sites} census sites.\n` +
-        'Re-run the census with `node scripts/isystem-census.mjs --json`. ⛔ Every finding here is a ' +
-        'human edit -- nothing on the page is generated.\n' +
+        'The site register is GENERATED: a moved, added or deleted read in a symbol a row already ' +
+        'names is `node scripts/check-system-context-census.mjs --write`, and the anchor findings it ' +
+        'raises clear with it. Everything else is a human edit -- a row key (`[read-without-a-row]`, ' +
+        '`[row-key-*]`), a NON_READ_ANCHORS row, or an anchor in the prose. ' +
+        'Re-run the census with `node scripts/isystem-census.mjs --json`.\n' +
         `\nThe anchor grammar:\n  ${ANCHOR_GRAMMAR}\n`
     );
     return 1;
@@ -1376,7 +1764,9 @@ function run() {
       `${stats.anchors} anchors and ${stats.fileLevelAnchors} file-level citation(s); ` +
       `${stats.nonReadAnchors} declared non-read; ${stats.collapsingFiles} file(s) hold more than one ` +
       `read in one symbol (the declared precision loss); ${stats.rowRefsHeld} row reference(s) resolve ` +
-      `to their keyed row, ${stats.rowRefsUnheld} declared unheld.\n`
+      `to their keyed row, ${stats.rowRefsUnheld} declared unheld; ${register.stats.keys} key(s) in ` +
+      `${register.stats.rows} row(s) own every read, and the generated register (${register.stats.registered} ` +
+      'symbol(s)) matches the tree.\n'
   );
   return 0;
 }
@@ -2519,5 +2909,6 @@ if (isEntrypoint(import.meta.url)) {
       process.exit(selfTestCode);
   }
   if (argv.includes('--fix')) process.exit(refuseRetiredFix());
+  if (argv.includes('--write')) process.exit(write());
   process.exit(run());
 }
