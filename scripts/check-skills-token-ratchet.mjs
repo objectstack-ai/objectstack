@@ -420,7 +420,28 @@ export const CEILINGS = new Map([
   // the measurement. Maintainer ruling 2026-10-27 on the seat's decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/SKILL.md', 6358],
+  // 25429 -> 25864 (#26756): the `screen` node row says Next / Submit and
+  // "Step N of M" are engine-served, never authored — when a screen pauses
+  // the engine reads the graph and serves `progress` (`nextScreen` `none` /
+  // `possible` / `certain`; `step` / `stepCount` only when every path
+  // agrees), a `decision`, `fault` edge, loop back, non-screen pause or
+  // `subflow` after a screen answers `possible` ("Next", no count), a
+  // `progress` key in the node config is refused, and a hand-rolled label or
+  // counter in `fields` is wrong. Paid down first, three restatements each
+  // with a surviving home: the Filter-operands bullet's "every other `{…}`
+  // token is refused" (Valid-but-silently-wrong item 1 lists every CRUD
+  // `filter` operand, -42 bytes); the Trigger Configuration lead-in "The
+  // binding is the START NODE" (the Triggers intro says the binding lives on
+  // the start node `config`, -23 bytes); item 3's "; flow functions don't"
+  // (its own bold lead says a flow function does not read or write the
+  // database, -22 bytes), plus the trimmed bullet's re-wrap indentation (-2
+  // bytes of whitespace). Arithmetic in priced bytes (stamp line excluded):
+  // 25429 -> 25864 (+524 added, -89 cut, +435 net) -> ceil(25864 / 4) =
+  // 6466; headroom was 3 bytes, 0 tokens, so the ceiling moves +108, pinned
+  // AT the measurement. Maintainer ruling 2026-10-27 on the seat's decision
+  // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6466],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
