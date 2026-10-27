@@ -156,7 +156,10 @@ function expectListFaces(container: HTMLElement) {
 
 describe('objectstack#26344 — a related list date column reads in one absolute face', () => {
   it('A: object `columns`', async () => {
-    expectListFaces(await mountList(NAMES.map((field) => ({ field }))));
+    // Spec-spelled `{ field, label }`: an object column with no display text is
+    // left headerless on purpose (`RelatedList.columnHeaderLabel`).
+    const columns = NAMES.map((field) => ({ field, label: FIELDS[field as keyof typeof FIELDS].label }));
+    expectListFaces(await mountList(columns));
   });
 
   it('B: string `columns`', async () => {
