@@ -477,14 +477,20 @@ describe('the split itself — narrow = rich key set, live = the measured read s
     expect(Object.keys(shapeOf(TableColumnSchema)).sort()).toEqual([...RICH_COLUMN_KEYS].sort());
   });
 
-  it('the static table zod tombstones exactly its two retired keys plus the two content channels', () => {
+  it('the static table zod tombstones exactly its two retired keys plus the two content channels, and inherits `BaseSchema`\'s three', () => {
     // `hoverable` / `striped` are objectui#5474's retirements — keys the static
     // renderer never read. `body` / `children` joined them in objectui#9256 for
     // the SAME reason measured a second time: the compiler-API read-site sweep
     // over all 24 registering packages files zero `body` / `children` reads
     // under `TableSchema`, so both content channels were silent empty boxes
-    // here too. Four tombstones, one mechanism.
-    expect(tombstonedKeys(TableZod).sort()).toEqual(['body', 'children', 'hoverable', 'striped']);
+    // here too. Four tombstones, one mechanism. `visibleOn` / `hiddenOn` /
+    // `disabledOn` are `BaseSchema`'s OWN tombstones (objectstack#25926: the
+    // retired spellings of `visibleWhen` / `hidden` / `disabled`), inherited by
+    // every node mirror that extends it; they are listed here so a drift in
+    // either direction on either face is seen, not absorbed.
+    expect(tombstonedKeys(TableZod).sort()).toEqual(
+      ['body', 'children', 'disabledOn', 'hiddenOn', 'hoverable', 'striped', 'visibleOn'],
+    );
   });
 });
 

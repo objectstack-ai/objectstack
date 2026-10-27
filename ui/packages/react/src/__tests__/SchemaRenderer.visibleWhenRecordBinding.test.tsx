@@ -250,11 +250,12 @@ describe('#5454 leg 2 — a declared `visibleWhen` outranks a hoisted `propertie
     expect(shown()).toBe(true);
   });
 
-  it('`visible` still outranks the DEPRECATED `visibleOn` — only `visibleWhen` moved', () => {
-    // Deliberately unmoved: re-ranking it would move verdicts #5454 did not
-    // rule on. (The page component's `visibility` spelling is retired and no
-    // longer a leg at all, objectui#12654.)
-    mount({ visible: true, visibleOn: 'false' }, DONE);
+  it('a retired `visibleOn` is not a leg at all — `visible` alone decides', () => {
+    // `BaseSchema.visibleOn` is a `?: never` tombstone, refused by name on the
+    // zod mirror; a stale document that still carries it reaches a chain that
+    // does not consult it. (The page component's `visibility` spelling is
+    // retired the same way, objectui#12654.)
+    mount({ visible: true, visibleOn: 'false' } as never, DONE);
     expect(shown()).toBe(true);
   });
 });

@@ -966,15 +966,13 @@ jobs:
       # repo-root `sdui.manifest.json` is absent or unreadable, so nothing in
       # the production path ever says "the gate lost its whitelist" — this step
       # is the thing that notices. Offline record checks only (existence, shape,
-      # sha256 vs the provenance record, record pin vs `.objectui-sha`): the
-      # regenerate-and-compare half runs where a regeneration can (the Node
-      # generator reads objectui's BUILT tree at the pin, which only
-      # `pnpm objectui:build` materialises — see
-      # scripts/gen-sdui-manifest-node.mjs), and a pin bump goes red HERE until
-      # it has been re-run — the same moment the lockstep step above forces the
-      # parser parity re-verification, with an objectui checkout guaranteed in
-      # hand. Unfiltered for the same reason as its neighbour: filtering to the
-      # artefact would go dormant on exactly the PR that moves the pin.
+      # sha256 vs the provenance record, and with no pin each registry
+      # package's source digest vs its record): the regenerate-and-compare half
+      # runs where the registry is built, as ci.yml's Build & E2E UI step "The
+      # committed SDUI manifest is the one this tree generates" (#26137), on
+      # pull_request and on the merge queue's combined tree. Unfiltered:
+      # filtering it to the artefact would go dormant on exactly the PR that
+      # moves the artefact's inputs and not the artefact.
       # Direct invocation per the GATE INVOCATION IDIOM at the top of this file.
       - name: SDUI manifest is present, intact and fresh at the objectui pin
         id: sdui-manifest-is-present-intact-and-fresh
@@ -5105,6 +5103,16 @@ jobs:
         id: check-every-package-is-type-check-covered-or
         continue-on-error: true
         run: pnpm check:type-check-coverage
+
+      # The workspace ROOT's own program (`tsconfig.json`: `scripts/` and the
+      # top-level configs) is outside every package's `typecheck`, so the turbo
+      # typecheck never reads it. This step does (#26236), and the coverage gate
+      # above requires it once `typecheck:root` exists. The program imports no
+      # built `dist/`, so it needs no build. Sub-second to a few seconds.
+      - name: Type-check the workspace root program
+        id: type-check-the-workspace-root-program
+        continue-on-error: true
+        run: pnpm typecheck:root
 
       # Conformance meta-gate (#4363): `spec/src/data/*-conformance.ts` holds the
       # shared case-sets that exist so the independent drivers answer ONE

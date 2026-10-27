@@ -425,6 +425,10 @@ export function portTextReadNotice(
  *    watch recompiles and the `serve` child all run in (#26243).
  *  - `os serve` merges it into its own `process.env` before it loads the
  *    config (#26243).
+ *  - A development auto-shift exports the port it shifted to the same way,
+ *    in the `os dev` parent before its compile and in `os serve` before its
+ *    config load, so the config reads the port bound rather than the busy
+ *    one it asked for (#26270).
  *
  * Measured before #26243, on `examples/app-showcase` with no `OS_PORT`/`PORT`:
  * `os dev -p 41302` and `os serve --port 41303` both served

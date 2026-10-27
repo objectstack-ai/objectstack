@@ -32,7 +32,6 @@
   },
   "dependencies": {
     "@object-ui/core": "workspace:*",
-    "@object-ui/data-objectstack": "workspace:*",
     "@object-ui/i18n": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@objectstack/spec": "workspace:^"
@@ -42,10 +41,12 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@object-ui/data-objectstack": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectui",

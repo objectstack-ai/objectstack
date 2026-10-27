@@ -83,6 +83,19 @@ export interface EvalContext {
    */
   timezone?: string;
   /**
+   * Locale (BCP-47 tag, e.g. `zh-CN`) the `template` dialect's formatters
+   * render numbers, money, percents and dates in. Defaults to `en-US` when
+   * unset or empty.
+   *
+   * A reserved channel, like {@link timezone}: it is NOT bound as a variable,
+   * and nothing in {@link extra} or any other root sets it. A template's roots
+   * are author-visible values (a bulk action's params, a flow's variables), so
+   * a root named `locale` is just a value a hole can print — it used to also
+   * set the formatter locale of the whole sentence (objectstack#26232). The
+   * caller that knows the viewer's display locale passes it here.
+   */
+  locale?: string;
+  /**
    * Current authenticated subject (hook / action / view contexts).
    *
    * ADR-0068: the canonical user contract is {@link EvalUser} from

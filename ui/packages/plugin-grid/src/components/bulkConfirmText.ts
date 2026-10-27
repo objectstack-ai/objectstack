@@ -125,12 +125,20 @@ export function bulkConfirmTemplateScope(scope: BulkConfirmScope): Record<string
  * notifications and the single-record `confirmText` render with, so the
  * engine's whitelisted formatters apply (`{{ count | number }}`) and no hole
  * holds logic. A sentence without a `{{ }}` hole is shown as written.
+ *
+ * `locale` is the viewer's display locale, the BCP-47 tag the dialog reads
+ * from `useDisplayLocale()`; the formatters (`currency`, `number`, `date`)
+ * render in it (objectstack#26307). It goes to `fillTemplateHoles`'s own
+ * locale channel, apart from the roots, so a param named `locale` stays a
+ * value the sentence prints. ⛔ No second resolution of it here: absent, the
+ * engine formats in `en-US`.
  */
 export function bulkConfirmText(
   confirmText: BulkActionDef['confirmText'] | null | undefined,
   scope: BulkConfirmScope,
+  locale?: string,
 ): string | undefined {
   const source = bulkConfirmTextSource(confirmText);
   if (source === undefined || !hasTemplateHoles(source)) return source;
-  return fillTemplateHoles(source, bulkConfirmTemplateScope(scope));
+  return fillTemplateHoles(source, bulkConfirmTemplateScope(scope), locale);
 }

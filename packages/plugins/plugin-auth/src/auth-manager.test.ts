@@ -1052,6 +1052,34 @@ describe('AuthManager', () => {
       expect(String(err?.body?.message)).toMatch(/outside the delegated subtree/);
     });
 
+    it('issuance: the gate\'s scope-violation refusal (DELEGATION_SCOPE_VIOLATION) is the same verdict — 403 INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE, not an outage', async () => {
+      // [#26189] A refusal that describes the issuer's own delegated scope (a
+      // unit outside the subtree, a set off the allowlist) now carries its own
+      // code. It is still the gate's verdict, so the invitation answers what
+      // it answered before. Structural stand-in, as above.
+      const assertIssuable = vi.fn(async () => {
+        throw Object.assign(new Error("[Security] Outside your delegated scope: business unit 'bu_plant_b' is outside the delegated subtree"), {
+          name: 'DelegationScopeViolationError',
+          code: 'DELEGATION_SCOPE_VIOLATION',
+          status: 403,
+          statusCode: 403,
+        });
+      });
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
+      warnSpy.mockRestore();
+
+      const err = await placementAnswer(
+        hooks.beforeCreateInvitation({
+          invitation: PLACEMENT_INVITE,
+          inviter: { id: 'u_issuer' },
+          organization: { id: 'org-42' },
+        }),
+      );
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE');
+      expect(String(err?.body?.message)).toMatch(/outside the delegated subtree/);
+    });
+
     it('issuance: a store fault out of the placement check is an outage (503 SERVICE_UNAVAILABLE), not a scope refusal', async () => {
       // [#24243] `assertIssuable` resolves the issuer's grants from the store
       // BEFORE the gate runs; a store that cannot answer throws there, as the

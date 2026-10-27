@@ -10,9 +10,10 @@
  * objectui#3955 — the REVERSE-POLARITY twin of objectui#3862, in the same
  * `useMemo` of the same file.
  *
- * `SchemaRenderer`'s visibility chain has six legs. The four `visible*` ones are
- * written `!evaluator.evaluateCondition(...)`; the `hidden` / `hiddenOn` pair is
- * not negated. `evaluateCondition` documents exactly ONE default for "there is
+ * `SchemaRenderer`'s visibility chain had six legs when this was measured (three
+ * since the `visibleOn` / `hiddenOn` / `visibility` spellings were retired). The
+ * `visible*` ones are written `!evaluator.evaluateCondition(...)`; the `hidden`
+ * leg (then a `hidden` / `hiddenOn` pair) is not negated. `evaluateCondition` documents exactly ONE default for "there is
  * nothing here to evaluate": it returns `true`, meaning *visible/enabled*. Negated
  * that default lands on "shown", which is what "no gate" means anyway — benign.
  * Un-negated it means HIDE, so an empty predicate made the node disappear:
@@ -50,7 +51,7 @@
  *
  * ## What each case detects
  *
- *   • the empty shapes on `hidden` and on `hiddenOn` → the node RENDERS. THE
+ *   • the empty shapes on `hidden` → the node RENDERS. THE
  *     defect. Each shape reaches "nothing to evaluate" by its own route (string
  *     identity, `trim()`, envelope `source` empty, envelope `source` blank), so
  *     each is an independent mutation detector.
@@ -66,20 +67,18 @@
  *   • `hidden: false` → still rendered, and the key is not forwarded as a DOM
  *     prop (it is stripped in the destructure below `evaluatedSchema`), so "not
  *     hidden" cannot be confused with "hidden={false} reached the component".
- *   • precedence, both directions: an UNDECLARED `hidden` no longer
- *     short-circuits, so a declared `hiddenOn` is finally consulted — and a
- *     DECLARED `hidden` still wins over `hiddenOn`, which is the case that would
- *     stay green if someone "fixed" the defect by deleting the `hidden` leg.
+ *   • an UNDECLARED `hidden` no longer short-circuits the chain: it is "no
+ *     gate", and since the `hiddenOn` spelling was retired there is no second
+ *     spelling left to consult — the node simply renders.
  *   • the `visible*` legs still come FIRST and still keep `!== undefined`: their
  *     alias precedence is load-bearing and their `true` is benign (objectui#3850's
  *     ruling fenced them off deliberately).
  *
  * ## Reverse verification (direction predicted before running)
  *
- * Restoring `newSchema.hidden !== undefined` / `hiddenOn !== undefined` must turn
- * RED exactly: every empty-shape case on both keys, and the
- * "undeclared `hidden` falls through to `hiddenOn`" precedence case (whose
- * `hiddenOn: false` becomes unreachable). Every `true` / `false` / expression /
+ * Restoring `newSchema.hidden !== undefined` must turn RED exactly: every
+ * empty-shape case, and the "undeclared `hidden` is no gate" case. Every
+ * `true` / `false` / expression /
  * envelope / `visible*` case stays GREEN — the change can only stop hiding a
  * node, never start.
  *
@@ -214,11 +213,6 @@ describe('SchemaRenderer `hidden` — an empty predicate is not a declared gate 
     expect(rendered()).toBe(true);
   });
 
-  it.each(EMPTY_SHAPES)('hiddenOn: $label → the node renders too (the alias reads the same definition)', ({ value }) => {
-    renderNode({ hiddenOn: value });
-    expect(rendered()).toBe(true);
-  });
-
   it.each(JUNK_SHAPES)('hidden: $label (declared, not evaluable — objectui#11358) → hidden, reported once', ({ value }) => {
     // A fresh node id per row: the unresolvable-predicate report dedupes per
     // node and key, so a shared id would carry one row's report into the next.
@@ -248,14 +242,6 @@ describe('SchemaRenderer `hidden` — an empty predicate is not a declared gate 
     expect(screen.getByTestId('probe')).toHaveAttribute('data-hidden-prop', 'absent');
   });
 
-  it('hiddenOn: true → still hidden; hiddenOn: false → still rendered', () => {
-    const { unmount } = renderNode({ hiddenOn: true });
-    expect(rendered()).toBe(false);
-    unmount();
-    renderNode({ hiddenOn: false });
-    expect(rendered()).toBe(true);
-  });
-
   it('an expression-valued `hidden` keeps its verdict, both ways -- through the DECLARED path, no cast (objectui#7455)', () => {
     const { unmount } = renderDeclaredNode({ type: 'probe-3955', hidden: '${data.status === "draft"}' });
     expect(rendered()).toBe(false);
@@ -270,11 +256,6 @@ describe('SchemaRenderer `hidden` — an empty predicate is not a declared gate 
     unmount();
     renderDeclaredNode({ type: 'probe-3955', hidden: { dialect: 'cel', source: 'false' } });
     expect(rendered()).toBe(true);
-  });
-
-  it('an expression-valued `hiddenOn` keeps its verdict', () => {
-    renderNode({ hiddenOn: '${data.archived}' });
-    expect(rendered()).toBe(false);
   });
 
   it('a blank source is "no gate", but one significant character is a predicate', () => {
@@ -294,25 +275,14 @@ describe('SchemaRenderer `hidden` chain precedence (objectui#3955)', () => {
     ComponentRegistry.unregister?.('probe-3955');
   });
 
-  it('an UNDECLARED `hidden` no longer short-circuits — a declared `hiddenOn` is consulted', () => {
+  it('an UNDECLARED `hidden` is "no gate" — the node renders, and nothing else decides', () => {
     // Before: `'' !== undefined` won the chain, `evaluateCondition('')` was
-    // `true`, and the node vanished for a reason no key stated — `hiddenOn: false`
-    // was unreachable. This is a behaviour change (alias precedence), pinned as
-    // such rather than claimed as an equivalence.
-    renderNode({ hidden: '', hiddenOn: false });
+    // `true`, and the node vanished for a reason no key stated. The `hiddenOn`
+    // dialect that this fall-through once reached is RETIRED (a `?: never`
+    // tombstone, refused by name on the zod mirror), so the undeclared leg now
+    // falls through to "shown" with no second spelling to consult.
+    renderNode({ hidden: '' });
     expect(rendered()).toBe(true);
-  });
-
-  it('… and in the other direction: an undeclared `hidden` lets a HOLDING `hiddenOn` hide', () => {
-    renderNode({ hidden: { dialect: 'cel', source: '' }, hiddenOn: '${data.archived}' });
-    expect(rendered()).toBe(false);
-  });
-
-  it('a DECLARED `hidden` still wins over `hiddenOn`', () => {
-    // The case that stays green if someone "fixes" the defect by deleting the
-    // `hidden` leg: with the leg gone, `hiddenOn: false` would render the node.
-    renderNode({ hidden: true, hiddenOn: false });
-    expect(rendered()).toBe(false);
   });
 
   it('the `visible*` legs still come first and still keep `!== undefined`', () => {

@@ -4,7 +4,7 @@
  * MarketplaceProxyPlugin
  *
  * Forwards `GET /api/v1/marketplace/*` from a tenant ObjectOS runtime to
- * the configured ObjectStack Cloud control-plane URL. The cloud endpoint
+ * the configured ObjectOS Cloud control-plane URL. The cloud endpoint
  * is unauthenticated and only exposes packages whose owner has opted in
  * to the public catalog (`sys_package.marketplace_listed = true`) — so the
  * proxy passes through without any credentials.
@@ -280,8 +280,8 @@ export class MarketplaceProxyPlugin implements Plugin {
                     // Browse-only mechanism: this plugin forwards only safe,
                     // idempotent GET/HEAD (it carries no credentialled cloud
                     // auth). It does NOT own install *policy* — that is a host
-                    // concern (ObjectStack Cloud supplies a credentialled
-                    // install route via the `extraPlugins` seam; see ADR
+                    // concern (the ObjectOS Cloud control plane supplies a
+                    // credentialled install route via the `extraPlugins` seam; see ADR
                     // docs/design/cloud-account-binding-marketplace-install.md
                     // §5.2). So instead of dead-ending non-GET with a 405
                     // "install via cloud", we PASS THROUGH: a host-supplied

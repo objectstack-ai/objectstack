@@ -465,6 +465,14 @@ export function selfTest({ tier = 'full' } = {}) {
       !pkgInvs.some((i) => String(i.script ?? i.check).startsWith('scripts/')),
     );
     t(
+      'the root program\'s `typecheck:root` is read as a family, so the root change kind can name it',
+      extractCheckInvocations('    - run: pnpm typecheck:root\n', 'lint.yml').some((i) => i.check === 'typecheck:root' && !i.direct),
+    );
+    t(
+      'control — that exception is the one script name, not every `typecheck` spelling',
+      extractCheckInvocations('    - run: pnpm typecheck\n    - run: pnpm typecheck:rooted\n    - run: pnpm --filter ./examples/x run typecheck\n', 'x.yml').length === 0,
+    );
+    t(
       'control — a CLIMBING spelling is refused rather than resolved: `..` is not a prefix segment, because '
         + 'a path this ROOT cannot resolve is exactly how a phantom identity key gets minted',
       extractCheckInvocations('    - run: node ../scripts/check-x.mjs\n', 'x.yml').length === 0,
@@ -1488,7 +1496,12 @@ export function selfTest({ tier = 'full' } = {}) {
   //    resolve.
   const rootScriptsMap = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
+  // `typecheck:root` is the one other zero-file family, by construction: it is a
+  // tsc program over the root config, not a script file, and the cards it owes
+  // are named by the root-program change kind (`root-ts-program`), never by a
+  // path read out of a script.
   const unexplained = zeroFile
+    .filter(([check]) => check !== 'typecheck:root')
     .map(([check]) => [check, rootScriptsMap[check] ?? ''])
     .filter(([, cmd]) => !/\bpnpm\b[^&|]*?(?:--filter|--recursive|-r)\b[^&|]*?\brun\b/.test(cmd))
     .map(([check, cmd]) => `${check} (${cmd || 'no root script'})`);
@@ -4423,10 +4436,12 @@ export function selfTest({ tier = 'full' } = {}) {
   // rename, which is the one rot class the STALE branch exists to report.
   const rootKind = changeKindLines(['scripts/bench/runtime-publish-gate.bench.mts'], resolved);
   t('a root-program path emits the convention section', rootKind.length === 2 && rootKind[0].includes('ROOT tsc program'));
-  t('and it names the RATCHET half — the invocation that re-measures', rootKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
-  const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
-  t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
-  t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
+  // The root graduated from the DEBT ledger (#26236), so the gate that reads
+  // this program is its own `typecheck:root` script, which lint.yml runs.
+  t('and it names the root program\'s own type check', rootKind.some((l) => l.includes('- pnpm typecheck:root   —')));
+  const rootLine = rootKind.find((l) => l.includes('- pnpm typecheck:root   —')) ?? '';
+  t('the root-program line refuses an exclude or a returning ledger entry and states the real repair', /never to add an exclude/.test(rootLine) && /make the file typecheck/.test(rootLine));
+  t('and says it needs no build, unlike the ratchet lines', /needs no build/.test(rootLine) && !/closure BUILT/.test(rootLine));
   // Re-pointed rather than deleted (#12074). This case pinned one property —
   // a `.mjs` checker script is NOT in the ROOT tsc program, unlike the `.mts`
   // bench file above — and the gate-script kind below now makes the same path
@@ -4436,7 +4451,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // hiding inside a `length` this case no longer checks.
   const checkerKind = changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved);
   t('a checker script is still outside the ROOT tsc program', !checkerKind.some((l) => l.includes('ROOT tsc program')));
-  t('…and the root ratchet is not named for it', !checkerKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  t('…and the root type check is not named for it', !checkerKind.some((l) => l.includes('- pnpm typecheck:root   —')));
   t('…and the ONE section it does emit is the gate-script kind', checkerKind.length === 3 && checkerKind[0].includes('GATE SCRIPT'));
 
   // -- The GATE SCRIPT entry (#12074) --------------------------------------
@@ -5813,11 +5828,12 @@ export function selfTest({ tier = 'full' } = {}) {
   // Seven, not six, since #10542 added check:cross-package-test-inputs to the
   // test-file kind. `a.test.ts` is a root-level TypeScript file, so it is BOTH
   // a test file and inside the root tsc program and legitimately hits two
-  // kinds. The ratchet therefore renders twice, under a different `why` each
-  // time — pinned just below, because a bare count cannot tell that apart from
-  // one kind rotting away.
+  // kinds. Each kind renders its own gate as STALE (the ratchet under the test
+  // kind, `typecheck:root` under the root kind since the root graduated) —
+  // pinned just below, because a bare count cannot tell that apart from one
+  // kind rotting away.
   t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 7);
-  t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
+  t('a root-level test file hits both kinds: the ratchet renders STALE under the test kind, the root type check under the root kind', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 1 && stale.filter((l) => l.includes('\u26a0 typecheck:root: STALE')).length === 1);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
   // one of the two is dropped from the table and something else is added, and a
@@ -7927,10 +7943,13 @@ export function selfTest({ tier = 'full' } = {}) {
   // LIVE: the classification against the real derivation, in BOTH directions.
   // The positive alone would pass on a rule that classified everything; the
   // negative alone would pass on a rule that classified nothing.
+  // Two invocations of the one queue guard read the payload: the judgment, and
+  // the `pull_request` leg's `--toolchain-needed` install gate.
   const liveCiOnly = [...liveDiscovery.byCheck].filter(([, e]) => e.ciOnly);
+  const QUEUE_GUARD_CI_FAMILIES = ['scripts/pm/check-governed-queue-guard.mjs', 'scripts/pm/check-governed-queue-guard.mjs --toolchain-needed'];
   t(
-    `LIVE: exactly one family classifies CI-measured, and it is the queue guard (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
-    liveCiOnly.length === 1 && liveCiOnly[0][0] === 'scripts/pm/check-governed-queue-guard.mjs',
+    `LIVE: exactly the queue guard's two payload-reading invocations classify CI-measured (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
+    liveCiOnly.map(([c]) => c).sort().join('|') === QUEUE_GUARD_CI_FAMILIES.join('|'),
   );
   t(
     'LIVE: an ordinary local family on the same card is NOT classified — the rule discriminates rather than sweeping',
