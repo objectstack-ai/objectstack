@@ -17,6 +17,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { PageSchema } from '@objectstack/spec/ui';
 import { PageBlockInspector } from './PageBlockInspector';
 import type { MetadataInspectorProps } from '../inspector-registry';
+import type { SupportedLocale } from '../i18n';
 
 vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
@@ -41,7 +42,7 @@ function pageDraft(block: Record<string, unknown>): Record<string, unknown> {
   }) as unknown as Record<string, unknown>;
 }
 
-function renderInspector(draft: Record<string, unknown>, locale = 'en-US'): Mock<MetadataInspectorProps['onPatch']> {
+function renderInspector(draft: Record<string, unknown>, locale: SupportedLocale = 'en-US'): Mock<MetadataInspectorProps['onPatch']> {
   const onPatch: Mock<MetadataInspectorProps['onPatch']> = vi.fn();
   render(
     <PageBlockInspector
