@@ -585,6 +585,11 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   // lookup, and it means a future regression that re-deadens a widget key warns
   // on its own instead of waiting for someone to notice this list again.
   { type: 'dashboard', key: 'dashboards' },
+  // #26548 — `report` joins the day its ledger first warns: `dateRange` and
+  // `exportOptions` are `planned` + `authorWarn` until the report renderer
+  // reads them. A flat collection whose top-level keys are the ledger's props,
+  // so the flat walk below is the right shape for it.
+  { type: 'report', key: 'reports' },
 ];
 
 /**

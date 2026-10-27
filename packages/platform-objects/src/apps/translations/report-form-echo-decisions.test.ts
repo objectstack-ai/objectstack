@@ -80,6 +80,13 @@
 // locales, so the population went 45 → 44, the field leaves 37 → 36 and the
 // inward negatives 39 → 38, and none of the six decided rows moved.)
 //
+// (#26548 added the "Period & export" section, with its `dateRange` and
+// `exportOptions` composites, authored in all three locales when they landed:
+// 6 new leaves, all non-echoing. The population went 44 → 50, the section
+// leaves 8 → 10, the field leaves 36 → 40 and the inward negatives 38 → 44; the
+// counts in the prose above are this round's base, and none of the six decided
+// rows moved.)
+//
 // ## ⚠️⚠️ The phantom-translation trap — and why this family is the SHARP case
 //
 // `reportForm` declares NO label on `drilldown` and NO label on `runtimeFilter`
@@ -830,7 +837,7 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
       'the catalog holds a report field reportForm does not declare',
     ).toEqual([]);
     const declaredSections = FORM_SECTIONS.map((s) => sectionName(s));
-    expect(declaredSections).toEqual(['basics', 'dataset_binding', 'joined_blocks', 'filter_and_chart']);
+    expect(declaredSections).toEqual(['basics', 'dataset_binding', 'joined_blocks', 'filter_and_chart', 'period_and_export']);
     expect(
       Object.keys(subtree.sections ?? {}).filter((k) => !declaredSections.includes(k)),
       'the catalog holds a report section reportForm does not declare',
@@ -841,9 +848,9 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     // `report.sections.*` is written into #19403's body as a population NOTHING
     // covers — 「承接者:无」. This walk covers it, and the count is asserted so
     // a walk that quietly stopped at `fields` would go red.
-    expect(PANEL_LEAVES.length).toBe(44);
-    expect(PANEL_LEAVES.filter((l) => l.kind === 'section').length).toBe(8);
-    expect(PANEL_LEAVES.filter((l) => l.kind === 'field').length).toBe(36);
+    expect(PANEL_LEAVES.length).toBe(50);
+    expect(PANEL_LEAVES.filter((l) => l.kind === 'section').length).toBe(10);
+    expect(PANEL_LEAVES.filter((l) => l.kind === 'field').length).toBe(40);
     expect(
       PANEL_LEAVES.some((l) => l.kind === 'section' && l.path === 'dataset_binding' && l.prop === 'description'),
       'the section description this round decides is not in the population',
@@ -902,13 +909,13 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     );
   });
 
-  it('⭐ DARK, INWARD — 38 of this population\'s own 44 leaves come back NON-ECHOING', () => {
+  it('⭐ DARK, INWARD — 44 of this population\'s own 50 leaves come back NON-ECHOING', () => {
     // A hand-list of six echoes can only ever produce positives. This derivation
-    // produces 38 negatives from the same predicate in the same run, including
+    // produces 44 negatives from the same predicate in the same run, including
     // the twin `blocks.runtimeFilter` the runtimeFilter row is copied from.
     const decided = new Set(DECISIONS.map(idOf));
     const negatives = PANEL_LEAVES.filter((l) => !decided.has(idOf(l)));
-    expect(negatives.length).toBe(38);
+    expect(negatives.length).toBe(44);
     for (const leaf of negatives) {
       for (const [locale, forms] of TRANSLATED_LOCALES) {
         expect(catalogLeaf(forms, leaf), `${locale} ${idOf(leaf)} is an echo, not a control`).not.toBe(leaf.en);

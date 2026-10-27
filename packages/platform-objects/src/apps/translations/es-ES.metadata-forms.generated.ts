@@ -1895,6 +1895,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "Filtro y gráfico",
         description: "Filtros a nivel de informe y presentación del gráfico."
+      },
+      period_and_export: {
+        label: "Periodo y exportación",
+        description: "El periodo predeterminado del informe y los formatos en los que se puede descargar su tabla."
       }
     },
     fields: {
@@ -1983,6 +1987,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "Gráfico",
         helpText: "Configuración de gráfico (type, legend, colors)"
+      },
+      dateRange: {
+        label: "Rango de fechas",
+        helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
+      },
+      exportOptions: {
+        label: "Opciones de exportación",
+        helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
       }
     }
   },

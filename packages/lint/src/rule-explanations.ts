@@ -4990,6 +4990,48 @@ const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
  */
+// ── Report date range (`validate-report-date-range.ts`) ──────────────────────
+
+const REPORT_DATE_RANGE_SHARED_PARAGRAPHS: readonly string[] = [
+  'A report\'s `dateRange` is a period over ONE dimension of the dataset the report binds, and that ' +
+    'dimension must declare `type: \'date\'`: the analytics compiler types exactly those as time ' +
+    'dimensions, and any other dimension, `type` absent included, as a string axis that cannot carry a ' +
+    'date window. A dimension over a date column that does not say `type: \'date\'` is not a date ' +
+    'dimension.',
+  'Name it in `dateRange.dimension`. When `dimension` is omitted, the dataset\'s one `type: \'date\'` ' +
+    'dimension is used; a dataset that declares none, or two or more, is an error naming what it found, ' +
+    'because the period would otherwise apply to no column, or to one nobody chose. That is the rule a ' +
+    'dashboard\'s omitted `compareTo.dimension` follows.',
+  'The report schema parses without the dataset, so it checks only the shape of `dateRange`; this rule ' +
+    'is the dataset-aware half and runs on `os validate`, `os build` and when a report is published. Not ' +
+    'judged here: a report whose `dataset` resolves to nothing (`chart-dataset-unknown` reports that ' +
+    'once), and a `joined` report, whose `dateRange` the schema refuses.',
+];
+
+const REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-unknown',
+  covers: 'which dimension a report date range applies to',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-not-date',
+  covers: 'what makes a dataset dimension a date dimension',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-ambiguous',
+  covers: 'how an omitted date range dimension is resolved',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-none',
+  covers: 'how an omitted date range dimension is resolved',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5182,6 +5224,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DOCS_NAV_TARGET_EXPLANATION.rule]: DOCS_NAV_TARGET_EXPLANATION,
   [DOCS_FRONTMATTER_TAGS_EXPLANATION.rule]: DOCS_FRONTMATTER_TAGS_EXPLANATION,
   [PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION.rule]: PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

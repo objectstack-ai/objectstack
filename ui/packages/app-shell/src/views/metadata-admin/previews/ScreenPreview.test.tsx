@@ -2,6 +2,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+// Module scope, per AGENTS.md 测试纪律: a boolean screen field reaches
+// `BooleanField` through a `React.lazy` factory inside `@object-ui/fields`;
+// importing the barrel here resolves that factory before any `findBy` budget.
+import '@object-ui/fields';
 
 // Capture the schema ObjectForm receives so object-form mode can be asserted
 // without standing up the real plugin-form runtime.
@@ -151,23 +155,23 @@ describe('ScreenPreview — visibleWhen is decided live by the screen renderer (
     },
   };
 
-  it('a sibling-field predicate hides its field until the sibling is ticked, then shows it; the hint follows; the control is drawn throughout', () => {
-    const { container } = render(<ScreenPreview node={node} variables={{}} />);
+  it('a sibling-field predicate hides its field until the sibling is ticked, then shows it; the hint follows; the control is drawn throughout', async () => {
+    render(<ScreenPreview node={node} variables={{}} />);
     expect(screen.getByText('Create Opportunity?')).toBeInTheDocument();
     expect(screen.queryByText('Opportunity Name')).not.toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.getByText(/hidden by .*visible when/i)).toBeInTheDocument();
 
-    fireEvent.click(container.querySelector('#ff-createOpp')!);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Create Opportunity?' }));
     expect(screen.getByText('Opportunity Name')).toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.queryByText(/hidden by .*visible when/i)).not.toBeInTheDocument();
   });
 
-  it('the variables handed in for {var} interpolation do not decide a sibling-field predicate: a flow variable of the same name, false, used to freeze the field hidden', () => {
-    const { container } = render(<ScreenPreview node={node} variables={{ createOpp: false }} />);
+  it('the variables handed in for {var} interpolation do not decide a sibling-field predicate: a flow variable of the same name, false, used to freeze the field hidden', async () => {
+    render(<ScreenPreview node={node} variables={{ createOpp: false }} />);
     expect(screen.queryByText('Opportunity Name')).not.toBeInTheDocument();
-    fireEvent.click(container.querySelector('#ff-createOpp')!);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Create Opportunity?' }));
     expect(screen.getByText('Opportunity Name')).toBeInTheDocument();
   });
 
