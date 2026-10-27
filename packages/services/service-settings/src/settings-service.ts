@@ -3296,13 +3296,16 @@ export class SettingsService {
         context: SETTINGS_SYSTEM_CONTEXT,
       });
       if (existing[0]) {
-        const previous = existing[0] as SettingsRow;
+        // Snapshot BEFORE the update: an engine may hand back the stored
+        // object itself, which the update then rewrites in place.
+        const previous = { ...(existing[0] as SettingsRow) };
+        const previousEnc = SettingsService.handleOf(previous.value_enc);
         await this.engine.update(object, {
           where,
           data,
           context: SETTINGS_SYSTEM_CONTEXT,
         });
-        return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
+        return { previousEnc, previous };
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
