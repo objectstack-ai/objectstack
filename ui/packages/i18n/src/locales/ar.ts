@@ -883,6 +883,7 @@ const ar = {
     addRecord: "إضافة سجل",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "عرض الكل",
+    viewAllCount: "عرض الكل ({{count}})",
     tabs: "علامات التبويب",
     allRecords: "جميع السجلات",
     userFilters: {

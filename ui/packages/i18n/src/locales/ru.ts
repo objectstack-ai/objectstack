@@ -836,6 +836,7 @@ const ru = {
     addRecord: "Добавить запись",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Показать все",
+    viewAllCount: "Показать все ({{count}})",
     tabs: "Вкладки",
     allRecords: "Все записи",
     userFilters: {

@@ -995,6 +995,8 @@ const en = {
     addRecord: 'Add record',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: 'View all',
+    // objectstack#26613 — the capped list's footer link, with the records the list holds.
+    viewAllCount: 'View all {{count}}',
     tabs: 'Tabs',
     allRecords: 'All Records',
     // objectui#13405 — the synthetic trailing tab a `showAllRecords` user-filter bar adds.
