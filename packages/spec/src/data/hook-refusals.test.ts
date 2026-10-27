@@ -133,6 +133,7 @@ describe('hookRefusalCodesThrownIn — the save-time reading', () => {
     // an assignment on a name that is never thrown bare
     "const row = {}; row.code = 'ROW'; throw new Error('x');",
     // a lower-case value is never a refusal code
+    // adr0112-ok: a fixture body's source text the save-time reader must NOT read as a code; nothing emits it
     "throw Object.assign(new Error('x'), { code: 'lower' });",
     // inside a comment or a string
     "// throw Object.assign(new Error(), { code: 'COMMENTED' });\nreturn;",
