@@ -275,6 +275,7 @@
     "SchemaValidationReport": "src/contracts/external-datasource-service.ts#SchemaValidationReport (interface)",
     "SchemaValidationResult": "src/contracts/external-datasource-service.ts#SchemaValidationResult (interface)",
     "ScreenFieldSpec": "src/contracts/automation-service.ts#ScreenFieldSpec (interface)",
+    "ScreenProgressSpec": "src/contracts/automation-service.ts#ScreenProgressSpec (interface)",
     "ScreenSpec": "src/contracts/automation-service.ts#ScreenSpec (interface)",
     "SearchHit": "src/contracts/search-service.ts#SearchHit (interface)",
     "SearchOptions": "src/contracts/search-service.ts#SearchOptions (interface)",

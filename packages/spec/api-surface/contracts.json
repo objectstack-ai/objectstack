@@ -275,6 +275,7 @@
     "SchemaValidationReport (interface)",
     "SchemaValidationResult (interface)",
     "ScreenFieldSpec (interface)",
+    "ScreenProgressSpec (interface)",
     "ScreenSpec (interface)",
     "SearchHit (interface)",
     "SearchOptions (interface)",
