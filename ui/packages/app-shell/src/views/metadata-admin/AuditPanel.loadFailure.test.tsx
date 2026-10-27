@@ -50,6 +50,11 @@ import userEvent from '@testing-library/user-event';
 import type { MetadataAuditEntry, MetadataClient } from '@object-ui/data-objectstack';
 import { AuditPanel } from './AuditPanel';
 import { t } from './i18n';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 /** The positive claim this card exists to keep off a failed read. */
 const EMPTY_TITLE = t('engine.edit.auditEmptyTitle', 'en-US');

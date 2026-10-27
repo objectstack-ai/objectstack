@@ -68,16 +68,19 @@ const FORMATTERS: Record<string, Formatter> = {
     return new Intl.NumberFormat(locale, digits !== undefined && !Number.isNaN(digits)
       ? { minimumFractionDigits: digits, maximumFractionDigits: digits } : {}).format(n);
   },
-  // currency | currency:EUR  → defaults to USD
+  // currency | currency:EUR  → no argument formats in USD; an argument is a
+  // literal ISO 4217 code. An argument that is not one (a path such as
+  // `currency_code`, a lowercase or empty code) is refused when the template
+  // is compiled or published (`judgeHoleFormatter`), and refused here too: it
+  // throws rather than format the amount in a currency nobody wrote.
   currency: (v, arg, locale) => {
+    if (arg !== undefined && !isCurrencyCode(arg)) {
+      throw new RangeError(currencyArgumentRefusal(`currency:${arg}`, arg));
+    }
     const n = asNumber(v);
     if (n === undefined) return baseString(v);
-    const code = (arg && arg.trim()) || 'USD';
-    try {
-      return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(n);
-    } catch {
-      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(n);
-    }
+    const code = arg !== undefined ? arg.trim() : 'USD';
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(n);
   },
   // percent | percent:1  → 0.42 → "42%" (value is a 0..1 ratio)
   percent: (v, arg, locale) => {
@@ -134,6 +137,99 @@ const FORMATTERS: Record<string, Formatter> = {
 /** Public list of whitelisted template formatters (for introspection/docs). */
 export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 
+// ───────────────────────── hole grammar both dialects share ───────────────
+//
+// The rules about a hole's formatter part, judged by this one function for
+// both template dialects: this engine's (in-app slots, ADR-0032 §3) and the
+// mail renderer's (`mail-hole-grammar.ts`, read by `@objectstack/plugin-email`
+// and by `@objectstack/lint`'s email template rule). Each dialect parses its
+// own path; what follows the first `|` is judged here, once.
+//
+// - One formatter per hole. A second `|` used to be read as part of the first
+//   formatter's argument, so `{{ x | default:0 | number:2 }}` rendered the
+//   text `0 | number:2` — formatter syntax printed to the reader — and
+//   `{{ x | upper | lower }}` was left on the page as written.
+// - The `currency` argument is a literal ISO 4217 code in capitals. A path
+//   (`currency:currency_code`) is not read: `Intl` refused it and the
+//   formatter used to substitute USD, so the amount printed in a currency
+//   nobody wrote. Reading a code from the data is a grammar widening this
+//   function does not make.
+
+/** The rule a refused hole breaks. */
+export type TemplateHoleGrammarRule = 'one-formatter' | 'currency-code-literal';
+
+/** A hole the shared grammar refuses, with the sentence an author is shown. */
+export interface TemplateHoleGrammarRefusal {
+  rule: TemplateHoleGrammarRule;
+  /** Names the hole as written, the rule it breaks and the remedy. */
+  message: string;
+}
+
+/** An ISO 4217 alphabetic code: three capital letters, the form `Intl` formats with. */
+const CURRENCY_CODE_RE = /^[A-Z]{3}$/;
+
+function isCurrencyCode(arg: string): boolean {
+  return CURRENCY_CODE_RE.test(arg.trim());
+}
+
+function currencyArgumentRefusal(hole: string, arg: string): string {
+  return (
+    `the hole ${hole} gives the currency formatter the argument '${arg.trim()}', which is not an ISO 4217 `
+    + 'currency code: the argument is a literal code in three capital letters (`currency:EUR`), and it is '
+    + 'never read as a path to a value. Write the code itself, or format the amount in the caller that '
+    + 'supplies the data and pass the formatted text as its own variable.'
+  );
+}
+
+/**
+ * True when the formatter part (the text after a hole's first `|`) carries a
+ * second `|` outside a quoted argument — a second formatter. A `|` inside a
+ * closed quoted argument (`default:'a | b'`) is the argument's own text.
+ */
+function chainsASecondFormatter(formatterPart: string): boolean {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1) return formatterPart.includes('|');
+  if (formatterPart.slice(0, colon).includes('|')) return true;
+  const arg = formatterPart.slice(colon + 1).trim();
+  const quote = arg[0];
+  if (quote === "'" || quote === '"') {
+    const close = arg.indexOf(quote, 1);
+    if (close !== -1) return arg.slice(close + 1).includes('|');
+  }
+  return arg.includes('|');
+}
+
+/**
+ * Judge one hole's formatter against the grammar both template dialects share.
+ *
+ * @param hole          the hole as written, braces included — the refusal names it
+ * @param formatterPart the text after the hole's first `|`, trimmed
+ * @param formatter     the formatter name the dialect parsed
+ * @param arg           the argument the dialect parsed, quotes removed; `undefined` when none was written
+ * @returns the refusal, or `null` when the hole is within the grammar
+ */
+export function judgeHoleFormatter(
+  hole: string,
+  formatterPart: string,
+  formatter: string,
+  arg: string | undefined,
+): TemplateHoleGrammarRefusal | null {
+  if (chainsASecondFormatter(formatterPart)) {
+    return {
+      rule: 'one-formatter',
+      message:
+        `the hole ${hole} chains a second formatter: a hole takes one formatter, `
+        + '`{{ path | formatter[:arg] }}`, and the text after the second `|` is never applied. Keep one '
+        + 'formatter here, and do any further formatting or branching in the caller that supplies the data, '
+        + 'passing the finished value as its own variable.',
+    };
+  }
+  if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
+    return { rule: 'currency-code-literal', message: currencyArgumentRefusal(hole, arg) };
+  }
+  return null;
+}
+
 /**
  * Apply a whitelisted formatter to a value, the single source of truth for
  * value→string semantics across dialects. Returns `undefined` for an unknown
@@ -182,6 +278,8 @@ function resolvePath(scope: Record<string, unknown>, path: string): unknown {
 interface ParsedHole {
   path: string;
   filter?: { name: string; arg?: string };
+  /** Set when the hole is a path and formatter the shared grammar refuses ({@link judgeHoleFormatter}). */
+  refusal?: TemplateHoleGrammarRefusal;
 }
 
 /**
@@ -219,8 +317,12 @@ function parseHole(inner: string): ParsedHole | null {
     name = filterPart.slice(0, colon).trim();
     arg = filterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
   }
+  const refusal = judgeHoleFormatter(`{{${inner}}}`, filterPart, name, arg);
+  // A chained hole is refused by the one-formatter rule before its first
+  // formatter's name is looked up (`upper | lower` names no formatter).
+  if (refusal?.rule === 'one-formatter') return { path, refusal };
   if (!FORMATTERS[name]) return null;
-  return { path, filter: { name, arg } };
+  return { path, filter: { name, arg }, ...(refusal ? { refusal } : {}) };
 }
 
 function compileTemplate(source: string): EvalResult<ParsedHole[]> {
@@ -245,6 +347,9 @@ function compileTemplate(source: string): EvalResult<ParsedHole[]> {
             `Move logic into a CEL field. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}.`,
         },
       };
+    }
+    if (parsed.refusal) {
+      return { ok: false, error: { kind: 'parse', message: `invalid template hole: ${parsed.refusal.message}` } };
     }
     holes.push(parsed);
   }

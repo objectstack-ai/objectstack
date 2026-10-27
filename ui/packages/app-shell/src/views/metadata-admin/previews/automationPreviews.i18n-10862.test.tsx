@@ -125,7 +125,7 @@ const ACTION_API = {
   objectName: 'account',
   variant: 'primary',
   refreshAfter: true,
-  aiExposed: false,
+  ai: { exposed: false },
   locations: ['record_header', 'list_toolbar', 'list_item', 'record_section', 'record_more'],
   requiredPermissions: ['account.sync'],
   visible: "record.status == 'open'",
@@ -225,7 +225,7 @@ describe('ActionPreview — the designer words read engine.actionPreview.* (obje
     });
 
     it(`${lang}: an inline script body, exposed to AI`, () => {
-      mountAction(lang, { name: 'recalc', label: 'Recalc', type: 'script', aiExposed: true, body: { source: 'record.total = 1' } });
+      mountAction(lang, { name: 'recalc', label: 'Recalc', type: 'script', ai: { exposed: true }, body: { source: 'record.total = 1' } });
       expectSites(lang, [
         { key: 'engine.actionPreview.pill.type', vars: { type: 'script' } },
         { key: 'engine.actionPreview.pill.aiExposed' },

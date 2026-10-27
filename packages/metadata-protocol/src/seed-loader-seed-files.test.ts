@@ -427,3 +427,94 @@ describe('seed files: refusals, by row, before the row is written (#25779)', () 
     expect(service.describeFiles).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * [#26670] A seed that stores many files must leave the event loop to the
+ * requests that arrive while it runs.
+ *
+ * On a synchronous driver (better-sqlite3) every `await` of the seed's
+ * per-row file work resolves as a microtask, and the fakes here resolve the
+ * same way, which is the property that matters: without a macrotask turn the
+ * whole load runs as one unbroken microtask chain, and a request that
+ * arrives meanwhile (a sign-in, read on the I/O phase) is not even read until
+ * the seed is done. Measured on `os serve --dev` over sqlite before the fix:
+ * the event loop stalled 3–5 s per 200-row insert batch while the connection
+ * pool never held a connection longer than 44 ms.
+ */
+describe('a seed of many files yields to waiting requests (#26670)', () => {
+  const ROWS = 60;
+  // No self-reference, unlike `clm_version`: the loader buffers this object's
+  // inserts and flushes them in batches, then settles each landed row's claim
+  // back to back — the path the stall was measured on.
+  const manyFiles = () => {
+    const files: Record<string, unknown> = {};
+    const records = [];
+    for (let i = 0; i < ROWS; i++) {
+      files[`fixtures/f${i}.pdf`] = bundled(`%PDF ${i}`);
+      records.push({ code: `D${i}`, file: seedFile(`fixtures/f${i}.pdf`) });
+    }
+    return dataset(records, files, { object: 'clm_doc' });
+  };
+  const batchedLoader = (engine: IDataEngine, service: IFieldFileService) => {
+    const metadata = createMetadata();
+    (metadata.getObject as any).mockImplementation(async (name: string) =>
+      name === 'clm_doc' ? { name: 'clm_doc', fields: { code: { type: 'text' }, file: { type: 'file' } } } : undefined);
+    return new SeedLoaderService(engine, metadata, createLogger(), { getFieldFiles: () => service });
+  };
+
+  it('stores at most one row\'s files and settles at most one row\'s claim between two macrotask turns', async () => {
+    const { engine } = createEngine();
+    const { service, stored, claims } = createFieldFiles();
+    const turns: Array<{ stored: number; claims: number }> = [];
+    let done = false;
+    const sample = () => {
+      turns.push({ stored: stored.length, claims: claims.length });
+      if (!done) setImmediate(sample);
+    };
+    setImmediate(sample);
+    const result = await batchedLoader(engine, service).load({ seeds: [manyFiles()], config: CONFIG });
+    done = true;
+
+    expect(result.success).toBe(true);
+    expect(stored).toHaveLength(ROWS);
+    expect(claims).toHaveLength(ROWS);
+    let maxStored = 0;
+    let maxClaims = 0;
+    for (let t = 1; t < turns.length; t++) {
+      maxStored = Math.max(maxStored, turns[t].stored - turns[t - 1].stored);
+      maxClaims = Math.max(maxClaims, turns[t].claims - turns[t - 1].claims);
+    }
+    // A turn ran while the load did, and the first one landed before the last
+    // file was stored: the load did not run through in one chain.
+    expect(turns.length, 'no macrotask turn ran while the seed ran').toBeGreaterThan(1);
+    expect(turns[0].stored,'the first macrotask turn came only after the seed stored every file').toBeLessThan(ROWS);
+    expect({ maxStored, maxClaims }).toEqual({ maxStored: 1, maxClaims: 1 });
+  });
+
+  it('serves an unrelated read issued during the seed within one row\'s file work', async () => {
+    const { engine } = createEngine();
+    const { service, stored, claims } = createFieldFiles();
+    let readAt: { stored: number; claims: number } | undefined;
+    // A request read on the I/O phase, as a sign-in's user lookup is.
+    setImmediate(() => {
+      const issuedAt = { stored: stored.length, claims: claims.length };
+      void engine.find('sys_user', { where: { email: 'admin@example.com' } }).then(() => {
+        readAt = { stored: stored.length - issuedAt.stored, claims: claims.length - issuedAt.claims };
+      });
+    });
+    await batchedLoader(engine, service).load({ seeds: [manyFiles()], config: CONFIG });
+    expect(readAt, 'the read never completed').toBeDefined();
+    expect(readAt!.stored + readAt!.claims, 'files stored or claimed while the read waited').toBeLessThanOrEqual(1);
+  });
+
+  it('writes a dataset that carries seed files in insert batches of at most 20 rows', async () => {
+    const { engine } = createEngine();
+    const { service } = createFieldFiles();
+    await batchedLoader(engine, service).load({ seeds: [manyFiles()], config: CONFIG });
+    const sizes = (engine.insert as any).mock.calls
+      .filter(([object]: [string]) => object === 'clm_doc')
+      .map(([, data]: [string, unknown]) => (Array.isArray(data) ? data.length : 1));
+    expect(sizes.reduce((a: number, b: number) => a + b, 0)).toBe(ROWS);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(20);
+  });
+});
