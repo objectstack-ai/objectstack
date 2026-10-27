@@ -42,9 +42,6 @@ const repoRoot = resolve(__dirname, '..');
  * group had. A private package outside this list is still refused in the group,
  * so a package marked private by mistake cannot hide in it.
  *
- * Readers that count "published packages" (`check-lockstep-package-count.mjs`)
- * subtract these names.
- *
  * @type {Readonly<Record<string, string>>}
  */
 export const PRIVATE_FIXED_MEMBERS = Object.freeze({
