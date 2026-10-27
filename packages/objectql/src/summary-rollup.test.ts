@@ -582,4 +582,26 @@ describe('[#26950] a predicate update or delete hands recomputeSummaries its mat
     expect(readsBeforeWrite('inv_line').map((e) => e.ast.fields)).toEqual([['id', 'inv']]);
     expect(parent(a)).toMatchObject({ line_total: 0, line_count: 0 });
   });
+
+  it('a roll-up over its own object does not recompute a parent the same delete removed', async () => {
+    // A self roll-up: a node counts the nodes whose `up` names it. Deleting a
+    // node and its child in one predicate delete leaves the child naming a
+    // parent that is gone; only the surviving root is recomputed, and the
+    // delete answers its count instead of a recompute failure.
+    engine.registry.registerObject({
+      name: 'node',
+      fields: {
+        grp: { type: 'text' },
+        up: { type: 'lookup', reference: 'node' },
+        kids: { type: 'summary', summaryOperations: { object: 'node', field: 'grp', function: 'count', relationshipField: 'up' } },
+      },
+    } as any);
+    const root = await engine.insert('node', { grp: 'keep' });
+    const mid = await engine.insert('node', { grp: 'x', up: root.id });
+    await engine.insert('node', { grp: 'x', up: mid.id });
+    expect(storeFor('node').get(root.id).kids).toBe(1);
+
+    expect(await engine.delete('node', { where: { grp: 'x' }, multi: true })).toBe(2);
+    expect(storeFor('node').get(root.id).kids).toBe(0);
+  });
 });

@@ -199,6 +199,7 @@ import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
   summaryEmptySetValue,
+  withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
@@ -19913,8 +19914,8 @@ export class ObjectQL implements IObjectQLEngine {
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
                    const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
-                   if (summaryKeyColumns.length > 0) summaryPriorRows = matched;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    for (const matchedId of matchedIds) {
                      await this.cascadeDeleteRelations(object, matchedId, writeContext);
                    }
