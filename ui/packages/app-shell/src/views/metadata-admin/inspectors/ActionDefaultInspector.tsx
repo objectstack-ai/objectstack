@@ -416,7 +416,6 @@ const BODY_SHAPE_OPTS: KeyedOption[] = [
   { value: 'wrap', labelKey: 'engine.inspector.action.bodyShape.wrap' },
 ];
 
-/** What a script action DOES — `operation` is authored beside `type`, not in it. */
 /** One field-value row of an update action: the field, and the value written to it. */
 type PatchRow = [string, unknown];
 
@@ -430,6 +429,7 @@ function samePatchRows(a: ReadonlyArray<PatchRow>, b: ReadonlyArray<PatchRow>): 
     && a.every(([key, value], i) => key === b[i][0] && JSON.stringify(value) === JSON.stringify(b[i][1]));
 }
 
+/** What a script action DOES — `operation` is authored beside `type`, not in it. */
 const SCRIPT_OPERATIONS: KeyedOption[] = [
   { value: '', labelKey: 'engine.inspector.action.scriptOp.run' },
   { value: 'update', labelKey: 'engine.inspector.action.scriptOp.update' },
