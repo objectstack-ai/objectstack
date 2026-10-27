@@ -28,6 +28,11 @@ import { ObjectFieldInspector } from './ObjectFieldInspector';
 // bare string — the loop below iterates exactly those two, so annotating the
 // helper keeps the array's element type from widening back to `string`.
 import { t, type SupportedLocale } from '../i18n';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
