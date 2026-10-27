@@ -769,7 +769,17 @@ export const CEILINGS = new Map([
   // prose above it), then the row's 7 tokens of headroom absorb 7; the ceiling moves by the
   // remaining 43 and is pinned AT the measurement — zero headroom. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/rules/actions.md', 2151],
+  // 2151 -> 2259: the `disabledReason` teaching beside `disabled` — one bullet (an I18nLabel,
+  // display-only, never a predicate; omitted = the console's default reason, blank refused, the
+  // four near-miss spellings refused naming it, the reason never in `description`) and the key on
+  // the `disabled` line of the ReassignLead example. PAID DOWN FIRST by 122 bytes of true
+  // duplicate in this file: two code comments in that example restating the bullets above it
+  // (`// Greys out (stays visible) …` — the `disabled` bullet; `// success toast offers Undo;
+  // Ctrl+Z works too` — the `undoable` bullet). The file is 8602 -> 9035 bytes -> 2259 tokens,
+  // zero headroom to absorb any of it, ceiling +108, pinned AT the measurement. Same ruling as
+  // the line above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9035 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2259],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -961,7 +971,13 @@ export const CEILINGS = new Map([
   // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the
   // whole addition raised and pinned AT the measurement. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1789],
+  // 1789 -> 2009: case 9, the `disabledReason` beside a `disabled` predicate (the reason never in
+  // `description`, the near-miss spellings refused) — +882 bytes; the file's cases share no
+  // sentence, so there was no duplicate to cut (0 bytes). 7154 -> 8036 bytes -> 2009 tokens,
+  // ceiling +220, pinned AT the measurement. Same ruling as the line above (2026-10-27, tap A:
+  // 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8036 / 4)
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2009],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes

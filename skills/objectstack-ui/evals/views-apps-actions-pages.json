@@ -80,6 +80,16 @@
         "must_contain": ["{{", "onSuccess", "result.output"],
         "must_not_contain": ["${record.name}"]
       }
+    },
+    {
+      "id": 9,
+      "prompt": "Approve on `contract` should stay visible but greyed until `legal_review_status` is `approved`, and the rep should see why it is greyed.",
+      "expected_output": "`disabled: P`record.legal_review_status != \"approved\"`` with `disabledReason: 'An approved legal review is required before approval.'` beside it — an I18nLabel the console shows as the greyed button's hover title; display-only, never a predicate, not a gate. The reason is not written into `description`; omitting the key keeps the default \"Not available for this record\", and a blank reason or a `*Message` / `*Tooltip` / `*Hint` spelling of the key is refused.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["disabled:", "disabledReason"],
+        "must_not_contain": ["description:", "disabledMessage", "disabledTooltip", "visible:"]
+      }
     }
   ]
 }
