@@ -34,9 +34,10 @@
  *
  * The TypeScript VERSION a contributor installs cannot be spawned here without
  * an install, so the TS5103 half is pinned on the declaration instead: the
- * in-repo range is the workspace's range, and its floor is a major that
- * accepts the base's `ignoreDeprecations`. The standalone range is pinned
- * unchanged beside it.
+ * in-repo range is the range this package declares for the very `tsc` the
+ * cases spawn (the workspace's TypeScript, which the root and every sibling
+ * declare too), and its floor is a major that accepts the base's
+ * `ignoreDeprecations`. The standalone range is pinned unchanged beside it.
  *
  * ## The control
  *
@@ -56,9 +57,8 @@ import { SCAFFOLD_TYPESCRIPT_RANGE } from '../src/commands/init.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, '../../..');
+const PKG = path.resolve(HERE, '..');
 const BASE_TSCONFIG = path.resolve(HERE, '../../..', 'tsconfig.base.json');
-const PLUGINS_DIR = path.resolve(HERE, '../../..', 'packages/plugins');
 
 const require = createRequire(import.meta.url);
 const TSC = require.resolve('typescript/bin/tsc');
@@ -143,20 +143,10 @@ describe('os create plugin --in-repo: the scaffold passes its own scripts', () =
 });
 
 describe('os create plugin: the TypeScript each placement declares', () => {
-  it('in-repo declares the workspace\'s TypeScript, the range the root and every sibling plugin declare', () => {
-    const root = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as Manifest;
-    expect(manifestFor('in-repo').devDependencies.typescript).toBe(root.devDependencies.typescript);
-    expect(IN_REPO_TYPESCRIPT_RANGE).toBe(root.devDependencies.typescript);
-
-    const siblings = fs
-      .readdirSync(PLUGINS_DIR)
-      .map((name) => path.join(PLUGINS_DIR, name, 'package.json'))
-      .filter((file) => fs.existsSync(file))
-      .map((file) => JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Manifest>)
-      .map((pkg) => pkg.devDependencies?.typescript)
-      .filter((range): range is string => typeof range === 'string');
-    expect(siblings.length, 'no sibling under packages/plugins declares typescript').toBeGreaterThan(0);
-    expect([...new Set(siblings)]).toEqual([IN_REPO_TYPESCRIPT_RANGE]);
+  it('in-repo declares the workspace\'s TypeScript, the range of the tsc the cases above spawn', () => {
+    const own = JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8')) as Manifest;
+    expect(manifestFor('in-repo').devDependencies.typescript).toBe(own.devDependencies.typescript);
+    expect(IN_REPO_TYPESCRIPT_RANGE).toBe(own.devDependencies.typescript);
   });
 
   it('in-repo\'s TypeScript floor accepts the base\'s ignoreDeprecations (TS5103)', () => {

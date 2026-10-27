@@ -728,6 +728,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // their trees: the pin reads nothing else from either package.
       'packages/spec/src/data/hook.zod.ts',
       'packages/runtime/src/sandbox/body-runner.ts',
+      // The repo-root base every package extends. test/create-in-repo-scaffold-typechecks.test.ts
+      // copies it into a sandbox laid out like this repo and type-checks an
+      // `os create plugin --in-repo` scaffold under it, so a strictness or
+      // `ignoreDeprecations` change in the base is exactly what must re-run
+      // this suite. It is a turbo `globalDependencies` entry as well, which
+      // this roster does not read.
+      'tsconfig.base.json',
     ],
     heldBy: {
       // The parity pin joins each barrel path from `SCAFFOLD_WIRED_BARRELS`, a

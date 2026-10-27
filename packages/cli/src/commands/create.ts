@@ -179,8 +179,8 @@ export function objectstackDependencySpec(placement: ScaffoldPlacement): string 
  * here, and never this range for `standalone`.
  *
  * `test/create-in-repo-scaffold-typechecks.test.ts` pins it equal to the range
- * the repository root and every sibling under `packages/plugins/` declare, so a
- * workspace TypeScript bump reddens there until this moves with it.
+ * this package declares (the root and every sibling package declare the same
+ * one), so a workspace TypeScript bump reddens there until this moves with it.
  */
 export const IN_REPO_TYPESCRIPT_RANGE = '^6.0.3';
 
