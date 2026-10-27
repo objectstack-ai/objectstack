@@ -90,6 +90,16 @@
         "must_contain": ["record_link", "reference", "defaultValue", "outputVariable", "dialect: 'cel'"],
         "must_not_contain": ["type: 'record'", "]("]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "The `expense` record page shows an Edit button to every member who can read the record. While an expense is under approval, members who are not on the approval still get the button and their save is refused with `409 RECORD_LOCKED`. Make the page know the record is locked before it offers the edit.",
+      "expected_output": "Read the lock itself: `client.approvals.getRecordLock('expense', recordId)` (`GET /api/v1/approvals/records/expense/:recordId/lock`) answers `{ locked }` to anyone who can read the record, participant or not — the same judgement the lock hook applies to the write — so the page hides or disables Edit while `locked` is `true`. Not the request row: a non-participant is served none, and request content stays behind the object's `approvalsVisibleToReaders`, which is not switched on for this. A record the caller cannot read answers `404 RECORD_NOT_FOUND`, the same as a missing one.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["getRecordLock", "locked"],
+        "must_not_contain": ["lock_record", "approvalsVisibleToReaders: true"]
+      }
     }
   ]
 }
