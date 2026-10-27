@@ -91,7 +91,10 @@ function makeSession(opts: {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, o);
             if (table === 'sys_metadata_history') {
-                return history.find((h) => Object.entries(o.where).every(([k, v]) => v === undefined || h[k] === v)) ?? null;
+                return history.find((h) => Object.entries(o.where).every(([k, v]) => {
+                    if (k.startsWith('$')) throw new Error(`history double: unsupported operator ${k}`);
+                    return v === undefined || h[k] === v;
+                })) ?? null;
             }
             if (table !== 'sys_metadata') return null;
             return findRow(o.where)?.row ?? null;
