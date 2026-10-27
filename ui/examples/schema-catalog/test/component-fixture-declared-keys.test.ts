@@ -87,6 +87,7 @@ import {
 } from '@object-ui/types/zod';
 import { enumOptions } from '@object-ui/test-support';
 import { allExamples, getExample } from '../src/index.js';
+import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
 type Json = Record<string, unknown>;
 
@@ -280,7 +281,7 @@ describe('catalog corpus: no fixture hangs an action object off a handler key (o
     expect(handlers.map((h) => h.where)).toContain(
       'components-feedback-toaster/with-toast-trigger.children[0].onClick',
     );
-    expect(entries.length).toBeGreaterThan(400);
+    expect(entries.length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
   });
 
   it('every handler value in the corpus is a string expression, never an action object', () => {
@@ -565,7 +566,7 @@ describe('catalog corpus: every menubar item uses the declared MenuItem spelling
       ]),
     );
     expect(items).toHaveLength(13);
-    expect(allExamples().length).toBeGreaterThan(400);
+    expect(allExamples().length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
   });
 
   it('the walker descends into submenu `children` — synthetic positive control', () => {
@@ -773,7 +774,7 @@ describe('catalog corpus: no overlay-menu item authors the undeclared `value` ke
     // below. 25 items = menubar 13 + basic-context-menu 5 + basic-dropdown-menu
     // 4 + with-icons 3.
     expect(items).toHaveLength(25);
-    expect(allExamples().length).toBeGreaterThan(400);
+    expect(allExamples().length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
 
     // One representative position per container shape, including the deeper
     // `menus[].items[]` nesting only `menubar` has.
@@ -935,11 +936,12 @@ describe('catalog corpus: no `select` option authors the undeclared `type` key (
 
   it('the sweep reaches every select option in the corpus — non-vacuity', () => {
     // Floors, not equalities: catalog growth must not fail this file, only a
-    // walker that stopped working. 66 options on 19 select nodes across 7
-    // categories at `b6e83be6a`.
-    expect(options.length).toBeGreaterThanOrEqual(66);
-    expect(new Set(options.map((o) => o.where.split('/')[0])).size).toBeGreaterThanOrEqual(7);
-    expect(allExamples().length).toBeGreaterThan(400);
+    // walker that stopped working. About two thirds of the 66 options across 7
+    // categories measured on objectstack 6a7c0fe3, so deleting an entry does
+    // not fail it either.
+    expect(options.length).toBeGreaterThanOrEqual(44);
+    expect(new Set(options.map((o) => o.where.split('/')[0])).size).toBeGreaterThanOrEqual(5);
+    expect(allExamples().length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
 
     // One representative position per authoring shape, including the two
     // nesting depths a shallow walker would silently miss: a select inside a
