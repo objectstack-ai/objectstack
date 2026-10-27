@@ -227,6 +227,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { readShardMatrix, shardTotal } from './lib/ci-shard-matrix.mjs';
 
 /** Artifact-name prefix shared by every shard credential. */
 const ARTIFACT_PREFIX = 'shard-attest-';
@@ -2253,8 +2254,11 @@ async function selfTest() {
   // The runs replayed below (38036705318, 34007386254) ran the SIX-shard matrix,
   // which #25376 widened to eight, so they are read against the live workflow
   // with the shard name as it stood then. The live names are pinned on their own
-  // at the end of this battery.
-  const LIVE_TEST_NAME = 'name: Test Core (${{ matrix.shard }}/8)';
+  // at the end of this battery, at the sizes the live matrices declare (read
+  // through scripts/lib/ci-shard-matrix.mjs, so no size is copied here).
+  const LIVE_TEST_TOTAL = shardTotal(CI_TEXT, 'test');
+  const LIVE_DOGFOOD_TOTAL = shardTotal(CI_TEXT, 'dogfood');
+  const LIVE_TEST_NAME = `name: Test Core (\${{ matrix.shard }}/${LIVE_TEST_TOTAL})`;
   const CI_TEXT_SIX_SHARDS = CI_TEXT.replace(LIVE_TEST_NAME, 'name: Test Core (${{ matrix.shard }}/6)');
   assert(CI_TEXT_SIX_SHARDS !== CI_TEXT, `#22653: the live ci.yml no longer carries \`${LIVE_TEST_NAME}\` — the six-shard replays below would read the live roster`);
   const PARTIAL_JOBS = /\/repos\/o\/r\/actions\/runs\/38036705318\/attempts\/1\/jobs\?per_page=100&page=1$/;
@@ -2349,8 +2353,9 @@ async function selfTest() {
     '#22653: a matrix name with no shard expression cannot locate a shard ⇒ unreadable, naming the shard',
   );
 
-  assert([1, 2, 3, 4, 5, 6, 7, 8].every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/8)`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
-  assert([1, 2, 3].every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/3)`), '#22653: …and each dogfood shard');
+  const oneTo = (total) => Array.from({ length: total }, (_, i) => i + 1);
+  assert(oneTo(LIVE_TEST_TOTAL).every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/${LIVE_TEST_TOTAL})`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
+  assert(oneTo(LIVE_DOGFOOD_TOTAL).every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/${LIVE_DOGFOOD_TOTAL})`), '#22653: …and each dogfood shard');
   assert(workflowJobDisplayName(CI_TEXT, 'dogfood-verify') === 'Dogfood Verify CLI', "#22653 control: the single leg's literal name reads as before");
   assert(workflowJobDisplayName(CI_TEXT, 'test') === undefined, '#22653: a matrix template asked WITHOUT a shard is still unresolvable ⇒ undefined');
   assert(workflowJobDisplayName('jobs:\n  m:\n    runs-on: x\n', 'm', 1) === undefined, '#22653: a nameless matrix job is not guessed at — GitHub appends the matrix values itself');
@@ -2683,10 +2688,15 @@ async function selfTest() {
     // start mutating dogfood's matrix instead — still red, still for a
     // plausible-looking reason, and no longer the assertion written here.
     // Since #26084 the test matrix is planned, and its full roster is the
-    // fallback literal after `||`; growing THAT is growing the matrix.
-    const TEST_MATRIX = "shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]') }}";
-    assert((await fixture('grow the matrix', (s) => s.replace(TEST_MATRIX, TEST_MATRIX.replace('8]', '8, 9]')))).problems.some((p) => p.includes('declares 9 shard')), 'growing the matrix without the gate ⇒ red');
-    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/8', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
+    // fallback literal after `||`; growing THAT is growing the matrix. The
+    // roster is the one the live matrix declares, spelled as ci.yml spells it.
+    const liveTest = readShardMatrix(good, 'test');
+    const N = liveTest.total;
+    const ROSTER = JSON.stringify(liveTest.values).replaceAll(',', ', ');
+    assert(liveTest.form === 'planned', `ci.yml's test matrix reads as ${liveTest.form}, not planned — the #26084 anchors below assume the planned shape`);
+    const TEST_MATRIX = `shard: \${{ fromJSON(needs.test-plan.outputs.shards || '${ROSTER}') }}`;
+    assert((await fixture('grow the matrix', (s) => s.replace(TEST_MATRIX, TEST_MATRIX.replace(`${N}]`, `${N}, ${N + 1}]`)))).problems.some((p) => p.includes(`declares ${N + 1} shard`)), 'growing the matrix without the gate ⇒ red');
+    assert((await fixture('shrink the roster', (s) => s.replace(`--leg "test/${N}:`, '--leg "test/2:'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
     assert((await fixture('uncounted intruder', (s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
     assert((await fixture('rename test-gate', (s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
     assert((await fixture('typo the artifact name', (s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');
@@ -2707,16 +2717,16 @@ async function selfTest() {
 
     // ── #26084: the planned matrix and the gate read one expression ─────────
     battery('#26084 the static guard holds the planned matrix and the gate to one expression');
-    const GATE_PLAN = "          OS_TEST_PLAN: ${{ needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]' }}\n";
+    const GATE_PLAN = `          OS_TEST_PLAN: \${{ needs.test-plan.outputs.shards || '${ROSTER}' }}\n`;
     const planProblem = async (label, mutate, ...needles) => hasPlanProblem(await fixture(label, mutate), ...needles);
     const hasPlanProblem = (result, ...needles) => result.problems.some((p) => needles.every((needle) => p.includes(needle)));
     assert(
-      await planProblem('the gate reads another fallback', (s) => s.replace(GATE_PLAN, GATE_PLAN.replace(", 7, 8]", ']')), 'not the matrix', '#26084'),
+      await planProblem('the gate reads another fallback', (s) => s.replace(GATE_PLAN, GATE_PLAN.replace(`, ${N}]`, ']')), 'not the matrix', '#26084'),
       '#26084: a gate roster expression that differs from the matrix by one byte ⇒ red',
     );
     assert(
       await planProblem('the gate loses --planned', (s) => s.replace(' \\\n            --planned "test=$OS_TEST_PLAN"', ''), 'without --planned', '#26084'),
-      '#26084: a gate that counts a planned leg against 1..8 ⇒ red',
+      '#26084: a gate that counts a planned leg against its full 1..N roster ⇒ red',
     );
     assert(
       await planProblem('the gate loses --plan-result', (s) => s.replace(' \\\n            --plan-result "$OS_TEST_PLAN_RESULT"', ''), '--plan-result', '#26084'),
@@ -2739,7 +2749,7 @@ async function selfTest() {
       '#26084: a planned matrix with no full-roster fallback ⇒ red',
     );
     assert(
-      await planProblem('--planned on a literal matrix', (s) => s.replace(TEST_MATRIX, 'shard: [1, 2, 3, 4, 5, 6, 7, 8]'), 'literal list', '#26084'),
+      await planProblem('--planned on a literal matrix', (s) => s.replace(TEST_MATRIX, `shard: ${ROSTER}`), 'literal list', '#26084'),
       '#26084: --planned beside a literal matrix ⇒ red (nothing to narrow)',
     );
     assert(plannedMatrix("${{ fromJSON(needs.p.outputs.s || '[1, 2]') }}")?.total === 2 && plannedMatrix('[1, 2]') === null, '#26084 plannedMatrix: reads the planned shape, ignores a literal list');
@@ -2818,29 +2828,30 @@ async function selfTest() {
       hasProblem(await fixture('drop the token (test-gate)', inJob('test-gate', TOKEN_LINE, '')), "gate 'test-gate'", 'GITHUB_TOKEN'),
       "#22653: test-gate's verify step without GITHUB_TOKEN ⇒ red",
     );
-    const TEST_NAME = '    name: Test Core (${{ matrix.shard }}/8)\n';
+    const TEST_NAME = `    name: Test Core (\${{ matrix.shard }}/${N})\n`;
+    const DOGFOOD_NAME = `    name: Dogfood Regression Gate (\${{ matrix.shard }}/${shardTotal(good, 'dogfood')})\n`;
     assert(
       hasProblem(await fixture('a matrix name without the shard expression', (s) => s.replace(TEST_NAME, '    name: Test Core shards\n')), '#22653', "job 'test' is named"),
       '#22653: a matrix name with no `${{ matrix.shard }}` ⇒ red — the platform would append the values itself, a name the reader cannot rebuild',
     );
     assert(
-      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, '    name: Test Core (${{ matrix.shard }}/8) ${{ github.event_name }}\n')), '#22653', "job 'test' is named"),
+      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, TEST_NAME.replace('\n', ' ${{ github.event_name }}\n'))), '#22653', "job 'test' is named"),
       '#22653: any expression besides the shard ⇒ red — the text reading cannot evaluate it',
     );
     assert(
       hasProblem(
-        await fixture('the dogfood matrix name on another matrix key', (s) => s.replace('    name: Dogfood Regression Gate (${{ matrix.shard }}/3)\n', '    name: Dogfood Regression Gate (${{ matrix.os }}/3)\n')),
+        await fixture('the dogfood matrix name on another matrix key', (s) => s.replace(DOGFOOD_NAME, DOGFOOD_NAME.replace('matrix.shard', 'matrix.os'))),
         '#22653',
         "job 'dogfood' is named",
       ),
       "#22653: dogfood's matrix leg is held to the same name rule — it is asked on a partial cancel too",
     );
     assert(
-      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, '    name: "Test Core (${{ matrix.shard }}/8)"\n'))).problems.length === 0,
+      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, `    name: "Test Core (\${{ matrix.shard }}/${N})"\n`))).problems.length === 0,
       '#22653 positive limb: a quoted template reads the same from text and from YAML ⇒ green',
     );
     assert(
-      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, '    name: Test Core (${{matrix.shard}}/8)\n'))).problems.length === 0,
+      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, TEST_NAME.replace('${{ matrix.shard }}', '${{matrix.shard}}')))).problems.length === 0,
       '#22653 positive limb: `${{matrix.shard}}` is the same expression ⇒ green',
     );
     assert(baseline.problems.length === 0 && baseline.gateIds.includes('test-gate'), '#22653: the checked-in test-gate carries every prerequisite — the baseline is green with it counted as a gate');
