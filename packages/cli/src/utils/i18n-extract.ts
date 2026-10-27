@@ -122,6 +122,7 @@
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
+ *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   metadataForms.<type>.label / .description
@@ -228,6 +229,7 @@ export interface ExpectedEntry {
     | 'picklist'
     | 'page'
     | 'flow'
+    | 'hook'
     | 'position'
     | 'permission'
     | 'metadataType'
@@ -1673,6 +1675,9 @@ export function collectExpectedEntries(
   // ── Screen flows (`flows.<flow>.screens.<node>.…`, #7646 / #11287) ─
   walkScreenFlows(config, out);
 
+  // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
+  walkHookRefusals(config, out);
+
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
   // `objects`, `views` and `pages`, and one section may be declared by more
@@ -2235,6 +2240,32 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       // No id, no key: the request's `current_step` could not name the node.
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.refusals.<CODE>.message` for every entry a hook's refusal
+ * catalogue declares (#26170, maintainer ruling 6431311681 letter A), seeded
+ * with the declared message.
+ *
+ * The sandboxed body runner reads exactly that key (`hookRefusalMessageKey`)
+ * in the caller's locale when the body throws the entry's code, so each
+ * declared entry is one demand, counted by the coverage gate under its own
+ * `hook` bucket. Keyed by hook name, not by the objects the hook binds, so a
+ * hook bound to several objects or to `'*'` is asked for one translation per
+ * code. A hook that declares no `refusals` has no key here: its throws carry
+ * no address a bundle could reach.
+ */
+function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const refusals = hook.refusals;
+    if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) continue;
+    for (const [code, entry] of Object.entries<any>(refusals)) {
+      pushOptional(out, ['hooks', hookName, 'refusals', code, 'message'], inlineText(entry?.message), 'hook');
     }
   }
 }

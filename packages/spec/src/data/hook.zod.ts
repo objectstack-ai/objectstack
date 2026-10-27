@@ -25,6 +25,14 @@ import {
 // (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
 // cycle. `import type` is erased, leaving the edge in the type graph only.
 import type { IScopedContext } from '../contracts/scoped-context';
+// [#26170] The refusal catalogue's code spelling, the save-time reading of a
+// body's literal throws and the sentence — an import-free leaf the runtime
+// reads too, so this schema's import graph is unchanged.
+import {
+  HOOK_REFUSAL_CODE_PATTERN,
+  hookRefusalCodesThrownIn,
+  undeclaredHookRefusalCodeAtSave,
+} from './hook-refusal-codes';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -186,6 +194,79 @@ function refuseElevatedIdentityAssignmentBodyWrite(
     });
   }
 }
+
+/*
+ * ── A hook that declares `refusals` refuses by code only ────────────────────
+ *
+ * [#26170, maintainer ruling 6431311681 letter A] A hook's refusal catalogue
+ * names every refusal its body may throw. The runtime answers a declared code
+ * with the declared message in the caller's locale; it refuses a code the
+ * catalogue does not declare, loudly. Where the body names the code literally
+ * in a `throw` (`hookRefusalCodesThrownIn`), the save decides it first: the
+ * parse refuses the hook at every door that parses one — the metadata save
+ * door, `defineStack` / `os validate`, compile, an artifact's parse — so the
+ * author meets the refusal before any write does. One issue per code, at
+ * `body.source`. A code that arrives any other way is the run-time refusal's.
+ *
+ * A hook that declares no `refusals` is untouched: its body's throws are
+ * answered as they always were.
+ */
+
+/**
+ * The object-level check that refuses a code a hook's sandboxed body throws
+ * literally and its `refusals` does not declare. See the block above.
+ */
+function refuseUndeclaredLiteralRefusalCode(
+  hook: { refusals?: Record<string, unknown>; body?: { language?: string; source?: unknown } },
+  ctx: z.RefinementCtx,
+): void {
+  if (!hook.refusals || hook.body?.language !== 'js' || typeof hook.body.source !== 'string') return;
+  const declared = Object.keys(hook.refusals);
+  for (const code of hookRefusalCodesThrownIn(hook.body.source)) {
+    if (Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['body', 'source'],
+      message: undeclaredHookRefusalCodeAtSave(code, declared),
+    });
+  }
+}
+
+/**
+ * One entry of a hook's refusal catalogue (#26170): the sentence the user
+ * reads when the hook's body throws this entry's code, and the status the
+ * refusal is answered with.
+ *
+ * The message is plain text, handed over verbatim in the source locale and
+ * replaced whole by its translation, `hooks.<hook>.refusals.<CODE>.message` —
+ * the validation-rule message's posture (`objects.<object>._validations.<rule>.message`):
+ * an authored refusal has no parameter contract, so no `{{ }}` hole is filled.
+ */
+export const HookRefusalSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this hook refusal',
+    aliases: { text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status' },
+    guidance: {
+      code:
+        '`code` is not a refusal key — the code is the entry\'s KEY in `refusals` '
+        + '(`refusals: { CLEAN_VERSION_REQUIRED: { message } }`), and the body throws it.',
+      title:
+        'A hook refusal has no heading — the caller reads the `message` alone. Write the sentence in `message`.',
+    },
+  },
+  {
+    message: z.string().trim().min(1).describe(
+      'The sentence the user reads when the body throws this code — plain text in the source locale, translated '
+      + 'whole through hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; no {{ }} holes are filled',
+    ),
+    status: z.number().int().min(400).max(499).optional().describe(
+      'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
+      + 'body itself sets on the throw is not read — the catalogue decides',
+    ),
+  },
+));
+
+export type HookRefusal = z.input<typeof HookRefusalSchema>;
 
 /**
  * Hook Lifecycle Events
@@ -496,6 +577,42 @@ export const HookSchema = lazySchema(() => strictObject(
   ),
 
   /**
+   * The hook's refusal catalogue (#26170, maintainer ruling 6431311681
+   * letter A): every refusal its body may throw, keyed by the code it throws.
+   *
+   *   refusals: {
+   *     CLEAN_VERSION_REQUIRED: { message: 'A current clean version is required before signing.', status: 422 },
+   *   }
+   *
+   * The body refuses by code only — it throws an error carrying a declared
+   * `code`, and the runtime answers with that entry: its `message`, translated
+   * through `hooks.<hook>.refusals.<CODE>.message` in the caller's locale with
+   * the declared message as the fallback, marked as the end user's sentence,
+   * and its `status`. A code the catalogue does not declare, or a throw with no
+   * code, is refused loudly: at save where the body names it literally,
+   * otherwise when it runs, as a fault naming the hook and the code. An error
+   * a host call raised and the body let through unchanged (a `ctx.api` write
+   * refused by the engine, a nested hook's refusal) passes through as before,
+   * and so does a crash.
+   *
+   * Keyed by hook name, not by object: one hook bound to several objects, or
+   * to `'*'`, owns one catalogue and one translation per code. Read by the
+   * sandboxed `body` runner; an in-process `handler` is answered as before.
+   * Absent: the hook's throws are answered as they always were.
+   */
+  refusals: z.record(
+    z.string().regex(HOOK_REFUSAL_CODE_PATTERN, {
+      message: 'A refusal code is SCREAMING_SNAKE (e.g. CLEAN_VERSION_REQUIRED) — the error code the body throws',
+    }),
+    HookRefusalSchema,
+  ).optional().describe(
+    'Refusal catalogue keyed by the SCREAMING_SNAKE code the body throws: { message, status? }. The body refuses '
+    + 'by code only; the runtime answers with the declared message (translated through '
+    + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale) and status. A code not declared here is refused '
+    + 'loudly — at save when the body throws it literally, otherwise at run time',
+  ),
+
+  /**
    * Execution identity for the hook's `ctx.api` data operations (#14010;
    * ruling 2026-09-01). The value semantics of `'system'` / `'user'` are
    * FlowSchema's, word for word (`automation/flow.zod.ts` `runAs`): `system`
@@ -565,11 +682,13 @@ export const HookSchema = lazySchema(() => strictObject(
   // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
   // [#21565] The object-level checks: the first pairs `object` with `body`,
-  // [#25653] the second `runAs` with `body`, pairs no field-level refine can
-  // see together. A schema DERIVED from this one by overriding a key must use
-  // `.safeExtend()` (zod refuses `.extend()` over a refined object), which is
-  // what keeps both checks on the derived schema too.
-}).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite));
+  // [#25653] the second `runAs` with `body`, [#26170] the third `refusals`
+  // with `body`, pairs no field-level refine can see together. A schema
+  // DERIVED from this one by overriding a key must use `.safeExtend()` (zod
+  // refuses `.extend()` over a refined object), which is what keeps every
+  // check on the derived schema too.
+}).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite)
+  .superRefine(refuseUndeclaredLiteralRefusalCode));
 
 /**
  * Hook Runtime Context
@@ -1149,6 +1268,23 @@ export const HookContextSchema = lazySchema(() => z.object({
       + 'updated_at/updated_by (and the readonly audit family) instead of being stamped with '
       + 'the import instant. Server-set, opt-in, absent on normal writes; read by the '
       + 'built-in audit hook. A stamping policy, not an authorization input.',
+    ),
+    /**
+     * The caller's locale (#26170) — the write's already-resolved
+     * `ExecutionContext.locale`, copied by `buildSession()`: the request's
+     * `Accept-Language` first tag, else the `localization` setting. Absent on
+     * a write no person asked for (a system or programmatic write).
+     *
+     * The sandboxed body runner reads it to answer a declared refusal
+     * (`HookSchema.refusals`) in the caller's language: it negotiates it
+     * against the locales the `i18n` service holds (`resolveBundleLocale`)
+     * and picks `hooks.<hook>.refusals.<CODE>.message`. A hook may read it too,
+     * to describe the caller; like {@link positions} it authorizes nothing.
+     */
+    locale: z.string().optional().describe(
+      'The caller\'s locale (BCP-47), copied from ExecutionContext.locale: the request\'s Accept-Language, else '
+      + 'the localization setting; absent on a write no person asked for. The body runner answers a declared refusal '
+      + '(HookSchema.refusals) in it. Descriptive only — not an authorization input.',
     ),
     // `roles` REMOVED (#5050, ADR-0049 D2). It was DECLARED here, READ by two
     // dead exemption branches in plugin-approvals (the approval record lock and

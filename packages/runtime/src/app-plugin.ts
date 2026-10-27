@@ -36,6 +36,7 @@ import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
+import { hookRefusalI18nReader } from './sandbox/hook-refusal-catalogue.js';
 import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 import { countServerTiming } from '@objectstack/observability';
 
@@ -746,6 +747,7 @@ export class AppPlugin implements Plugin {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
+            i18n: hookRefusalI18nReader(ctx),
         }));
         if (installed !== false) {
             ctx.logger.info('[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)');
@@ -1716,7 +1718,14 @@ export class AppPlugin implements Plugin {
                 handlerDefinition.manifest[key] = handlerSource[key];
             }
         }
-        bindAppArtifactHandlers(ql, handlerDefinition, { appId, logger: ctx.logger, source: 'AppPlugin' });
+        bindAppArtifactHandlers(ql, handlerDefinition, {
+            appId,
+            logger: ctx.logger,
+            source: 'AppPlugin',
+            // [#26170] A hook's declared refusal is answered in the caller's
+            // language, through the i18n service read at refusal time.
+            i18n: hookRefusalI18nReader(ctx),
+        });
 
         // [ADR-0110 D5] The action-governance inventory used to hang off a
         // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is
