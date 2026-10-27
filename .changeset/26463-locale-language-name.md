@@ -16,7 +16,7 @@ The language subtag is now 2–3 letters, the ISO 639 codes every tag in use sta
 
 Clause-②: no (narrowing) — the locale shape refuses values it used to accept. Nothing is widened.
 
-Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in practice a language name, is refused on translation items, bundle keys, the i18n configuration, seed datasets and a user's `locale` column)
+Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in practice a language name, is refused on translation items, bundle keys, the i18n configuration and seed datasets)
 
 <!-- adr-0087: not-required (already-registered translation-locale-non-tag-refused) the 18.x D3 entry already prescribes rewriting a language name by hand, and its conversion already lists such a stored row as a TODO through LocaleSchema; this diff narrows the same shape and corrects that entry's subtag length -->
 
@@ -24,4 +24,4 @@ Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in
 
 - **Before.** `defineTranslation({ name: 'qa_x', locale: 'Chinese', … })` parsed and its strings never rendered; `PATCH` of a user's `locale` to `Japanese` was stored, and that user's notifications fell to the delivery ladder's floor.
 - **Now.** The value is refused at `locale` (or at the bundle key) with a message naming the tag shape, and the user's write is refused by the column's `locale_bcp47_shape` rule.
-- **Fix.** Write the tag, not the name: `Chinese` → `zh-CN`, `English` → `en`, `Japanese` → `ja-JP`. A language name has no single tag it can have meant, so `os migrate meta --stored` lists a stored row as a TODO (D3 entry `translation-locale-non-tag-refused`) and you rewrite it by hand.
+- **Fix.** Write the tag, not the name: `Chinese` → `zh-CN`, `English` → `en`, `Japanese` → `ja-JP`. A language name has no single tag it can have meant, so `os migrate meta --stored` lists a stored translation row as a TODO (D3 entry `translation-locale-non-tag-refused`) and you rewrite it by hand. A user whose stored `locale` is already a name such as `Japanese` keeps loading: their notifications fall to the deployment default as before, and saving that value again is refused until it is replaced with a tag.
