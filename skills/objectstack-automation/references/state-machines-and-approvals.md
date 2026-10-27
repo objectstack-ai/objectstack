@@ -230,7 +230,7 @@ still missing.
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
-| `queue`      | Members of an ownership queue (`value` = the queue's machine name, declared or the organization's own), resolved at node entry (ADR-0142 D6). An empty queue adds nobody and logs a warning; a node with only `queue` approvers is linted `approval-approvers-may-resolve-empty` |
+| `queue`      | Members of the ownership queue named by `value`, resolved at node entry (ADR-0142 D6); an empty queue adds nobody |
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 ### Dynamic approvers (`type: 'expression'`)
