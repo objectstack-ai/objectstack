@@ -15,7 +15,7 @@ export const entry: SemanticMigration = {
     + 'bundle locale key, i18n.defaultLocale / fallbackLocale / supportedLocales, a seed dataset '
     + 'locale scope, the seed loader locale',
   replacement:
-    'the BCP-47 tag the value was written for: a 2-8 letter language subtag, then hyphen-separated '
+    'the BCP-47 tag the value was written for: a 2-3 letter language subtag, then hyphen-separated '
     + '1-8 letter-or-digit subtags (`en`, `zh-CN`, `zh-Hans-CN`, `es-419`). Write `zh-CN` for '
     + '`zh_CN` and drop surrounding whitespace; the conversion does both for stored rows and built '
     + 'artifacts. A language name or any other text has no single tag it can have meant, so rewrite '

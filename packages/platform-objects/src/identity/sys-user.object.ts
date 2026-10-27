@@ -4,11 +4,17 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 
 /**
- * The BCP-47 shape `sys_user.locale` accepts — a 2–8 letter language subtag
+ * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
  * followed by any number of 1–8 alphanumeric subtags (`zh`, `zh-CN`,
  * `zh-Hans-CN`, `es-419`). Shape only: membership in a shipped template bundle
  * is the bundle's business, and the delivery-time ladders handle a
- * shipped-nowhere tag by falling to their floor.
+ * shipped-nowhere tag by falling to their floor. The primary subtag is held to
+ * the 2–3 letters of the ISO 639 codes real tags start with, so a language
+ * name (`Japanese`) or a stringified nothing (`null`) is refused as
+ * malformed: BCP-47 reserves 4 letters and registers no 5–8 letter language.
+ * The same pattern as `LOCALE_TAG_SHAPE` behind `LocaleSchema` in
+ * `@objectstack/spec/system`, so a translation is stored only under a tag a
+ * user can hold.
  *
  * A JS regex SOURCE string, because that is what a `format` validation rule
  * carries (`new RegExp(rule.regex)` in objectql's rule validator) — anchored at
@@ -30,7 +36,7 @@ import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
  * `recipient-locale-shape-parity.test.ts` in service-messaging asserts the two
  * spellings are byte-identical and names what breaks if they are not.
  */
-export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$';
+export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$';
 
 /**
  * sys_user — System User Object
