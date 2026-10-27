@@ -719,3 +719,44 @@ on `main` and the 2026-10-07 browser QA pass on the showcase boot (objectstack
 
 `since: "v17.7"` records the release in which the ledger began checking these
 conventions; the surfaces they sample predate it.
+
+## 12. Scoped authoring 2026-10-27 — the Studio QA run #26715 (checklist-author, one hunter)
+
+**Not a full sweep.** One hunter only: the Studio QA run #26715 (framework `3fcafcd3`) —
+four pillar cards, two gap-fill cards and the coordinator — whose checklist-accuracy
+findings and uncovered capabilities were authored by one writer, sequentially, and re-read
+at `43731031`. No other SWEEP.md angle was run, so this section supports **no** claim about
+what else is missing.
+
+- **Accuracy fixes** to 12 `studio-authoring` items; each item's own `history` row says
+  what changed and why.
+- **23 new items**, all `active`, `since: "v18"`. Where the run found the capability broken,
+  the clause is written against the correct behaviour and the item's `knownGaps` names the
+  card or the run record: #26705 (held edits lost on departure), #26707 (draft and editor
+  verdicts disagree with the publish verdict), #26708 (an uninstalled package id is
+  accepted), #26711 (the view envelope strips unknown keys), #26712 (`app.hidden` rewritten
+  to `_unpublished`), #26718 (`restrict` overridden by a master-detail cascade), #26719 (a
+  chart view accepts another object's dataset). Defects the run recorded that had no card
+  number when the items were written are cited as "recorded by QA run #26715".
+- **`coverage.json`**: the new items are mapped to their kinds, and the `picklist` waiver was
+  re-audited and replaced by items — its premise, "no runtime reads a picklist", no longer
+  holds; the entry's `$comment` says what the mapping does and does not claim.
+  `realtime_subscription`, the one remaining waiver, was **not** re-audited by this pass.
+
+### 12a. Not checklist items — for their owners
+
+- **Liveness ledger drift** (the gap-data card): `field.settledWhen` is graded `planned` in
+  `packages/spec/liveness/field.json`, yet on a `dueLike` date it changes the served
+  console's overdue styling. It belongs to the liveness ledger, outside this directory. The
+  card's second ledger finding — "`object.tenancy` has no ledger row" — does **not** hold:
+  `packages/spec/liveness/object.json` carries `tenancy.children.enabled` as `live`
+  (re-read at `43731031`). No action.
+- **The jsdom pin spelling** `pnpm --filter @object-ui/PKG exec vitest run FILE`, written in
+  several items' `knownGaps` and in RUNNER.md's objectui-pinned-automation fact, does not
+  reach the `ui/` workspace config for `@object-ui/app-shell`, which has no vitest config of
+  its own (its `test` script is `vitest run --root ../.. packages/app-shell/`). QA run #26715
+  measured the working form for one pin only — from `ui/`, `pnpm exec vitest run --root .
+  FILE` — and only that item (`packaged-automation-studio-lock`) was corrected. The other
+  texts need a measured run before they change.
+- **Explain access** was listed as uncovered by the Access card; Studio's Access pillar
+  already drives it in `access-security.record-access-explain`, so no item was added.

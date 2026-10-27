@@ -10,7 +10,8 @@
         "api-backend.action-activation-door-contract",
         "automation.setup-packaged-automation-board",
         "platform-core.activation-ledger-registration-home",
-        "records-forms.script-action-hook-refusal-toast"
+        "records-forms.script-action-hook-refusal-toast",
+        "studio-authoring.actions-tab-presets"
       ]
     },
     "agent": {
@@ -40,7 +41,9 @@
         "access-security.me-permissions-aggregation-parity",
         "search.command-palette-navigation",
         "platform-core.marketplace-install-local-lifecycle",
-        "platform-core.marketplace-console-honesty"
+        "platform-core.marketplace-console-honesty",
+        "studio-authoring.interfaces-create-dialogs",
+        "studio-authoring.app-and-nav-properties"
       ]
     },
     "batch_endpoints": {
@@ -81,13 +84,17 @@
         "dashboards.chart-first-paint",
         "dashboards.empty-null-bucket-boundaries",
         "studio-authoring.packaged-display-class-direct-edit",
-        "search.command-palette-navigation"
+        "search.command-palette-navigation",
+        "studio-authoring.dashboard-widget-and-filter-types",
+        "studio-authoring.uninstalled-package-refused"
       ]
     },
     "dataset": {
       "items": [
         "dashboards.dataset-report-authoring",
-        "api-backend.aggregate-contract-matrix"
+        "api-backend.aggregate-contract-matrix",
+        "studio-authoring.report-authoring-options",
+        "studio-authoring.no-entry-property-matrix"
       ]
     },
     "datasource": {
@@ -127,7 +134,11 @@
         "api-backend.aggregate-contract-matrix",
         "api-backend.formula-stdlib-matrix",
         "approvals.status-mirror-field",
-        "cli.dev-automigrate-policy"
+        "cli.dev-automigrate-policy",
+        "studio-authoring.summary-field-authoring",
+        "studio-authoring.no-entry-property-matrix",
+        "studio-authoring.api-written-keys-survive-studio-save",
+        "studio-authoring.removed-key-save-door-refusal"
       ]
     },
     "flow": {
@@ -148,7 +159,12 @@
         "studio-authoring.packaged-automation-studio-lock",
         "approvals.email-action-token-door",
         "approvals.approver-resolution-matrix",
-        "approvals.status-mirror-field"
+        "approvals.status-mirror-field",
+        "studio-authoring.automations-rail-and-new-flow",
+        "studio-authoring.flow-edge-type-authoring",
+        "studio-authoring.org-scope-flows",
+        "studio-authoring.flow-status-matches-runtime",
+        "studio-authoring.uninstalled-package-refused"
       ]
     },
     "hook": {
@@ -156,7 +172,8 @@
         "records-forms.object-hook-lifecycle",
         "cli.hook-body-extraction-gates",
         "access-security.record-view-read-audit",
-        "records-forms.script-action-hook-refusal-toast"
+        "records-forms.script-action-hook-refusal-toast",
+        "studio-authoring.hooks-tab-authoring"
       ]
     },
     "job": {
@@ -200,7 +217,14 @@
         "api-backend.api-methods-verb-gate",
         "integration-system.external-schema-browser-ui",
         "search.command-palette-navigation",
-        "platform-core.lifecycle-retention-sweep"
+        "platform-core.lifecycle-retention-sweep",
+        "studio-authoring.held-edit-leave-guard",
+        "studio-authoring.held-edit-publish-refusal",
+        "studio-authoring.object-api-tab-curl",
+        "studio-authoring.no-entry-property-matrix",
+        "studio-authoring.api-written-keys-survive-studio-save",
+        "studio-authoring.removed-key-save-door-refusal",
+        "studio-authoring.uninstalled-package-refused"
       ]
     },
     "page": {
@@ -208,7 +232,10 @@
         "studio-authoring.record-page-roundtrip",
         "platform-core.nav-surfaces-render",
         "search.command-palette-navigation",
-        "platform-core.marketplace-console-honesty"
+        "platform-core.marketplace-console-honesty",
+        "studio-authoring.interfaces-create-dialogs",
+        "studio-authoring.authored-page-slots-and-variables",
+        "studio-authoring.uninstalled-package-refused"
       ]
     },
     "permission": {
@@ -225,11 +252,18 @@
         "access-security.share-link-capability-tokens",
         "access-security.platform-owner-email-anchor",
         "access-security.me-permissions-aggregation-parity",
-        "api-backend.api-methods-verb-gate"
+        "api-backend.api-methods-verb-gate",
+        "studio-authoring.access-permission-set-lifecycle",
+        "studio-authoring.access-facets-runtime",
+        "studio-authoring.access-owd-and-suggestions"
       ]
     },
     "picklist": {
-      "waived": "WAIVED 2026-09-30 — there is no runtime behaviour to drive yet, measured rather than asserted. The spec layer landed (#19518, addbbf02ab): PicklistSchema, `Field.select({ picklist })`, PicklistServedFieldSchema, `picklistExtensions` and the `picklists.NAME` translation face. No runtime reads a picklist: packages/spec/liveness/picklist.json grades every key `planned`, and scripts/check-stack-collection-maps.mjs carries `picklists` and `picklistExtensions` as rows PENDING the runtime layer (#19519) in the METADATA_ARRAY_KEYS and ARTIFACT_FIELD_TO_TYPE registration maps. No code resolves a picklist onto a field or judges a write against one, so an item written to RUN today could only assert absence. The item that will carry this kind is authored as `planned`: records-forms.picklist-shared-across-objects (phase 1: two objects, the package extension, the write door, the locale relabel; the phase-2 per-organization overlay is ruled out, #22869, and no item carries it). It is not listed under `items`, because a kind whose only items are planned is UNMAPPED and an entry cannot hold a waiver and items together. WHAT RETIRES THIS WAIVER — #19519 lands resolve-at-serve, the additive merge and write validation; records-forms.picklist-shared-across-objects gains its steps, runs, passes and is promoted to `active`, and the same edit replaces this waiver with `items` naming it. ⚠️ Re-audit it every sweep, as SWEEP.md asks of every waiver."
+      "$comment": "Re-audited 2026-10-27 (the checklist-author pass on QA run #26715, framework 43731031): the 2026-09-30 waiver is STALE and is replaced by items, as SWEEP.md asks of every waiver. Its premise was that no runtime reads a picklist, packages/spec/liveness/picklist.json grading every key planned. At 43731031 that ledger grades 10 of its 11 keys live, verified 2026-10-01: the ObjectQL registry resolves a list onto every field that names it and merges picklistExtensions additively (packages/objectql/src/picklist-resolution.ts; the name row's evidence is packages/objectql/src/registry.ts, resolvePicklistOptions), and an ACTIVE item drives that runtime end to end: studio-authoring.picklist-bound-select (since v17.7) reads GET /meta/picklist, the served options with the extension's option, the bound field's PUT round-trip and both objects' forms. What the mapping does NOT claim: that item's fixture is an uncommitted checkout edit (the stock showcase declares no picklist and the kind is code-only, so no runtime door mints one), and QA run #26715 scored it blocked(fixture) because the run did not make the edit; the coverage is real but costs a run that edit. records-forms.picklist-shared-across-objects stays PLANNED and is listed as the map target the waiver named; it contributes zero, and its promotion still needs a passing run of its own.",
+      "items": [
+        "studio-authoring.picklist-bound-select",
+        "records-forms.picklist-shared-across-objects"
+      ]
     },
     "position": {
       "items": [
@@ -258,7 +292,9 @@
       "items": [
         "dashboards.dataset-report-authoring",
         "dashboards.drill-through-range",
-        "search.command-palette-navigation"
+        "search.command-palette-navigation",
+        "studio-authoring.interfaces-create-dialogs",
+        "studio-authoring.report-authoring-options"
       ]
     },
     "rest_api": {
@@ -310,7 +346,8 @@
       "items": [
         "access-security.write-path-guards",
         "records-forms.conditional-rules-header",
-        "records-forms.validation-rule-type-matrix"
+        "records-forms.validation-rule-type-matrix",
+        "studio-authoring.validation-rules-authoring"
       ]
     },
     "view": {
@@ -322,7 +359,9 @@
         "records-forms.gantt-interactions",
         "records-forms.saved-view-management",
         "studio-authoring.packaged-display-class-direct-edit",
-        "records-forms.field-history-tracking"
+        "records-forms.field-history-tracking",
+        "studio-authoring.no-entry-property-matrix",
+        "studio-authoring.removed-key-save-door-refusal"
       ]
     },
     "webhook": {
