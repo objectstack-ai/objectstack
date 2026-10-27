@@ -20,8 +20,10 @@
  * What follows the first `|` is judged by `judgeHoleFormatter`
  * (`template-engine.ts`), the function the in-app template dialect judges its
  * holes with too, so the two dialects refuse the same formatter parts with the
- * same sentence. A refused hole is a hole — it is found, located and named —
- * and the renderer refuses to render it rather than print a wrong value.
+ * same sentence: one formatter per hole, and a `currency` argument that is a
+ * literal ISO 4217 code. A refused hole is a hole — it is found, located and
+ * named — and the renderer refuses to render it rather than print a wrong
+ * value or formatter syntax.
  */
 
 import { judgeHoleFormatter, type TemplateHoleGrammarRefusal } from './template-engine';
@@ -69,7 +71,14 @@ export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailH
   if (!PATH_RE.test(path)) return null;
   const formatterPart = inner.slice(pipe + 1).trim();
   const m = FILTER_RE.exec(formatterPart);
-  if (!m) return null;
+  if (!m) {
+    // `{{ x | upper | lower }}` matches no single formatter shape, and the
+    // renderer used to leave it on the page as written: a chained hole is
+    // still a hole, refused by the one-formatter rule.
+    const name = formatterPart.split(/[:|]/, 1)[0].trim();
+    const refusal = judgeHoleFormatter(hole, formatterPart, name, undefined);
+    return refusal ? { path, formatter: name, refusal } : null;
+  }
   const formatter = m[1];
   const arg = m[2];
   const refusal = judgeHoleFormatter(hole, formatterPart, formatter, arg);

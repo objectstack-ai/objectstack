@@ -82,6 +82,12 @@ never needs triple braces.
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
 
+**One formatter per hole.** `{{ amount | default:0 | number:2 }}` is refused by
+`os validate`, `os build`, `os lint` and the metadata publish door
+(`email-template-hole-grammar`): a hole takes one formatter, and there is no
+chaining. Decide the value in the caller that supplies the data — a default, a
+second format — and pass the finished value as its own variable.
+
 **The `currency` argument is a literal code.** `currency:EUR` formats in euros,
 and `currency` with no argument formats in US dollars. The argument is an ISO
 4217 code in three capital letters, never a path: `currency:currency_code` does

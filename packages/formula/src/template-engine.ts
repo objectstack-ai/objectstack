@@ -145,14 +145,18 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 // and by `@objectstack/lint`'s email template rule). Each dialect parses its
 // own path; what follows the first `|` is judged here, once.
 //
+// - One formatter per hole. A second `|` used to be read as part of the first
+//   formatter's argument, so `{{ x | default:0 | number:2 }}` rendered the
+//   text `0 | number:2` — formatter syntax printed to the reader — and
+//   `{{ x | upper | lower }}` was left on the page as written.
 // - The `currency` argument is a literal ISO 4217 code in capitals. A path
-//    (`currency:currency_code`) is not read: `Intl` refused it and the
-//    formatter used to substitute USD, so the amount printed in a currency
-//    nobody wrote. Reading a code from the data is a grammar widening this
-//    function does not make.
+//   (`currency:currency_code`) is not read: `Intl` refused it and the
+//   formatter used to substitute USD, so the amount printed in a currency
+//   nobody wrote. Reading a code from the data is a grammar widening this
+//   function does not make.
 
 /** The rule a refused hole breaks. */
-export type TemplateHoleGrammarRule = 'currency-code-literal';
+export type TemplateHoleGrammarRule = 'one-formatter' | 'currency-code-literal';
 
 /** A hole the shared grammar refuses, with the sentence an author is shown. */
 export interface TemplateHoleGrammarRefusal {
@@ -178,20 +182,48 @@ function currencyArgumentRefusal(hole: string, arg: string): string {
 }
 
 /**
+ * True when the formatter part (the text after a hole's first `|`) carries a
+ * second `|` outside a quoted argument — a second formatter. A `|` inside a
+ * closed quoted argument (`default:'a | b'`) is the argument's own text.
+ */
+function chainsASecondFormatter(formatterPart: string): boolean {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1) return formatterPart.includes('|');
+  if (formatterPart.slice(0, colon).includes('|')) return true;
+  const arg = formatterPart.slice(colon + 1).trim();
+  const quote = arg[0];
+  if (quote === "'" || quote === '"') {
+    const close = arg.indexOf(quote, 1);
+    if (close !== -1) return arg.slice(close + 1).includes('|');
+  }
+  return arg.includes('|');
+}
+
+/**
  * Judge one hole's formatter against the grammar both template dialects share.
  *
  * @param hole          the hole as written, braces included — the refusal names it
- * @param _formatterPart the text after the hole's first `|`, trimmed
+ * @param formatterPart the text after the hole's first `|`, trimmed
  * @param formatter     the formatter name the dialect parsed
  * @param arg           the argument the dialect parsed, quotes removed; `undefined` when none was written
  * @returns the refusal, or `null` when the hole is within the grammar
  */
 export function judgeHoleFormatter(
   hole: string,
-  _formatterPart: string,
+  formatterPart: string,
   formatter: string,
   arg: string | undefined,
 ): TemplateHoleGrammarRefusal | null {
+  if (chainsASecondFormatter(formatterPart)) {
+    return {
+      rule: 'one-formatter',
+      message:
+        `the hole ${hole} chains a second formatter: a hole takes one formatter, `
+        + '`{{ path | formatter[:arg] }}`, and the text after the second `|` is never applied. Keep one '
+        + 'formatter here, and do any further formatting or branching in the caller that supplies the data, '
+        + 'passing the finished value as its own variable.',
+    };
+  }
   if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
     return { rule: 'currency-code-literal', message: currencyArgumentRefusal(hole, arg) };
   }
@@ -285,8 +317,11 @@ function parseHole(inner: string): ParsedHole | null {
     name = filterPart.slice(0, colon).trim();
     arg = filterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
   }
-  if (!FORMATTERS[name]) return null;
   const refusal = judgeHoleFormatter(`{{${inner}}}`, filterPart, name, arg);
+  // A chained hole is refused by the one-formatter rule before its first
+  // formatter's name is looked up (`upper | lower` names no formatter).
+  if (refusal?.rule === 'one-formatter') return { path, refusal };
+  if (!FORMATTERS[name]) return null;
   return { path, filter: { name, arg }, ...(refusal ? { refusal } : {}) };
 }
 

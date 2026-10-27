@@ -30,6 +30,7 @@ const template = (over: Record<string, unknown> = {}) => ({
 });
 
 const CURRENCY_PATH = '{{ planned_amount | currency:currency_code }}';
+const CHAINED = '{{ actual_amount | default:0 | number:2 }}';
 
 describe('the rule, on the stack', () => {
   it('a template whose every hole is within the grammar draws nothing', () => {
@@ -44,6 +45,15 @@ describe('the rule, on the stack', () => {
     expect(findings[0].message).toContain(CURRENCY_PATH);
     expect(findings[0].message).toContain('ISO 4217');
     expect(findings[0].message).toContain('never read as a path');
+  });
+
+  it.each(['subject', 'bodyText', 'bodyHtml'])('⭐ refuses a chained hole in %s, naming the one-formatter rule and the caller remedy', (face) => {
+    const findings = validateEmailTemplateHoleGrammar({ emailTemplates: [template({ [face]: `Paid ${CHAINED}` })] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'error', rule: EMAIL_TEMPLATE_HOLE_GRAMMAR, path: `emailTemplates[0].${face}` });
+    expect(findings[0].message).toContain(CHAINED);
+    expect(findings[0].message).toContain('a hole takes one formatter');
+    expect(findings[0].message).toContain('in the caller that supplies the data');
   });
 
   it('one finding per refused hole, located on its own template and face', () => {
@@ -80,11 +90,11 @@ describe('the registry entry', () => {
     });
   });
 
-  it.each([...AUTHORING_COMMANDS])('os %s refuses the hole at error', (command) => {
-    const stack = { emailTemplates: [template({ subject: CURRENCY_PATH })] };
+  it.each([...AUTHORING_COMMANDS])('os %s refuses both holes at error', (command) => {
+    const stack = { emailTemplates: [template({ subject: CURRENCY_PATH, bodyText: CHAINED })] };
     const errors = runAuthoringRules(command, { normalized: stack, parsed: stack })
       .filter((f) => f.severity === 'error' && f.rule === EMAIL_TEMPLATE_HOLE_GRAMMAR);
-    expect(errors).toHaveLength(1);
+    expect(errors.map((f) => f.path)).toEqual(['emailTemplates[0].subject', 'emailTemplates[0].bodyText']);
   });
 });
 

@@ -8,9 +8,14 @@
  * A mail template hole is a path with at most one formatter from the shared
  * whitelist, `{{ path | formatter[:arg] }}`, and a formatter argument the
  * renderer can honour as written. A hole the grammar refuses never renders as
- * its author meant it: a `currency` argument that is not a literal ISO 4217
- * code (`currency:currency_code`, a path) is not read as a path — the renderer
- * used to print the amount in USD instead.
+ * its author meant it:
+ *
+ * - a second formatter (`{{ x | default:0 | number:2 }}`) — the renderer used
+ *   to read it as part of the first formatter's argument and print the text
+ *   `0 | number:2`, or leave the whole hole on the page;
+ * - a `currency` argument that is not a literal ISO 4217 code
+ *   (`currency:currency_code`, a path) — it is not read as a path, and the
+ *   renderer used to print the amount in USD instead.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,

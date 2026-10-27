@@ -6,6 +6,8 @@
  * the mail grammar (`parseMailHole` / `judgeMailHoleGrammar`) that the mail
  * renderer, the placement judge and the lint rule read.
  *
+ * One formatter per hole: a second `|` used to be swallowed into the first
+ * formatter's argument (`{{ x | default:0 | number:2 }}` printed `0 | number:2`).
  * The `currency` argument is a literal ISO 4217 code. A path is never read as
  * one: `Intl` refused it, and the formatter used to substitute USD.
  */
@@ -17,6 +19,46 @@ import { validateExpression } from './validate';
 
 const evaluate = (source: string, record: Record<string, unknown>) =>
   templateEngine.evaluate<string>({ dialect: 'template', source }, { record, locale: 'en-US' });
+
+describe('one formatter per hole', () => {
+  it.each([
+    ['a second formatter after an argument', 'default:0 | number:2'],
+    ['a second formatter after a bare one', 'upper | lower'],
+    ['a second formatter after a closed quoted argument', "default:'N/A' | upper"],
+    ['three formatters', 'trim | upper | lower'],
+  ])('refuses %s, naming the one-formatter rule and the caller remedy', (_label, part) => {
+    const refusal = judgeHoleFormatter(`{{ x | ${part} }}`, part, part.split(/[:|]/)[0].trim(), undefined);
+    expect(refusal?.rule).toBe('one-formatter');
+    expect(refusal?.message).toContain(`{{ x | ${part} }}`);
+    expect(refusal?.message).toContain('a hole takes one formatter');
+    expect(refusal?.message).toContain('in the caller that supplies the data');
+  });
+
+  it('a `|` inside a closed quoted argument is the argument\'s own text', () => {
+    expect(judgeHoleFormatter("{{ x | default:'a | b' }}", "default:'a | b'", 'default', 'a | b')).toBeNull();
+    expect(judgeHoleFormatter('{{ x | default:"a | b" }}', 'default:"a | b"', 'default', 'a | b')).toBeNull();
+  });
+
+  it('the in-app dialect refuses a chained hole at compile, with the rule — never the literal text', () => {
+    for (const source of ['{{ record.n | default:0 | number:2 }}', '{{ record.n | upper | lower }}']) {
+      const r = templateEngine.compile(source);
+      expect(r.ok, source).toBe(false);
+      if (r.ok) continue;
+      expect(r.error.message).toContain('a hole takes one formatter');
+      expect(evaluate(source, { n: null }).ok).toBe(false);
+    }
+    expect(validateExpression('template', { dialect: 'template', source: 'Paid {{ record.n | default:0 | number:2 }}' })
+      .errors.map((e) => e.code)).toEqual(['invalid-template']);
+  });
+
+  it('the mail grammar parses a chained hole as a hole, carrying the refusal, in both shapes', () => {
+    expect(parseMailHole(' actual_amount | default:0 | number:2 ')?.refusal?.rule).toBe('one-formatter');
+    expect(parseMailHole(' actual_amount | upper | lower ')).toMatchObject({ path: 'actual_amount', refusal: { rule: 'one-formatter' } });
+    const face = 'Paid {{ actual_amount | default:0 | number:2 }} of {{ planned_amount | number:2 }}';
+    expect(judgeMailHoleGrammar(face).map((f) => [f.text, f.start, f.refusal.rule]))
+      .toEqual([['{{ actual_amount | default:0 | number:2 }}', 5, 'one-formatter']]);
+  });
+});
 
 describe('the currency argument is a literal ISO 4217 code', () => {
   it.each([
