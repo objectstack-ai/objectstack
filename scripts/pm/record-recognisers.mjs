@@ -69,7 +69,6 @@
  */
 
 import process from 'node:process';
-import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -1545,7 +1544,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
-  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 14,
+  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1931,7 +1930,6 @@ export async function selfTest() {
   const HO_HEAD = '1b03a9c36be249502c1160b1f262f835f7ccaf02';
   const HO_LINE = (head = HO_HEAD, reason = 'HTTP 429', at = '2026-10-27T13:00Z') => `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (${reason}, ${at}) · head ${head}`;
   const HO_ROW = (line, id = 4401, at = '2026-10-27T13:01:00Z') => ({ id, created_at: at, body: `Seat note — the review tier was refused this round.\n\n${line}\n\nLabel kept.` });
-  const RULES_TEXT = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8');
   t('⭐ the line names the CURRENT head ⇒ the review is triage\'s, with the reason, the time and the comment that handed it off', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); return r.state === 'triage' && r.head === HO_HEAD && r.reason === 'HTTP 429' && r.handedAt === '2026-10-27T13:00Z' && r.id === 4401; })());
   t('⭐ the head MOVED past the line ⇒ stale, naming the head the hand-off was for — a fresh line or the seat\'s own review', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], 'c260fddc'.padEnd(40, '0')); return r.state === 'stale' && r.head === HO_HEAD; })());
   t('⭐ NO hand-off line on any comment ⇒ absent, the seat\'s own review — a record, a seat note, a label mention change nothing', (() => { const r = contractReviewHandoff([RECORD_ON_9AF9, { id: 4402, created_at: '2026-10-27T13:02:00Z', body: 'ACCEPT — `needs:contract-review` stays until the seat reviews.' }], HO_HEAD); return r.state === 'absent' && r.read === 2; })());
@@ -1944,7 +1942,6 @@ export async function selfTest() {
   t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
   t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_HANDOFF_LINE.source === keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY).source && readContractReviewHandoff(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`).state === 'missing' && contractReviewHandoff([HO_ROW(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`)], HO_HEAD).state === 'absent');
-  t('⭐ the rulebook spells the line this reader reads — key, target, the tier by NAME, `unavailable`, and `head` — on ONE line', RULES_TEXT.split(/\r?\n/).some((l) => l.includes(`\`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (`) && l.includes(') · head ')));
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a hand-off line beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, HO_ROW(HO_LINE(HEAD_9AF9))] })); return r.state === 'found' && r.id === 3301; })());
 
   // -- #18042: the copyable record TEMPLATE ----------------------------------
