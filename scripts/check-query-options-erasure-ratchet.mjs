@@ -16,7 +16,7 @@
 //   • TEST residual. The 08-03 triage scoped the blocking rule to non-test code:
 //     an unknown share of the test sites are LEGITIMATE, because a test whose
 //     subject is off-contract engine input has to erase the type to construct
-//     input `tsc` would refuse. Those are held by one aggregate decrease-only
+//     input `tsc` would refuse. Those are held by one aggregate grow-never
 //     number instead, so the surface is measured and cannot grow unnoticed
 //     without a per-file ratchet going red on a legitimate rejection test.
 //
@@ -62,14 +62,16 @@
 //     `pnpm lint` — reported here too so one command explains the picture), or
 //   • a baselined file's count INCREASES (new erasure hiding behind an old
 //     entry — the invisible move), or
-//   • a baselined file's count DECREASED, or the file is clean/gone (progress!)
-//     — run with --update to ratchet the baseline down and commit it, or
 //   • a file was ADDED to the baseline relative to the merge base with main
 //     (the grandfather list is not a mute button), or
-//   • the aggregate TEST count moved in either direction: up is a new erasure,
-//     down is un-ratcheted progress. A ceiling left above reality silently
-//     licenses that many new erasures, which is how a ratchet stops meaning
-//     anything.
+//   • the aggregate TEST count rose above its ceiling (a new erasure).
+//
+// It is ONE-SIDED (#26444): a baselined file whose count DECREASED or that is
+// clean/gone, and a TEST count below its ceiling, PASS and are reported —
+// deleting or sweeping a file must not red a PR that never touched this gate.
+// The cost is stated rather than hidden: a ceiling left above reality licenses
+// that many new erasures until `--update` writes the lower number down, so the
+// report names that headroom on every run, and `--update` is what closes it.
 //
 // And it REFUSES to report at all (exit 2) when a file in either population
 // does not PARSE. ESLint's Node API returns a parse failure as a message
@@ -213,21 +215,6 @@ export function diffRatchet({ baseline, current, testCeiling, testSites, addedBa
     }
   }
 
-  for (const [file, allowed] of Object.entries(baseline)) {
-    const now = current[file];
-    if (now === undefined) {
-      errors.push(
-        `${file}: baselined file is clean/gone (was ${allowed}) — ratchet DOWN: run ` +
-        `\`pnpm check:query-options-erasure --update\` and commit the baseline.`,
-      );
-    } else if (now < allowed) {
-      errors.push(
-        `${file}: erasure count fell ${allowed} → ${now} — ratchet DOWN: run ` +
-        `\`pnpm check:query-options-erasure --update\` and commit the baseline.`,
-      );
-    }
-  }
-
   // The key set must only ever SHRINK. Counts alone cannot see the last move: a
   // genuinely-erasing NEW file added to the baseline matches its own count and
   // sails through, which would turn the grandfather list into a general-purpose
@@ -252,15 +239,41 @@ export function diffRatchet({ baseline, current, testCeiling, testSites, addedBa
       `catch a wrong key; it removes an \`any\` and is a precondition for the day that ` +
       `exclusion lifts, not a compiler guard today.`,
     );
-  } else if (testSites < testCeiling) {
-    errors.push(
-      `test surface fell ${testCeiling} → ${testSites} site(s) — ratchet DOWN: run ` +
-      `\`pnpm check:query-options-erasure --update\` and commit the baseline. A ceiling ` +
-      `left above reality silently licenses that many new erasures.`,
-    );
   }
 
   return errors;
+}
+
+/**
+ * The decrease direction, as a REPORT rather than an error (#26444): a fall, a
+ * clean/gone file and a test surface below its ceiling all PASS. Each line names
+ * the headroom it leaves — the old number stays the ceiling until `--update`
+ * writes the lower one down — which is the report `--update` exists for.
+ */
+export function ratchetDownReport({ baseline, current, testCeiling, testSites }) {
+  const lines = [];
+  for (const [file, allowed] of Object.entries(baseline)) {
+    const now = current[file];
+    if (now === undefined) {
+      lines.push(
+        `${file}: baselined file is clean/gone (was ${allowed}). Passing; ` +
+        `\`pnpm check:query-options-erasure --update\` drops the entry.`,
+      );
+    } else if (now < allowed) {
+      lines.push(
+        `${file}: erasure count fell ${allowed} → ${now}. Passing; until ` +
+        `\`pnpm check:query-options-erasure --update\` records it, ${allowed} stays this file's ceiling.`,
+      );
+    }
+  }
+  if (testSites < testCeiling) {
+    lines.push(
+      `test surface fell ${testCeiling} → ${testSites} site(s). Passing; until ` +
+      `\`pnpm check:query-options-erasure --update\` records it, ${testCeiling} stays the ceiling ` +
+      `and licenses ${testCeiling - testSites} new test-code erasure(s).`,
+    );
+  }
+  return lines;
 }
 
 /** Baseline keys that are not present at the merge base with `main`. */
@@ -518,7 +531,7 @@ const SELF_TEST_VERDICT = 'check-query-options-erasure-ratchet self-test reached
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   '1. The rule, in both directions, over synthetic sources': 48,
-  '2. The ratchet comparison, in both directions.': 8,
+  '2. The ratchet comparison, in both directions.': 15,
   '3. The fatal-parse guard, in both directions (#10123).': 38,
   '5. Parser headroom: the population\'s deepest file must actually PARSE.': 8,
 });
@@ -679,16 +692,33 @@ async function selfTest() {
     ['identical + ceiling met is clean', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
     ['a new file fails', { baseline: base, current: { ...base, 'c.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
     ['growth in a baselined file fails', { baseline: base, current: { 'a.ts': 3, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
-    ['a fall must be ratcheted down', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
-    ['a cleaned file must be dropped', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
+    ['a fall passes (one-sided)', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
+    ['a cleaned/gone file passes (one-sided)', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
+    ['growth still fails beside a fall elsewhere', { baseline: base, current: { 'a.ts': 1, 'b.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
     ['a key added to the baseline fails', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10, addedBaselineKeys: ['b.ts'] }, 1],
     ['test-surface growth fails', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 11, addedBaselineKeys: [] }, 1],
-    ['test-surface shrink must be ratcheted down', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9, addedBaselineKeys: [] }, 1],
+    ['test-surface shrink passes (one-sided)', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9, addedBaselineKeys: [] }, 0],
   ];
   for (const [name, input, expected] of cases) {
     const got = diffRatchet(input).length;
     assert(got === expected, `diffRatchet: ${name} — expected ${expected} error(s), got ${got}`);
   }
+  // The decrease direction's REPORT: every passing decrease prints one line.
+  const downCases = [
+    ['identical reports nothing', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10 }, 0],
+    ['a fall is reported', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10 }, 1],
+    ['a cleaned/gone file is reported', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10 }, 1],
+    ['a test-surface shrink is reported', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9 }, 1],
+    ['growth is not a decrease', { baseline: base, current: { 'a.ts': 3, 'b.ts': 1 }, testCeiling: 10, testSites: 11 }, 0],
+  ];
+  for (const [name, input, expected] of downCases) {
+    const got = ratchetDownReport(input).length;
+    assert(got === expected, `ratchetDownReport: ${name} — expected ${expected} line(s), got ${got}`);
+  }
+  assert(
+    ratchetDownReport({ baseline: {}, current: {}, testCeiling: 10, testSites: 7 })[0]?.includes('licenses 3 new'),
+    'ratchetDownReport: a test-surface shrink must name the headroom the stale ceiling licenses',
+  );
 
   // ── 3. The fatal-parse guard, in both directions (#10123). ───────────────
   //
@@ -1068,6 +1098,11 @@ async function main() {
     testSites,
     addedBaselineKeys: monotonicity?.added ?? [],
   });
+  const down = ratchetDownReport({ baseline, current: nonTest, testCeiling, testSites });
+  if (down.length > 0) {
+    console.log(`↓ query-options-erasure ratchet: ${down.length} decrease(s) (passing, reported):`);
+    for (const line of down) console.log(`  • ${line}`);
+  }
 
   if (errors.length > 0) {
     console.error(`✗ query-options-erasure ratchet (${errors.length} problem(s)):\n`);
@@ -1087,8 +1122,8 @@ async function main() {
     `Every other non-test file under packages/ is covered by \`pnpm lint\`.`,
   );
   console.log(
-    `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — at the ` +
-    `ceiling, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
+    `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — ` +
+    `${testSites === testCeiling ? 'at the ceiling' : `under the ceiling of ${testCeiling}`}, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
     `to build off-contract input).`,
   );
   console.log(
@@ -1099,7 +1134,7 @@ async function main() {
   );
 }
 
-// The dispatch, behind the same predicate. This module exports `diffRatchet`,
+// The dispatch, behind the same predicate. This module exports `diffRatchet`, `ratchetDownReport`,
 // `measure` and the baseline helpers; unguarded, importing one of them ran two
 // full ESLint passes over packages/** inside the importer.
 if (isEntrypoint(import.meta.url)) {
