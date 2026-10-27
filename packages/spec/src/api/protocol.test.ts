@@ -692,6 +692,32 @@ describe('HttpFindQueryParamsSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  // [#26817] The list door's accept set for `count` and `select` — not
+  // `z.coerce.boolean()` (which read `'false'` as `true` and admitted
+  // `'maybe'`) and not any string (which admitted a blank projection).
+  it.each([['true', true], ['false', false], [true, true], [false, false]])(
+    'reads count=%j as %j',
+    (value, expected) => {
+      const result = HttpFindQueryParamsSchema.safeParse({ count: value });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.count).toBe(expected);
+    },
+  );
+
+  it.each(['maybe', '1', '0', '', 'TRUE', 1, null])('refuses count=%j — neither true nor false', (value) => {
+    expect(HttpFindQueryParamsSchema.safeParse({ count: value }).success).toBe(false);
+  });
+
+  it.each(['', '   ', ',', ' , ,', '\t'])('refuses select=%j — names no field', (value) => {
+    expect(HttpFindQueryParamsSchema.safeParse({ select: value }).success).toBe(false);
+  });
+
+  it.each(['name', 'name,email', ' name , email ', 'name,,email'])('keeps select=%j — names a field', (value) => {
+    const result = HttpFindQueryParamsSchema.safeParse({ select: value });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.select).toBe(value);
+  });
+
   it('rejects ?distinct — the querystring spelling of the removed query.distinct', () => {
     const result = HttpFindQueryParamsSchema.safeParse({ distinct: true });
     expect(result.success).toBe(false);
