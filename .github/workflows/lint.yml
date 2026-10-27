@@ -3474,7 +3474,18 @@ jobs:
         run: |
           node scripts/ci/scheduled-full-run.mjs --self-test
           node scripts/ci/scheduled-full-run.mjs --check-concurrency
+
+      # Workflow step bodies that moved out of inline `run:` / `github-script`
+      # blocks into scripts/ci/ (#26086). Each step fires only on an event no
+      # pull request produces (a red scheduled run, a red nightly on main), so
+      # its module's --self-test is the one place it runs before it fires.
+      # Offline doubles; sub-second each.
+      - name: Moved workflow step bodies self-test
+        id: moved-workflow-step-bodies-self-test
+        continue-on-error: true
+        run: |
           node scripts/ci/scheduled-full-run-card.mjs --self-test
+          node scripts/ci/test-nightly-tiers-card.mjs --self-test
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
