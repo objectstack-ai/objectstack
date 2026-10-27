@@ -26,10 +26,21 @@ on:
     branches:
       - main
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled.
+concurrency:
+  group: check-links-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   link-checker:
     name: Check Documentation Links
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.8 min, max
+    # 1.0. The bound covers the lychee retry path (two binary downloads and the 15 s wait)
+    # with headroom.
+    timeout-minutes: 10
     # Least privilege: the job only reads the tree and runs lychee offline.
     # There is no issue-filing step, and `--offline` makes zero network
     # requests, so neither `issues: write` nor a GITHUB_TOKEN is needed.
