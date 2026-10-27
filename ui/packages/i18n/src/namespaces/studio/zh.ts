@@ -1968,6 +1968,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.copyJson': '复制 JSON',
   'engine.studio.if.copyFailed': '无法复制到剪贴板',
   'engine.studio.if.definitionTitle': '{label} · 定义',
+  // The shared rail (objectstack#26733): the action under a search that matched nothing.
+  'engine.studio.rail.clearSearch': '清除搜索',
   // Data pillar
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',

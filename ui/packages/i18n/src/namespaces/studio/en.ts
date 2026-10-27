@@ -2183,6 +2183,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.copyJson': 'Copy JSON',
   'engine.studio.if.copyFailed': 'Could not copy to the clipboard',
   'engine.studio.if.definitionTitle': '{label} · Definition',
+  // The shared rail (objectstack#26733): the action under a search that matched nothing.
+  'engine.studio.rail.clearSearch': 'Clear search',
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
