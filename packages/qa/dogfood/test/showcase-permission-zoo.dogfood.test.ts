@@ -235,6 +235,9 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
       name: 'Renamed by contributor (FLS probe)',
     });
     expect(nameEdit.status, 'ordinary field edit passes').toBeLessThan(300);
+    // [#26571] fls-mask-and-strip acceptance[0]: the value oracle, not the status.
+    const renamed = await ql.findOne('showcase_project', { where: { id: projectId }, context: SYS });
+    expect(renamed.name, 'the editable field really changed').toBe('Renamed by contributor (FLS probe)');
 
     // Masked field → denied. A LARGE budget keeps the spent_within_budget
     // validation rule satisfied, so a rejection here can only be the FLS
@@ -247,5 +250,25 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
 
     const after = await ql.findOne('showcase_project', { where: { id: projectId }, context: SYS });
     expect(after.budget, 'budget unchanged after the denied write').toBe(budgetBefore);
+  });
+
+  // [#26571] fls-mask-and-strip acceptance[2] — the other side of the same lock:
+  // it keys on the caller's FLS, not on the field, so the admin's identical
+  // budget write lands. Raised (spent <= budget stays true) and put back, so the
+  // seeded row other shared files read is left as found.
+  it('FLS: the admin\'s budget write on the same project succeeds and persists', async () => {
+    const projects = await ql.find('showcase_project', { where: { budget: { $gt: 0 } }, limit: 1, context: SYS });
+    const projectId = projects?.[0]?.id;
+    const budgetBefore = Number(projects?.[0]?.budget);
+    expect(projectId, 'a seeded project with a budget available').toBeTruthy();
+
+    const raised = budgetBefore + 1000;
+    const write = await stack.apiAs(adminTok, 'PATCH', `/data/showcase_project/${projectId}`, { budget: raised });
+    expect(write.status, 'the entitled caller writes the FLS-locked field').toBeLessThan(300);
+    const after = await ql.findOne('showcase_project', { where: { id: projectId }, context: SYS });
+    expect(Number(after.budget), 'and the write persisted').toBe(raised);
+
+    const restore = await stack.apiAs(adminTok, 'PATCH', `/data/showcase_project/${projectId}`, { budget: budgetBefore });
+    expect(restore.status, 'the seeded budget is put back').toBeLessThan(300);
   });
 });

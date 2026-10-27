@@ -69,6 +69,8 @@ export const zhCN: TranslationData = {
         nav_sharing_rules: { label: '共享规则' },
         nav_declared_sharing_rules: { label: '已声明的共享规则' },
         nav_record_shares: { label: '记录共享' },
+        nav_queues: { label: '队列' },
+        nav_queue_members: { label: '队列成员' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's

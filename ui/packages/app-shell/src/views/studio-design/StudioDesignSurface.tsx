@@ -1807,10 +1807,19 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     setSlotPropsClaims((n) => n + 1);
     return () => setSlotPropsClaims((n) => n - 1);
   }, []);
-  const showSlotProps = React.useCallback(() => {
+  // objectstack#26737 — a selection shows its properties at every width: a
+  // hidden slot unfolds, as `⌘.` unfolds it, so a builder who hid the panel is
+  // never left with a selection whose properties are drawn nowhere. One
+  // function for the surface's life (state, not a memo — AGENTS.md #10): the
+  // pillars ask on a new selection only, never because this was re-created.
+  const setSlotOpenRef = React.useRef(setSlotOpen);
+  React.useLayoutEffect(() => {
+    setSlotOpenRef.current = setSlotOpen;
+  });
+  const [showSlotProps] = React.useState(() => () => {
     setSlotMode('props');
-    if (isMobile) setSlotOpenMobile(true);
-  }, [isMobile]);
+    setSlotOpenRef.current(true);
+  });
   const slotHandle = React.useMemo<StudioRightSlotHandle | null>(
     () =>
       slotHost
@@ -5542,6 +5551,18 @@ export function DataPillar({
     if (next !== viewMode) setFieldSel(null);
     setViewMode(next);
   };
+  // objectstack#26736 — the action a refusal or a held line names, opened by
+  // its "Show me": a fresh object per press, so pressing it again re-selects
+  // the action after the author picked another one.
+  const [actionFocus, setActionFocus] = React.useState<{ name: string } | null>(null);
+  const showObjTarget = (target: MetadataSelection) => {
+    if (target.kind === 'action') {
+      selectViewMode('actions');
+      setActionFocus({ name: target.id });
+      return;
+    }
+    setFieldSel({ kind: target.kind, id: target.id });
+  };
   // objectui#11781 — Escape closes it too, but only an Escape nothing else
   // took: a layer that answers Escape itself (a Radix menu, select or dialog,
   // an autocomplete, an inline edit) prevents its default, and that keystroke
@@ -6408,8 +6429,9 @@ export function DataPillar({
                 <StudioRefusalStrip
                   refusal={error}
                   locale={locale}
-                  // objectui#11785 — "Show me" opens the named field's inspector.
-                  onShow={(target) => setFieldSel({ kind: target.kind, id: target.id })}
+                  // objectui#11785 — "Show me" opens the named field's inspector,
+                  // or (objectstack#26736) the named action.
+                  onShow={showObjTarget}
                   className={cn('mb-2 px-3 py-1.5 text-[11px]', bodyFlush && 'mx-6 mt-3')}
                 />
               )}
@@ -6421,7 +6443,7 @@ export function DataPillar({
                   onShow={
                     fieldSel?.kind === objHeld.target.kind && fieldSel.id === objHeld.target.id
                       ? undefined
-                      : (target) => setFieldSel({ kind: target.kind, id: target.id })
+                      : showObjTarget
                   }
                   className={cn('mb-2 px-3 py-1.5 text-[11px]', bodyFlush && 'mx-6 mt-3')}
                 />
@@ -6464,6 +6486,7 @@ export function DataPillar({
                   draft={objDraft}
                   onPatch={onPatch}
                   disabled={readOnly}
+                  focus={actionFocus}
                   actionSchema={typeSchemas.action}
                   onBlockingIssuesChange={reportPanelBlocking}
                 />

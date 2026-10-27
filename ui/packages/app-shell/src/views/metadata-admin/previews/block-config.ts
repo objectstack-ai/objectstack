@@ -257,6 +257,17 @@ export const BLOCK_CONFIG: Record<string, BlockPropField[]> = {
     // `DEFAULT_KANBAN_FETCH_BATCH_SIZE`, the value that applies when the box is empty.
     { name: 'limit', label: 'engine.inspector.pageBlock.field.object-kanban.limit', kind: 'number', placeholder: { literal: '100' } },
   ],
+  // The page `list-view` block reads its query from the node-level `dataSource`
+  // binding (`ListViewBlock`, plugin-list): `object` lands on `objectName`,
+  // `view` names the saved view, and `limit` is its row cap, which a list in a
+  // wide page region draws as its first rows (objectstack#26613). So all three
+  // controls write `dataSource.*`, the way `element:repeater`'s do below.
+  // `{ literal: '5' }` is the capped list's own count when no limit is stated.
+  'list-view': [
+    { name: 'object', label: 'engine.inspector.pageBlock.field.list-view.object', kind: 'object-picker', at: 'dataSource' },
+    { name: 'view', label: 'engine.inspector.pageBlock.field.list-view.view', kind: 'text', at: 'dataSource' },
+    { name: 'limit', label: 'engine.inspector.pageBlock.field.list-view.limit', kind: 'number', placeholder: { literal: '5' }, at: 'dataSource' },
+  ],
 
   // ── Layout grid ───────────────────────────────────────────────────────────
   grid: [

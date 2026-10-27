@@ -1843,6 +1843,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "無効",
         helpText: "CEL 式: 条件が true の場合に無効化"
       },
+      disabledReason: {
+        label: "無効の理由",
+        helpText: "アクションがグレーアウトされている理由。「無効」が true の間、ホバー時に表示され、スクリーンリーダーにも読み上げられます（例:「承認済みの法務レビューが先に必要です。」）。表示専用で、サーバーは引き続き独自のルールで呼び出しを拒否します。空欄の場合は「このレコードでは利用できません」と表示されます。"
+      },
       requiresFeature: {
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
@@ -2443,6 +2447,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   sharing_rule: {
     label: "共有ルール",
     description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
+  },
+  queue: {
+    label: "キュー",
+    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します"
+  },
+  assignment_rule: {
+    label: "割り当てルール",
+    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます"
   },
   agent: {
     label: "AI エージェント",

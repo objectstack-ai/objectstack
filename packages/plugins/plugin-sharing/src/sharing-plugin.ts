@@ -33,6 +33,7 @@ import type {
   IMetadataService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 // [commit 8e13ca876] The share-link routes' context is the FULL authorization envelope —
 // it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
 // the route-local `ShareLinkExecutionContext`.
@@ -48,7 +49,16 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // mechanism for a second producer, and commit aa5994e17 landed this middleware's key
 // (`record_write_denied`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
-import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
+import {
+  SysRecordShare,
+  SysSharingRule,
+  SysShareLink,
+  SysQueue,
+  SysQueueMember,
+  SysAssignmentCursor,
+} from './objects/index.js';
+import { OwnershipQueueService, specsReadBusinessUnits, type OwnershipQueueEngine } from './ownership-queue-service.js';
+import { bindQueueGuards, bindQueueRecipientRecompute, reportShadowedAuthoredQueues } from './queue-hooks.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import {
   SharingService,
@@ -390,6 +400,13 @@ export class SharingServicePlugin implements Plugin {
   private linkService?: ShareLinkService;
   /** Resolved once in `kernel:ready`; reused by the `kernel:bootstrapped` backfills. */
   private engine?: SharingEngine;
+  /**
+   * [ADR-0142 D1] The ownership-queue service, constructed and registered in
+   * `init` — before any `kernel:ready` handler runs — so the engine's boot
+   * refusal for a stack declaring `queues` / `assignmentRules` finds it. It
+   * reaches the engine lazily, at use.
+   */
+  private queues?: OwnershipQueueService;
 
   /**
    * [#4433] Has the `kernel:bootstrapped` rule-grant backfill finished?
@@ -623,7 +640,18 @@ export class SharingServicePlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysRecordShare, SysSharingRule, SysBusinessUnit, SysBusinessUnitMember, SysShareLink],
+      objects: [
+        SysRecordShare,
+        SysSharingRule,
+        SysBusinessUnit,
+        SysBusinessUnitMember,
+        SysShareLink,
+        // [ADR-0142 D1/D5] Authored queues, their members, and the round-robin
+        // cursor the engine's assignment step advances.
+        SysQueue,
+        SysQueueMember,
+        SysAssignmentCursor,
+      ],
       // ADR-0029 D7 — contribute the sharing entries into the Setup app's
       // `group_access_control` slot (priority 200 so they sit after plugin-
       // security's Roles / Permission Sets). This plugin owns these objects (K2).
@@ -643,6 +671,8 @@ export class SharingServicePlugin implements Plugin {
             { id: 'nav_sharing_rules', type: 'object', label: 'Sharing Rules', objectName: 'sys_sharing_rule', icon: 'share-2', requiresObject: 'sys_sharing_rule', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_declared_sharing_rules', type: 'url', label: 'Declared Sharing Rules', url: '/apps/setup/metadata/sharing_rule?scope=environment', icon: 'package', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', viewName: 'all_shares', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
+            { id: 'nav_queues', type: 'object', label: 'Queues', objectName: 'sys_queue', icon: 'inbox', requiresObject: 'sys_queue', requiredPermissions: ['manage_platform_settings'] },
+            { id: 'nav_queue_members', type: 'object', label: 'Queue Members', objectName: 'sys_queue_member', icon: 'users', requiresObject: 'sys_queue_member', requiredPermissions: ['manage_platform_settings'] },
           ],
         },
       ],
@@ -663,6 +693,18 @@ export class SharingServicePlugin implements Plugin {
         } catch { /* i18n optional */ }
       });
     }
+    // [ADR-0142 D1] The ownership-queue service — registered here, in `init`,
+    // under its own name (⛔ never `queue`, the job queue's): the engine's
+    // `kernel:ready` boot refusal tests for it by that name, and a `kernel:ready`
+    // registration could lose the race to it. The engine is resolved at use.
+    this.queues = new OwnershipQueueService({
+      engine: () => {
+        if (this.engine) return this.engine as OwnershipQueueEngine;
+        try { return ctx.getService<OwnershipQueueEngine>('objectql'); } catch { return null; }
+      },
+      logger: ctx.logger as any,
+    });
+    ctx.registerService(OWNERSHIP_QUEUE_SERVICE, this.queues);
     ctx.logger.info('SharingServicePlugin: schema registered');
   }
 
@@ -711,6 +753,8 @@ export class SharingServicePlugin implements Plugin {
           try { return ctx.getService<SharingTenancyProbe>('tenancy'); }
           catch { return null; }
         },
+        // [ADR-0142 D3] Records sitting in the caller's queues.
+        ownershipQueues: () => this.queues ?? null,
         // [#26180] Late-bound `approvals` service: the records a pending
         // approver may read, ORed into the read filter. Optional plugin, so
         // the slice is declared structurally; absent → no approval grant.
@@ -720,6 +764,18 @@ export class SharingServicePlugin implements Plugin {
         },
       });
       ctx.registerService('sharing', this.service);
+
+      // [ADR-0142 D1] The authored queue tables' name guards — data hygiene on
+      // tables this plugin owns, bound regardless of `enforce` — and the boot
+      // report of an authored queue a later declaration shadows.
+      try {
+        if (this.queues && typeof engine.registerHook === 'function') {
+          bindQueueGuards(engine as any, this.queues);
+          await reportShadowedAuthoredQueues(engine as any, this.queues, ctx.logger as any);
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: queue guards not bound', { error: err?.message });
+      }
 
       // [ADR-0057 D12] Maintain sys_user.primary_business_unit_id as a
       // denormalised projection of sys_business_unit_member.is_primary so a
@@ -794,6 +850,8 @@ export class SharingServicePlugin implements Plugin {
             engine: engine as SharingEngine,
             sharing: this.service,
             logger: ctx.logger as any,
+            // [ADR-0142 D7] A `queue` recipient expands through the queue service.
+            ownershipQueues: () => this.queues ?? null,
             declaredRules: createDeclaredSharingRuleSource({
               engine,
               metadata: () => {
@@ -872,7 +930,12 @@ export class SharingServicePlugin implements Plugin {
             // `unbindAllRuleHooks` (which every rebind calls) cannot tear it
             // down. Inside `enforce`, unlike the primary-BU projection next to
             // it: this one IS an access-control surface.
-            bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any);
+            bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any, async (rule) => {
+              // [ADR-0142 D2] A queue recipient reads the BU tree exactly when
+              // its queue has a business-unit member.
+              const queue = await this.queues?.resolveQueue(rule.recipient_id, rule.organization_id ?? null);
+              return queue ? specsReadBusinessUnits(queue.members) : false;
+            });
 
             // …and a rule whose recipient is a POSITION or a TEAM changes
             // audience when a membership row (`sys_user_position`,
@@ -881,7 +944,12 @@ export class SharingServicePlugin implements Plugin {
             // the rule's grants and a former holder loses them before the write
             // returns. Bound outside the rebind seam for the same reason as the
             // BU recompute above: it reads `listRules()` live on every write.
-            bindRecipientMembershipRecompute(engine, this.ruleService, ctx.logger as any);
+            bindRecipientMembershipRecompute(engine, this.ruleService, ctx.logger as any, this.queues);
+
+            // [ADR-0142 D7] …and a rule whose recipient is a QUEUE changes
+            // audience when the queue's own rows move: a member specification
+            // added or removed, the queue deleted. Same placement and reasoning.
+            bindQueueRecipientRecompute(engine, this.ruleService, ctx.logger as any);
 
             // [#3896] Authoring a rule in Setup is a plain INSERT on
             // sys_sharing_rule — it bypasses defineRule's validation, so the

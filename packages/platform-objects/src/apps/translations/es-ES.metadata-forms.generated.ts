@@ -1843,6 +1843,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Deshabilitado",
         helpText: "Expresión CEL: desactivar cuando la condición sea true"
       },
+      disabledReason: {
+        label: "Motivo de deshabilitado",
+        helpText: "Por qué la acción aparece atenuada; se muestra al pasar el cursor y lo leen los lectores de pantalla mientras Deshabilitado es true (p. ej., \"Primero se requiere una revisión legal aprobada.\"). Solo de presentación: el servidor sigue rechazando la llamada según sus propias reglas. Déjalo vacío para mostrar \"No disponible para este registro\"."
+      },
       requiresFeature: {
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
@@ -2443,6 +2447,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   sharing_rule: {
     label: "Regla de Compartición",
     description: "Una regla que un paquete declara para compartir registros; las organizaciones crean las suyas en Configuración"
+  },
+  queue: {
+    label: "Cola",
+    description: "Un conjunto de personas con nombre donde los registros esperan hasta que una de ellas los toma; las organizaciones preparan las suyas en Configuración"
+  },
+  assignment_rule: {
+    label: "Regla de Asignación",
+    description: "Una regla que un paquete declara para dirigir los registros nuevos a una cola o a una persona"
   },
   agent: {
     label: "Agente de IA",

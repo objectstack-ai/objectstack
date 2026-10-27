@@ -1843,6 +1843,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Disabled",
         helpText: "CEL expression: disable when condition is true"
       },
+      disabledReason: {
+        label: "Disabled Reason",
+        helpText: "Why the action is greyed, shown on hover and read by screen readers while Disabled is true (e.g. \"An approved legal review is required first.\"). Display only: the server still refuses the call on its own rules. Leave empty to show \"Not available for this record\"."
+      },
       requiresFeature: {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
@@ -2443,6 +2447,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   sharing_rule: {
     label: "Sharing Rule",
     description: "A rule a package declares to share records; organizations author their own in Setup"
+  },
+  queue: {
+    label: "Queue",
+    description: "A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup"
+  },
+  assignment_rule: {
+    label: "Assignment Rule",
+    description: "A rule a package declares to route new records to a queue or a person"
   },
   agent: {
     label: "AI Agent",

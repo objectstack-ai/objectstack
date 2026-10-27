@@ -85,18 +85,32 @@ describe('validateApprovalApprovers', () => {
     expect(findings[0].hint).toContain("type: 'position'");
   });
 
-  // ── queue: declared-but-unenforced (#3508) ────────────────────────────────
+  // ── queue: re-admitted (ADR-0142 D6) ──────────────────────────────────────
 
-  it('flags a queue approver as unsupported — the runtime resolves it to nobody', () => {
+  it('accepts a queue approver beside a person — the runtime expands it to the queue\'s members', () => {
     const findings = validateApprovalApprovers(stackWithApprovers([
-      { type: 'queue', value: 'q_west' },
+      { type: 'queue', value: 'support_tier1' },
       { type: 'user', value: 'u1' }, // a real route keeps the node off the empty-slate rule
     ]));
+    expect(findings).toEqual([]);
+    expect(findings.some((f) => f.rule === APPROVAL_APPROVER_TYPE_UNSUPPORTED)).toBe(false);
+  });
+
+  it('a queue-only node is reported may-resolve-empty, like a position-only one', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'queue', value: 'support_tier1' },
+    ]));
     expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(APPROVAL_APPROVER_TYPE_UNSUPPORTED);
-    expect(findings[0].severity).toBe('warning');
-    expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers[0].type');
-    expect(findings[0].message).toContain('it was deprecated rather than built');
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    expect(findings[0].message).toContain('routes to a group (position/team/department/queue)');
+  });
+
+  it('admits `organization` on a queue approver — a queue is an organization\'s', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'queue', value: 'group_finance', organization: '$root' },
+      { type: 'user', value: 'u1' },
+    ]));
+    expect(findings).toEqual([]);
   });
 
   // ── the deprecated `role` spelling (ADR-0090 D3, #3133) ──────────────────
@@ -126,10 +140,11 @@ describe('validateApprovalApprovers', () => {
   });
 
   it('accepts the position approver type and the other RESOLVABLE spec types silently', () => {
-    // `queue` is deliberately absent: it parses but the runtime never resolves
-    // it, so it now draws APPROVAL_APPROVER_TYPE_UNSUPPORTED (#3508).
+    // `queue` is among them since ADR-0142 D6 re-admitted it (it drew
+    // APPROVAL_APPROVER_TYPE_UNSUPPORTED while the runtime had no queue, #3508).
     const findings = validateApprovalApprovers(stackWithApprovers([
       { type: 'position', value: 'sales_manager' },
+      { type: 'queue', value: 'support_tier1' },
       { type: 'user', value: 'u1' },
       { type: 'manager' },
       { type: 'department', value: 'bu_sales' },
@@ -473,7 +488,7 @@ describe('unset-manager dead-end (#16748)', () => {
       { type: 'position', value: 'exec' },
     ]));
     expect(positionOnly).toHaveLength(1);
-    expect(positionOnly[0].message).toContain('routes to a group (position/team/department)');
+    expect(positionOnly[0].message).toContain('routes to a group (position/team/department/queue)');
     expect(positionOnly[0].message).not.toContain('manager_id');
 
     // The mixed slate this package has always pinned as silent stays silent —
@@ -753,7 +768,7 @@ describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, a
   it('the two empty-slate arms read as one sentence each, sharing the lock clause', () => {
     const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
     expect(group.message).toBe(
-      'every approver on this node routes to a group (position/team/department), so if none is ' +
+      'every approver on this node routes to a group (position/team/department/queue), so if none is ' +
         "staffed the request opens on the organization's administrators, and (lockRecord) the record " +
         'stays locked',
     );

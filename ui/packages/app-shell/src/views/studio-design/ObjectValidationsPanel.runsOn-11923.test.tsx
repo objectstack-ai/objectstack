@@ -218,7 +218,7 @@ describe('the "Runs on" row reads the spec\'s events contract (objectui#11923)',
     });
   });
 
-  it('a new rule starts on the spec\'s default (objectui#11820)', () => {
+  it('a new rule starts on the spec\'s default (objectui#11820)', async () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} initial={draftWith(RULE)} />);
     fireEvent.click(screen.getByText('New'));
@@ -226,8 +226,13 @@ describe('the "Runs on" row reads the spec\'s events contract (objectui#11923)',
     // about where a new rule starts, not about the menu's layout.
     const advanced = screen.queryByRole('button', { name: 'Advanced' });
     if (advanced) fireEvent.click(advanced);
-    // A type with no guard is written at once.
     fireEvent.click(screen.getByRole('button', { name: t('engine.studio.rules.typeFormat', EN) }));
+    // Written once it has a field and a message (objectstack#26731).
+    fireEvent.keyDown(screen.getByTestId('rule-field'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Name (name)' }));
+    fireEvent.change(screen.getByPlaceholderText(t('engine.studio.rules.messagePlaceholder', EN)), {
+      target: { value: 'Bad name' },
+    });
     const rule = lastRule(onPatch);
     expect(rule.type).toBe('format');
     expect(rule.events).toEqual(SPEC_DEFAULT);

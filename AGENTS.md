@@ -276,8 +276,8 @@ localStorage / auth gotchas.
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
     (人合: every register row except `.claude/**`): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
-    spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
-    ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
+    spent once per PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's.
+    **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
     seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed

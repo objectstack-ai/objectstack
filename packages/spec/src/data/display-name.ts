@@ -175,6 +175,13 @@ function isNameIshAffix(fieldName: string): boolean {
   );
 }
 
+/** The injected system columns whose type is title-eligible: today the ownership-queue column alone. */
+const INJECTED_TEXT_COLUMNS: ReadonlySet<string> = new Set(['queue']);
+
+function isInjectedTextColumn(fieldName: string, def: TitleEligibleFieldDef | undefined): boolean {
+  return INJECTED_TEXT_COLUMNS.has(fieldName) && def?.system === true;
+}
+
 /**
  * Derive the title field from the object's fields when no explicit pointer is
  * set. Ranking (highest first), restricted to title-eligible fields:
@@ -185,7 +192,13 @@ function isNameIshAffix(fieldName: string): boolean {
  */
 function deriveDisplayField(fields: Record<string, TitleEligibleFieldDef> | undefined): string | undefined {
   if (!fields) return undefined;
-  const names = Object.keys(fields);
+  // [ADR-0142 D3] The platform's injected `queue` column is text, so it would
+  // be title-eligible — and the injection places its columns FIRST, so tier 3
+  // would make a queue machine name the title of every object with no
+  // name-ish field. A platform column is never a derived title; an author's
+  // explicit `nameField` still wins above (and an author's own `queue` field,
+  // which carries no `system: true`, is derivable as before).
+  const names = Object.keys(fields).filter((fname) => !isInjectedTextColumn(fname, fields[fname]));
 
   // Tier 1: name-ish exact, in the EXACT priority order (name > title > subject > …)
   // so `name` wins over `title` when both exist, independent of declaration order.

@@ -1843,6 +1843,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "禁用",
         helpText: "CEL 表达式：满足条件时禁用"
       },
+      disabledReason: {
+        label: "禁用原因",
+        helpText: "动作置灰的原因，在“禁用”为 true 时悬停显示，并由屏幕阅读器读出（例如“需要一条通过的法务审查后才能送审。”）。仅用于展示：服务端仍按自身规则拒绝调用。留空则显示“对此记录不可用”。"
+      },
       requiresFeature: {
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
@@ -2443,6 +2447,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   sharing_rule: {
     label: "共享规则",
     description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
+  },
+  queue: {
+    label: "队列",
+    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列"
+  },
+  assignment_rule: {
+    label: "分配规则",
+    description: "软件包声明的规则，把新记录分配到某个队列或某个人"
   },
   agent: {
     label: "AI 代理",

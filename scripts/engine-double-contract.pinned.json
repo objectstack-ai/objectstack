@@ -782,6 +782,11 @@
       "pinned": 3
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.empty-projection-unknown-count.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -1153,6 +1158,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.migrate-stored-noncanonical-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3154,7 +3174,7 @@
     {
       "file": "packages/plugins/plugin-auth/src/demo-staff.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-auth/src/durability-swallow-repair.test.ts",
@@ -3637,6 +3657,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/ownership-queue-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3873,6 +3898,26 @@
     },
     {
       "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/ownership-queue.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/ownership-queue.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/queue-recipient.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/queue-recipient.test.ts",
       "verb": "update",
       "pinned": 1
     },

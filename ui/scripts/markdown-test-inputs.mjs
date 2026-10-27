@@ -7,14 +7,19 @@
  *
  *   node scripts/markdown-test-inputs.mjs --list            the adjudicated class
  *   node scripts/markdown-test-inputs.mjs --audit           re-derive and compare
- *   node scripts/markdown-test-inputs.mjs --changed -       read paths on stdin
- *   node scripts/markdown-test-inputs.mjs --changed a.md b.md
  *
- * `--changed` prints the subset of the paths handed to it that this repository
- * has recorded as a test's input, one per line, and exits 0 whether or not the
- * subset is empty -- an EMPTY LIST IS AN ANSWER, and a non-zero exit means the
- * question could not be answered at all. That distinction is the whole contract
- * with the caller in `ci.yml`, which treats "could not answer" as RUN.
+ * ## What is left of it in the monorepo (objectstack#25712, #25753)
+ *
+ * It was written for objectui's `ci.yml`, whose `Decide whether this change
+ * needs a full run` step asked `--changed` which markdown paths a test reads.
+ * That workflow runs nowhere under the monorepo, and the root `Test UI` job
+ * starts on any change under `ui/` (the `filter` job's `ui` globs), so no CI
+ * step asks the question any more and `--changed` retired with its caller. The
+ * ledger stays as an AUDIT: `markdown-test-inputs.test.ts` holds the
+ * adjudicated class equal to what the scanner derives, and
+ * `check-pending-changeset-literals.mjs` resolves markdown literals through
+ * `deriveCandidates()`. The sections below record why the class has the shape
+ * it has; where they say "the decision step", read objectui's workflow.
  *
  * ## The blind spot this exists to close (objectui#8861)
  *
@@ -1145,9 +1150,9 @@ export function readersByEntry() {
  * structural rather than incidental, so the union is taken here: `entries` is
  * every rule that covers the document and `readers` is every test behind them.
  *
- * `should_run` does not depend on this -- one match is enough to run everything
- * and the caller in `ci.yml` reads only the path. The readers do: they are what
- * the log line names when it says which test is waiting on this document.
+ * objectui's decision step needed only the path -- one match was enough to run
+ * everything. The readers are what a caller names when it says which test is
+ * waiting on this document.
  */
 export function markdownTestInputsAmong(paths) {
   const entries = declaredEntries();
@@ -1346,14 +1351,6 @@ export function missingDocuments({ root = REPO_ROOT } = {}) {
 // CLI
 // ---------------------------------------------------------------------------
 
-function readStdin() {
-  try {
-    return readFileSync(0, 'utf8');
-  } catch {
-    return '';
-  }
-}
-
 function runList() {
   const readers = readersByEntry();
   for (const [entry, tests] of readers) {
@@ -1399,25 +1396,14 @@ function runAudit() {
   return 1;
 }
 
-function runChanged(args) {
-  const paths = args.includes('-')
-    ? [...args.filter((a) => a !== '-'), ...readStdin().split('\n')]
-    : args;
-  for (const hit of markdownTestInputsAmong(paths)) {
-    process.stdout.write(`${hit.path}\n`);
-  }
-  return 0;
-}
-
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
   let code;
   if (argv[0] === '--list') code = runList();
   else if (argv[0] === '--audit') code = runAudit();
-  else if (argv[0] === '--changed') code = runChanged(argv.slice(1));
   else {
     process.stderr.write(
-      'usage: markdown-test-inputs.mjs (--list | --audit | --changed <path…> | --changed -)\n',
+      'usage: markdown-test-inputs.mjs (--list | --audit)\n',
     );
     code = 2;
   }
