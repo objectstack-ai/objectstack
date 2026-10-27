@@ -66,7 +66,7 @@ blocked / not-run,⛔ 不进标题计数;与 blocked 的分界是 fixture 债 vs
 - **全是 `api` / `build` / `cli`** → 不需要 console 构建。把框架拉起来
   (`objectstack dev`),驱动 REST/CLI。快(分钟级)。
 - **有任何 `browser` / `mixed`** → 需要 vendored console dist。它与 showcase 工作区
-  闭包**分开**构建(`pnpm objectui:build`,从钉住的 `.objectui-sha` 构建);它存在
+  闭包**分开**构建(`pnpm console:build`,从本仓 `ui/apps/console` 构建);它存在
   之前,第一次启动对 `/_console/` 是 404(dogfood §2 —— 真实前置条件,记录它,不要
   伪造 block)。给构建留预算(冷 monorepo 上 ~10–30 分钟);它占掉大头,浏览器驱动
   只是分钟级。
@@ -132,7 +132,7 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
   是协议载体、不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取
   义务条款)。**这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。
 - **正文**,按此顺序:
-  - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
+  - **环境指纹** —— framework sha(`ui/` 在内)、端口、db、seed、时间戳。
   - **范围** —— 选择器 + 每项所对的 `revision`。
   - **逐条款判定表** —— 项 · 条款 · 判定 · 一行**文本** oracle 证据
     (API/网络/构建/测试结果 —— 服务端真相,永不是像素)。
