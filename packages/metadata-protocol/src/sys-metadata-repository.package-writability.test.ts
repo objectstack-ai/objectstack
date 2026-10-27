@@ -121,8 +121,12 @@ function makeFakeEngine() {
     manifests: new Map<string, unknown>([[READ_ONLY_PKG, { id: READ_ONLY_PKG }]]),
     registry: {
       // Installed / platform packages, read-only by manifest scope.
+      // [#26708] The other two are installed as well — the booted code package
+      // and the authored workspace (no scope, so still writable) — since a
+      // save naming a package no installed package has is refused first.
       getPackage: (id: string) =>
-        id === PLATFORM_PKG ? { manifest: { id, scope: 'system' } } : undefined,
+        id === PLATFORM_PKG ? { manifest: { id, scope: 'system' } }
+          : id === READ_ONLY_PKG || id === WRITABLE_PKG ? { manifest: { id } } : undefined,
     },
     async find(table: string, opts: { where: Record<string, unknown> }) {
       if (table === 'sys_metadata_history') return historyRows.filter((h) => matchesHistory(h, opts.where));

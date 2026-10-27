@@ -52,6 +52,24 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each manifest declares the
+ * packages whose objects its items bind, as a real one must: an installed
+ * package's write is judged against its declared closure (ADR-0028).
+ */
+const INSTALLED_PACKAGES: ReadonlyMap<string, readonly string[]> = new Map([
+    ['app.demo', []],
+    ['pkg_a', ['pkg_b']],
+    ['pkg_b', ['pkg_a']],
+]);
+const installedPackage = (id: string) => {
+    const dependencies = INSTALLED_PACKAGES.get(id);
+    return dependencies ? { manifest: { id, dependencies: Object.fromEntries(dependencies.map((d) => [d, '*'])) } } : undefined;
+};
+
+
 interface Row {
     id: string;
     type: string;
@@ -176,7 +194,7 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
             listItems: () => [],
             getItem: () => undefined,
             getObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             // The env-wide `view` list read (the public-form re-open refusal).
             isPackageDisabled: () => false,
             // `isArtifactBacked` prefers this lookup — a hit means the name is
@@ -669,7 +687,7 @@ describe('each package\'s copy of a view container expands into its own package\
             },
             getObject: () => undefined,
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             isPackageDisabled: () => false,
             isObjectPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
@@ -1380,7 +1398,7 @@ describe('each package\'s copy of a view container expands into its own package\
                     },
                     getObject: () => undefined,
                     registerObject: () => {},
-                    getPackage: () => undefined,
+                    getPackage: installedPackage,
                     isPackageDisabled: () => false,
                     isObjectPackageDisabled: () => false,
                     applyNavContributions: (app: unknown) => app,

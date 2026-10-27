@@ -57,6 +57,16 @@ import {
     stampHtmlPageRequires,
 } from './runtime-authoring-gate.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.fx', 'com.example.pages']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
     name: 'leave_approval',
@@ -175,6 +185,7 @@ function makeStubEngine() {
                     ? [{ name: 'leave_request', fields: { owner: { type: 'text' } } }]
                     : [],
             getItem: () => undefined,
+            getPackage: installedPackage as (id: string) => { manifest: Record<string, unknown> } | undefined,
         },
     };
     return { engine, rows };
@@ -4091,12 +4102,16 @@ describe('runtime authoring gate on VIEW writes that name no package — the who
         expect(activeViewRows(rows)).toEqual([]);
     });
 
-    it('(d) a write naming a package the registry cannot produce narrows nothing — the whole-collection verdict', async () => {
+    it('(d) [#26708] a save naming a package the registry cannot produce is refused before the gate — nothing written', async () => {
+        // Was: the gate narrowed nothing and judged the whole collection. A
+        // package the registry cannot produce is not installed, so the save
+        // door now refuses the save itself (the named-base rule, every type).
         const { protocol, rows } = makeOverlayProtocol();
 
         const err = await saveView(protocol, listView('nosuch_obj'), { packageId: 'com.unregistered.pkg' }).catch((e: any) => e);
 
-        expectRefusedUnknown(err, 'unresolvable package');
+        expect({ code: err?.code, status: err?.status, packageId: err?.packageId })
+            .toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422, packageId: 'com.unregistered.pkg' });
         expect(activeViewRows(rows)).toEqual([]);
     });
 

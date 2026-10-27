@@ -31,6 +31,16 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.pin']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 interface Row {
     id: string;
     type: string;
@@ -162,7 +172,7 @@ function makeStubEngine() {
             listItems: () => [],
             getItem: () => undefined,
             getObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
