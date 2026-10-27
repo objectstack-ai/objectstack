@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-designer",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Visual designer plugin for Object UI with page, data model, process, and report designers plus collaborative editing.",

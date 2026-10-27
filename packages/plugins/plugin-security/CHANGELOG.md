@@ -1,5 +1,271 @@
 # @objectstack/plugin-security
 
+## 18.2.0
+
+### Minor Changes
+
+- 5e113b3: feat(spec,plugin-security,lint): a `controlled_by_parent` detail may opt its rows' owners into updating them with read access to the master — `sharing.controlledByParent.ownerMayEdit: true`
+  
+  Clause-②: yes (widening) — a detail row's owner now passes the master-detail write gate with READ on the master, on an object that declares the opt-in; everyone else, and every other shape of write, still needs master EDIT. The default is unchanged.
+  Metadata-protocol: added (`ObjectSchema.sharing.controlledByParent.ownerMayEdit`, a per-object opt-in read only under `sharingModel: 'controlled_by_parent'`)
+  Ruling-ref: 6398566164 (letter 1)
+  
+  ADR-0055 §3 had one rule for every write of a `controlled_by_parent` detail: EDIT access to the master record. Salesforce's Activities under OWD = Controlled by Parent let the owner of an activity edit it while merely reading its account; the platform could not express that, and an authored `owner_id == current_user.id` update policy on the detail could not either — the detail's own policies compose AND with the master gate, so it only narrowed the master's editors.
+  
+  - **Spec.** `ObjectSchema` gains `sharing: { controlledByParent: { ownerMayEdit: boolean } }`, both blocks closed. `ownerMayEdit: true` is refused at parse on any object that is not a `sharingModel: 'controlled_by_parent'` detail, at `sharing.controlledByParent.ownerMayEdit`. The reader `controlledByParentOwnerMayEdit(schema)` (`@objectstack/spec/data`) fails closed on every shape but the parsed `true`.
+  - **Gate.** On an opted-in detail, a by-id `update` by the caller whose `userId` is the stored row's `owner_id` (the registry's injected per-record owner) passes step 2.8 when the caller can READ the master row, asked of the read door under the caller's own context. Insert, delete, a predicate (`multi: true`) update and a delegated (on-behalf-of) write keep the master-edit rule; a body that re-points the master reference still asks EDIT on the master it names; a row with no owner admits nobody. The detail's own object grant and row-level policies run before the leg, unchanged. An opt-in on an object whose schema carries no `owner_id` column (`ownership` other than `'user'`) is inert and reported once per object at `warn` by the relation resolver.
+  - **Lint.** `os lint` reports `security-controlled-by-parent-owner-policy-without-opt-in` (warning) for an `update` or `all` row-level policy whose `using` or `check` keys a field on the caller (`owner_id == current_user.id`, either operand order, the SQL `=` spelling included) on a `controlled_by_parent` detail that has not declared the opt-in. `os explain security-controlled-by-parent-owner-policy-without-opt-in` prints why such a policy can only narrow, and what the opt-in changes.
+  - **ADR-0055** §3 is amended (2026-10-26, #25760) with the opt-in, its boundaries, and what stays out of scope.
+- c8cb510: feat(spec,security): a field permission entry can carry a row condition (`when`) on its edit vote
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6408558941
+  
+  - **Before.** A `fields["<object>.<field>"]` entry voted `readable` / `editable` on every row of the object. A lock that should apply on some rows only (the amount of an approved opportunity, say) had no spelling: a validation rule or a hook carried it, outside the permission model and outside `os explain`.
+  - **Now.** `FieldPermissionSchema.when` is an optional row condition, authored in the same canonical CEL as `rowLevelSecurity[].using` (`status == 'approved'`, `owner_id == current_user.id`, …). An entry with a `when` votes as declared on the rows the condition names and is **absent** on the others, as if the set had not declared the field; an entry without one votes on every row, as before. The vote reaches the **edit** bit only — reads are row-blind — so `readable: false` beside a `when` is refused at parse, and the message says why. `condition`, `where` and `filter` are refused with a pointer to `when`.
+  - **Judged on the row the write changes.** The write gate (the engine middleware's field-level step and `canWriteObject`) judges the **stored** row before an update, read as the caller reads it, and each **incoming** row of an insert — in process, by `RLSCompiler.compileRowPredicate` (the compile, `current_user` context, field guard and comparand faces an RLS `check` clause takes) and the write gate's own stored-form judge. Never a query rewrite. A row that cannot be judged — a predicate update, a stored row the caller cannot read, a condition that does not resolve for the request — applies the entry as its **lock** (no edit grant), and a WARN line says why.
+  - **Row-blind readers apply the lock.** `/auth/me/permissions` (`buildEffectiveFieldPermissions`, new in `@objectstack/core`, the one vote `PermissionEvaluator.getFieldPermissions` takes per object), the writable-field projections, the query guard and the result masker hold no row, so a conditioned entry is reported as its lock: no client is told of an edit the gate refuses. `os explain`'s `fls` layer names each row-conditioned entry as such — judged per row by the write gate, applied as the lock elsewhere.
+  - **Validated like an RLS predicate.** `@objectstack/lint`'s `validateRlsPredicateEnforceability` walks `permissions[].fields[].when` by the passes `using` / `check` take, against the key's object: `rls-predicate-unenforceable`, `-unparseable`, `-over-budget`, `-unknown-field`, `-unknown-user-variable`, with the cost named (the entry cannot be judged and is applied as its lock on every row).
+  - **Unchanged.** Field grants union without deny: a matched conditioned lock is out-voted by a sibling's unconditioned `editable: true` exactly as before, and only declaring entries vote. The `/auth/me/permissions` `fields` merge keeps its most-permissive rule. Recorded under ADR-0066 ⑧ (note of 2026-10-26).
+
+### Patch Changes
+
+- 733b3c8: fix(plugin-security)!: a permission set that shares a held position's name is no longer granted; declare it in the position's `permissionSets` (#24757)
+  
+  Clause-②: yes (narrowing: a holder of position `P` is no longer granted the permission set named `P` unless `P`'s definition names it in `permissionSets`; widened: `@objectstack/core`'s `UserAuthzGrants` and `ResolvedAuthzContext` gain the additive field `directPermissions`)
+  Metadata-protocol: none
+  Ruling-ref: #13419 ruling B (`5472608110`); 「甲」 as amended (`6303865025`); order and unlock on #24757 (`6290781571`, `6392096931`); #25799 seat ruling A (claims `6414302166`, `6414315157`)
+  
+  ADR-0131 D3/D4: a position grants only the permission sets its definition's `permissionSets` names — the binding is written, not inferred. The security plugin's set resolution still requested every held position's NAME as a permission-set name too (the position-name fold), so a set that happened to share a position's name was granted to its holders without anyone writing the binding. #13419 ruling B retires that channel; HotCRM declared its bindings first (objectstack-ai/hotcrm#2200, released in hotcrm `v6.0.0`).
+  
+  What changes:
+  
+  - `resolvePermissionSetsForContext` requests only the context's `permissions` and the baseline. A held position's name reaches no set. `dropDeactivatedFoldedSets`, the second activation read that only the fold needed, is gone.
+  - The `position_name_fold_grant` warning keeps its event name and fields and now says the opposite: the same-named set is **not** granted, and how to grant it (`permissionSets: ['P']`) or to rename one of the two. Its payload carries `granted: false`. It is still logged once per position name per process.
+  - `describePositionGrants` lists only the sets a position's definition names, so it no longer serves `via: 'name'`. The `'name'` member of `PositionGrantVia` (`@objectstack/spec`) and its UI badge are retired separately in #26022; until then the value is published but never served.
+  - The delegated-administration gate judges an assignment of position `P` on the sets `P`'s definition names only. A set that only shares `P`'s name is no longer walked for the allowlist, the containment check or the organization boundary, because no assignment grants it.
+  - `explainAccess` attributes a set to `position:P` when `P`'s definition names it, and says `direct grant` otherwise. When the position definitions cannot be read it says so, rather than guessing either. A set held both through the user's own grant row and through a held position's definition reads `direct grant + position:P`, so revoking the position is not mistaken for removing the access (#25799).
+  - `@objectstack/core`: `UserAuthzGrants` and `ResolvedAuthzContext` gain `directPermissions: string[]`, the names conferred by the user's own `sys_user_permission_set` rows that apply in the active organization (a set a position definition also names included, a set only a definition names excluded). It is additive and grants nothing; the explainer reads it. Code that builds either object by hand must now set it (`directPermissions: []` when there are no grant rows).
+  - The lint gate `check-position-name-fold-loaders` and the census script `measure-position-name-fold-census` are deleted. They guarded the fold's only route, which no longer exists.
+  
+  **BREAKING** for an environment that relied on a shared name to grant a set.
+  
+  - **Before.** A user holding position `sales_manager` was granted the permission set `sales_manager` whether or not the position's definition named it.
+  - **Now.** That user is granted only the sets the `sales_manager` definition lists in `permissionSets`. The first resolution that would have folded the set logs `position_name_fold_grant` with `granted: false`, naming the position and the fix.
+  - **Fix.** Name the set in the position: `permissionSets: ['sales_manager']`. If the shared name is a coincidence, nothing needs to change.
+  - **Cloud ordering.** An environment running HotCRM must be on the HotCRM release that declares its bindings (`v6.0.0` or later) before it takes this release.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time narrowing in the security plugin's permission-set resolution: a held position's name is no longer requested as a permission-set name. No authorable key, spelling or stored shape moves, the position and permission-set schemas parse exactly as before, and no stored row is read, rewritten or converted. The repair is the author's choice between naming the set in the position's `permissionSets` and leaving it ungranted, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); nothing exported from `@objectstack/spec` moves in this change; and the one type change, the additive `directPermissions` on `@objectstack/core`'s resolver output, is a per-request value no stored artifact or authored metadata carries, so no conversion has a source to rewrite. -->
+- 073f08b: fix(security): a hook that runs as system and an action body are refused writes to position holdings, permission-set grants, invitations and memberships, as a system flow already is
+  
+  Clause-②: no (narrowing: app-authored hook and action-script writes to the four identity objects are refused at run time, as #25251 did for flows; the seat runs the contract review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to a hook or action body's elevated write to four platform objects; the save-time refusal and its semantic entry are the spec half of the same card. -->
+  
+  **BREAKING** (a served-set narrowing) for app-authored automation that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` under system elevation. A census of the hooks and action bodies in this repository and in HotCRM found none that does.
+  
+  A `runAs: 'system'` flow has been refused these writes since 18.1. Two other kinds of app-authored automation run with the same elevation and were not: a hook that declares `runAs: 'system'`, and an action body (`type: 'script'`), which always runs elevated. Their writes skipped the delegated-administration gate (so a grant carried no `granted_by`) and the invitation door's placement and role-cap checks. Both are now refused the same way:
+  
+  - An insert, update, delete, transfer, restore or purge of one of the four objects, from a `runAs: 'system'` hook (a sandboxed body or an in-process handler) or from an action body (through `ctx.api` or `ctx.engine`), answers `403 PERMISSION_DENIED`. Nothing is written. A hook's refusal aborts the triggering write under the default `onError: 'abort'`.
+  - The message names the source and the fix. For position holdings and permission-set grants: set the hook's `runAs` to `'user'`, so the delegated-administration gate judges the user the hook acts for and records them as `granted_by`. An action body has no `runAs`, so its grant moves to a `runAs: 'user'` flow, which an action of type `flow` runs as the invoking user. For invitations and memberships: use the organization endpoints.
+  
+  Unchanged: reads of the four objects, and writes to every other object, from the same hook or body. A hook under `runAs: 'user'`, which the ordinary gates judge as its user. The platform's own writers (better-auth and its reconciliation, invitation placement, the seeders, any `sudo()`), which carry no app-automation mark. A system flow's refusal, word for word.
+  
+  **What changes for you.** A hook or action body that grants a position or a permission set under elevation now fails. Declare `runAs: 'user'` on the hook, or move an action body's grant into a `runAs: 'user'` flow. Invitations and memberships change through `POST /api/v1/auth/organization/invite-member`, `cancel-invitation`, `update-member-role` and `remove-member`.
+  
+  `@objectstack/core` exports the mark: `APP_AUTOMATION_ELEVATION`, `markAppAutomationElevation`, `appAutomationElevationOf` and `carryAppAutomationElevation`.
+- 6a6ebff: fix(security): an app-authored hook that inherits a system context, its `ctx.api.sudo()`, and an action it reaches through `execute()` are refused writes to position holdings, permission-set grants, invitations and memberships
+  
+  Clause-②: no (narrowing: an app-authored hook's inherited or sudo() elevation, and an action reached through ObjectRepository.execute(), are refused the four identity objects at run time, as a runAs: 'system' hook already is)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to an app-authored hook's elevated write to four platform objects. -->
+  
+  **BREAKING** (a served-set narrowing) for an app-authored hook that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` while elevated. A census of the hooks in this repository and in HotCRM found none that does.
+  
+  Since the previous release, a hook that declares `runAs: 'system'` and an action body are refused these writes. Three other ways app-authored code ran elevated were not:
+  
+  - a hook that declares no `runAs` and fires on a write made under a system context, which it inherits;
+  - a hook's in-process `ctx.api.sudo()`;
+  - an action reached through `ctx.api.object(name).execute(action)`.
+  
+  Each is now refused the same way: `403 PERMISSION_DENIED`, nothing written, and under the default `onError: 'abort'` the triggering write aborts. The message names the hook and the fix: set its `runAs` to `'user'` and leave `ctx.api.sudo()` out, or use the organization endpoints for invitations and memberships.
+  
+  A hook is app-authored when it is bound from metadata through the hook binder (the same hooks the `skipAutomations` opt-out skips). A hook a plugin registers in code with `engine.registerHook`, and platform code's own `sudo()`, keep writing these objects. Reads of the four objects, and writes to every other object, are unchanged.
+- 43edf90: fix(plugin-security,organizations): the seed-ownership claims re-own row by row when a stored expression reads `owner_id`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Both seed-ownership claims (`claimSeedOwnership` in `@objectstack/plugin-security`, `claimOrgSeedOwnership` in `@objectstack/organizations`) re-owned seeded rows with one `multi: true` predicate update. A stored computed field (a non-formula field with an `expression`) that reads `owner_id`, directly (`record.owner_id`) or one hop through it (`record.owner_id.name`), computes a different value on each row once the owner is set. One predicate update can store only one value, so the engine refused the write, and every seeded row of that object stayed ownerless. The boot logged only `claimSeedOwnership failed for …`, and the next pass sent the same write.
+  - **Now.** An object whose stored expressions read `owner_id`, directly, one hop through it, or through another stored field that does, is claimed with one write per row. Each write keeps the claim's own terms (`owner_id IS NULL` or the seed identity, and the organization in the multi-tenant claim) plus the row's id, so each row's stored value is computed from that row, and a row someone owned in the meantime is not taken from them. Reads come from the same member reader the engine uses (`analyzeRelationshipTraversals` in `@objectstack/formula`). An expression whose reads cannot be named also takes the row-by-row path.
+  - **Unchanged.** Every other object keeps the predicate write, and its paging. The engine's refusal of a predicate update that would store different values stays as it is. A row whose own write is refused stays ownerless and is reported with the claim's existing warning, and the object's other rows are still claimed.
+  - `@objectstack/organizations` now depends on `@objectstack/formula`.
+  
+  What to do: nothing. For an app whose stored expression reads `owner_id`, such as a title that includes the owner's name, the single-tenant claim hands the seeded rows to the platform admin at the next seed settle (`app:seeded`), on the next boot. The organization claim covers organizations whose owner is bound from this release on. It runs in the call that replays their seed.
+- f6c6193: Every built-in permission set says who holds it, in English, Chinese, Japanese and Spanish
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → Permission Sets lists the platform's own permission sets beside every app's. Five of them (*Administrator — Full Access*, *Organization Administrator*, *Member — Standard Access*, *Viewer — Read-Only* and *External Member — Own Records*) had no description, and the no-bypass organization administrator set and the three MCP agent sets had descriptions written for platform engineers. An administrator picking a set for a new user could not tell an administrator set from a member set.
+  
+  Each built-in set now has one plain sentence saying who holds it and what it opens or withholds. For example, *Organization Administrator* reads "Owners and admins of an organization: full control of its records and members in Setup, but no app authoring or platform-wide settings." The sentences are translated into zh-CN, ja-JP and es-ES through the permission-set group of the translation bundle (`permissions.<name>.description`), so the page shows them in the user's language. The engineering detail that used to be in the no-bypass and MCP descriptions is now in code comments.
+  
+  No set's grants, name or label changed. This changes only the text shown about each set, not its permissions.
+- 07bdecd: The built-in permission sets' names are shown in Chinese, Japanese and Spanish
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → Permission Sets showed the platform's own permission sets with English names (*Administrator — Full Access*, *Member — Standard Access* …) under zh-CN, ja-JP and es-ES, next to each app's translated sets and next to their own translated descriptions. Each built-in set's label is now translated through the permission-set group of the translation bundle (`permissions.NAME.label`), beside its description, so a row reads in one language. For example, under zh-CN *Administrator — Full Access* reads 「管理员 — 完全访问」 and *Viewer — Read-Only* reads 「查看者 — 只读」.
+  
+  No set's grants, name, English label or description changed. This changes only the text shown for each set, not its permissions.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- b7b04e5: fix(plugin-approvals,plugin-sharing): the approver a pending step waits on can read the record the request is about
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An approver was asked to decide on a record they could not open. Unless the app happened to grant them read of that exact row, the request page showed only the snapshot and the record card read "unable to open this record", so a contract was approved without its document being read.
+  
+  - **Who reads.** While an approval request is pending, each person on its current step's slate (a slot naming their user id, or the email their own account carries) and the override holder (the administrator who may decide any pending request of their organization) may READ the one record the request is about. A slot left as a `position:` or `team:` literal names no person and grants no read.
+  - **How far.** Read only: the write gates never read this grant, so the approver still cannot edit or delete the record. Only the record itself, as a reader of it reads it: attachments follow the record read, as they do for any reader. Only while the step is pending: a decision that resolves the step, or advances the request to its next step, ends the grant at the next read. Never across organizations, the platform administrator's override included. An on-behalf-of (agent) principal gets no approval grant.
+  - **Where it is decided.** `@objectstack/plugin-approvals` derives the records from the slate it already resolves (`ApprovalService.pendingApproverReadGrants`, one indexed read of the pending-approver index per request context, plus one request read per object, memoized per request and retired by any write). `@objectstack/plugin-sharing` ORs those record ids into its read filter beside the caller's record shares, so every read door that composes the sharing filter serves them; it grants nothing when the approvals service is absent or its read fails.
+  - **Explain.** `@objectstack/plugin-security`'s access explanation names the grant on the sharing layer as a read share "via approval request N".
+  
+  The grant is the row-level reach of a read share; the approver still needs read on the object itself. Nothing is declared: no metadata key, no app setting.
+  
+  What to do: nothing. An app that wrote sharing rules mirroring its approval routing only so approvers could open the record may drop them.
+- b029c90: fix(metadata-protocol)!: a permission set that grants a hierarchy scope is refused on publish, and warned on a draft save, when the runtime mounts no hierarchy resolver; explain names the absent resolver (#26188)
+  
+  Clause-②: yes (narrowing: on a runtime with no hierarchy resolver, publishing a permission set whose grant uses `own_and_reports`, `unit` or `unit_and_below` is refused, where it used to answer 200; widened: `@objectstack/spec/security` gains the export `findHierarchyScopeGrants`, and `@objectstack/plugin-security`'s `ExplainEngineDeps` gains the optional member `hierarchyResolverMounted`)
+  Metadata-protocol: none
+  Ruling-ref: #26059 ruling Q3 / Q4 (`6416233738`), items 9a and 9b of the item reading (`6415971852`)
+  
+  `own_and_reports`, `unit` and `unit_and_below` are enforced only by the enterprise hierarchy resolver (capability `hierarchy-security`, ADR-0057). Without it the open sharing service evaluates them as `own`. `defineStack` already refuses such a grant unless the stack declares `requires: ['hierarchy-security']`, but a runtime save of the same permission set answered 200 with no word, and explain then told a manager that a subordinate's record was outside their unit.
+  
+  What changes:
+  
+  - The runtime authoring gate reads whether a hierarchy resolver is mounted (the kernel service `hierarchy-scope-resolver`) on every metadata write. When none is, a permission set whose `readScope` or `writeScope` is a hierarchy depth is refused on publish: a direct active save, the per-item publish of a draft, the package batch publish and a restore to such a version all answer 422 `INVALID_METADATA`, with one `issues[]` entry per grant under the rule `hierarchy-scope-capability-required`. The entry is located at the grant and names the `hierarchy-security` requirement.
+  - A draft save of the same body still succeeds. Its answer carries the same finding, at `severity: 'warning'`, in `advisories`.
+  - With a resolver mounted, nothing changes. A host with no service registry (the CLI) judges nothing here; `defineStack` is that host's door.
+  - `explainAccess`: on a deployment with no resolver, the depth layer's record cell for a hierarchy read depth now reads "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'." instead of saying the owner is outside the caller's read depth.
+  - `@objectstack/spec/security` exports `findHierarchyScopeGrants`, the one list of hierarchy depths and the one finding sentence. `defineStack`'s refusal reads it too, and its message is unchanged.
+  
+  **BREAKING** for a runtime with no hierarchy resolver that publishes hierarchy-scope grants at runtime.
+  
+  - **Before.** The publish answered 200 and the grant was enforced as owner-only.
+  - **Now.** The publish answers 422 `INVALID_METADATA` with the rule `hierarchy-scope-capability-required`. A draft save warns.
+  - **Fix.** Set the grant's `readScope` / `writeScope` to `own` or `org`, or run the permission set on a runtime that mounts the enterprise hierarchy resolver (`hierarchy-security`). Rows already stored are read as before.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time narrowing at the metadata publish door, conditional on a deployment fact (no hierarchy resolver mounted). No authorable key, spelling or stored shape moves: the permission-set schema parses exactly as before, `defineStack` already refused the same grant, and no stored row is read, rewritten or converted. The repair is the author's choice between a non-hierarchy depth and an enterprise runtime, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); the one spec export is added, not moved, renamed or removed; and nothing a stored artifact carries changes type, so no conversion has a source to rewrite. -->
+- 495fa07: feat(plugin-security,spec,plugin-auth)!: a delegated admin's write outside their own scope answers `403 DELEGATION_SCOPE_VIOLATION` with the gate's reason
+  
+  When a delegated administrator's write on `sys_user_position` or `sys_user_permission_set` fell outside their own `adminScope`, the delegated-administration gate knew exactly why ("business unit … is outside the delegated subtree", "… is not in the scope's allowlist"), but threw it as a plain `403 PERMISSION_DENIED`. A client could not tell it from a denial whose reason must stay hidden, so the console showed only its fixed "no permission" line.
+  
+  Clause-②: yes (widening: the ADR-0112 ledger registers `DELEGATION_SCOPE_VIOLATION` under `@objectstack/plugin-security`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the error code three of the gate's refusal reasons answer with: every write that was refused is still refused, with the same 403 status and the same reason, and every write that was admitted is still admitted. The remedy is on the consumer's side, reading `code`; never a rewrite of a package source or a stored row. The other categories are closed on facts: all three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/plugin-security`.** Three reasons describe the caller's own delegated scope: a business unit outside the delegated subtree (the new row's or the existing row's), a permission set not in the scope's allowlist (one the position distributes, or one granted directly), and a target user outside the subtree. They now throw `DelegationScopeViolationError`: status `403`, code `DELEGATION_SCOPE_VIOLATION`, and the message `[Security] Outside your delegated scope: delegated 'OP' on OBJECT rejected — REASON (scope from 'SET').` Every other refusal of the gate keeps `403 PERMISSION_DENIED`, unchanged: the audience anchor, principal-less writes, `sys_member` being tenant-only, the organization boundary, plain CRUD with no scope, filter writes, delegation of duty, a scope without `manageAssignments`, an unanchored assignment, adminScope containment, a stored grant whose set is unnamed or not in the catalog, a grant naming no target user, and a target user with no business unit.
+  - The message does not open with `[Security] Access denied`, which `mapDataError`, `isPermissionDeniedError` and the explain route read as `PERMISSION_DENIED`. The REST door (`mapDataError`) and the runtime dispatcher (`resolveThrownHttpError`) carry the new code as it was thrown.
+  - **`@objectstack/spec`.** One ADR-0112 ledger row, `DELEGATION_SCOPE_VIOLATION`, registered as its own meaning. It is not a synonym of `PERMISSION_DENIED`, and no waiver is needed.
+  - **`@objectstack/plugin-auth`.** The invitation door reads the new code as the gate's verdict too, so an invitation placed outside the issuer's scope still answers `403 INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`, not the `503` read-fault answer.
+  - For a client: a `403` with code `DELEGATION_SCOPE_VIOLATION` carries a message about the caller's own scope, which is safe to show. A `403 PERMISSION_DENIED` stays opaque. A client that matched `PERMISSION_DENIED` to catch these three refusals should also match the new code.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes
