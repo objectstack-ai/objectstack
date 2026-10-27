@@ -2,7 +2,7 @@
 
 **Type**: development assessment / landscape (NOT an ADR — this routes work, it does not decide).
 **Scope**: every code touchpoint for the two kernel agents across `@objectstack/service-ai` (OSS `ask`), `@objectstack/service-ai-studio` (cloud `build`), `@objectstack/spec` (agent/skill/tool schemas), and `../objectui` (chat surface).
-**Frames**: [ADR-0040](../adr/0040-unified-assistant-and-agent-binding.md), [ADR-0063](../adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md), [ADR-0064](../adr/0064-tool-scoping-to-agent.md).
+**Frames**: [ADR-0040](../../../adr/0040-unified-assistant-and-agent-binding.md), [ADR-0063](../../../adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md), [ADR-0064](../../../adr/0064-tool-scoping-to-agent.md).
 **Method**: four parallel read-only inventories. File:line references below are accurate as of this worktree.
 
 > **Outcome (see §5):** D2 resolved to **two distinct agents bound by surface**; ADR-0040's unified-assistant core is reversed.
@@ -101,7 +101,7 @@ D2 resolved **against** the "one assistant, two tiers" option §4 floated. Ratio
 
 **Resolution: two distinct agents (`ask` / `build`), bound by surface.** ADR-0040's unified-assistant core is reversed; "user never picks a roster" is kept but re-grounded as *surface binding*. See:
 
-- **[ADR-0063](../adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md)** (revised) — two agents bound by surface; skills-only third-party extension; `surface` affinity; naming; supersedes ADR-0040 core + §3.
-- **[ADR-0064](../adr/0064-tool-scoping-to-agent.md)** — tool scoping: an agent's tools = its skills' tools (resolves ADR-0040 §4).
+- **[ADR-0063](../../../adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md)** (revised) — two agents bound by surface; skills-only third-party extension; `surface` affinity; naming; supersedes ADR-0040 core + §3.
+- **[ADR-0064](../../../adr/0064-tool-scoping-to-agent.md)** — tool scoping: an agent's tools = its skills' tools (resolves ADR-0040 §4).
 
 Implementation (split personas, make `build` canonical, finish `ask` rename, withdraw tenant agents, `surface` field, surface-binding in objectui) is consolidated in the follow-up issue. D4 (guardrail floor) remains deferred.

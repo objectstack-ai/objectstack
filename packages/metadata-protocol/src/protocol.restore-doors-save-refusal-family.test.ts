@@ -7,7 +7,8 @@
  * body back as the active row (`repo.restoreVersion`). `saveMetaItem` refuses a
  * family of shapes after its schema gate: a hook with no `body`, a second
  * default record page of an object, an `external` object binding on a managed
- * datasource (both halves of the pair), a `runAs: 'system'` flow an anonymous
+ * datasource (both halves of the pair), an object `datasource` that names no
+ * datasource (#26724), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
  * file: each restore door wrote every one of those shapes back, so a version
@@ -92,6 +93,8 @@ function makeStubEngine() {
     const rows = new Map<string, Row>();
     const historyRows: HistoryRow[] = [];
     const registered = new Map<string, Map<string, unknown>>();
+    // [#26724] The drivers the engine has registered by name, with no datasource item.
+    const drivers = new Set<string>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -169,6 +172,7 @@ function makeStubEngine() {
             return { deleted: 1 };
         },
         async count() { return 0; },
+        getDriverByName: (name: string) => (drivers.has(name) ? { name } : undefined),
         async syncObjectSchema() { return true; },
         async dropObjectSchema() { return true; },
         registry: {
@@ -195,6 +199,7 @@ function makeStubEngine() {
         rows,
         historyRows,
         registered,
+        drivers,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -474,6 +479,27 @@ pinBothDoors({
         return { refused: 1, accepted: 2 };
     },
     expectDetail: (error) => expect(error.issues).toEqual([expect.objectContaining({ path: 'runAs', code: 'custom' })]),
+});
+
+pinBothDoors({
+    title: 'an object restored with a `datasource` that names nothing now (unknownDatasourceSaveRefusal)',
+    type: 'object',
+    name: 'wh_order',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        h.drivers.add('rt_store');
+        await h.protocol.saveMetaItem({ type: 'object', name: 'wh_order', item: order({ datasource: 'rt_store' }) });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'wh_order', item: order({ datasource: undefined }) });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'wh_order', item: order({ datasource: undefined, label: 'Order v3' }) });
+        // The driver v1 was bound to is gone.
+        h.drivers.delete('rt_store');
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'datasource', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Object 'wh_order' names datasource 'rt_store', and no datasource")).toBe(true);
+    },
 });
 
 pinBothDoors({
