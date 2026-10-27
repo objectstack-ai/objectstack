@@ -1102,11 +1102,14 @@ export function contractReviewTemplateLines(values = {}) {
     `                    below \`hits\`. The rest of a mixed diff is the lane seat's ACCEPT at ${TIER_DEFAULT_NAME},`,
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
     '                    face the floor is every path of the diff outside the prose faces: no path is a remainder.',
-    '  · ④ Design judgment  on the schema and rules faces only — the published spec, skills and ADR surfaces the',
-    '                    full-review order names; the narrowing and declaration faces carry no ④. For each `hits`',
-    '                    file: does the change hold against the code it cites and the scenario it is accepted',
-    '                    against — an ADR against its first consumer and its execution plan? The cited code is',
-    '                    READ to judge it, never reviewed; a must-fix found here is a FAIL like any other.',
+    '  · ④ Design judgment  on the schema and rules faces only — the published spec, and the governed register,',
+    '                    which holds the skills and ADR surfaces the full-review order names among its rows;',
+    '                    the narrowing and declaration faces carry no ④. For each `hits` file: does the change',
+    '                    hold against the code it cites and the scenario it is accepted against? A skill file',
+    "                    against the card's eval prompt and the spec it teaches on `main`; a schema file",
+    '                    against the ruling or ADR it implements and its first consumer; an ADR against its',
+    '                    first consumer and its execution plan. The cited code is READ to judge it, never reviewed;',
+    '                    a must-fix found here is a FAIL like any other.',
     '  · Implemented-by  the identity that produced the diff, read off the implementation claim:',
     "                    a mode:subagent dev's BRANCH, a mode:remote dev's session id.",
     '  · Reviewed-by     the session that RENDERS or ADOPTS the verdict — a session only. Prose',
@@ -1203,8 +1206,10 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  *
  * ⭐ Item ④, on the faces whose record carries it (`recordCarriesDesignJudgment`): the brief
  * hands the reviewer the design judgment as an ADVERSARIAL instruction — hold the change against
- * the code it cites and the scenario it is accepted against, an ADR against its first consumer
- * and its execution plan, and try to break it — and the surface-file scope rule the owner refined
+ * the code it cites and the scenario it is accepted against, named per surface (a skill file
+ * against the card's eval prompt and the spec it teaches, a schema file against the ruling or ADR
+ * it implements and its first consumer, an ADR against its first consumer and its execution
+ * plan), and try to break it — and the surface-file scope rule the owner refined
  * the order with: ④ judges the `hits` files only; lockfiles, generated output, changesets and
  * prose elsewhere in the PR are not reviewed, and the cited code is READ to judge them, never
  * reviewed. The narrowing brief carries neither: its floor is the whole diff outside the prose
@@ -1267,8 +1272,10 @@ export function contractReviewBriefLines(values = {}) {
     '  ③ Boundary flags — every dev flag and every `open_questions` entry answered, or escalated.',
     ...(designJudgment ? [
       '  ④ Design judgment — for EVERY `hits` file: does the change hold against the code it cites and the',
-      '     scenario it is accepted against — an ADR against its first consumer and its execution plan? Read the',
-      '     cited code in the live tree and try to break the design; name each finding must-fix or should-fix.',
+      "     scenario it is accepted against? A skill file against the card's eval prompt and the spec it teaches",
+      '     on `main`; a schema file against the ruling or ADR it implements and its first consumer; an ADR',
+      '     against its first consumer and its execution plan. Read the cited code in the live tree, and',
+      '     try to break the design; name each finding must-fix or should-fix.',
       "     A must-fix is a FAIL. ⛔ Judge the tree, never the PR body's account of it.",
     ] : []),
     "Sign `Implemented-by:` with the dev's branch and `Reviewed-by:` with your session id — the value is the FIRST",
@@ -1415,10 +1422,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling names no head': 7,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 27,
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 28,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
-  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 16,
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 17,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
@@ -1432,7 +1439,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 11 → 12 with the letter-B narrowing-face battery (ruling record 6203713500): one battery, one row.
 // Item ④ (the owner's full-review order, #25765) added no battery: the template battery's floor rose 19 → 27
 // and the brief battery's 10 → 16, one pin per new printed line or face reading, so a pin that stops
-// registering reds here instead of leaving the ④ lines unmeasured.
+// registering reds here instead of leaving the ④ lines unmeasured. The per-surface scenario lines
+// and the governed-register wording added one pin to each: 27 → 28 and 16 → 17.
 const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
@@ -1836,6 +1844,7 @@ export async function selfTest() {
   t('⭐ the face table marks exactly the two path-read faces as full-review faces, every face answering — never a second list', REVIEW_FACES.filter((f) => f.fullReview === true).map((f) => f.id).join() === 'schema,rules' && REVIEW_FACES.every((f) => typeof f.fullReview === 'boolean') && recordCarriesDesignJudgment(null, CONTRACT_REVIEW_TIER_NAME) && !recordCarriesDesignJudgment(null, TIER_DEFAULT_NAME));
   t('⛔ an unknown `faceId` is REFUSED, never printed as the bare record', (() => { try { contractReviewRecordLines({ faceId: 'lane' }); return false; } catch { return true; } })());
   t('⭐ item ④ is prose to every reader — a record carrying it still reads FOUND on its head and its tier STANDS', (() => { const r = tplOn(contractReviewRecordLines({ headSha: TPL_REAL_HEAD, reviewedBy: 'session_01PINFOUR' }).join('\n'), TPL_REAL_HEAD); return r.state === 'found' && r.sha === TPL_REAL_HEAD && servedTierStands(r.served); })());
+  t('the notes name the rules face as the governed register, never as three surfaces, and give each surface its scenario: a skill its eval prompt and the spec it teaches, a schema its ruling or ADR and first consumer', ['the published spec, and the governed register,', 'which holds the skills and ADR surfaces the full-review order names', "against the card's eval prompt and the spec it teaches", 'against the ruling or ADR it implements and its first consumer'].every((frag) => says(TPL_TEXT, frag)) && !says(TPL_TEXT, 'the published spec, skills and ADR surfaces'));
   t('the notes explain ④: which faces, judged against the cited code and the accepted scenario, an ADR against its first consumer, the cited code READ never reviewed', ['on the schema and rules faces only', 'against the code it cites', 'scenario it is accepted', 'first consumer and its execution plan', 'READ to judge it, never reviewed', 'narrowing and declaration faces carry no ④'].every((frag) => says(TPL_TEXT, frag)));
   // The branch placeholder is ASSEMBLED in the module body so the derivation
   // does not read it as a dead path population. This pin spells the printed
@@ -1875,6 +1884,7 @@ export async function selfTest() {
   t('…and the usage names it', usageLines().join('\n').includes('--brief-template'));
   // -- item ④ in the brief: the adversarial design-judgment instruction and the surface-file scope rule --
   t('⭐ the brief carries the ④ instruction, adversarial: hold against the code it cites and the accepted scenario, an ADR against its first consumer and execution plan, try to break it, a must-fix is a FAIL', ['④ Design judgment', 'against the code it cites', 'scenario it is accepted against', 'first consumer and its execution plan', 'try to break the design', 'must-fix or should-fix', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(BRIEF_BODY, frag)));
+  t('…and names the accepted scenario per surface, not for an ADR alone: a skill file against the card\'s eval prompt and the spec it teaches, a schema file against its ruling or ADR and its first consumer', ["A skill file against the card's eval prompt and the spec it teaches", 'a schema file against the ruling or ADR it implements and its first consumer', 'an ADR', 'against its first consumer and its execution plan'].every((frag) => says(BRIEF_BODY, frag)));
   t('…and the surface-file scope rule: ④ judges the `hits` files ONLY; lockfiles, generated output, changesets and prose elsewhere are not reviewed; the cited code is READ, never reviewed', ['④ judges the `hits` files ONLY', 'lockfiles, generated output, changesets and prose', 'not reviewed', 'READ to judge them, never reviewed'].every((frag) => says(BRIEF_BODY, frag)));
   t('…on the schema and rules faces and over a mixed path list alike', ['schema', 'rules'].every((id) => contractReviewBriefLines({ face: id }).join('\n').includes('④ Design judgment')) && contractReviewBriefLines({ paths: MIXED }).join('\n').includes('④ judges the `hits` files ONLY'));
   t('⛔ the narrowing brief carries no ④ and no surface-file rule — its floor is the whole diff outside the prose faces', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return !b.includes('④') && !b.includes('files ONLY'); })());
