@@ -88,7 +88,7 @@
 // id. The counter therefore cannot drift from the rule: change the rule and
 // this re-measures against it.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -178,11 +178,61 @@ async function measure(drop, targets = [LINT_TARGET]) {
     repoRoot,
   });
   const counts = {};
+  const linted = new Set();
   for (const result of results) {
+    const rel = relative(repoRoot, result.filePath).replace(/\\/g, '/');
+    linted.add(rel);
     const hits = result.messages.filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length;
-    if (hits > 0) counts[relative(repoRoot, result.filePath).replace(/\\/g, '/')] = hits;
+    if (hits > 0) counts[rel] = hits;
   }
-  return counts;
+  // Which lifted FILES the rule really ran on (#26444): linted, and with the rule
+  // on in the config ESLint resolved for that file. The test globs in `drop` are
+  // never a linted path, so only baselined files are looked up.
+  const measured = new Set();
+  for (const file of drop) {
+    if (!linted.has(file)) continue;
+    if (ruleIsOn(await eslint.calculateConfigForFile(resolve(repoRoot, file)))) measured.add(file);
+  }
+  return { counts, measured };
+}
+
+/** The rule is configured, and not to `off`, in a resolved per-file config. */
+function ruleIsOn(resolved) {
+  const setting = resolved?.rules?.[QUERY_OPTIONS_RULE_ID];
+  const severity = Array.isArray(setting) ? setting[0] : setting;
+  return severity !== undefined && severity !== 0 && severity !== 'off';
+}
+
+/**
+ * DEAD-SCAN REFUSAL 1 (#26444): baselined files still ON DISK that the non-test
+ * run did not measure, sorted. While the ratchet was two-sided, a file the run
+ * lost — not linted, or linted with its ignore not really lifted — dropped out
+ * of `current` and the DOWN direction redded. Now that drop would be a passing
+ * report, so it is refused here. A deleted file is not on disk and a swept file
+ * was measured, so both still pass. `exists` is injected for the self-test.
+ */
+function unmeasuredBaselined(baseline, measured, exists = (f) => existsSync(resolve(repoRoot, f))) {
+  return Object.keys(baseline).filter((file) => exists(file) && !measured.has(file)).sort();
+}
+
+/**
+ * DEAD-SCAN REFUSAL 2 (#26444): the test surface has no file keys to check, so
+ * its dead scan is the aggregate falling to ZERO in one run while the ceiling
+ * still holds sites — the shape of the test globs no longer being lifted, or the
+ * rule going blind on test code. Two-sided, that fall redded; one-sided it would
+ * be a passing report licensing the whole ceiling. A real sweep of the last test
+ * site is still possible: `--update` records it, and the zero ceiling it writes
+ * disarms this refusal. Returns the refusal text, or null.
+ */
+function testSurfaceCollapse({ testCeiling, testSites }) {
+  if (!(testCeiling > 0) || testSites !== 0) return null;
+  return (
+    `check-query-options-erasure-ratchet: the test surface measured 0 site(s) against a ceiling of ` +
+    `${testCeiling}. Every test-code erasure vanishing in one run is the shape of the test globs ` +
+    'no longer being lifted or the rule no longer running on test code, and since the ratchet ' +
+    'went one-sided (#26444) it would otherwise pass as a decrease. If the test surface really is ' +
+    'swept, `pnpm check:query-options-erasure --update` records the zero.'
+  );
 }
 
 const sum = (counts) => Object.values(counts).reduce((a, b) => a + b, 0);
@@ -534,11 +584,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '2. The ratchet comparison, in both directions.': 15,
   '3. The fatal-parse guard, in both directions (#10123).': 38,
   '5. Parser headroom: the population\'s deepest file must actually PARSE.': 8,
+  '6. A dead scan is refused, not reported as a decrease (#26444).': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -719,6 +770,29 @@ async function selfTest() {
     ratchetDownReport({ baseline: {}, current: {}, testCeiling: 10, testSites: 7 })[0]?.includes('licenses 3 new'),
     'ratchetDownReport: a test-surface shrink must name the headroom the stale ceiling licenses',
   );
+
+  // ── 6. A dead scan is refused, not reported as a decrease (#26444). ──────
+  battery('6. A dead scan is refused, not reported as a decrease (#26444).');
+  {
+    const onDisk = () => true;
+    assert(unmeasuredBaselined(base, new Set(), onDisk).length === 2,
+      'an EMPTY measurement with every baselined file still on disk must refuse every one');
+    assert(unmeasuredBaselined(base, new Set(['a.ts']), onDisk).join(',') === 'b.ts',
+      'a partial measurement must refuse only the file it lost');
+    assert(unmeasuredBaselined(base, new Set(['a.ts']), (f) => f !== 'b.ts').length === 0,
+      'a DELETED baselined file must not be refused — it is a decrease, and decreases pass');
+    assert(unmeasuredBaselined(base, new Set(['a.ts', 'b.ts']), onDisk).length === 0,
+      'a measured file must not be refused, whatever its count now');
+    assert(testSurfaceCollapse({ testCeiling: 10, testSites: 0 }) !== null,
+      'an EMPTY test surface under a non-zero ceiling must refuse');
+    assert(testSurfaceCollapse({ testCeiling: 10, testSites: 1 }) === null,
+      'a test surface that fell but still reads sites is a decrease, not a dead scan');
+    assert(testSurfaceCollapse({ testCeiling: 0, testSites: 0 }) === null,
+      'a ceiling --update already wrote down to zero must not refuse');
+    assert(ruleIsOn({ rules: { [QUERY_OPTIONS_RULE_ID]: [2] } }) && !ruleIsOn({ rules: { [QUERY_OPTIONS_RULE_ID]: [0] } })
+      && !ruleIsOn({ rules: {} }),
+      'ruleIsOn must read a resolved severity: on for 2, off for 0 and for an absent rule');
+  }
 
   // ── 3. The fatal-parse guard, in both directions (#10123). ───────────────
   //
@@ -1068,8 +1142,11 @@ async function main() {
   // Two runs, one per population. The split is done by ESLint against the very
   // globs the rule uses, so there is no second definition of "is this a test
   // file" for the two halves to drift apart on.
-  const nonTest = sortKeys(await measure(new Set(Object.keys(baseline))));
-  const everything = sortKeys(await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS])));
+  const nonTestRun = await measure(new Set(Object.keys(baseline)));
+  const nonTest = sortKeys(nonTestRun.counts);
+  const everything = sortKeys(
+    (await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS]))).counts,
+  );
   const testOnly = sortKeys(
     Object.fromEntries(Object.entries(everything).filter(([file]) => !(file in nonTest))),
   );
@@ -1088,6 +1165,23 @@ async function main() {
       `${Object.keys(testOnly).length} file(s).`,
     );
     process.exit(0);
+  }
+
+  const unmeasured = unmeasuredBaselined(baseline, nonTestRun.measured);
+  if (unmeasured.length > 0) {
+    console.error(
+      `check-query-options-erasure-ratchet: ${unmeasured.length} baselined file(s) are still on disk ` +
+      `but the rule did not run on them this time:\n${unmeasured.map((f) => `  ${f}`).join('\n')}\n` +
+      'Either ESLint did not lint them or their `ignores` entry was not lifted. Since the ratchet\n' +
+      'went one-sided (#26444) a file that drops out of the measurement would otherwise pass as a\n' +
+      'decrease — refusing rather than reporting a sweep that never happened.',
+    );
+    process.exit(2);
+  }
+  const collapse = testSurfaceCollapse({ testCeiling, testSites });
+  if (collapse !== null) {
+    console.error(collapse);
+    process.exit(2);
   }
 
   const monotonicity = baselineKeysAddedSinceMergeBase(Object.keys(baseline));

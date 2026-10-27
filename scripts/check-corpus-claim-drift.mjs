@@ -587,6 +587,31 @@ function ratchetVerdict(baseline, current, byId) {
 }
 
 /**
+ * The dead-scan refusal the one-sided ratchet needs (#26444): baselined files
+ * still ON DISK that this run did not read, sorted. While the ratchet was
+ * two-sided, a scan that lost part of its population dropped those files out of
+ * `current` and the DOWN direction redded; now that drop would be a passing
+ * report. A deleted page is not on disk and a swept page was read, so both
+ * still pass. (A scan that read NOTHING is also caught by the unreachable-row
+ * refusal; this one covers the partial case it cannot see.) `exists` is
+ * injected for the self-test.
+ */
+function unreadBaselined(baseline, read, exists = existsSync) {
+  return Object.keys(baseline).filter((file) => exists(file) && !read.has(file)).sort();
+}
+
+function unreadBaselinedMessage(unread) {
+  return (
+    `check-corpus-claim-drift: ${unread.length} baselined file(s) are still on disk but this run `
+    + `did not read them — ${unread.join(', ')}. REFUSING to reach a verdict. The scan lost part `
+    + 'of its population (a root emptied, a skip widened, or the walk broke), and since the '
+    + 'ratchet went one-sided (#26444) a file that drops out of the scan would otherwise pass as '
+    + 'a decrease. If the narrowing is deliberate, '
+    + '`node scripts/check-corpus-claim-drift.mjs --update` records it.'
+  );
+}
+
+/**
  * The input volume, PER ROOT. A number derived from the ledger cannot tell a
  * reader whether the population moved underneath it, and a root that exists and
  * contributes nothing is invisible in a bare total.
@@ -699,11 +724,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
   'At the PROGRAM level': 10,
   'The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 7,
+  'A baselined file the scan did not READ is REFUSED (#26444)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1299,6 +1325,24 @@ function selfTest() {
       improvedMessage('content/docs/a.mdx', RULE, 4, 2).includes('4 stays'));
   }
 
+  // ── A baselined file the scan did not READ is REFUSED (#26444) ──────────
+  battery('A baselined file the scan did not READ is REFUSED (#26444)');
+  {
+    const ledger = { 'content/docs/a.mdx': { [RULE.id]: 1 }, 'skills/b.md': { [RULE.id]: 1 } };
+    const onDisk = () => true;
+    expect('#26444 — an EMPTY population with every ledgered page still on disk refuses every one',
+      unreadBaselined(ledger, new Set(), onDisk).length === 2);
+    expect('#26444 — a partial scan refuses only the pages it did not read',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), onDisk).join(',') === 'skills/b.md');
+    expect('#26444 — a DELETED page is not refused (it is a decrease, and decreases pass)',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), (f) => f !== 'skills/b.md').length === 0);
+    expect('#26444 — a page that was read is not refused, whatever its count now',
+      unreadBaselined(ledger, new Set(Object.keys(ledger)), onDisk).length === 0);
+    expect('#26444 — the refusal names the unread page and the --update remedy',
+      unreadBaselinedMessage(['skills/b.md']).includes('skills/b.md')
+        && unreadBaselinedMessage(['skills/b.md']).includes('--update'));
+  }
+
   // ── A missing ROOT is REFUSED, per root (#9932) ───────────────────────────
   battery('A missing ROOT is REFUSED, per root (#9932)');
   const PRESENT_ROOT = 'alpha/one';
@@ -1611,6 +1655,12 @@ const baseline = existsSync(BASELINE_PATH)
   ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
   : {};
 const byId = new Map(VOCABULARY.map((r) => [r.id, r]));
+
+const unread = unreadBaselined(baseline, new Set(corpus.map((f) => f.rel)));
+if (unread.length) {
+  console.error(unreadBaselinedMessage(unread));
+  process.exit(1);
+}
 
 const { errors, down } = ratchetVerdict(baseline, current, byId);
 if (down.length) {

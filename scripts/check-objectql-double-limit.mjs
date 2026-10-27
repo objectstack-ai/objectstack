@@ -757,8 +757,10 @@ export async function measure() {
     conforming: 0, refusing: 0, blind: 0, wrong: 0, unjudged: 0,
     wrapOrder: { 'no-transform': 0, 'proven-after-bound': 0, 'lazy-transform': 0, 'before-bound': 0, 'n/a': 0 },
   };
+  const scanned = new Set();
   for (const abs of testFilesUnder(join(repoRoot, SCAN_ROOT))) {
     const rel = relative(repoRoot, abs).replace(/\\/g, '/');
+    scanned.add(rel);
     for (const candidate of discoverInSource(readFileSync(abs, 'utf8'), rel)) {
       census.proposed += 1;
       const result = await judge(candidate);
@@ -778,7 +780,7 @@ export async function measure() {
       bucket.details.push({ line: candidate.line, result });
     }
   }
-  return { measured, census };
+  return { measured, census, scanned };
 }
 
 const KINDS = ['blind', 'wrong', 'unjudged'];
@@ -817,6 +819,18 @@ export function reconcile(measured, baselineFiles) {
     }
   }
   return errors;
+}
+
+/**
+ * The partial dead-scan refusal the one-sided ledger needs (#26444): baselined
+ * files still ON DISK that the corpus walk never read, sorted. DISCOVERED below
+ * catches a walk that graded nothing; this catches one that lost PART of the
+ * corpus, which two-sided reddened through the DOWN direction and one-sided
+ * would report as decreases. A deleted file is not on disk and a repaired file
+ * was read, so both still pass. `exists` is injected for the self-test.
+ */
+function unreadBaselined(baselineFiles, scanned, exists = (f) => existsSync(resolve(repoRoot, f))) {
+  return Object.keys(baselineFiles).filter((f) => exists(f) && !scanned.has(f)).sort();
 }
 
 /**
@@ -1133,7 +1147,7 @@ const SELF_TEST_VERDICT = 'check-objectql-double-limit self-test reached its ver
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-objectql-double-limit self-test': 52,
+  'check-objectql-double-limit self-test': 56,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1267,6 +1281,16 @@ async function selfTest() {
   expect('the report names the old count as the ceiling it leaves',
     reconcileDown(fake, { 'a.test.ts': { blind: 3 } })[0]?.includes('3 stays'));
   const fakeWrong = new Map([['b.test.ts', { blind: 0, wrong: 1, unjudged: 0, details: [{ line: 2, result: { verdict: 'WRONG', shapes: ['truthiness'] } }] }]]);
+  // A partial dead scan is refused, not reported as decreases (#26444).
+  const ledgerAB = { 'a.test.ts': { blind: 1 }, 'b.test.ts': { blind: 1 } };
+  expect('an EMPTY walk with every baselined file still on disk refuses every one',
+    unreadBaselined(ledgerAB, new Set(), () => true).length === 2);
+  expect('a partial walk refuses only the file it never read',
+    unreadBaselined(ledgerAB, new Set(['a.test.ts']), () => true).join(',') === 'b.test.ts');
+  expect('a DELETED baselined file is not refused (a decrease passes)',
+    unreadBaselined(ledgerAB, new Set(['a.test.ts']), (f) => f !== 'b.test.ts').length === 0);
+  expect('a file the walk read is not refused, whatever its count now',
+    unreadBaselined(ledgerAB, new Set(['a.test.ts', 'b.test.ts']), () => true).length === 0);
   expect('a shape-breaking double is ledgered in its own kind, not folded into blind',
     reconcile(fakeWrong, { 'b.test.ts': { blind: 0, wrong: 1 } }).length === 0
     && reconcile(fakeWrong, { 'b.test.ts': { blind: 1 } }).length === 1
@@ -1428,13 +1452,21 @@ if (!isEntrypoint(import.meta.url)) {
   }
   const baseline = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
   const baselineFiles = baseline.files ?? {};
-  const { measured, census } = await measure();
+  const { measured, census, scanned } = await measure();
 
   const errors = [];
   if (census.graded === 0) {
     errors.push(
       'DISCOVERED: the control probe graded no ObjectQL `find` doubles at all. That is a ' +
       'broken scan, not a clean repo -- every other invariant iterates the graded set.',
+    );
+  }
+  const unread = unreadBaselined(baselineFiles, scanned);
+  if (unread.length > 0) {
+    errors.push(
+      `UNREAD: ${unread.length} baselined file(s) are still on disk but the corpus walk never read ` +
+      `them -- ${unread.join(', ')}. The walk lost part of its population; since the ledger went ` +
+      'one-sided (#26444) their entries would otherwise pass as decreases.',
     );
   }
   errors.push(...reconcile(measured, baselineFiles));

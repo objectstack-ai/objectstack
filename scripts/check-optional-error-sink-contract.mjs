@@ -179,6 +179,8 @@
  *     deleting or repairing a file must not red a PR that never touched this
  *     gate. The report says what the stale row costs — until it is deleted it
  *     re-licenses that sink — so the file still only gets shorter, by hand.
+ *     A dead scan, which used to red by turning every row stale, is refused
+ *     outright by `deadScanProblem` instead.
  *   - **Never a place to add new work.** A new red sink is a violation, not a
  *     ledger row. The ledger's own header carries the same sentence.
  *
@@ -703,8 +705,10 @@ function printSinkList(census) {
 
 function run({ list = false } = {}) {
     const census = emptyCensus();
+    const read = new Set();
     for (const root of SCAN_ROOTS) {
         for (const file of collectSourceFiles(join(ROOT, root))) {
+            read.add(relative(ROOT, file).split(sep).join('/'));
             const text = readFileSync(file, 'utf8');
             // Cheap prefilter, sound for every bucket because it is derived from
             // the whole channel vocabulary rather than from `error` alone — see
@@ -733,6 +737,13 @@ function run({ list = false } = {}) {
 
     const baseline = loadBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [baselineKey(e), e]));
+    // Before the comparison (#26444): one-sided, a dead scan would turn every
+    // ledger row into a passing "stale" report, so it is refused here instead.
+    const dead = deadScanProblem({ read, sinks: census.sinks.length, allowed });
+    if (dead !== null) {
+        console.error(`\n✗ ${dead}\n`);
+        return 1;
+    }
     const { violations, stale } = reconcileLedger(census.sinks, allowed);
 
     let failed = false;
@@ -797,6 +808,36 @@ function reconcileLedger(sinks, allowed) {
     return { violations, stale };
 }
 
+/**
+ * The dead-scan refusal the one-sided ledger needs (#26444). While a stale row
+ * failed, a scan that read nothing turned every row stale and redded; now a
+ * stale row passes, so the scan itself is checked. Refused when the walk read
+ * NO source file, when it found NO sink declaring `error` at all (the measured
+ * population is dozens; zero is a broken scan, not a clean repo), or when a
+ * ledgered file is still ON DISK but the walk never reached it. A deleted file
+ * is not on disk and a repaired sink was read, so both still pass. Pure, with
+ * `exists` injected, so the self-test drives it. Returns the text, or null.
+ */
+function deadScanProblem({ read, sinks, allowed, exists = (f) => existsSync(join(ROOT, f)) }) {
+    if (read.size === 0) {
+        return `the scan read NO source file under ${SCAN_ROOTS.join(', ')} — refusing to report on a population it never opened.`;
+    }
+    if (sinks === 0) {
+        return `the scan read ${read.size} file(s) but found NO sink type declaring \`error\` — a broken scan, not a clean repo; refusing.`;
+    }
+    const unread = [...new Set([...allowed.values()].map((e) => e.file))]
+        .filter((f) => exists(f) && !read.has(f))
+        .sort();
+    if (unread.length > 0) {
+        return (
+            `${unread.length} ledgered file(s) are still on disk but the scan never read them — ` +
+            `${unread.join(', ')}. The walk lost part of its population; refusing rather than ` +
+            'reporting their rows stale.'
+        );
+    }
+    return null;
+}
+
 // ── Self-test ───────────────────────────────────────────────────────────────
 
 /**
@@ -839,7 +880,7 @@ let selfTestReachedVerdict = false;
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-optional-error-sink-contract self-test': 70,
+  'check-optional-error-sink-contract self-test': 75,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1169,6 +1210,43 @@ check(() => {
             if (fresh.violations.length !== 1 || fresh.stale.length !== 0) {
                 failures++;
                 console.error('  ✗ a NEW red sink must still FAIL');
+            }
+        });
+    }
+
+    // A dead scan is refused, not reported as a ledger of stale rows (#26444).
+    {
+        const row = { file: 'a.ts', sink: 'L' };
+        const ledger = new Map([[baselineKey(row), row]]);
+        const onDisk = () => true;
+        check(() => {
+            if (deadScanProblem({ read: new Set(), sinks: 0, allowed: ledger, exists: onDisk }) === null) {
+                failures++;
+                console.error('  ✗ an EMPTY population (no file read) must be refused');
+            }
+        });
+        check(() => {
+            if (deadScanProblem({ read: new Set(['x.ts']), sinks: 0, allowed: new Map(), exists: onDisk }) === null) {
+                failures++;
+                console.error('  ✗ a scan that found NO sink at all must be refused, even over an empty ledger');
+            }
+        });
+        check(() => {
+            if (deadScanProblem({ read: new Set(['x.ts']), sinks: 3, allowed: ledger, exists: onDisk }) === null) {
+                failures++;
+                console.error('  ✗ a ledgered file on disk that the scan never read must be refused');
+            }
+        });
+        check(() => {
+            if (deadScanProblem({ read: new Set(['x.ts']), sinks: 3, allowed: ledger, exists: () => false }) !== null) {
+                failures++;
+                console.error('  ✗ a ledgered file that was DELETED must not be refused (a decrease passes)');
+            }
+        });
+        check(() => {
+            if (deadScanProblem({ read: new Set(['a.ts']), sinks: 3, allowed: ledger, exists: onDisk }) !== null) {
+                failures++;
+                console.error('  ✗ a live scan that read the ledgered file must not be refused');
             }
         });
     }

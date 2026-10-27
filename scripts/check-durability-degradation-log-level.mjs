@@ -3767,6 +3767,35 @@ function reconcileLedger(findings, allowed, keyOf) {
     return { violations, stale: [...allowed.keys()].filter((k) => !used.has(k)) };
 }
 
+/**
+ * The partial dead-scan refusal both one-sided ledgers need (#26444): ledgered
+ * files still ON DISK that the scan never read, sorted. A scan that read nothing
+ * at all is already red through the vocabulary staleness checks
+ * (FAILURE_PROPAGATION_SITES, READ_FAILURE_DISCRIMINATORS), which are not
+ * baselines and stayed two-sided. What one-sided lost is the PARTIAL scan, whose
+ * ledger rows would now pass as stale reports. A deleted file is not on disk and
+ * a repaired one was read, so both still pass. `exists` is injected for the
+ * self-test.
+ *
+ * @param {Map<string, {file: string}>} allowed ledger rows by key
+ * @param {Set<string>} read repo-relative paths the scan visited
+ * @param {(f: string) => boolean} [exists]
+ * @returns {string[]}
+ */
+function unreadLedgered(allowed, read, exists = (f) => existsSync(join(ROOT, f))) {
+    return [...new Set([...allowed.values()].map((e) => e.file))]
+        .filter((f) => exists(f) && !read.has(f))
+        .sort();
+}
+
+function unreadLedgeredMessage(unread, baselinePath) {
+    return (
+        `\n✗ ${unread.length} file(s) ledgered in ${baselinePath} are still on disk but the scan never read ` +
+        `them — ${unread.join(', ')}. The walk lost part of its population; since the ledger went ` +
+        'one-sided (#26444) their rows would otherwise pass as stale. Refusing.\n'
+    );
+}
+
 // ── The ratchet-remedy authority convention (#8435) ──────────────────────────
 //
 // The read-seam report's `OR :` line hands the author the baseline-expanding
@@ -3848,8 +3877,10 @@ function collectReadSeams(options = {}) {
     const seams = [];
     const usedDiscriminators = new Set();
 
+    const read = new Set();
     for (const root of READ_SEAM_SCAN_ROOTS) {
         for (const file of collectSourceFiles(join(ROOT, root))) {
+            read.add(relative(ROOT, file).split(sep).join('/'));
             const text = readFileSync(file, 'utf8');
             if (!text.includes('catch')) continue;
             const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
@@ -3860,11 +3891,11 @@ function collectReadSeams(options = {}) {
         }
     }
 
-    return { findings, seams, usedDiscriminators };
+    return { findings, seams, usedDiscriminators, read };
 }
 
 function runReadSeamRule({ list = false } = {}) {
-    const { findings, seams, usedDiscriminators } = collectReadSeams();
+    const { findings, seams, usedDiscriminators, read } = collectReadSeams();
 
     if (list) {
         console.log(
@@ -3924,6 +3955,11 @@ function runReadSeamRule({ list = false } = {}) {
 
     const baseline = loadReadInventionBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.fn}`, e]));
+    const unreadReadSeams = unreadLedgered(allowed, read);
+    if (unreadReadSeams.length > 0) {
+        console.error(unreadLedgeredMessage(unreadReadSeams, 'scripts/durability-read-invention.baseline.json'));
+        return 1;
+    }
     const { violations, stale } = reconcileLedger(findings, allowed, readInventionKey);
 
     let failed = false;
@@ -4236,6 +4272,12 @@ function run({ list = false } = {}) {
     // Shrink-only, one-sided (#26444): a baseline entry whose violation is gone
     // is reported for deletion on every run, but passes — until it is deleted it
     // can quietly re-license a site that was already fixed, and the report says so.
+    const unreadLogLevel = unreadLedgered(
+        allowed, new Set(files.map((f) => relative(ROOT, f).split(sep).join('/'))));
+    if (unreadLogLevel.length > 0) {
+        console.error(unreadLedgeredMessage(unreadLogLevel, 'scripts/durability-degradation.baseline.json'));
+        return 1;
+    }
     const { violations, stale } = reconcileLedger(findings, allowed, baselineKey);
 
     let failed = false;
@@ -4560,6 +4602,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'passes: #22985 — a bare `.bind(recv)` invokes nothing, so it guards nothing': 1,
         'passes: #22985 — a shadowing parameter or a `let` binding is not resolved as an alias': 1,
         'ledger: a stale baseline entry PASSES and is reported; an unledgered finding still FAILS (#26444)': 1,
+        'ledger: a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
     // Partition 2 — the read-seam invention rule's table, driven by
     // `selfTestReadSeams()`.
@@ -4622,6 +4665,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'flags: #13474 — three same-named bodies, resolved from inside the first (the live `lookup` shape)': 1,
         'flags: #13474 — a name declared ONCE still resolves from outside its scope (the fix must not narrow the census)': 1,
         'ledger (read seams): a stale entry PASSES and is reported; an unledgered seam still FAILS (#26444)': 1,
+        'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)': 1,
     }),
 });
 
@@ -4632,8 +4676,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // added to the roster with no size pin at all: the lookup below reads
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
-    selfTest: 69,
-    selfTestReadSeams: 58,
+    selfTest: 70,
+    selfTestReadSeams: 59,
 });
 
 // The roster's TOTAL, checked from BOTH verdict sites. Each entry checks only
@@ -4641,7 +4685,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 127;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 129;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -5861,6 +5905,21 @@ function selfTest() {
         if (gone.violations.length !== 0 || gone.stale.length !== 1
             || kept.violations.length !== 0 || kept.stale.length !== 0
             || fresh.violations.length !== 1 || fresh.stale.length !== 0) {
+            failures++;
+            console.error(`  ✗ ${row}`);
+        } else {
+            console.log(`  ✓ ${row}`);
+        }
+    }
+    {
+        const row = 'ledger: a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)';
+        registerCase(row);
+        const hit = { file: 'a.ts', callee: 'syncSchema' };
+        const ledger = new Map([[baselineEntryKey(hit), hit]]);
+        const empty = unreadLedgered(ledger, new Set(), () => true);
+        const deleted = unreadLedgered(ledger, new Set(), () => false);
+        const read = unreadLedgered(ledger, new Set(['a.ts']), () => true);
+        if (empty.join(',') !== 'a.ts' || deleted.length !== 0 || read.length !== 0) {
             failures++;
             console.error(`  ✗ ${row}`);
         } else {
@@ -7154,6 +7213,21 @@ function selfTestReadSeams() {
         if (gone.violations.length !== 0 || gone.stale.length !== 1
             || kept.violations.length !== 0 || kept.stale.length !== 0
             || fresh.violations.length !== 1 || fresh.stale.length !== 0) {
+            failures++;
+            console.error(`  ✗ ${row}`);
+        } else {
+            console.log(`  ✓ ${row}`);
+        }
+    }
+    {
+        const row = 'ledger (read seams): a ledgered file on disk the scan never READ is refused; a deleted one passes (#26444)';
+        registerCase(row);
+        const hit = { file: 'a.ts', fn: 'load' };
+        const ledger = new Map([[readInventionKey(hit), hit]]);
+        const empty = unreadLedgered(ledger, new Set(), () => true);
+        const deleted = unreadLedgered(ledger, new Set(), () => false);
+        const read = unreadLedgered(ledger, new Set(['a.ts']), () => true);
+        if (empty.join(',') !== 'a.ts' || deleted.length !== 0 || read.length !== 0) {
             failures++;
             console.error(`  ✗ ${row}`);
         } else {

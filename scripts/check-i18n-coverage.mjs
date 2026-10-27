@@ -228,11 +228,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The prerequisite refusal CLASS, and the advisory that names it (#14857).': 23,
   'The dispatch-gates declaration (#21011): the example configs and the trees they import': 10,
   'The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 6,
+  'A dead scan is refused, not reported as a decrease (#26444)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -798,6 +799,52 @@ function ratchetVerdict(baseline, current) {
   return { errors, down };
 }
 
+/**
+ * The dead-scan refusal the one-sided ratchet needs (#26444). Two-sided, a
+ * round that lost configs, or whose content classifier went blind, redded
+ * through the DOWN direction; one-sided, both read as decreases. So:
+ *
+ *   - a baselined config still ON DISK that the round did not measure is
+ *     refused (a deleted config is not on disk, and passes);
+ *   - every measured config falling to ZERO in one round while the ledger still
+ *     held strings for them is refused. That is the shape of `os lint` renaming
+ *     its `i18n/` rules or the classifier no longer matching them — the pins on
+ *     `countI18nRuleIssues` hold the classifier against a recorded report, and
+ *     this holds it against the live CLI. A real last-string sweep is still
+ *     possible: `--update` writes the zeros, and an all-zero ledger disarms it.
+ *
+ * Pure, with `exists` injected for the self-test. Returns the text, or null.
+ *
+ * @param {Record<string, number>} baseline
+ * @param {Record<string, number>} current
+ * @param {(path: string) => boolean} [exists]
+ * @returns {string | null}
+ */
+function deadScanProblem(baseline, current, exists = (p) => existsSync(at(p))) {
+  const unmeasured = Object.keys(baseline).filter((k) => !(k in current) && exists(k)).sort();
+  if (unmeasured.length > 0) {
+    return (
+      `check-i18n-coverage: ${unmeasured.length} baselined config(s) are still on disk but this round did ` +
+        `not measure them — ${unmeasured.join(', ')}. Discovery lost part of its population; since the ` +
+        'ratchet went one-sided (#26444) a config that drops out would otherwise pass as a decrease. ' +
+        'If the narrowing is deliberate, `node scripts/check-i18n-coverage.mjs --update` records it.'
+    );
+  }
+  const shared = Object.keys(current).filter((k) => k in baseline);
+  const before = shared.reduce((n, k) => n + baseline[k], 0);
+  const now = shared.reduce((n, k) => n + current[k], 0);
+  if (before > 0 && now === 0) {
+    return (
+      `check-i18n-coverage: every measured config reads 0 untranslated string(s) against ${before} in the ` +
+        'baseline. All of them vanishing in one round is the shape of the `i18n/` rules being renamed in ' +
+        '`os lint` or the content classifier no longer matching them, and since the ratchet went one-sided ' +
+        '(#26444) it would otherwise pass as a decrease. If every string really is translated, ' +
+        '`node scripts/check-i18n-coverage.mjs --update` records the zeros.'
+    );
+  }
+  return null;
+}
+
 async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
@@ -884,10 +931,11 @@ async function selfTest() {
   );
 
   // The content classifier. A classifier that stopped matching would drive every
-  // count to 0, and since the ratchet went one-sided (#26444) its DOWN direction
-  // REPORTS that rather than failing on it — so these pins are now the only thing
-  // that reds a classifier gone blind. The `i18n/` prefix is a contract with
-  // `os lint --json`, so pin it rather than infer it.
+  // count to 0. Since the ratchet went one-sided (#26444) its DOWN direction
+  // REPORTS a fall rather than failing on it, so a live collapse to zero is
+  // refused by `deadScanProblem` and these pins hold the classifier against a
+  // recorded report. The `i18n/` prefix is a contract with `os lint --json`, so
+  // pin it rather than infer it.
   expect('#5862 counts i18n rules', countI18nRuleIssues(REAL_LINT_REPORT) === 2, `got ${countI18nRuleIssues(REAL_LINT_REPORT)}`);
   expect(
     '#5862 ignores other rules',
@@ -1400,6 +1448,29 @@ async function selfTest() {
       fell.down[0]?.includes('4 stays'), `got ${JSON.stringify(fell.down)}`);
   }
 
+  battery('A dead scan is refused, not reported as a decrease (#26444)');
+  {
+    const ledger = { 'examples/a/objectstack.config.ts': 4, 'examples/b/objectstack.config.ts': 1 };
+    const onDisk = () => true;
+    expect('#26444 an EMPTY round with every baselined config still on disk is refused',
+      deadScanProblem(ledger, {}, onDisk) !== null, 'zero configs measured over a full ledger must red');
+    expect('#26444 a round that lost ONE config still on disk is refused, naming it',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 4 }, onDisk)?.includes('examples/b/') === true,
+      'a partial round must red and say which config it lost');
+    expect('#26444 a DELETED config is not refused (a decrease passes)',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 4 }, (k) => !k.includes('/b/')) === null,
+      'a config gone from disk is the decrease this card makes pass');
+    expect('#26444 every measured config at ZERO over a non-zero ledger is refused (the blind classifier)',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 0, 'examples/b/objectstack.config.ts': 0 }, onDisk) !== null,
+      'a classifier that stopped matching drives every count to 0 at once');
+    expect('#26444 a fall that leaves strings somewhere is not refused',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 0, 'examples/b/objectstack.config.ts': 1 }, onDisk) === null,
+      'a sweep of one config is a decrease, not a dead scan');
+    expect('#26444 an all-zero ledger that --update already wrote is not refused',
+      deadScanProblem({ 'examples/a/objectstack.config.ts': 0 }, { 'examples/a/objectstack.config.ts': 0 }, onDisk) === null,
+      'once the zeros are recorded there is nothing left to collapse');
+  }
+
   battery('The dispatch-gates declaration (#21011): the example configs and the trees they import');
   const { extractWatchHints, hintCovers } = await import('./pm/dispatch-gates.mjs');
   const ownPath = relative(REPO_ROOT, fileURLToPath(import.meta.url)).split('\\').join('/');
@@ -1853,6 +1924,12 @@ if (update) {
 }
 
 const baseline = existsSync(at(BASELINE_PATH)) ? JSON.parse(readFileSync(at(BASELINE_PATH), 'utf8')) : {};
+
+const dead = deadScanProblem(baseline, current);
+if (dead !== null) {
+  console.error(dead);
+  process.exit(1);
+}
 
 const { errors, down } = ratchetVerdict(baseline, current);
 if (down.length) {
