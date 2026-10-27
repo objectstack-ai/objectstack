@@ -497,6 +497,62 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
     });
 });
 
+// [#26699] The layered read (`getMetaItemLayered`, the Setup editor's read
+// through `GET /meta/:type/:name/layers`) takes the same selector: the option-A
+// ruling on #26649 extended ruling 6116165299's door list to it.
+const layersOf = async (protocol: ObjectStackProtocolImplementation, member?: string) => {
+    const layered: any = await protocol.getMetaItemLayered({ type: T, name: NAME, ...(member !== undefined ? { member } : {}) });
+    return {
+        code: layered?.code?.subject ?? null,
+        overlay: layered?.overlay?.subject ?? null,
+        effective: layered?.effective?.subject ?? null,
+        overlayScope: layered?.overlayScope ?? null,
+    };
+};
+
+describe('[#26699] the layered read addresses ONE member by the selector', () => {
+    it('a non-canonical member answers its own code and overlay layers', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        expect(await layersOf(protocol, 'zh-CN')).toEqual({
+            code: 'PKG zh', overlay: 'ADMIN zh', effective: 'ADMIN zh', overlayScope: 'env',
+        });
+        // A member nobody stored: its own code layer, and no overlay — never the canonical row.
+        const fresh = await boot(new Map());
+        await fresh.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+        expect(await layersOf(fresh.protocol, 'zh-CN')).toEqual({
+            code: 'PKG zh', overlay: null, effective: 'PKG zh', overlayScope: null,
+        });
+    });
+
+    it('CONTROL: the canonical read is unchanged — absent, and the canonical value, answer the canonical member', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        const canonical = { code: 'PKG en', overlay: 'ADMIN en', effective: 'ADMIN en', overlayScope: 'env' };
+        expect(await layersOf(protocol)).toEqual(canonical);
+        expect(await layersOf(protocol, 'en-US')).toEqual(canonical);
+        // The whole answer, not only the subjects: naming the canonical value is the same request.
+        expect(await protocol.getMetaItemLayered({ type: T, name: NAME, member: 'en-US' }))
+            .toEqual(await protocol.getMetaItemLayered({ type: T, name: NAME }));
+    });
+
+    it('a member no layer holds answers no layer at all — the door\'s absent item, never the canonical member', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        expect(await layersOf(protocol, 'fr-FR')).toEqual({ code: null, overlay: null, effective: null, overlayScope: null });
+    });
+
+    it('a wrong selector is the located 400 of the one reading, and nothing is read', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        await expectSelectorRefusal(
+            protocol.getMetaItemLayered({ type: 'view', name: 'task_grid', member: 'zh-CN' }),
+            /^The "member" selector names a bundle member, and a 'view' item has none/,
+        );
+        await expectSelectorRefusal(protocol.getMetaItemLayered({ type: T, name: NAME, member: ' ' }), /^The "member" selector is blank\./);
+    });
+});
+
 describe('the package-batch doors and the cluster fan-out carry the member (#22877, stage 2)', () => {
     /** A zh-CN draft bound to the package, beside an en-US active overlay that has none. */
     async function bootWithZhDraft(stores: Map<string, Map<string, Record<string, unknown>>>) {

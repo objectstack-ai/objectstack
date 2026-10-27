@@ -127,7 +127,7 @@ import {
 } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
-import { META_ITEM_LAYERS_PARAMS, metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
+import { metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -311,7 +311,19 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // [#23072] Recognition first, over the measured closed
                     // set; `serveMetaItemLayered` keeps the multiplicity
                     // rule it shares with the deprecated `?layers=` spelling.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_LAYERS_PARAMS)) return;
+                    // [#26699] Recognition AND arity are now the one decision
+                    // both transports ask (`metaItemQueryRefusal`, ruling
+                    // 6138588561), as on the item read: the set gained the
+                    // bundle member selector, read once, which the
+                    // multiplicity rule below never named. Answered in the
+                    // nested body `refuseUnknownQueryParams` wrote here.
+                    const queryRefusal = metaReadGate.metaItemQueryRefusal('layers', req.query);
+                    if (queryRefusal) {
+                        res.status(queryRefusal.status).json({
+                            error: { code: queryRefusal.code, message: queryRefusal.message },
+                        });
+                        return;
+                    }
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     // [ADR-0106 D2/D5] The dedicated path is its own
