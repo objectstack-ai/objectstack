@@ -51,7 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError, type StrictObjectOptions } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
@@ -5597,33 +5597,93 @@ function viewItemWireFields() {
 }
 
 /**
+ * [#26711] What the write door's three wire members said about an unknown
+ * top-level key before they were closed: nothing. The save answered success
+ * and stored the parsed body, without the key.
+ */
+const VIEW_WIRE_HISTORY =
+  'Until the `view` write door closed this shape an unknown top-level key was dropped silently — '
+  + 'the save answered success and the key was not stored.';
+
+/**
+ * [#26711] The alias spellings the #20456 census found on stored `view` rows,
+ * each mapped to the declared key it means. Undeclared on purpose (see
+ * {@link VIEW_CONSOLE_ROUND_TRIP_KEYS}); named here so the refusal points at
+ * the declared spelling instead of leaving the author to guess.
+ */
+const VIEW_WIRE_ALIASES = { objectName: 'object', id: 'name' } as const;
+
+/** [#26711] The unknown-key refusal of member 1, the ViewItem record. */
+const VIEW_ITEM_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this view item record',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/** [#26711] The unknown-key refusal of member 3, the flattened list overlay. */
+const LIST_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this inline list view',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/** [#26711] The unknown-key refusal of member 4, the flattened form overlay. */
+const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this inline form view',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/**
+ * [#26711] Close a wire member's TOP level, with its own unknown-key refusal.
+ *
+ * The flattened overlays are built by extending an authoring shape, and an
+ * extension inherits that shape's refusal: the surface named in it, and the
+ * candidate list a typo is pointed at, which would miss every key the overlay
+ * adds (`isPinned`, `columnState`, …). So the member is closed with a refusal
+ * built from its OWN shape — the same `strictObjectError` map
+ * {@link strictObject} attaches — and re-declared as a `closedObject`, so the
+ * refusal is terminal on this surface and the union keeps its envelope.
+ *
+ * Nested blocks keep their own posture, as before: closing the top level does
+ * not recurse any more than `.strip()` did, and the console's row ids are
+ * still removed before the parse by {@link stripViewConsoleDecorations}.
+ */
+function closeWireMember<T extends z.ZodObject>(member: T, options: StrictObjectOptions) {
+  const strict = member.strict();
+  const def = strict._zod.def;
+  return closedObject(strict.clone({ ...def, error: strictObjectError(options, def.shape) }));
+}
+
+/**
  * [#5074] The WIRE variant of {@link ViewItemSchema} — member 1 of
- * {@link ViewMetadataSchema}, re-opened with `.strip()`.
+ * {@link ViewMetadataSchema}.
  *
- * Exactly the pattern the two flattened members below already use
- * (`ListViewSchema.extend(flattenedViewOverlayFields()).strip()`), reached one
- * member further. `z.discriminatedUnion` cannot be `.extend()`ed, so the two
- * postures share {@link viewItemArmShape} rather than a `.extend()` chain —
- * derive-by-reference either way, one shape, two doors.
+ * `z.discriminatedUnion` cannot be `.extend()`ed, so the two postures share
+ * {@link viewItemArmShape} rather than a `.extend()` chain — derive-by-reference
+ * either way, one shape, two doors. The wire variant adds the console's
+ * round-trip keys ({@link viewItemWireFields}) and nothing else.
  *
- * `.strip()` covers the TOP level only. Nested console decorations
- * (`config.filter[].id`, `config.sort[].id`) are handled by
- * {@link stripViewConsoleDecorations} on the wire door — see that function for
- * why a recursive strip is the piece a posture flip cannot provide.
+ * [#26711] Closed, like the authoring schema: an unknown top-level key is
+ * refused by name. Until then this member `.strip()`ped it, and because the
+ * save stores the parsed body (#20051) a misspelt key answered success and was
+ * not stored. Nested console decorations (`config.filter[].id`,
+ * `config.sort[].id`) are still removed before the parse by
+ * {@link stripViewConsoleDecorations} on the wire door.
  */
 export const ViewItemWireSchema: z.ZodDiscriminatedUnion<[
-  z.ZodObject<ViewItemWireArmShape<'list', typeof ListViewSchema>, z.core.$strip>,
-  z.ZodObject<ViewItemWireArmShape<'form', typeof FormViewSchema>, z.core.$strip>,
+  z.ZodObject<ViewItemWireArmShape<'list', typeof ListViewSchema>, z.core.$strict>,
+  z.ZodObject<ViewItemWireArmShape<'form', typeof FormViewSchema>, z.core.$strict>,
 ], 'viewKind'> = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
-    z.object({
+    strictObject(VIEW_ITEM_WIRE_SURFACE, {
       ...viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.')),
       ...viewItemWireFields(),
-    }).strip(),
-    z.object({
+    }),
+    strictObject(VIEW_ITEM_WIRE_SURFACE, {
       ...viewItemArmShape('form', FormViewSchema.describe('Form view configuration.')),
       ...viewItemWireFields(),
-    }).strip(),
+    }),
   ]),
 );
 
@@ -6439,22 +6499,24 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * identity/round-trip fields a personalization PUT carries. Published as
  * `VIEW_METADATA_MEMBERS.listOverlay`.
  *
- * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
- * closing `ListViewSchema` for authoring (#4001) silently made this overlay
- * strict too — and this member exists precisely to carry Studio's auxiliary
- * round-trip keys (`isPinned`, `sortOrder`, …), which the save keeps because
- * they are declared. Strict here is a 422 on a shape the platform itself writes. The
- * ledger names this as the trap to watch while batching: a response-side
- * extension of an authoring schema must strip back, or an upstream field
- * addition becomes a crash.
+ * [#26711] Closed at the top level, with its own refusal
+ * ({@link closeWireMember}). It used to `.strip()`: `.extend()` inherits
+ * strictness, so closing `ListViewSchema` for authoring (#4001) made this
+ * overlay strict too while Studio's round-trip keys (`isPinned`, `sortOrder`,
+ * …) were still undeclared, and strict would have been a 422 on a shape the
+ * platform itself writes. #20456 declared every one of them
+ * ({@link VIEW_CONSOLE_ROUND_TRIP_KEYS}), and #20051 made the save store the
+ * parsed body, so the strip had become a silent loss: a misspelt key answered
+ * success and was not stored. An undeclared key the console writes is now a
+ * refusal that names it — declare it here, with its meaning, as #20456 did.
  *
  * [#7741] `object` + `viewKind` are required on this arm (and its form
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
  *
  * [#20051] …and `options` is DECLARED here, judged by
- * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
- * round-trip keys, and a bag the renderer reads is not one of those.
+ * {@link ListViewOverlayOptionsSchema}: a bag the renderer reads is not a
+ * round-trip key.
  *
  * [#20186] This member judges `viewKind: 'list'` only (the form sibling
  * `'form'` only), and it judges a column-less PATCH as well as a full inline
@@ -6470,19 +6532,19 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
   // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
   // refuses to overwrite a key on an object that carries refinements. So the
-  // binding check is re-attached AFTER `.strip()` instead of inherited — this
+  // binding check is re-attached AFTER the close instead of inherited — this
   // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
   // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
-  ListViewShapeSchema.extend({
+  closeWireMember(ListViewShapeSchema.extend({
     ...flattenedViewOverlayFields('list'),
     options: ListViewOverlayOptionsSchema.optional(),
     ...listOverlayPatchFields(),
     // [#20456] The console's round-trip keys on this row shape, declared so
-    // the parse keeps them instead of `.strip()`ping them unread.
+    // the parse keeps them.
     ...listOverlayRoundTripFields(),
-  }).strip()
+  }), LIST_OVERLAY_WIRE_SURFACE)
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
@@ -6492,7 +6554,8 @@ const ListViewOverlayWireSchema = lazySchema(() =>
 /**
  * [#6391] Member 4 of {@link ViewMetadataSchema} — a flattened runtime FORM
  * overlay, published as `VIEW_METADATA_MEMBERS.formOverlay`. Same construction
- * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}.
+ * as {@link ListViewOverlayWireSchema}, and closed at the top level the same way
+ * (#26711).
  *
  * [#20051] `options` is pinned ABSENT here — see
  * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
@@ -6508,11 +6571,11 @@ const FormViewOverlayWireSchema = lazySchema(() =>
   // (`columns`, see {@link formOverlayColumnsField}), and {@link FormViewSchema}
   // carries refinements, which `.extend()` refuses to combine with an overwrite.
   // The two differ in that throw only — the refinements ride along either way.
-  FormViewSchema.safeExtend({
+  closeWireMember(FormViewSchema.safeExtend({
     ...flattenedViewOverlayFields('form'),
     options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
     columns: formOverlayColumnsField(),
-  }).strip(),
+  }), FORM_OVERLAY_WIRE_SURFACE),
 );
 
 /**
