@@ -422,23 +422,34 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // every page-door binding as unresolvable. Its page-typed sibling above
   // takes the default for the same reason.
   { name: 'validatePageVisualizationBindings', run: validatePageVisualizationBindings },
-  // [#19542] `runtimeTypes` gains `report` under the ADR-0049 ruling, and ONLY
-  // `report`. On a report write this member is the subject-reader: it opens
-  // with `recordsOf(stack.reports)` and resolves that report's own `dataset` /
-  // `rows` / `columns` / `values` and its chart's axes against `stack.datasets`
-  // — the one collection this resolution needs and the one the per-write
-  // snapshot already carries (#7529), so it has no missing-collection
-  // false-positive channel. ⛔ NOT `dashboard` or `view`: on those writes the
-  // report/board surfaces the rule walks are the collections the snapshot does
-  // NOT carry, which is the `dataset` door's own DARK pin one file over.
+  // [#19542] `runtimeTypes` gains `report` under the ADR-0049 ruling. On a
+  // report write this member is the subject-reader: it opens with
+  // `recordsOf(stack.reports)` and resolves that report's own `dataset` /
+  // `rows` / `columns` / `values` and its chart's axes against
+  // `stack.datasets` — the one collection this resolution needs and the one
+  // the per-write snapshot already carries (#7529), so it has no
+  // missing-collection false-positive channel.
   //
-  // ⚠️ A REFUSAL widening, like #15254's and #19143's: a report republished
-  // with a dangling dataset binding or a dimension the dataset does not
-  // declare is now refused (422) rather than stored silently. MEASURED over
-  // the shipped report corpus at the door's own snapshot shape before
-  // crossing: 9 reports (showcase 4, todo 5), 8 of them binding a real dataset
-  // with `rows`/`values` — 0 findings, with a lit synthetic probe refused.
-  { name: 'validateChartBindings', runtimeTypes: ['flow', 'report'], run: validateChartBindings },
+  // [#26847] `view` and `object` join for the same reason. A list-view chart
+  // (`views[].list` / `listViews`, the flattened overlay, the ViewItem
+  // `config`, and an object's own `listViews`) binds `dataset` + `dimensions`
+  // + `values` and resolves against `stack.datasets` ALONE — the collection
+  // the snapshot carries — so the door refuses an unknown dataset
+  // (`chart-dataset-unknown`), dimension or measure (`chart-dimension-unknown`
+  // / `chart-measure-unknown`) the way `os validate` already does. The walk's
+  // report, page and dashboard surfaces read collections a view or object
+  // snapshot does not carry, so on those writes they find nothing: they are
+  // empty there, never dangling. ⛔ Still NOT `dashboard` or `page`: on those
+  // writes the surfaces the rule walks are the subject, and their sibling
+  // rules own them.
+  //
+  // ⚠️ REFUSAL widenings, like #15254's and #19143's: a report, view or object
+  // published with a dangling chart binding is now refused (422) rather than
+  // stored silently. Each was MEASURED over the shipped corpus at the door's
+  // own snapshot shape before crossing — `report`: 9 reports (showcase 4,
+  // todo 5), 0 findings; `view` / `object`: MEASURED_VIEW_CORPUS — with a lit
+  // synthetic probe refused at each door.
+  { name: 'validateChartBindings', runtimeTypes: ['flow', 'report', 'view', 'object'], run: validateChartBindings },
   // [#26548] The same report, one key on: `dateRange.dimension` resolved
   // against the bound dataset's `type: 'date'` dimensions (named, or the ONE
   // candidate when omitted). Directly after its sibling because the two read
