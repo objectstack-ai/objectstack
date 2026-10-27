@@ -1687,12 +1687,11 @@ export class ActionRunner {
         // documented `${ctx.recordId}` went out on the wire as the literal
         // placeholder while a `url` target with the same token resolved. One
         // substitution, one vocabulary, one encoding, whoever sends the request.
-        return handler(
-          actionType === 'api' && typeof action.target === 'string'
-            ? { ...action, target: this.interpolateTarget(action.target, action) }
-            : action,
-          this.context,
-        );
+        // A target with no token reaches the handler as the same object.
+        const target = actionType === 'api' && typeof action.target === 'string'
+          ? this.interpolateTarget(action.target, action)
+          : action.target;
+        return handler(target === action.target ? action : { ...action, target }, this.context);
       }
 
       // Built-in action execution by type.

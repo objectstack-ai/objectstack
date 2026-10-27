@@ -56,6 +56,17 @@ describe('api targets interpolate before a registered api handler (objectstack#2
     expect(seen[0].method).toBe(method);
   });
 
+  it('an api target with no token reaches the handler as the same action object', async () => {
+    const runner = new ActionRunner(RECORD_PAGE);
+    const { seen, handler } = recordingApiHandler();
+    runner.registerHandler('api', handler);
+    const action: ActionDef = { type: 'api', name: 'plain', target: '/api/v1/data/gapdata_item', method: 'POST' };
+
+    await runner.execute(action);
+
+    expect(seen[0]).toBe(action);
+  });
+
   it('encodes each value the way a url target does', async () => {
     const context: ActionContext = { record: { id: 'a/b c' }, objectName: 'gapdata_item' };
     const runner = new ActionRunner(context);
