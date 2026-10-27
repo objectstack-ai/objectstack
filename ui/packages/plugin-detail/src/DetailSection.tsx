@@ -26,7 +26,14 @@ import {
   LazyIcon,
 } from '@object-ui/components';
 import { ChevronDown, ChevronRight, Copy, Check, Eye, EyeOff, Pencil } from 'lucide-react';
-import { SchemaRenderer, toRenderableSchema, useInlineEdit, usePrintPage, usePredicateScope } from '@object-ui/react';
+import {
+  SchemaRenderer,
+  toRenderableSchema,
+  useInlineEdit,
+  usePrintPage,
+  usePredicateScope,
+  useRecordPagePreferences,
+} from '@object-ui/react';
 import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -194,7 +201,27 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const isCollapsed = !isPrintPage && collapsedState;
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState<number | undefined>(undefined);
-  const [showEmptyOverride, setShowEmptyOverride] = React.useState(false);
+  // objectstack#25883 — "Show N empty fields" is the reader's choice for the
+  // whole object, not for this one section: under a host's record-page
+  // preference store it is read from, and written to, that store's entry for
+  // `objectName`, so it holds for every section of the page, for the next
+  // record of the object and after a reload. With no store (no host, no
+  // signed-in user) or no object name, it stays this section's own state,
+  // forgotten on unmount, as before.
+  const recordPagePreferences = useRecordPagePreferences();
+  const [localShowEmpty, setLocalShowEmpty] = React.useState(false);
+  const rememberedShowEmpty =
+    recordPagePreferences && objectName
+      ? {
+          shown: recordPagePreferences.get(objectName).showEmptyFields === true,
+          set: (shown: boolean) => recordPagePreferences.update(objectName, { showEmptyFields: shown }),
+        }
+      : null;
+  const showEmptyOverride = rememberedShowEmpty ? rememberedShowEmpty.shown : localShowEmpty;
+  const toggleShowEmpty = () => {
+    if (rememberedShowEmpty) rememberedShowEmpty.set(!rememberedShowEmpty.shown);
+    else setLocalShowEmpty((s) => !s);
+  };
   const { t } = useDetailTranslation();
   // The word a read-only boolean row is drawn with (objectui#12933): the same
   // `common.yes` / `common.no` pair every read-only boolean face reads
@@ -870,7 +897,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setShowEmptyOverride((s) => !s)}
+            onClick={toggleShowEmpty}
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             {showEmptyOverride ? (
