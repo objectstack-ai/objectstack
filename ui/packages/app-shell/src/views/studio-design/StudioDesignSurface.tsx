@@ -4468,6 +4468,26 @@ export function InterfacesPillar({
         : navIcon(currentNavEntry?.type ?? current.type);
   const ifKindName = current ? navKindName(currentNavEntry ?? { type: current.type }, locale) || translateMetadataType(current.type, locale) : '';
   const ifInternalId = current ? `${t('engine.studio.if.internalId', locale)}: ${current.type} · ${current.name}` : undefined;
+  // objectstack#26746 — the header names the open leaf as its rail row names
+  // it: the row's entry in `railTree`, through the same `navEntryLabelText`
+  // and resolver, asked on every render. `current.label` is that text frozen
+  // when the Surface was made, so a label the resolver learns later (a
+  // draft-only object's `_drafts` label, the console's object metadata) left
+  // the header on the machine name while the rail already read the label.
+  const ifTitleText = (() => {
+    if (!current) return '';
+    const find = (nodes: NavNode[]): NavNode | null => {
+      for (const node of nodes) {
+        if (node.id === current.navId) return node;
+        const hit = Array.isArray(node.children) ? find(node.children) : null;
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const railEntry = current.navId ? find(railTree) : null;
+    const text = railEntry ? navEntryLabelText(railEntry as NavEntryLike, locale, targetLabel) : current.label;
+    return text || current.name;
+  })();
   // objectui#12455 — an object entry's structure is the Data pillar's: the
   // header offers to open it there, through the host's surface channel (no
   // channel, no chip: the hint under the tab row still names the pillar).
@@ -4591,7 +4611,7 @@ export function InterfacesPillar({
       title={
         current ? (
           <>
-            {current.label || current.name}
+            {ifTitleText}
             <span className="sr-only"> · {ifKindName}</span>
           </>
         ) : (
@@ -4606,7 +4626,7 @@ export function InterfacesPillar({
       chips={
         current ? (
           <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
-            <span className="sr-only">{current.label || current.name} · </span>
+            <span className="sr-only">{ifTitleText} · </span>
             {ifKindName}
           </span>
         ) : undefined
@@ -4997,7 +5017,7 @@ export function InterfacesPillar({
       >
         <SheetHeader className="shrink-0 border-b px-4 py-3 pr-10">
           <SheetTitle className="text-[13px] font-medium">
-            {tFormat('engine.studio.if.definitionTitle', locale, { label: current.label || current.name })}
+            {tFormat('engine.studio.if.definitionTitle', locale, { label: ifTitleText })}
           </SheetTitle>
         </SheetHeader>
         {isSourcePage ? (
