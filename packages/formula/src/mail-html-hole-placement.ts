@@ -40,14 +40,13 @@
  *
  * ## Grammar parity with the renderer
  *
- * {@link HOLE} and {@link parseHole} are the renderer's own hole grammar,
- * spelled again here because the two packages share no module that could
- * hold it (`plugin-email` depends on this package; this package depends on
- * neither of its consumers). A copy that drifted would judge holes the
- * renderer never substitutes, or miss ones it does, so the copy is pinned:
- * `plugin-email`'s `text-field-html-outlets.pin.test.ts` renders a grammar
- * corpus and every built-in body through the real renderer and requires the
- * spans this judge finds to be exactly the spans the renderer replaces.
+ * The hole grammar is not spelled here: {@link mailHolePattern} and
+ * {@link parseMailHole} (`mail-hole-grammar.ts`) are the renderer's own,
+ * imported by `plugin-email`'s renderer from this package, so the spans this
+ * judge finds are the spans the renderer substitutes by construction.
+ * `plugin-email`'s `text-field-html-outlets.pin.test.ts` still renders a
+ * grammar corpus and every built-in body through the real renderer and holds
+ * the two to the same spans.
  *
  * ## Limits, stated so they are not read as more
  *
@@ -62,31 +61,7 @@
  *   with the placement the template gives it.
  */
 
-// ─── The renderer's hole grammar (pinned to `plugin-email`'s template-engine.ts) ───
-
-/** 1=open (`{{` or `{{{`), 2=brace-free inner body, 3=close (`}}` or `}}}`). */
-const HOLE = /(\{\{\{?)([^{}]*)(\}\}\}?)/g;
-const PATH_RE = /^[\w.]+$/;
-const FILTER_RE = /^(\w+)(?::\s*'?([^']*?)'?)?$/;
-
-interface ParsedHole {
-  path: string;
-  formatter?: string;
-}
-
-/** A hole's inner body as the renderer parses it; null when the renderer leaves the text verbatim. */
-function parseHole(inner: string): ParsedHole | null {
-  const pipe = inner.indexOf('|');
-  if (pipe === -1) {
-    const path = inner.trim();
-    return PATH_RE.test(path) ? { path } : null;
-  }
-  const path = inner.slice(0, pipe).trim();
-  if (!PATH_RE.test(path)) return null;
-  const m = FILTER_RE.exec(inner.slice(pipe + 1).trim());
-  if (!m) return null;
-  return { path, formatter: m[1] };
-}
+import { mailHolePattern, parseMailHole } from './mail-hole-grammar';
 
 // ─── Placement classes ──────────────────────────────────────────────
 
@@ -166,8 +141,8 @@ export function judgeMailHtmlHoles(html: string, options: MailHtmlHoleJudgeOptio
   if (typeof html !== 'string' || html === '') return [];
   const urlVariables = new Set(options.urlVariables ?? []);
   const found: Array<Omit<MailHtmlHole, 'placement' | 'supported'> & { formatter?: string }> = [];
-  for (const m of html.matchAll(HOLE)) {
-    const parsed = parseHole(m[2]);
+  for (const m of html.matchAll(mailHolePattern())) {
+    const parsed = parseMailHole(m[2], m[0]);
     if (!parsed) continue;
     const start = m.index ?? 0;
     found.push({

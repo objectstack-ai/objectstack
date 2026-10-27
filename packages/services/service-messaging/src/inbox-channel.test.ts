@@ -376,6 +376,21 @@ describe('inbox channel', () => {
             expect(ch.classifyError?.(new Error('db down'))).toBe('retryable');
         });
 
+        it('grades TEMPLATE_INVALID permanent — a template whose hole the mail grammar refuses fails every attempt until republished', async () => {
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
+            const r = fakeRenderer(() => {
+                throw new Error("TEMPLATE_INVALID: email template crm.large_deal_won (locale=zh-CN): the hole {{ amount | currency:currency_code }} gives the currency formatter the argument 'currency_code', which is not an ISO 4217 currency code");
+            });
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(false);
+            expect(result.error).toMatch(/^TEMPLATE_INVALID: /);
+            expect(data.inserts).toHaveLength(0);
+            expect(ch.classifyError?.(result.error)).toBe('permanent');
+        });
+
         it('never consults the renderer for a non-template delivery', async () => {
             const data = fakeData();
             const r = fakeRenderer();

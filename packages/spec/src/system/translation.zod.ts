@@ -197,6 +197,8 @@ const actionTranslationSchema = (surface: string) => strictObject({
     name: 'label', title: 'label',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
   },
@@ -211,6 +213,9 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+  // action shows; overlaid by `translateAction` like the copy keys above.
+  disabledReason: z.string().optional().describe('Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -447,6 +452,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.disabledReason
    *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -963,6 +969,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.disabledReason
    *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
@@ -2260,12 +2267,15 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // Undeclared, they were stripped on every parse, so the metadata door quietly
   // discarded an item's own name on the way through.
   //
-  // Not snake_case-constrained the way `job.name` is: translation items are
-  // conventionally named after their locale (`zh-CN`), and the runtime sync
-  // reads `row.name` as a locale fallback for exactly that reason. Optional
-  // because `locale`, not `name`, is this type's required identity — that call
-  // was deliberate (a skipped item is invisible) and is not being reopened.
-  name: z.string().optional().describe('Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent'),
+  // Named like every other metadata item: snake_case (`zh_cn`), with the BCP-47
+  // tag in `locale`. The save door's item-name grammar
+  // (`METADATA_ITEM_NAME_PATTERN`) refuses a tag-shaped name such as `zh-CN`,
+  // so this shape does not re-check it. The runtime sync still reads a
+  // tag-shaped `row.name` as a locale fallback, but only for rows stored before
+  // `locale` became required. Optional because `locale`, not `name`, is this
+  // type's required identity — that call was deliberate (a skipped item is
+  // invisible) and is not being reopened.
+  name: z.string().optional().describe('Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale`'),
   label: z.string().optional().describe('Human-readable label shown in metadata lists'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
