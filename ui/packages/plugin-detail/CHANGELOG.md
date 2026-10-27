@@ -1,5 +1,225 @@
 # @object-ui/plugin-detail
 
+## 18.2.0
+
+### Minor Changes
+
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+- f02e644: fix(plugin-detail): `record:related_list` with `actions: []` no longer draws the built-in New
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  - **Before.** `actions: []` on a `record:related_list` hid the list's authored and default actions, but the built-in **New** stayed whenever the host offered create. The only way to drop it was the child object's `userActions.create`, which removes New from every list of that object. A page could not say that one list's children must be created through a process (a renewal through its flow, a version through upload), and the generic create form, with the relationship prefilled, bypassed that process.
+  - **Now.** An authored `actions: []` is the author's choice of no actions on that list, New included. It holds per list and does not depend on the child object's `userActions.create`. Every list that does not author `[]` keeps the host's verdict.
+  - **Unchanged.** A list with no `actions`, or with a non-empty `actions` list, draws New exactly as before. The row affordances (View, Edit, Delete) and the `add` (link existing) button are not governed by this key. No key is added and none is removed.
+  - **What to do.** Nothing for a list that should keep New. A page that authored `actions: []` and still wants New on that list deletes the key.
+
+### Patch Changes
+
+- 80f267d: refactor(ui)!: the renderer runs `@objectstack/sdui-parser`, and `@object-ui/sdui-parser` is deleted (#25712)
+  
+  Clause-②: yes (narrowing: a `type-mismatch` or `member-type-mismatch` the html-tier compile used to grade `warning` is now an `error`, so a page that carried one now refuses to compile instead of rendering with the value dropped)
+  Metadata-protocol: none
+  
+  The renderer and the save gate each ran their own copy of the SDUI parser. The previous change under this card made `@objectstack/sdui-parser` the one body. This change moves every `@object-ui/*` package, the console and the examples onto it, and deletes `ui/packages/sdui-parser`. There is no forwarding release of `@object-ui/sdui-parser`: it leaves the fixed version group, and the 18.1 line on npm is its last.
+  
+  - **Dependencies.** Each package above now depends on `@objectstack/sdui-parser` where it depended on `@object-ui/sdui-parser`. The console's `gen-manifest.ts` moved from the deleted package to `ui/apps/console/scripts/`.
+  - **Severity, the one narrowing.** The renderer's copy graded a `type-mismatch` as an `error` only beside an `enum` arm, and as a `warning` otherwise. The kept rule grades every `type-mismatch` and `member-type-mismatch` an `error`, which is what the save gate already did. So an html-tier page whose attribute does not fit the declared type now shows the compile-error block naming the prop, where it rendered the block with that value dropped. Example: `<list-view columns='["name","amount"]' />` (a string where `columns` is declared `array`). A page the save gate accepted is not affected, because the save gate already refused it.
+  - **Body-dialect messages.** The retired `body` child-list key's `unknown-prop` message now ends `("body" is its retired spelling)`, and its `not-a-container` message drops the `(objectui#6771)` parenthetical.
+  
+  Migration: none for a page the save gate accepted. A page that relied on the warning has a value the declared type does not take: write it in the declared type, for example `columns={['name','amount']}`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the renderer's grading of a value that does not fit its declared type, which the save gate already refused, so no page saved through the gate changes verdict. The repair of a page written around the gate is the author's per diagnostic, which no ledger entry can derive. The other categories are closed on facts: no ADR-0087 id is named or touched (not registered or already-registered); the deleted `@object-ui/sdui-parser` stays published on npm at 18.1 and is deprecated there by the maintainer after 18.2, and no package in this change is unpublished (not unpublished); nothing exported by a package above is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- 054652b: fix(app-shell,react,plugin-detail): on a record under approval, an administrator who is not the approver sees one status line and one override menu instead of five buttons above the title, and Recall is drawn once
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** for a viewer who holds no approver slot but may override, the record page's approval bar is now one line: the request's pending status and who the step waits on, the levers that have no override arm (Reply) as buttons, and one marked menu holding every lever the override flag admits (Override Approve, Override Reject, Override Reassign, and Recall). The approver's own bar is unchanged. Who may override, the override notice each lever shows, and the request each lever sends are unchanged. `DeclaredActionsBar` takes a new optional `foldOverrides` prop for this; a host that does not pass it renders as before.
+  - **`@object-ui/react`:** `InlineEditProvider` and the `InlineEditContext` value gain an optional `approvalRecallDrawnByHost`. It is optional so every existing host keeps its behaviour: absent means `false`, and then the approval band draws its own Recall exactly as before. A host that draws the pending request's declared Recall itself sets it to `true`.
+  - **`@object-ui/plugin-detail`:** the DetailView approval band leaves out its Recall button when the host says it draws one, and keeps its lock badge and tally. The record page sets the signal only while its approval bar actually draws the request's declared Recall, so Recall appears once on the page; before the bar can draw it (definition still loading, or a backend that sends no viewer block) the band keeps its own.
+  
+  What to do: nothing.
+- 411fc00: fix(plugin-detail): the record page's inline-edit pencil shows on keyboard focus, not only on hover
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In read mode, the pencil beside an editable field (in the details body and in the highlights strip) was transparent until the pointer hovered its field. The pencil is a real button, so a keyboard user tabbing through the record landed on a control they could not see, focus ring included. It now also shows while it has keyboard focus, or while anything else in its field does. Hover, the row's hint and double-click to edit are unchanged.
+  
+  What to do: nothing.
+- 4f7e041: fix(app-shell): a related list's "View all" opens the rows the list showed, its own `filter` included, or is not offered
+  
+  Clause-②: yes (an optional member on the exported `ResolveRelatedRecordActionsInput` of `@object-ui/react` widens its public type surface, additive; the seat owes a TIER_DEFAULT review record before the queue; re-declared if the PR changes no exported type)
+  Metadata-protocol: none
+  
+  - **The defect.** A `record:related_list` "View all" link opened the child object's list scoped by the list's relationship alone and dropped the list's own `filter`. The full list was wider than the tab, and on `sys_approval_request` it was empty: the request read gate admits a record reader only on a read that pins both `object_name` and `record_id`, so a reader who saw the requests on a record's Approvals list saw none on "View all".
+  - **The fix.** The destination now carries every condition of the list's `filter`, resolved the way the list resolved it for its own query (`{current_user_id}`, `{record_id}` and the date macros), ANDed with the relationship. When the list route has no spelling for a condition (an `or`, a set or text operator, a boolean comparand), or a condition names a field the viewer cannot read, no link is drawn: the route would drop that condition and open a wider list.
+  - **The type.** `ResolveRelatedRecordActionsInput` gains an optional `filter`, the list's own resolved scope filter. A host implementing `resolve` reads it to scope any destination it builds for the list's rows; a host that ignores it keeps compiling.
+  
+  What to do: nothing. A related list without a `filter` opens the same destination as before.
+- 775a000: fix(plugin-detail): empty related lists fold into one line after the lists with records; `record:path` terminal stages share the rail's width
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Related tab.** Stacked `record:related_list` blocks whose lists have no records no longer take a full row each wherever they were declared. Once every list of the stack has answered, the empty ones fold into one line after the last list, naming each one and keeping its **New** action. A list that gains a record returns to its place. A stack whose lists are all empty, a list on its own, and an empty list that offers more than New (an `add` picker, child toolbar actions) draw exactly as before.
+  - **Path bar.** On the desktop rail every stage now takes an equal share of the width, terminal stages included, and a terminal stage's label wraps instead of being cut. Before, the separated lost group was only as wide as its words, so a short path drew its terminal stages in one narrow cell at the right edge. The mobile row is unchanged.
+  - **`RelatedList`** takes an optional `onEmptyChange(empty)` callback, told whether the list is empty once its read answers (`null` while a read is in flight). Nothing else about the component changes.
+  - No key is added to, removed from or reinterpreted on any block. Nothing to do.
+- d98d3e2: fix(plugin-detail): the record page's read mode wraps a text value instead of cutting it to one line, and a highlighted date keeps its day
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Details body.** A `text` field in a `record:details` section, read mode, was drawn with the grid's one-line cell (one line, an ellipsis), so a case subject read "Data export timing out for large…" in a two-column section with room to spare. It now reads through the text field's own read display and wraps, as a `textarea` already did. The same holds for every type that used the grid's text cell (`code`, `time`, `auto_number`, …). A host that registered its own cell renderer for one of those types keeps it. Grid cells are unchanged and still truncate, with the whole value on hover.
+  - **Highlights strip.** A `date` or `datetime` chip now takes the wide column (16rem floor) that email, phone and URL chips take. On the 9rem column the compact datetime face, and a date in Chinese or Japanese, overran the value box, so the ellipsis landed inside the day ("2026/10/2…"). A chip whose line runs out still truncates, with the whole value as its hover title.
+  
+  What to do: nothing.
+- 0b76a1f: feat(plugin-detail): the record activity timeline folds consecutive updates by one actor into one row with a count
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Before.** Every `sys_activity` update was its own feed row. When a flow, a rollup or a seed updated a record repeatedly, the system's rows buried the people's comments: a demo campaign showed thirteen consecutive "System · Updated Campaign …" rows in its discussion feed.
+  - **Now.** `RecordActivityTimeline` folds a run of adjacent `updated` entries by the same actor (`actor_id`, `null` for the system, and the same display name), each no more than 10 minutes after the one before it, into one row. The row shows the actor, the time of the latest entry, the entry count and the union of the changed fields, by their field labels where the page has the object schema and by machine name otherwise (`Updated Number Sent, Leads, Responses · 13 updates`). A toggle (`aria-expanded`) expands it to every entry.
+  - **Rendering only.** No entry is dropped or merged in the data, and the panel heading still counts every entry. Create, delete, assign, share, comment, completed and milestone rows never fold, and any of them between two updates ends the run. An entry without a summary still folds and still counts. Field names come from `sys_activity.changed_fields`, never from the recorded values.
+  - **`FeedItem` (`@object-ui/types`).** Four new optional members, set by `activityRowToFeedItem`: `activityType` (the row's own `sys_activity.type`), `activityKind` (`metadata.kind`, e.g. `'milestone'`), `actorId` and `changedFields`. A host item without them renders as before and never folds.
+  - **Strings.** `detail.foldedUpdates`, `detail.foldedUpdateCount`, `detail.foldedMoreFields`, `detail.expandFolded` and `detail.collapseFolded`, in all ten packs.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [80f267d]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [934810c]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [dfaad4d]
+- Updated dependencies [c8cb510]
+- Updated dependencies [c7aa9cd]
+- Updated dependencies [326a559]
+- Updated dependencies [054652b]
+- Updated dependencies [9c3097e]
+- Updated dependencies [326a559]
+- Updated dependencies [4f7e041]
+- Updated dependencies [326a559]
+- Updated dependencies [7bbc0b9]
+- Updated dependencies [cc378e9]
+- Updated dependencies [c86c823]
+- Updated dependencies [ef025fe]
+- Updated dependencies [326a559]
+- Updated dependencies [1bbb7bf]
+- Updated dependencies [e843b5b]
+- Updated dependencies [4f48d2b]
+- Updated dependencies [9598405]
+- Updated dependencies [0b76a1f]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [f00cbe3]
+- Updated dependencies [9f16f16]
+- Updated dependencies [b3ed6c8]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [0e7be7e]
+- Updated dependencies [b727956]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [6ea429d]
+- Updated dependencies [4548ba3]
+- Updated dependencies [0489214]
+- Updated dependencies [6a2866a]
+- Updated dependencies [48a9d9d]
+- Updated dependencies [57ab06b]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+  - @object-ui/components@18.2.0
+  - @object-ui/react@18.2.0
+  - @object-ui/i18n@18.2.0
+  - @object-ui/types@18.2.0
+  - @object-ui/core@18.2.0
+  - @object-ui/fields@18.2.0
+  - @object-ui/permissions@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

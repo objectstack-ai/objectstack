@@ -1,5 +1,399 @@
 # @objectstack/runtime
 
+## 18.2.0
+
+### Minor Changes
+
+- f1ddace: feat(automation): a flow declares who may start it — `requiredPermissions` on the flow, checked at every start door
+  
+  A flow can now carry `requiredPermissions: ['capability', …]`, the same value shape as an action's `requiredPermissions` (ADR-0066 D4). Every door that starts a flow by name checks it in one shared check: the trigger route (`POST /automation/:name/trigger`), an action of `type: 'flow'` (REST `POST /actions/:object/:action` and the MCP `run_action` bridge), and a declared endpoint of `type: 'flow'`. A caller that is not the system principal must hold every named capability (granted through a permission set's `systemPermissions`), or the door answers `403 PERMISSION_DENIED` and nothing runs.
+  
+  - **The action door inherits the flow's list.** An action that starts a gated flow is gated by the flow even when the action declares nothing, so the app states it once. An action that declares its own list keeps its own gate, which answers first, so a caller at that door needs both lists.
+  - **A sub-flow is not a door.** A parent flow's `subflow` node starts its child through the engine and is not checked again; the parent's own start was.
+  - **The elevated self-triggered rule still answers first.** Holding the capabilities does not let a member start a `runAs: 'system'` flow of type `autolaunched`, `record_change` or `schedule`.
+  - **Studio's flow form** offers the key (a tag list beside `runAs`).
+  - **`os validate`** judges the key's values the way it judges an action's: a capability no built-in, `defineCapability` or `systemPermissions` grant provides is reported as `capability-reference-unknown` at `flows[i].requiredPermissions` (`os explain capability-reference-unknown`).
+  
+  This is how to say who may start an elevated (`runAs: 'system'`) `screen` or `api` flow. An app that gates such a flow with a `decision` node on `current_user.positions` can move that gate to the flow's `requiredPermissions`; the positions array is not an authorization input. A flow that declares no `requiredPermissions` starts exactly as before.
+  
+  Clause-②: yes (widening) — a flow may declare a new key, `requiredPermissions`; a flow that does not declare it is admitted at every door exactly as before.
+  
+  Metadata-protocol: added (`FlowSchema.requiredPermissions`)
+- f00e8d5: feat: `demoStaff` — an application declares the demo accounts its seed data is dealt to, and the development boot creates them
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A stack may now declare `demoStaff: [{ name, email, position?, permissionSets? }]`. On a local development boot (`os dev`), `@objectstack/plugin-auth` creates each entry right after the development admin, through the same sign-up pipeline, with the development seed password (`os dev --admin-password`, default `admin123`); assigns the declared position and permission sets in the Default Organization (an account the membership policy left outside it is reported and gets none); and the application's seed then runs, so a seed row naming one of these people (`owner_id: 'Legal Counsel 1'`) resolves on the first boot. Idempotent: an address that already has an account is left exactly as it is, and only its missing assignments are added.
+  
+  Development only. `os build` leaves the key out of the artifact (`objectstack.json`), so a deployment booted from one has nothing to provision. Every other boot creates nothing and says why, with an ADR-0112 code: a boot that is not `NODE_ENV=development`, or a migrate-and-exit run (`PERMISSION_DENIED`, logged at `info` — the intended outcome there); and, on a development boot, logged at `warn` because the developer loses the accounts: a walled tenancy posture or an auth base URL that is not a loopback address (`PERMISSION_DENIED`), a database where nothing but a demo account could sign in, so a demo account would be promoted to platform admin (`PRECONDITION_REQUIRED`), or a credential store that could not be read (`SERVICE_UNAVAILABLE`).
+  
+  `defineStack` refuses an entry that names a position or permission set the stack does not declare (a platform set such as `admin_full_access` is never one), and two entries with one name or one address (`STACK_CROSS_REFERENCE_INVALID`).
+  
+  `@objectstack/runtime`: when the boot will create demo accounts, `AppPlugin` runs its inline seed at `kernel:bootstrapped` instead of inside `start()`. The seed source is declared as before, so the settlement tally and `app:seeded` behave as they do for a seed that overran its budget.
+  
+  What to do: nothing. A stack that declares no `demoStaff` boots, seeds and builds exactly as before. An application that creates its demo accounts with its own script can declare them here and delete the script.
+- 2163e80: feat(spec,metadata-protocol,service-storage,runtime,cli)!: a seed record can carry a file the package ships, `seedFile(path)`, and a file field's id that names no stored file is refused
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped. The narrowing is a seed load refusing a value it used to write: an id-shaped string in a file field that names no stored file. There is nothing for `objectstack migrate meta` to rewrite and no tombstone; the fix is the author's choice of the file the field should hold. -->
+  
+  A `file`, `image`, `avatar`, `video` or `audio` field stores the id of a stored file, and only an upload made one, so a seed could not fill a required file field at all. A seed record now names the file by the path the package ships it at:
+  
+  ```ts
+  import { defineSeed, seedFile } from '@objectstack/spec/data';
+  
+  defineSeed(ContractVersion, {
+    externalId: 'code',
+    records: [
+      { code: 'NDA-001-V1', file: seedFile('fixtures/nda-v1.pdf') },
+      { code: 'NDA-002-V1', file: seedFile('fixtures/nda-v2', { name: 'NDA v2.pdf', contentType: 'application/pdf' }) },
+    ],
+  });
+  ```
+  
+  - **The path** is relative to the directory holding `objectstack.config.ts`, uses `/`, and stays inside it: an absolute path, a drive letter, a `\`, or an empty, `.` or `..` segment is refused at parse. A `multiple: true` file field takes an array of `seedFile(...)` values. `defineSeed` refuses `seedFile(...)` in a field that does not store a file.
+  - **`os build` / `os compile`** reads each referenced file and writes its bytes into the dataset's new `files` map (`{ contentType, size, sha256, data }`, base64), so the compiled artifact carries them to every boot that loads it: `os dev`, `os serve`, a published package, an artifact URL. A path that names no file, or a file whose type is neither named with `contentType` nor known by its extension, fails the build, and `os validate` refuses the same paths. `os serve` / `os dev` booting a config rather than an artifact reads the files the same way, so both boots seed the same files.
+  - **The seed loader** stores the bytes through the new `field-files` service (`FIELD_FILE_SERVICE`, `IFieldFileService`, registered by `@objectstack/service-storage`), writes the file's id into the field, and makes the written record the file's owner, the (object, record, field) ownership an upload gets. Each row gets a file of its own. A replay that finds the row holding a file stored from the same path with the same bytes, name and type keeps it, so a restart does not store a new file for an unchanged fixture. A file stays `pending` until its row lands, so a file whose row is refused is reclaimed by the pending-upload retention.
+  - **Refused, by row, before the row is written**: a reference whose bytes the dataset does not carry, bytes that do not match their recorded size and SHA-256, a load with no `field-files` service, a field mixing `seedFile(...)` with other values, and several `seedFile(...)` values in a one-file field. Each is counted, reported in the load's errors and logged at `error`.
+  - **The inline boot seed** of an app whose datasets carry seed files runs at `kernel:bootstrapped` (as one with `demoStaff` already does), once the storage service has read its settings, so the files land in the store the deployment serves from.
+  - `SeedLoaderService` takes an optional fourth argument, `{ getFieldFiles }`; every platform caller passes the kernel's `field-files` service.
+  
+  **BREAKING** (a seed-load narrowing). A seed record whose file field holds an id-shaped string (letters, digits, `_` and `-`, at most 64 characters) that names no stored file in the row's organization is now refused, by row, with an error naming the field and the value. Before, it was written as given, and the field then read as holding no file. An external URL or an inline value is not an id and is written as before; so is any value on a deployment without `@objectstack/service-storage`.
+  
+  **What to do.** If a seed load now reports `… holds '<value>', which names no stored file`, replace the value with the file the field should hold, `seedFile('<path in the package>')`, or remove it.
+
+### Patch Changes
+
+- 0dc4b5d: fix(rest): an unknown resource answers `404 RESOURCE_NOT_FOUND` at the package draft and commit-trail doors, the flow runs list and delete, and the datasource by-name write doors, as their read siblings already did
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the HTTP answer eight REST doors give for a resource name that does not exist. -->
+  
+  **BREAKING** (a served-set narrowing) for a caller that sends one of these doors a package id, flow name or datasource name that does not exist. Five of them used to answer such a request `200` with an empty result. All eight now refuse it.
+  
+  Eight doors answered a request about a resource that does not exist as if it were an empty or a bad request, while their sibling doors answered `404` for the same name. An SDK or AI caller could not tell "no such thing" from "nothing yet". Each now answers `404 RESOURCE_NOT_FOUND`, with the status, code and message its sibling gives for the same name. The answer before and after, per door:
+  
+  - `POST /api/v1/packages/:id/publish-drafts`, for a package the registry does not hold: `200 { success: false, outcome: 'nothing_to_publish' }` → `404 RESOURCE_NOT_FOUND "Package '<id>' not found"`. That is the answer of `GET /api/v1/packages/:id`.
+  - `POST /api/v1/packages/:id/discard-drafts`: `200 { success: true, discardedCount: 0 }` → the same `404`.
+  - `GET /api/v1/packages/:id/commits`: `200 { commits: [] }` → the same `404`.
+  - `GET /api/v1/automation/:name/runs`, for a flow the engine does not hold: `200 { runs: [], hasMore: false }` → `404 RESOURCE_NOT_FOUND "Flow '<name>' not found"`. That is the answer of `POST /api/v1/automation/:name/trigger`.
+  - `DELETE /api/v1/automation/:name`, for a flow that neither the engine nor the metadata store holds: `200 { name, deleted: true }` → the same `404`.
+  - `PATCH /api/v1/datasources/:name`, for a datasource that does not exist: `400 DATASOURCE_ADMIN_ERROR "Datasource '<name>' not found."` → `404 RESOURCE_NOT_FOUND 'Datasource "<name>" does not exist.'`. That is the answer of `GET /api/v1/datasources/:name`, word for word.
+  - `DELETE /api/v1/datasources/:name`: the same `400` → the same `404`.
+  - `POST /api/v1/datasources/:name/migrate-credential`: the same `400` → the same `404`.
+  
+  Unchanged: a resource that exists keeps its answer. An empty page for a flow that has not run, `nothing_to_publish` for a package with nothing pending, and `400 DATASOURCE_ADMIN_ERROR` for a code-defined datasource all stay as they were. Drafts or commits the store holds for an id the registry no longer lists are still published, discarded or listed. A stored flow the engine does not hold is still deleted. A failed ADR-0045 visibility flip still answers `200` with its `unhideError`.
+  
+  **What changes for you.** `ObjectStackClient` already throws on any non-2xx answer. `packages.publishDrafts`, `packages.discardDrafts`, `packages.listCommits`, `automation.listRuns` and `automation.delete` now reject with the not-found message for an unknown id, instead of resolving an empty result. Treat that rejection as "no such resource". An embedder calling `DatasourceAdminService.updateDatasource`, `removeDatasource` or `migrateCredential` directly now gets an error carrying `code: 'RESOURCE_NOT_FOUND'` and `status: 404`. Its message is now `Datasource "<name>" does not exist.`.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- 073f08b: fix(security): a hook that runs as system and an action body are refused writes to position holdings, permission-set grants, invitations and memberships, as a system flow already is
+  
+  Clause-②: no (narrowing: app-authored hook and action-script writes to the four identity objects are refused at run time, as #25251 did for flows; the seat runs the contract review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to a hook or action body's elevated write to four platform objects; the save-time refusal and its semantic entry are the spec half of the same card. -->
+  
+  **BREAKING** (a served-set narrowing) for app-authored automation that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` under system elevation. A census of the hooks and action bodies in this repository and in HotCRM found none that does.
+  
+  A `runAs: 'system'` flow has been refused these writes since 18.1. Two other kinds of app-authored automation run with the same elevation and were not: a hook that declares `runAs: 'system'`, and an action body (`type: 'script'`), which always runs elevated. Their writes skipped the delegated-administration gate (so a grant carried no `granted_by`) and the invitation door's placement and role-cap checks. Both are now refused the same way:
+  
+  - An insert, update, delete, transfer, restore or purge of one of the four objects, from a `runAs: 'system'` hook (a sandboxed body or an in-process handler) or from an action body (through `ctx.api` or `ctx.engine`), answers `403 PERMISSION_DENIED`. Nothing is written. A hook's refusal aborts the triggering write under the default `onError: 'abort'`.
+  - The message names the source and the fix. For position holdings and permission-set grants: set the hook's `runAs` to `'user'`, so the delegated-administration gate judges the user the hook acts for and records them as `granted_by`. An action body has no `runAs`, so its grant moves to a `runAs: 'user'` flow, which an action of type `flow` runs as the invoking user. For invitations and memberships: use the organization endpoints.
+  
+  Unchanged: reads of the four objects, and writes to every other object, from the same hook or body. A hook under `runAs: 'user'`, which the ordinary gates judge as its user. The platform's own writers (better-auth and its reconciliation, invitation placement, the seeders, any `sudo()`), which carry no app-automation mark. A system flow's refusal, word for word.
+  
+  **What changes for you.** A hook or action body that grants a position or a permission set under elevation now fails. Declare `runAs: 'user'` on the hook, or move an action body's grant into a `runAs: 'user'` flow. Invitations and memberships change through `POST /api/v1/auth/organization/invite-member`, `cancel-invitation`, `update-member-role` and `remove-member`.
+  
+  `@objectstack/core` exports the mark: `APP_AUTOMATION_ELEVATION`, `markAppAutomationElevation`, `appAutomationElevationOf` and `carryAppAutomationElevation`.
+- bb85f5f: fix(mcp,runtime)!: the stateless `/api/v1/mcp` surface answers `GET` and `DELETE` with `405` and `Allow: POST`, so an MCP client stops re-opening a GET stream that ends at once
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A transport verb answer on the MCP HTTP surface: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the 405 body is the MCP SDK transport's own. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the MCP HTTP transport (`MCPServerRuntime.handleHttpRequest`, `@objectstack/mcp`), and on the standalone server's `/api/v1/mcp` route (`createDispatcherPlugin`, `@objectstack/runtime`).
+  
+  - **Before.** The transport is stateless (no session id) and closes its per-request server when the request ends. A `GET` still reached the SDK's stream handler, which answered `200 text/event-stream` and then lost the stream when the server closed. An MCP client reads a GET stream that ends as a dropped connection and opens another one: claude-code re-opened it 2–3 times a second for as long as a session stayed connected. A `DELETE` answered `200` and ended nothing, because no session exists. Every other verb answered `405` with `Allow: GET, POST, DELETE`.
+  - **Now.** Every verb but `POST` that reaches the transport (`OPTIONS` with CORS off; with CORS on the CORS middleware's `204` answers first on both doors) answers `405` with `Allow: POST` and the JSON-RPC body `{"jsonrpc":"2.0","error":{"code":-32000,"message":"Method not allowed."},"id":null}`, before a server is built. This is the Streamable HTTP transport's answer for a server that offers no GET stream and does not end sessions. The MCP SDK client treats a `405` on GET as "no stream offered" and does not retry it.
+  - **The standalone server.** `createDispatcherPlugin` mounts `/api/v1/mcp` for `GET`, `POST` and `DELETE`, and now also declares it a path whose domain decides every verb (the declaration `/mcp/skill` and `/keys` already carry). Before, a `PUT`, a `PATCH` or an `OPTIONS` with CORS off matched no route there and the HTTP adapter answered it itself: `405` with `Allow: DELETE, GET, HEAD, POST` and a `METHOD_NOT_ALLOWED` envelope, to an anonymous caller too. Now those verbs reach the dispatcher like the mounted ones: an anonymous caller gets `401`, a signed-in one the transport's `405` with `Allow: POST`. A `createHonoApp` host already handed every verb to the dispatcher, so both doors now answer every verb alike.
+  - **Unchanged.** `POST` (JSON-RPC: `initialize`, `tools/list`, `tools/call`, …) answers exactly as before. An anonymous caller is refused `401` before any verb answer, on every verb and on both doors.
+  - **Who sees it.** A client that opens the GET stream on `/api/v1/mcp` now gets `405` instead of a `200` stream that ends at once. Nothing was ever sent on that stream. On the standalone server, an anonymous `PUT`, `PATCH` or `OPTIONS` (CORS off; with CORS on the CORS middleware's `204` answers `OPTIONS` first on both doors) on `/api/v1/mcp` now gets `401` instead of `405`.
+  
+  **The remedy.** None needed for an MCP client: it stops opening the stream. A probe or health check that read `GET /api/v1/mcp` as `200` should send a `POST initialize` instead.
+- 1ac2bb5: perf(metadata-protocol,runtime): served metadata lists parse each unchanged document once, and the dispatcher's `/meta/app` reads objects on the execution face
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Diagnostics verdicts are memoized.** `computeMetadataDiagnostics` remembers a verdict per schema object and per document content (a SHA-256 of an encoding that keeps apart everything the parse keeps apart), so a served list of unchanged documents parses each one once instead of on every read. A replaced type schema starts from nothing, each caller gets its own copy, and a document with no faithful key is parsed every time as before. The served bytes are unchanged. Measured on the showcase app (108 objects, local, main-thread CPU per request): `GET /meta/object` 85.75 ms → 37 ms.
+  - **The dispatcher's `/meta/app`** (the `${prefix}/*` catch-all) reads each object's `enable` for its nav prune through `getMetaItemsForExecution` where the protocol has it, as `RestServer` does, and `getMetaItems` otherwise.
+  - **No public surface moves.** The built `dist/index.d.ts` of both packages is byte-identical at `cb0a2fcf` and at this head.
+- 69fa23d: fix(runtime): `GET /i18n/translations/:locale` carries an `ETag` and `Cache-Control: private, no-cache`, and a matching `If-None-Match` is answered `304`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The translation bundle (both spellings, `/i18n/translations/:locale` and `/i18n/translations?locale=`) answered every read with the whole locale bundle and neither header, so a browser re-downloaded it on every console open: 80–88 KB compressed on a hosted tenant.
+  - **Now.** The `200` carries a weak `ETag`, a SHA-256 of the exact envelope served (`locale`, `requestedLocale` and `translations`), computed on every read, and `Cache-Control: private, no-cache`. A request whose `If-None-Match` names that representation (a strong or weak tag, a comma list, or `*`) is answered `304` with no body and the same two headers. A bundle that changed since the validator was issued is served in full under a new validator.
+  - **Unchanged.** The `200` body is byte-for-byte the envelope it was. An anonymous caller is still refused `401` before any validator is read, and refusals carry neither header. `/i18n/locales` and `/i18n/labels/*` are untouched.
+- 3446d43: feat(install): installing a package checks its declared `dependencies` first — every entry must name a package installed at a version inside its range, or one the same artifact delivers, or the install is refused `422 DEPENDENCY_MISSING` (ADR-0141 D2)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the answer the three install doors give a package whose declared dependencies the target environment does not satisfy. -->
+  
+  **BREAKING** (an install-acceptance narrowing) for a package whose manifest declares a `dependencies` entry the target environment does not satisfy. The three install doors — `POST /api/v1/packages` (both its protocol arm and its no-protocol fallback), the protocol's `installPackage` called in-process, and `POST /api/v1/marketplace/install-local` — used to install such a package and let the gap surface at its first cross-app save. They now refuse the whole install, before anything is registered, written or synced, with `422 DEPENDENCY_MISSING`.
+  
+  An entry `(id, range)` is satisfied when `id` is installed at a `manifest.version` inside `range`, or is delivered by the same artifact (presence only: the packages of one artifact are one tested unit). Ranges are read at exact-version granularity in npm style: `^`, `~`, `>=`, `>`, `<=`, `<`, `=`, an exact version, `x` / `*` wildcards, hyphen ranges, space- or comma-joined intersections and `||` unions. A range outside that grammar (`latest` included) or an installed version that is not `MAJOR.MINOR.PATCH` does not satisfy — the check fails closed.
+  
+  The refusal names every unmet entry in one answer: `error.details.issues` carries one `AppCompatibilityCheck` issue per entry (`severity: 'error'`, `category: 'dependency_missing'`), and `error.details.unmet` the facts per entry — `packageId`, `dependency`, `range`, `found` (`absent`, `out-of-range`, `unreadable-range`, `unreadable-version` or `unreadable-declaration`) and the `installedVersion` when one is installed.
+  
+  Unchanged: a package that declares no dependencies installs exactly as before; a boot never runs the check (what an install admitted stays admitted); `PATCH /api/v1/packages/:id` still applies a `dependencies` edit as given.
+  
+  **What changes for you.** Install a package's dependencies, at versions inside its declared ranges, before the package itself; the refusal says which and at what range. `@objectstack/metadata-core` exports the check (`checkDeclaredDependencies`, `assertDeclaredDependencies`), its error (`DependencyMissingError`, `isDependencyMissingError`, `dependencyMissingAnswer`) and the range reader (`rangeAdmitsVersion`, `readExactVersion`, `DEPENDENCY_RANGE_GRAMMAR`). `DEPENDENCY_MISSING` is registered in the error-code ledger under `@objectstack/metadata-core`.
+- 9ca36b1: fix(runtime): the automation run doors answer another flow's run as an unknown one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Every `/automation/:name/runs/:runId/*` door read the run by `runId` alone, so the `:name` segment was accepted and ignored. `POST /automation/OTHER_FLOW/runs/RUNID/resume` completed another flow's paused run, `GET /automation/OTHER_FLOW/runs/RUNID` and `…/screen` served it, and `…/cancel` and `…/restore-suspension` acted on it.
+  - **Now.** A flow name that does not own the run, whether it exists or not, is answered exactly as the door answers a run nobody holds:
+    - `POST …/resume`: `404 RUN_NOT_FOUND`, `No suspended run 'RUNID'`, the engine's own unknown-run answer.
+    - `GET …/runs/:runId`: `404 RUN_NOT_FOUND`, `Execution not found`. An unknown run now carries the same code (it was the status-derived `RESOURCE_NOT_FOUND`), so the two doors onto one run agree it is not there.
+    - `GET …/screen`: `404 No pending screen for run`, unchanged.
+    - `POST …/cancel`: `200 { cancelled: false }` with the not-found notice.
+    - `POST …/restore-suspension`: `404`, `refusal: 'RUN_NOT_FOUND'`, `No run 'RUNID' is known`.
+  - **Nothing is consumed.** The check runs after the doors' existing gates and before the verb, so a mismatched resume, cancel or restore leaves the run as it was. Who may act is unchanged.
+  - **Owner.** The run's `flowName` from `getRun`, else the suspended-run list. A service that can name neither keeps the previous answer.
+  - **Ledger.** `RUN_NOT_FOUND` is now registered under `@objectstack/runtime` too, since the door stamps it before the engine is asked.
+- e12d3f3: fix(runtime)!: the flow trigger door refuses a `params` that is not a JSON object, instead of running the flow with an empty bag
+  
+  `POST /api/v1/automation/:name/trigger`, its legacy spelling `POST /api/v1/automation/trigger/:name` (the route `client.automation.trigger()` calls), and every declared `type: 'flow'` API endpoint build the flow's context the same way. That build read `params` only when it was a truthy object. A string such as `{"params":"oops"}` became an empty params bag, and the flow ran with no inputs: it failed later with a misleading `400 FLOW_FAILED` "Unknown variable", or succeeded doing the wrong thing. An array was spread into an index-keyed bag (`{ "0": 1, "1": 2 }`). A falsy value (`null`, `0`, `false`, `""`) was read as an absent `params`, so the body's other top-level keys were forwarded as params instead.
+  
+  These doors now answer `400 VALIDATION_FAILED` with one `fields[]` entry, `{ field: 'params', code: 'invalid_type' }`, whose message names the type received. The refusal comes before the flow is dispatched, so no run starts and no run row is written. It is the refusal the resume door already gives a non-object `inputs`, `variables` or `output`, and both doors now ask the question through one check, so their wording is the same.
+  
+  Unchanged: an object `params` (an empty one included) builds the same bag as before, a body with no `params` key still forwards its other top-level keys as params, and an empty body still runs with an empty bag. An unknown flow still answers `404`, and a caller the flow refuses still answers `403`, before the body is judged.
+  
+  Clause-②: no (narrowing) — the trigger doors refuse request shapes they used to dispatch: a `params` that is a string, number, boolean, array or `null`. Nothing is widened.
+  
+  Metadata-protocol: none (an HTTP request body's handling at the trigger doors; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the flow trigger doors handle a request body whose `params` is not a JSON object: it is refused instead of dropped. The remedy is a request edit (send `params` as an object, or leave it out), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that sent `params` as something other than an object and relied on the flow running anyway, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** A non-object `params` was dropped (or, for `null` and the other falsy values, replaced by the body's other keys), and the flow was dispatched.
+  - **Now.** The request is refused with `400 VALIDATION_FAILED` naming `params`, and nothing runs.
+  - **Fix.** Send `params` as an object of flow input names to values, for example `{"params":{"ownerId":"u1"}}`, or leave the key out.
+- 1ee1d1b: feat(runtime): a hook body reads `ctx.provenance`, so a guard that tells a flow's write from a user's own write ships as metadata
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The sandboxed hook body now carries the declared `HookContext.provenance`, the same server-stamped write provenance an in-process handler reads. On a write from a flow data node, `ctx.provenance.flowRunId` is that flow run's id. `attributedUserId` and `performedByClientId` ride along when the engine stamps them. Each member is a string or absent, and `ctx.provenance` itself is absent on a write with no origin, such as a plain REST write. Read it as `ctx.provenance?.flowRunId`. The object is frozen in the VM. It is built from the server-side execution context, so a payload field named `provenance` stays on `ctx.input` and never reaches it.
+  
+  The widening is on the published type surface. `ScriptContext`, exported from the `@objectstack/runtime` barrel, gains one optional member: `provenance?: { flowRunId?: string; attributedUserId?: string; performedByClientId?: string }`. Measured on `dist/index.d.ts` before and after the change:
+  - the file grows from 338119 to 339467 bytes;
+  - the export list is byte-identical, with the same 184 names;
+  - the only declaration that changes is that one member and its doc comment.
+  
+  Nothing to migrate: the member is optional, and a `ScriptRunner` that ignores it behaves exactly as before.
+- 3821ec8: fix(runtime)!: the action door and the flow trigger door refuse a body or a `params` that is not a JSON object, instead of running with an empty bag
+  
+  `POST /api/v1/actions/:object/:action` read its body, and then `params`, only when each was a truthy object. A string such as `{"params":"oops"}` became an empty params bag and the action ran anyway, answering `200` and starting a run the same as `{"params":{}}`; an array `params` was handed on as the bag itself; and a JSON string or array body ran the action with an empty bag too.
+  
+  `POST /api/v1/automation/:name/trigger`, its legacy spelling `POST /api/v1/automation/trigger/:name`, and every declared `type: 'flow'` API endpoint read the request body only when it was a truthy object. A JSON string body dispatched the flow with an empty bag, so it failed later with a misleading `400 FLOW_FAILED` "Unknown variable" or ran doing the wrong thing, and an array body forwarded its indices as params.
+  
+  Both now answer `400 VALIDATION_FAILED` with one `fields[]` entry, `{ field: '(body)', code: 'invalid_type' }` for a body and `{ field: 'params', code: 'invalid_type' }` for a `params`, whose message names the type received. The refusal comes before anything is dispatched, so no run starts and no run row is written. It is the refusal the resume door already gives a non-object body, and the three doors now ask the question through one check, so their answers have the same shape; the resume door's `fields[]` message now also names the type received.
+  
+  Unchanged: an object `params` (an empty one included) reaches the action as before, and an action call with no body, a JSON `null` body or no `params` key still runs with an empty bag. A trigger with no body, or a JSON `null` body, still runs with an empty bag. An unknown action or flow still answers `404`, and a caller the action or flow refuses still answers `403`, before the body is judged.
+  
+  Clause-②: no (narrowing) — the action and trigger doors refuse a body that is a string, number, boolean or array, and the action door refuses a `params` that is a string, number, boolean, array or `null`. Nothing is widened.
+  
+  Metadata-protocol: none (an HTTP request body's handling at the action and trigger doors; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the action and flow trigger doors handle a request whose body or `params` is not a JSON object: it is refused instead of dropped. The remedy is a request edit (send `params` or the body as an object, or leave it out), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that sent the action door's body or `params`, or the trigger door's body, as something other than an object and relied on the call running anyway, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** A non-object body or `params` on the action door, or a non-object trigger body, was dropped (an array trigger body was forwarded as index-keyed params), and the action or flow was dispatched.
+  - **Now.** The request is refused with `400 VALIDATION_FAILED` naming `params` or `(body)`, and nothing runs.
+  - **Fix.** Send `params` as an object of input names to values, for example `{"params":{"note":"x"}}`, send the action body as an object (`{"recordId":"…","params":{…}}`), and send a trigger body as an object (`{"params":{"ownerId":"u1"}}` or a flat `{"ownerId":"u1"}`), or leave any of them out.
+- 1af2cea: fix(runtime,types)!: a NOT NULL refusal on a column no field declares answers `RestServer`'s `400 VALIDATION_FAILED` body at the dispatcher `/data` and actions doors too
+  
+  Since #24768 the engine refuses a NOT NULL violation on a field the object declares as its own `ValidationError`, which every door answers alike. A column no field declares (drift: the field left the metadata and its NOT NULL column stayed in the table) still leaves the engine as the driver threw it, and the doors answered that refusal three ways. `RestServer`'s `POST /data/:object` answered `mapDataError`'s NOT NULL arm: `400 VALIDATION_FAILED`, the column's sentence, its `required` field entry and the drift `hint`. The runtime dispatcher's `POST /data/:object` let it reach the Hono exits, which answered `500 INTERNAL_ERROR`. The actions door answered `400 VALIDATION_ERROR` with the driver's text (the physical table and column) as the message and the driver's code as `declaredCode`.
+  
+  Clause-②: yes (widening: `@objectstack/types` adds the export `driverNotNullRefusalAnswer`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the status, code and body two HTTP doors answer for one refusal, a driver NOT NULL refusal on an undeclared column: every write that was refused is still refused and every write that was served is still served. The remedy is on the consumer's side, reading `code` and `details`; never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/types`.** New export `driverNotNullRefusalAnswer(error, object?)`: `mapDataError`'s NOT NULL arm answer (`{ status, body }`) when classification answers the error with that arm, `undefined` for every other answer. Every arm ahead of it (a declared status, a sandboxed body's throw, a unique violation, an unknown column, the record validator's `ValidationError`) still decides first. `mapDataError`'s own answers are unchanged.
+  - **`@objectstack/runtime`.** The dispatcher's `/data/:object` routes answer that refusal themselves with `400`, `error.code: 'VALIDATION_FAILED'`, the column's sentence as `error.message`, and `fields`, `hint` and `object` in `error.details` (was a thrown `500 INTERNAL_ERROR`). The actions door answers the same body (was `400 VALIDATION_ERROR` with the driver's text and `declaredCode`). The driver's text and code no longer reach either wire.
+  - A `PATCH` cannot reach such a column: naming it is refused before the driver as an undeclared field (`400 INVALID_FIELD`), on both `/data` doors alike, as before.
+  - The answers for a field the object declares are unchanged.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 1d3ad39: fix: a sandboxed hook's or action's business refusal is logged once, at info, without a stack
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a sandboxed hook or action body refuses on purpose, for example a state-machine hook answered as `422 INVALID_STATE`, the server log used to get two `ERROR [BodyRunner]` lines with full stacks: one at the hook and one again at the action that triggered it. An operator watching for errors could not tell a refused click from a crashed hook.
+  
+  Now a throw that the HTTP doors answer in the 4xx band writes one `info` line, `[BodyRunner] sandboxed hook refused` (or `action refused`), naming the hook or action, its declared `code` and the status, with no stack. The action does not repeat a refusal its hook already logged. A throw that becomes a 5xx (a crash, a denied capability, a declared 5xx) still logs `error` with its stack, at both the hook and the action as before.
+  
+  The refusal-or-fault split is read from the same error table the HTTP doors answer with (`mapDataError`), so the log level follows the status the caller saw. The HTTP status, body and message of every refusal are unchanged, and every throw is still rethrown.
+- af13616: fix(spec,service-settings): the AI 501 remedy and the AI / knowledge settings hints name the hosted product "ObjectOS Cloud"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ObjectOS is the product, in Community, Cloud and Enterprise editions; ObjectStack is the protocol, SDK, CLI and framework. Three runtime sentences still named the hosted product by its retired name:
+  
+  - **`@objectstack/spec`.** `REMEDY_DETAIL['ai']` — the message every `/ai/*` route's 501 body carries and `/discovery` reports as `services.ai.message` on an open-edition boot — now reads "Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework".
+  - **`@objectstack/service-settings`.** The AI live-call hint ("realized only by an ObjectOS Cloud tier") and the knowledge `turso` adapter's "Test connection" hint ("built in the ObjectOS Cloud monorepo") on Settings → AI & Embedder.
+  - **`@objectstack/runtime`.** A doc comment on the kernel-resolver seam; no behaviour change.
+  
+  What to do: a client that string-matches the old 501 / discovery message updates the product name in its expected text. Nothing else changes: package names, `OS_CLOUD_*` env vars, `~/.objectstack/cloud.json` and the `os cloud …` commands keep their names.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [0dc4b5d]
+- Updated dependencies [50af6fa]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [431f065]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [e2b40a2]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [f123f75]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [e44a1ff]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [6a6ebff]
+- Updated dependencies [07586f5]
+- Updated dependencies [43edf90]
+- Updated dependencies [5874d25]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [a4eae06]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [d284ff3]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [7a04ba2]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [1d2a246]
+- Updated dependencies [c8cb510]
+- Updated dependencies [e3e936e]
+- Updated dependencies [f6c6193]
+- Updated dependencies [83a26c3]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [07bdecd]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b7b04e5]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [88f22e0]
+- Updated dependencies [17f8217]
+- Updated dependencies [5cf1b9d]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/plugin-security@18.2.0
+  - @objectstack/core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/rest@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/driver-turso@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/formula@18.2.0
+  - @objectstack/driver-memory@18.2.0
+  - @objectstack/driver-sqlite-wasm@18.2.0
+  - @objectstack/observability@18.2.0
+  - @objectstack/service-cluster@18.2.0
+  - @objectstack/service-i18n@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

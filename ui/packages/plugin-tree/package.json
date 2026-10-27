@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-tree",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Tree / tree-grid visualization plugin for Object UI",
