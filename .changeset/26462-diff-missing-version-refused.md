@@ -4,7 +4,7 @@
 
 fix(metadata-protocol)!: `GET /api/v1/meta/:type/:name/diff` refuses a `from` or `to` version that has no history row with 404 `VERSION_NOT_FOUND`, as the rollback door already does, instead of answering 200 "no change" or "everything removed"
 
-Clause-②: yes (narrowing) — `diffMetaItem` (and the REST `/diff` door that forwards to it) refuses a named version with no history row of the item, which it answered 200 before. The default range and every version that has a row answer exactly as before.
+Clause-②: no (narrowing) — `diffMetaItem` (and the REST `/diff` door that forwards to it) refuses a named version with no history row of the item, which it answered 200 before. The default range and every version that has a row answer exactly as before.
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) A read door's answer to a version that does not exist: no key of any metadata schema is added, removed, renamed or re-shaped, no export or type changes, and the refusal is the existing VERSION_NOT_FOUND code the rollback door answers. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
