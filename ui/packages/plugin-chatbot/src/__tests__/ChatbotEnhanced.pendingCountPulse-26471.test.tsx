@@ -21,7 +21,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { ChatbotEnhanced, type ChatbotEnhancedMessage } from '../ChatbotEnhanced';
 import { detectDraftResult } from '../mapMessages';
 
@@ -81,6 +81,16 @@ function chat(pulse: ReturnType<typeof makePulse>, fetchPendingDraftCount: (pkg:
   );
 }
 
+/**
+ * The button draws with the card, before the first count read answers; the
+ * count lands on a later render. `findByTestId` resolves on the button alone,
+ * so a one-shot text check after it races that render (objectstack#26647):
+ * wait for the render that carries the count.
+ */
+async function expectPublishButtonText(text: string) {
+  await waitFor(() => expect(screen.getByTestId('draft-publish')).toHaveTextContent(text));
+}
+
 describe('objectstack#26471 — the draft card re-reads its pending count on the metadata pulse', () => {
   it('发布 (2), then a publish elsewhere fires the pulse and the card stops offering 发布', async () => {
     const pulse = makePulse();
@@ -88,7 +98,7 @@ describe('objectstack#26471 — the draft card re-reads its pending count on the
     const fetchPendingDraftCount = vi.fn(async (_pkg: string) => pending);
     const { rerender } = render(chat(pulse, fetchPendingDraftCount));
 
-    expect(await screen.findByTestId('draft-publish')).toHaveTextContent('发布 (2)');
+    await expectPublishButtonText('发布 (2)');
     expect(fetchPendingDraftCount).toHaveBeenCalledTimes(1);
     expect(fetchPendingDraftCount).toHaveBeenCalledWith(PACKAGE_ID);
 
@@ -113,7 +123,7 @@ describe('objectstack#26471 — the draft card re-reads its pending count on the
     const fetchPendingDraftCount = vi.fn(async (_pkg: string) => 2);
     const { unmount } = render(chat(pulse, fetchPendingDraftCount));
 
-    expect(await screen.findByTestId('draft-publish')).toHaveTextContent('发布 (2)');
+    await expectPublishButtonText('发布 (2)');
     expect(pulse.listeners.size).toBe(1);
 
     unmount();

@@ -300,3 +300,27 @@ describe('#12194 — the refusal is scoped to the doors that MINT or PROMOTE', (
         ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
     });
 });
+
+describe('#26128 — a translation item is named in snake_case, the BCP-47 tag goes in `locale`', () => {
+    // `TranslationItemSchema.name` once called the locale tag (`zh-CN`) the
+    // conventional item name, while this door refused it. The describe moved;
+    // the door did not. Both halves are pinned here so they cannot drift again.
+    const TRANSLATION_BODY = { locale: 'zh-CN', label: '简体中文' };
+
+    it('refuses a tag-shaped item name (`zh-CN`) with the grammar refusal and persists nothing', async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'translation', name: 'zh-CN', item: { ...TRANSLATION_BODY, name: 'zh-CN' } }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400, message: expect.stringMatching(GRAMMAR_MESSAGE) });
+        expect(metaRows(rows)).toHaveLength(0);
+    });
+
+    it('accepts the snake_case name (`zh_cn`) with `locale: \'zh-CN\'`', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await protocol.saveMetaItem({ type: 'translation', name: 'zh_cn', item: { ...TRANSLATION_BODY, name: 'zh_cn' } });
+        expect(result.success).toBe(true);
+        expect(metaRows(rows)).toHaveLength(1);
+        expect(metaRows(rows)[0]!.name).toBe('zh_cn');
+        expect(JSON.parse(metaRows(rows)[0]!.metadata).locale).toBe('zh-CN');
+    });
+});
