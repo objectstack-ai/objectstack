@@ -4,7 +4,7 @@
 
 feat(lint)!: a new gating authoring rule, `email-template-hole-grammar`, refuses an email template hole that chains a second formatter or whose `currency` argument is not a literal ISO 4217 code
 
-Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door (`422 INVALID_METADATA`) refuse an `email_template` whose `subject`, `bodyText` or `bodyHtml` writes a hole with a second formatter (`{{ x | default:0 | number:2 }}`) or `{{ x | currency:ARG }}` with an `ARG` that is not three capital letters, both of which they accepted before. Nothing is widened.
+Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door (`422 INVALID_METADATA`) refuse an `email_template` whose `subject`, `bodyText` or `bodyHtml` writes a hole with a second formatter (`{{ x | default:0 | number:2 }}`) or `{{ x | currency:ARG }}` with an `ARG` that is not three capital letters, both of which they accepted before. No accept set is widened; the additions are exports only: `validateEmailTemplateHoleGrammar`, `EMAIL_TEMPLATE_HOLE_GRAMMAR`, the type `EmailTemplateHoleGrammarFinding`, and the rule id `email-template-hole-grammar`.
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: a hole that never rendered as written (the renderer printed formatter syntax, or the amount in US dollars) is now refused where it is authored. The refusal names the hole and the rule it breaks, so there is no key for a migration to rewrite and no tombstone. -->

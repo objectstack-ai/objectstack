@@ -4,7 +4,7 @@
 
 feat(plugin-email)!: a mail template hole that chains a second formatter, or whose `currency` argument is not a literal ISO 4217 code, fails the render with `TEMPLATE_INVALID` instead of printing formatter syntax or US dollars
 
-Clause-②: no (narrowing) — `sendTemplate` and `renderTemplate` refuse a stored template whose `subject`, `body_text` or `body_html` writes a hole with a second formatter, or `{{ x | currency:ARG }}` with an `ARG` that is not three capital letters, both of which rendered before. Nothing is widened.
+Clause-②: no (narrowing) — `sendTemplate` and `renderTemplate` refuse a stored template whose `subject`, `body_text` or `body_html` writes a hole with a second formatter, or `{{ x | currency:ARG }}` with an `ARG` that is not three capital letters, both of which rendered before. No accept set is widened, and the package adds no export.
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export changes: the renderer refuses a hole the authoring rule refuses, for a template that reached it without being judged. There is nothing for a migration to rewrite. -->
