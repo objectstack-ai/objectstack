@@ -252,7 +252,7 @@ describe('the ready wait hands the page a function, never a string', () => {
       g.__objectui = { idle: false };
       expect(poll(arg)).toBe(false);
       g.__objectui = { idle: true };
-      expect(Array.from({ length: STABLE_POLLS }, () => poll(arg)).at(-1)).toBe(true);
+      expect(Array.from({ length: STABLE_POLLS }, () => poll(arg))[STABLE_POLLS - 1]).toBe(true);
       expect(poll(arg)).toBe(true);
     } finally {
       for (const [key, value] of [['document', saved.document], ['__objectui', saved.__objectui], ['__objectstackPrintStable', saved.stable]] as const) {
