@@ -937,6 +937,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "メモリ（MB）",
         helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
+      refusals: {
+        label: "拒否カタログ",
+        helpText: "body が投げうる拒否をコード別に宣言 —— body はそのコードを持つエラーを投げ、呼び出し側はこのメッセージを受け取ります"
+      },
+      "refusals.message": {
+        label: "メッセージ",
+        helpText: "ユーザーが読む文言（ロケールごとに翻訳）"
+      },
+      "refusals.status": {
+        label: "ステータス",
+        helpText: "HTTP ステータス、400–499（既定 400）"
+      },
       handler: {
         label: "ハンドラー",
         helpText: "ハンドラー関数名（非推奨 — `body` を推奨）"

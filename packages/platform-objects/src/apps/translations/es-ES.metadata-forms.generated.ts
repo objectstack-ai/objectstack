@@ -937,6 +937,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memoria (MB)",
         helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
+      refusals: {
+        label: "Rechazos",
+        helpText: "Rechazos que el cuerpo puede lanzar, por código: el cuerpo lanza un error con el código y quien llama lee este mensaje"
+      },
+      "refusals.message": {
+        label: "Mensaje",
+        helpText: "Lo que lee el usuario (traducido por idioma)"
+      },
+      "refusals.status": {
+        label: "Estado",
+        helpText: "Estado HTTP, 400–499 (400 por defecto)"
+      },
       handler: {
         label: "Manejador",
         helpText: "Nombre de función manejadora (obsoleto — preferir `body`)"
