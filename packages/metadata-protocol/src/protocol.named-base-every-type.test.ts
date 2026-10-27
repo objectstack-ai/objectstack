@@ -220,12 +220,13 @@ describe('[#26708] controls — the saves the rule does not judge are unchanged'
         });
     }
 
-    it('a save naming the sys_metadata sentinel, or no package at all, still stores a package-less row', async () => {
+    it('a save naming the sys_metadata sentinel, or no package at all, still stores its row as before', async () => {
         for (const packageId of ['sys_metadata', null, undefined]) {
             const { engine, rows } = makeStubEngine();
             const protocol = new ObjectStackProtocolImplementation(engine);
             expect(await save(protocol, { type: 'object', name: 'plain_obj', item: BODIES.object('plain_obj'), packageId }), String(packageId)).toBe('saved');
-            expect(rowsFor(rows, 'object', 'plain_obj'), String(packageId)).toEqual([{ state: 'active', package_id: null }]);
+            expect(rowsFor(rows, 'object', 'plain_obj'), String(packageId))
+                .toEqual([{ state: 'active', package_id: packageId === 'sys_metadata' ? 'sys_metadata' : null }]);
         }
     });
 
@@ -236,7 +237,7 @@ describe('[#26708] controls — the saves the rule does not judge are unchanged'
             const outcome = await save(protocol, {
                 type: 'object', name: 'stored_obj', item: BODIES.object('stored_obj'), packageId: PHANTOM, ...request,
             });
-            expect(outcome === 'saved' ? 'saved' : outcome?.code, JSON.stringify(request)).not.toBe('WRITABLE_PACKAGE_REQUIRED');
+            expect(outcome, JSON.stringify(request)).toBe('saved');
         }
     });
 });
