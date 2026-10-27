@@ -998,7 +998,7 @@
       "title": "Metadata-authored `api` endpoints mount as real URLs with their declared auth/cache policy",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1035,13 +1035,13 @@
         {
           "clause": "authRequired defaults true — the anonymous call is refused 401 UNAUTHENTICATED, not served",
           "oracle": "api",
-          "verify": "unauth GET status 401 + code. No pin asserts the code: showcase-declarative-endpoints.dogfood.test.ts checks the 401 beside success: false, declarative-endpoint-policy.dogfood.test.ts the status alone, so UNAUTHENTICATED is read off the live trace and a pin-only run scores the clause partial",
+          "verify": "unauth GET status 401 + code. showcase-declarative-endpoints.dogfood.test.ts reads the code off the wire: 401 with error.code UNAUTHENTICATED on the object_operation feed and on the flow endpoint, over HTTP on a booted showcase, so the pin carries the clause (declarative-endpoint-policy.dogfood.test.ts asserts the status alone)",
           "evidence": "the response"
         },
         {
           "clause": "a script / proxy target is never served (declared ≠ delivered, refused loudly, never a fake 200). Authoring refuses it: the stack schema's `apis:` gate (packages/spec/src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations) rejects `type: 'script'` and `'proxy'`, naming the endpoint and the fix, and runtime authoring of `api` is withdrawn (#5488). The runtime keeps its own refusal for a declaration that reaches the store some other way: 501 NOT_IMPLEMENTED with a hint (packages/runtime/src/endpoint-executor.ts#planEndpointTarget)",
           "oracle": "build",
-          "verify": "the scratch-config `os validate` / `os build` refusal for a script and a proxy endpoint; the runtime half from the pins in `automated` (packages/runtime/src/endpoint-executor.test.ts, '%s answers 501 NOT_IMPLEMENTED with a hint'; packages/spec/src/api/apis-publish-gates.test.ts, gate (a)). What gate (a) asserts, so the build leg is not read off it: the script case matches /does not execute/ and the flow prescription /type: 'flow'/, the proxy case /SSRF|egress/ only, and neither asserts that the message names the endpoint. No file in automated.ref asserts that runtime authoring of `api` is withdrawn (#5488), and none runs `os validate` / `os build`: the endpoint naming, the withdrawal and the CLI refusal are the run's to capture",
+          "verify": "the scratch-config `os validate` / `os build` refusal for a script and a proxy endpoint, pinned at the build layer by packages/qa/dogfood/test/declarative-endpoint-authoring-refusal.dogfood.test.ts: it runs the CLI's own bin over a scratch `defineStack(…, { strict: false })` config and asserts, for both types and both commands, a non-zero exit and output naming the endpoint, the refused type and the `type: 'flow'` prescription, and no artifact from `os build`, beside an object_operation CONTROL both commands accept. The same file pins the #5488 withdrawal on a booted showcase: a platform admin's PUT /api/v1/meta/api/NAME of a well-formed flow endpoint answers 403 NOT_CREATABLE and the store gains no item. The runtime half stays with the unit pins (packages/runtime/src/endpoint-executor.test.ts, '%s answers 501 NOT_IMPLEMENTED with a hint'; packages/spec/src/api/apis-publish-gates.test.ts, gate (a) — the gate's own sentences, called directly)",
           "evidence": "the two refusals + the pin output"
         },
         {
@@ -1056,7 +1056,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts + declarative-endpoint-policy.dogfood.test.ts (acceptance[1]'s 401 by status, never by code); acceptance[2] (script / proxy never served) by packages/runtime/src/endpoint-executor.test.ts ('an unsupported declaration gets a structured 501, never invented semantics') + packages/spec/src/api/apis-publish-gates.test.ts ('gate (a) — the supported subset')"
+        "ref": "packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts (acceptance[0], [1] — the 401's UNAUTHENTICATED code read off the wire — and [3]) + packages/qa/dogfood/test/declarative-endpoint-policy.dogfood.test.ts + packages/qa/dogfood/test/declarative-endpoint-authoring-refusal.dogfood.test.ts (acceptance[2]: the os validate / os build refusal over a scratch config, and the #5488 withdrawal on a booted showcase); acceptance[2]'s runtime 501 by packages/runtime/src/endpoint-executor.test.ts ('an unsupported declaration gets a structured 501, never invented semantics') + packages/spec/src/api/apis-publish-gates.test.ts ('gate (a) — the supported subset')"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1097,6 +1097,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1] and [2] verify and automated.ref say what the pins leave to the run, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a1 and a2. Re-read at base f6c61932: neither dogfood file asserts the 401's UNAUTHENTICATED code; apis-publish-gates.test.ts gate (a) asserts the script refusal's fix sentence and the proxy refusal's SSRF reason, never the endpoint's name; nothing in the ref asserts the #5488 withdrawal; the os validate / os build refusal is a CLI run, not a pin. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "acceptance[1] and [2] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored both partial). showcase-declarative-endpoints.dogfood.test.ts now asserts the 401's UNAUTHENTICATED code over HTTP; the new declarative-endpoint-authoring-refusal.dogfood.test.ts runs `os validate` and `os build` on a scratch config with a script and a proxy endpoint (non-zero, endpoint and type named, flow prescription, no artifact; an object_operation CONTROL accepted) and pins the #5488 withdrawal (PUT /meta/api/NAME → 403 NOT_CREATABLE, nothing stored). automated.ref and both verify texts name them. Measured at base 74db43ef. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2862,7 +2868,7 @@
       "title": "Every read that reaches a NON-addressed object asks that object's own `enable` block (nested-relation filter → 404/405, $expand withheld to the bare id, search skips it), and an `internal: true` field is refused 400 INVALID_FIELD in every evaluate position (filter, sort, groupBy, aggregate, $expand where/orderBy)",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2894,7 +2900,7 @@
         {
           "clause": "a nested-relation filter into an apiEnabled:false target → 404 OBJECT_API_DISABLED located at filter.t_ref (both the GET and the POST door name the position `filter`) (405 OBJECT_API_METHOD_NOT_ALLOWED for a whitelist without the verb), for admin and member alike",
           "oracle": "api",
-          "verify": "status + code + located path, both personas",
+          "verify": "status + code + located path, both personas. The location is carried in the refusal's sentence (`… the condition on it at 'filter.REL' …`), with the target in `object`; second-object-exposure.dogfood.test.ts asserts all three on the GET and the POST door for an apiEnabled:false target (404 OBJECT_API_DISABLED) and for method whitelists without `list` (405 OBJECT_API_METHOD_NOT_ALLOWED), as admin and member",
           "evidence": "the four lines"
         },
         {
@@ -2906,7 +2912,7 @@
         {
           "clause": "every evaluate position on the internal field → 400 INVALID_FIELD naming object+field (never 500, never a filtered answer that leaks its value)",
           "oracle": "api",
-          "verify": "status + code per position",
+          "verify": "status + code per position, and the body's `object` + `field`. second-object-exposure.dogfood.test.ts drives an `internal: true` field on the fixture's own source object (sox_source.internal_f) in the filter (GET and POST), sort, groupBy and aggregate-operand positions over HTTP, as admin and member, and asserts 400 INVALID_FIELD with object sox_source and field internal_f; internal-field-data-door-positions.dogfood.test.ts holds the same refusal on sys_api_key.key",
           "evidence": "one line per position"
         }
       ],
@@ -2918,8 +2924,8 @@
         "wrong-persona"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts + packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts + packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts + packages/objectql/src/internal-field-positions.test.ts"
+        "kind": "dogfood",
+        "ref": "packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts + packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts + packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts + packages/objectql/src/internal-field-positions.test.ts (acceptance[0], protocol and engine) + packages/qa/dogfood/test/second-object-exposure.dogfood.test.ts (acceptance[1]–[3] over HTTP on a booted fixture app: the nested-relation refusal located at filter.REL, the withheld $expand, and the internal field refused in every evaluate position naming object and field, for admin and member) + packages/qa/dogfood/test/internal-field-data-door-positions.dogfood.test.ts (acceptance[3] on sys_api_key.key)"
       },
       "source": [
         "packages/spec/src/data/api-derivation.ts#canServeApiOperation",
@@ -2939,6 +2945,12 @@
           "date": "2026-10-19",
           "change": "steps[0], steps[1] and acceptance[1].clause corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.second-object-exposure-and-internal-fields; wave anchor #24579 §3). The dotted filter path is refused INVALID_FIELD before the exposure gate, the by-id door takes `expand` not `$expand`, and the refusal locates the condition at filter.t_ref. Re-derived at base 9a7838edf5: protocol.ts refuseInternalInFilter passes the position 'filter' for where and filter alike and refuseUnservedRelationTarget names `${param}.${field}`; DATA_RECORD_READ_PARAMS = ['select', 'expand'] (packages/rest/src/rest-server.ts)",
           "ref": "#24649"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "acceptance[1] and [3] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1 half-asserted and a3 partial). second-object-exposure.dogfood.test.ts now asserts the located position `filter.REL` on both doors, and its fixture carries an `internal: true` field on the source object, refused 400 INVALID_FIELD naming object and field in the filter, sort, groupBy and aggregate positions over HTTP for both personas. automated.ref names the dogfood files and both verify texts say what they read. Measured at base 74db43ef. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2947,7 +2959,7 @@
       "title": "Request-shape gates on v18: a /data write with a null / array / scalar body or an empty version token is refused 400 (never an unguarded 200), a repeated single-valued query name is refused 400 on the dispatcher doors (a doubled keepData no longer drops tables), and a stale If-Match on an unreadable row answers 404",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3008,8 +3020,8 @@
         "silent-coercion"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/request-schema-gate.conformance.test.ts + packages/runtime/src/domains/data-write-request-gate.test.ts + packages/runtime/src/domains/data-update-expected-version.test.ts + packages/runtime/src/domains/data-delete-expected-version.test.ts + packages/runtime/src/domains/dispatcher-query-arity.test.ts + packages/runtime/src/domains/packages-write-flag-arity.test.ts + packages/runtime/src/domains/data-conflict-caller-visibility.test.ts. Layer, per RUNNER rule 6: every file calls the RestServer route handlers and/or HttpDispatcher.dispatch() directly — a real ObjectQL engine and SqlDriver behind them in data-write-request-gate, data-update-expected-version, data-delete-expected-version and data-conflict-caller-visibility, service doubles in dispatcher-query-arity and packages-write-flag-arity, a mocked protocol in request-schema-gate.conformance — and none boots the Hono adapter. So the pins score acceptance[0] only, and acceptance[1]–[4] (oracle api) stay live legs. acceptance[1]'s empty-token leg is PATCH's: data-update-expected-version.test.ts › 'PATCH /data/:object/:id refuses a token that can never carry a version' (a body expectedVersion of '', an empty If-Match); data-delete-expected-version.test.ts pins the same refusal on DELETE, a door this item does not probe"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/request-schema-gate.conformance.test.ts + packages/runtime/src/domains/data-write-request-gate.test.ts + packages/runtime/src/domains/data-update-expected-version.test.ts + packages/runtime/src/domains/data-delete-expected-version.test.ts + packages/runtime/src/domains/dispatcher-query-arity.test.ts + packages/runtime/src/domains/packages-write-flag-arity.test.ts + packages/runtime/src/domains/data-conflict-caller-visibility.test.ts (acceptance[0]: route handlers or HttpDispatcher.dispatch() over a real engine, doubles or a mocked protocol, no Hono adapter) + packages/qa/dogfood/test/data-request-shape-live.dogfood.test.ts (acceptance[1]–[4] over HTTP on a booted showcase: the null / array / number PATCH bodies, the empty body token and the empty If-Match → 400 VALIDATION_FAILED with updated_at unchanged; the null /query body → 400 with no rows; the doubled status and keepData → 400 VALIDATION_ERROR 'supplied 2 times', with the showcase package listed and its table served afterwards; a member's stale If-Match on an admin-owned showcase_private_note → 404 identical to the tokenless PATCH, beside the owner's 409 CONTROL). acceptance[1]'s empty-token leg is PATCH's; data-delete-expected-version.test.ts pins the DELETE twin, a door this item does not probe"
       },
       "source": [
         "packages/rest/src/meta-item-read-gate.ts#metaQueryArityRefusal",
@@ -3035,6 +3047,12 @@
           "date": "2026-10-26",
           "change": "automated.ref names data-update-expected-version.test.ts and the layer every file reaches, and acceptance[1].verify says which door the empty-token leg is, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a1–a4 and a1. Re-read at base f6c61932: no file boots the Hono adapter (route handlers or HttpDispatcher.dispatch() over a real engine, doubles or a mocked protocol), so the pins score acceptance[0] only. The record asked whether the clause meant DELETE for the token: it means PATCH (steps[1]), and the PATCH refusal of an empty body token and an empty If-Match is pinned in data-update-expected-version.test.ts, which the ref did not name; the DELETE file pins the twin door. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "acceptance[1]–[4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a4 and n0 partial: every pin stopped above the Hono adapter). The new data-request-shape-live.dogfood.test.ts drives each step through the HTTP stack of its own showcase boot (the destructive keepData probe runs on that throwaway stack) and automated.ref names it with what it asserts. Measured at base 74db43ef. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -3043,7 +3061,7 @@
       "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3092,7 +3110,7 @@
         {
           "clause": "for the FLS-restricted caller F is ABSENT from sortability.fields (never offered — it is not listed with sortable: false) and the data sort on F is 403 — the two agree",
           "oracle": "api",
-          "verify": "sortability.fields without F (packages/rest/src/meta-object-sortability-caller-fls.test.ts: 'sortability never offers the unreadable field') + the data answer. The sortability pins do not reach the data sort: 'the two agree' rests on the 403, pinned over HTTP by packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts › 'sorting on the stripped field is refused 403 PERMISSION_DENIED (ordering leaks it too)'",
+          "verify": "sortability.fields without F + the data answer, for a member bound to the client_liaison position. meta-read-doors-live.dogfood.test.ts asserts both halves over HTTP on a booted showcase: budget absent from sortability.fields (name listed sortable; the admin's definition offers budget, the CONTROL), and GET /api/v1/data/showcase_project?sort=budget → 403 PERMISSION_DENIED beside a served sort on name. packages/rest/src/meta-object-sortability-caller-fls.test.ts ('sortability never offers the unreadable field') holds the same rule at unit, and showcase-fls-read-mask-strip.dogfood.test.ts the data-sort 403 for a scratch permission set",
           "evidence": "both excerpts"
         }
       ],
@@ -3100,8 +3118,8 @@
         "cache-staleness"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/meta-object-sortability-caller-fls.test.ts + packages/runtime/src/domains/meta-object-sortability-caller-fls.test.ts + packages/metadata-protocol/src/protocol.app-package-id-key.test.ts + packages/runtime/src/domains/meta-app-package-id-key.test.ts + packages/rest/src/rest-server-meta-member-selector.test.ts + packages/rest/src/rest-server-meta-door-closed-sets.test.ts + packages/runtime/src/domains/meta-package-all-fold.test.ts + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (acceptance[4]'s data-sort 403 on a booted showcase). Layer, per RUNNER rule 6: every other file calls the protocol, the RestServer route handlers or HttpDispatcher directly, with a stub server and response — the store is real (ObjectQL + SqlDriver) in meta-app-package-id-key and meta-package-all-fold, a double elsewhere — and none boots the Hono adapter, so they score acceptance[0] only. acceptance[1]–[3] (oracle api) are live legs, never a pass carried from the pins"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/meta-object-sortability-caller-fls.test.ts + packages/runtime/src/domains/meta-object-sortability-caller-fls.test.ts + packages/metadata-protocol/src/protocol.app-package-id-key.test.ts + packages/runtime/src/domains/meta-app-package-id-key.test.ts + packages/rest/src/rest-server-meta-member-selector.test.ts + packages/rest/src/rest-server-meta-door-closed-sets.test.ts + packages/runtime/src/domains/meta-package-all-fold.test.ts (acceptance[0]: the protocol, the RestServer route handlers or HttpDispatcher with a stub server and response, no Hono adapter) + packages/qa/dogfood/test/meta-read-doors-live.dogfood.test.ts (acceptance[1]–[4] over HTTP on a booted showcase: /meta/app/com.example.showcase answers showcase_app and an unknown package the same 404 as an unknown name; ?member=zh-CN reads the member authored through the save door with a body locale and ?member=en-US the shipped one; ?member= on object and an unknown parameter → 400 VALIDATION_ERROR naming them; ?package=all byte-identical to no parameter on /meta/view; the client_liaison member's sortability without budget and its 403 data sort) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (the data-sort 403 for a scratch permission set)"
       },
       "source": [
         "packages/spec/src/api/protocol.zod.ts#isAppPackageIdKey",
@@ -3128,6 +3146,12 @@
           "date": "2026-10-26",
           "change": "acceptance[4].verify and automated.ref name the data-sort pin and the layer the other pins reach, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a4 and a1–a3. Re-read at base f6c61932: no file in the ref asserted the data-sort 403 on F; showcase-fls-read-mask-strip.dogfood.test.ts has that case over HTTP and is now in the ref. Every unit file drives the protocol, route handlers or the dispatcher with a stub server and response, no Hono adapter, so acceptance[1]–[3] score from the live run (a precedent run carried them as pass from these pins). No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "acceptance[1]–[4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a4 partial: every pin but the data-sort dogfood stopped above the Hono adapter, and that one used a scratch permission set, not client_liaison). The new meta-read-doors-live.dogfood.test.ts drives each step through the HTTP stack of its own showcase boot, client_liaison bound through a sys_user_position row; automated.ref and acceptance[4].verify name it. Measured at base 74db43ef. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -3136,7 +3160,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3165,25 +3189,25 @@
         {
           "clause": "the hook refusal answers 400 carrying the hook's own sentence — not 500. On a /data door (the live leg) the envelope carries no `code` when the hook declared none, by pinned design; the hand-built nested-envelope rows (sharing rules, suggested bindings, approvals, package publish) re-dress the same refusal as 400 VALIDATION_ERROR — pin-only, since no package-authorable hook reaches their objects",
           "oracle": "api",
-          "verify": "status + message on the live /data door, and the absence of error.code when the hook declared none, read on the live door's body (rest-hook-script-fault-envelope.test.ts 'the refusal envelope carries no `code` when the hook declared none' pins that design at the UNIT layer: it imports mapDataError, the /data door's error mapper, and calls it directly, so it is never the live door's answer); the VALIDATION_ERROR rows from rest-write-route-hook-refusal-sentence.ledger.test.ts (REFUSED_400) — both in automated.ref",
+          "verify": "status + message on the live /data door, and the absence of error.code when the hook declared none, read on the live door's body: error-sentences-live.dogfood.test.ts drives POST /data/OBJECT and /createMany on a scratch app whose sandboxed beforeInsert hook throws a sentence, over HTTP, and asserts 400, the sentence verbatim, no `code` key and no row written (rest-hook-script-fault-envelope.test.ts pins the same design at unit through mapDataError); the VALIDATION_ERROR rows of the hand-built nested-envelope routes from rest-write-route-hook-refusal-sentence.ledger.test.ts (REFUSED_400) — both in automated.ref",
           "evidence": "the body"
         },
         {
           "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` in the composite shape: exactly `object` (the object's name) and `developerMessage`, no `field` — a field's `unique: true` is a tenancy-scoped composite index, so the driver names no single column (`field` is added only when the refusal states one)",
           "oracle": "api",
-          "verify": "status + error.code + the key set of error.details (exactly developerMessage and object) + details.object. dispatcher-unique-violation-wire-code.test.ts runs a real ObjectQL engine and SqlDriver behind HttpDispatcher with no Hono adapter, so its body is the dispatcher's result (the engine layer), not an HTTP answer: it scores this clause partial and the live action-door trace carries the verdict",
+          "verify": "status + error.code + the key set of error.details (exactly developerMessage and object) + details.object. error-sentences-live.dogfood.test.ts asserts all four over HTTP: a declarative `operation: 'update'` action whose patch repeats a `unique: true` email, POST /api/v1/actions/OBJECT/ACTION → 409 UNIQUE_VIOLATION, and the row keeps its own email. dispatcher-unique-violation-wire-code.test.ts holds the same answer at the engine layer (HttpDispatcher over a real ObjectQL engine and SqlDriver, no Hono adapter)",
           "evidence": "the body"
         },
         {
           "clause": "a forced 500 carries the route's generic sentence, never the caught internal message or a stack",
           "oracle": "api",
-          "verify": "error.message text",
+          "verify": "error.message text. error-sentences-live.dogfood.test.ts forces the fault over HTTP — the scratch app's local storage root sits under a regular file, so the adapter's write fails with ENOTDIR naming the server path — and asserts POST /api/v1/storage/upload/chunked → 500 INTERNAL whose body carries neither the errno, the path nor a stack line; storage-routes.server-fault-withheld.test.ts holds every catch-all arm at unit",
           "evidence": "the body"
         }
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts (acceptance[0], unit and engine) + packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts (acceptance[1]–[3] over HTTP on the scratch app packages/qa/dogfood/test/fixtures/error-sentences-fixture.ts: the hook's sentence at 400 with no code on the /data doors, 409 UNIQUE_VIOLATION with details exactly developerMessage + object at the action door, and a storage route's 500 INTERNAL withholding the caught text)"
       },
       "source": [
         "packages/types/src/data-error-classification.ts#sandboxBusinessMessage",
@@ -3216,6 +3240,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1] and [2] verify name the layer their pins reach, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a1 and a2. Re-read at base f6c61932: rest-hook-script-fault-envelope.test.ts imports mapDataError only, so the 'live /data door' leg it was named for is a unit read; dispatcher-unique-violation-wire-code.test.ts drives HttpDispatcher over a real engine and SqlDriver, no Hono adapter. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "acceptance[1]–[3] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a3 partial: mapDataError called directly, HttpDispatcher with no Hono adapter, storage handlers over a fake request). The new error-sentences-live.dogfood.test.ts boots the scratch app the fixtures name (fixtures/error-sentences-fixture.ts: a sandboxed refusing hook, a unique email with a declarative update action, a storage root under a regular file) and drives each clause over HTTP; automated.ref and the three verify texts name it. Measured at base 74db43ef. No clause changed",
+          "ref": "#26572"
         }
       ]
     }

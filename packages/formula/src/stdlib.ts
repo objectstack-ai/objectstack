@@ -15,11 +15,13 @@
  * `current_user.can(object, verb)` and `current_user.hasCapability(name)` — use
  * that same binding rather than fighting it: see
  * {@link registerPermissionPredicate} and {@link registerCapabilityPredicate}.
+ * The one MACRO it registers, `label(record.<field>)`, reads the field's name
+ * off its argument's AST: see {@link bindOptionLabel}.
  */
 
 import type { Environment } from '@marcbachmann/cel-js';
 
-import type { EvalContext, EvalPermissions, EvalSystemPermissions } from './types';
+import type { EvalContext, EvalOptionLabels, EvalPermissions, EvalSystemPermissions } from './types';
 import { createEvalUser, type EvalUser } from '@objectstack/spec';
 // The verb vocabulary lives on the SECURITY subpath, where the permission
 // contract it is seeded from lives — not on the root barrel, which exports a
@@ -347,16 +349,143 @@ function bindCapabilityPredicate(
   );
 }
 
+/** The slice of a cel-js AST node `label()` reads: its operator and operands. */
+interface CelMacroNode {
+  readonly op: string;
+  readonly args: unknown;
+}
+
+/** The slice of cel-js's type checker a macro's `typeCheck` calls. */
+interface CelMacroChecker {
+  check(node: CelMacroNode, ctx: unknown): unknown;
+  getType(name: string): unknown;
+  createError(code: string, message: string, node: CelMacroNode): Error;
+}
+
+/** The slice of cel-js's evaluator a macro's `evaluate` calls. */
+interface CelMacroEvaluator {
+  run(node: CelMacroNode, ctx: unknown): unknown;
+}
+
+/**
+ * The refusal for an argument that is not a field read straight off `record`.
+ * Shared by the type check (publish time) and the evaluation (an unchecked run).
+ */
+const LABEL_ARGUMENT_REFUSAL =
+  'label() takes a field of this record, read directly: label(record.<field>), e.g. ' +
+  "'v' + string(record.version_no) + ' · ' + label(record.kind). The field's name is what " +
+  'picks its options, so a computed value, a related record\'s field or an optional read ' +
+  '(record.?kind) has no options to look up.';
+
+/**
+ * The field `label()`'s argument names — `kind` for `label(record.kind)` — or
+ * `undefined` when the argument is any other shape.
+ */
+function optionLabelFieldOf(node: CelMacroNode | undefined): string | undefined {
+  if (!node || node.op !== '.' || !Array.isArray(node.args)) return undefined;
+  const [receiver, field] = node.args as [CelMacroNode | undefined, unknown];
+  if (!receiver || receiver.op !== 'id' || receiver.args !== 'record') return undefined;
+  return typeof field === 'string' && field.length > 0 ? field : undefined;
+}
+
+/**
+ * The label a reader reads for `value` of `field`, from the pinned map.
+ *
+ * `null` / absent is `''`, so a name composes cleanly over an empty select
+ * (`trim()` answers `''` for the same reason). A value no option declares reads
+ * as itself — the select control shows such a value the same way. Everything
+ * else that cannot be answered THROWS, which the engine reports as
+ * `{ ok: false, kind: 'runtime' }`.
+ */
+function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels | undefined): string {
+  if (labels === undefined) {
+    throw new Error(
+      `label(record.${field}) cannot be answered: this evaluation context carries no option ` +
+      'labels. A formula field read through the data engine carries them; pass `optionLabels` ' +
+      'on the EvalContext — field -> stored value -> label, resolved in the reader\'s locale. ' +
+      'Refusing is deliberate: the stored value instead of its label is the wrong answer this ' +
+      'function exists to remove.',
+    );
+  }
+  // The field's options first, so a field that declares none faults on EVERY
+  // row, not only on the rows where it happens to hold a value.
+  const options = Object.prototype.hasOwnProperty.call(labels, field) ? labels[field] : undefined;
+  if (options === undefined) {
+    throw new Error(
+      `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
+      'label() reads a select field\'s option label; read any other field directly ' +
+      `(record.${field}).`,
+    );
+  }
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    throw new Error(
+      `label(record.${field}) renders ONE option value, and \`${field}\` holds ` +
+      `${Array.isArray(value) ? 'a list of values' : 'an object'} on this record.`,
+    );
+  }
+  const stored = String(value);
+  const shown = Object.prototype.hasOwnProperty.call(options, stored) ? options[stored] : undefined;
+  return typeof shown === 'string' && shown.length > 0 ? shown : stored;
+}
+
+/**
+ * Register `label` — the option-label function — as a MACRO, so the authored
+ * spelling is `label(record.<field>)` and the function knows WHICH field it
+ * reads. A select field's stored value (`clean`) is the same string in every
+ * locale; its label (`Clean`, `清稿`) is not. A record name composed in a
+ * formula (`'v' + string(record.version_no) + ' · ' + label(record.kind)`)
+ * renders in the reader's locale through it.
+ *
+ * ## Why a macro
+ *
+ * A plain function receives the VALUE and nothing else, and a value does not
+ * say whose options it belongs to: two select fields may both store `open`.
+ * cel-js hands a macro its argument's AST, as it does `has(record.foo)`, so
+ * the field's name is read off the source, once, at parse. Any other argument
+ * shape is refused at the type check, which `compile()` and the publish gate
+ * run, so a wrong spelling never reaches a stored formula.
+ *
+ * ## Data, never a translator
+ *
+ * The labels are the {@link EvalOptionLabels} map the caller pinned for this
+ * evaluation (`EvalContext.optionLabels`). Translating is the caller's job,
+ * done before evaluation through the same path the object's metadata is
+ * served by, so the stdlib stays pure under the module header's rule. The
+ * map is read through `read` at the moment of the call, as the permission
+ * binding is, so the shared evaluation environment answers each evaluation
+ * from its own map.
+ */
+function bindOptionLabel(env: Environment, read: () => EvalOptionLabels | undefined): Environment {
+  return env.registerFunction('label(ast): string', ({ args }: { args: CelMacroNode[] }) => {
+    const field = optionLabelFieldOf(args[0]);
+    return {
+      args,
+      async: false,
+      typeCheck(checker: CelMacroChecker, _macro: unknown, ctx: unknown) {
+        if (field === undefined) throw checker.createError('invalid_macro_argument', LABEL_ARGUMENT_REFUSAL, args[0]);
+        checker.check(args[0], ctx);
+        return checker.getType('string');
+      },
+      evaluate(ev: CelMacroEvaluator, _macro: unknown, ctx: unknown) {
+        if (field === undefined) throw new Error(LABEL_ARGUMENT_REFUSAL);
+        return optionLabelOf(field, ev.run(args[0], ctx), read());
+      },
+    };
+  });
+}
+
 /**
  * Register the ObjectStack standard library into a CEL environment.
  *
  * The `now` resolver is closed over so each call uses the pinned
  * `EvalContext.now` (or wall-clock fallback); `permissionBinding` is pinned the
- * same way and for the same reason — see {@link PermissionBinding}.
+ * same way and for the same reason — see {@link PermissionBinding} — and so is
+ * `optionLabels` ({@link bindOptionLabel}).
  * Implementations are kept tiny and dependency-free — they're the contract
  * surface for AI authors and must stay legible.
  *
- * `can` and `hasCapability` are registered UNCONDITIONALLY, binding or not:
+ * `can`, `hasCapability` and `label` are registered UNCONDITIONALLY, binding or not:
  * whether a name exists in this environment is a fact about the platform, not
  * about one call site's data. A conditional registration would make the publish gate's answer depend
  * on which context happened to build the environment, so an authored predicate
@@ -368,14 +497,15 @@ export function registerStdLib(
   now: () => Date,
   timezone = 'UTC',
   permissionBinding?: PermissionBinding,
+  optionLabels?: EvalOptionLabels,
 ): Environment {
-  const pinned: StdLibBinding = { now, timezone, permissionBinding };
+  const pinned: StdLibBinding = { now, timezone, permissionBinding, optionLabels };
   return registerBoundStdLib(env, () => pinned);
 }
 
 /**
  * Everything a stdlib function reads that is not one of its arguments: the
- * clock, the reference timezone and the permission binding.
+ * clock, the reference timezone, the permission binding and the option labels.
  *
  * Package-internal (NOT re-exported from `index.ts`).
  */
@@ -383,6 +513,7 @@ export interface StdLibBinding {
   readonly now: () => Date;
   readonly timezone: string;
   readonly permissionBinding: PermissionBinding | undefined;
+  readonly optionLabels?: EvalOptionLabels | undefined;
 }
 
 /**
@@ -402,6 +533,7 @@ export interface StdLibBinding {
 export function registerBoundStdLib(env: Environment, read: () => StdLibBinding): Environment {
   bindPermissionPredicate(env, () => read().permissionBinding);
   bindCapabilityPredicate(env, () => read().permissionBinding);
+  bindOptionLabel(env, () => read().optionLabels);
   const now = (): Date => read().now();
   const today = (): Date => {
     const binding = read();

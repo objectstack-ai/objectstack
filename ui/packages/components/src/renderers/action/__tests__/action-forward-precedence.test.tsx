@@ -113,11 +113,14 @@ const CONTEXT = { target: 'contextWins', extraFromHost: 'present' };
  * `outcomeMessages` (objectui#11344) is the next middle insertion, beside
  * `successMessage`, the copy it outranks in the success toast. Same reading:
  * one added name, no neighbour moved.
+ *
+ * `variant` (objectstack#26665) is the next, beside `confirmText`: the runner
+ * reads it to paint that question's confirm button. Same reading.
  */
 const BUTTON_ORDER = [
   'type', 'name', 'label', 'description', 'target', 'openIn', 'endpoint', 'method',
   'params',
-  'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'successMessage', 'outcomeMessages', 'errorMessage',
+  'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
   'refreshAfter', 'undoable', 'recordIdField', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
 ];
 
@@ -129,7 +132,7 @@ const BUTTON_ORDER = [
 const ICON_ORDER = [
   'type', 'name', 'label', 'description', 'target', 'openIn', 'endpoint', 'method',
   'params',
-  'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'successMessage', 'outcomeMessages', 'errorMessage',
+  'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
   'refreshAfter', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
 ];
 
