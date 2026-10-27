@@ -2750,6 +2750,8 @@ const ko = {
         dataRead: "레코드 읽기(본인 권한 범위 내)",
         dataWrite: "레코드 생성, 변경 및 삭제(본인 권한 범위 내)",
         actionsExecute: "사용자를 대신하여 작업 실행(본인 권한 범위 내)",
+        metadataWrite: "이 앱의 메타데이터를 초안으로 작성 및 변경(본인 권한 범위 내), 게시는 사람이 합니다",
+        unrecognised: "인식할 수 없는 권한: {{scope}}",
       },
       deny: "거부",
       authorize: "허용",
