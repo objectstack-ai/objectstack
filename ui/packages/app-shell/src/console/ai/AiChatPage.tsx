@@ -118,7 +118,7 @@ import {
 } from '../../chrome/advertisedShortcuts.js';
 import { fetchPendingDraftCount } from '../../preview/draftStatus.js';
 import { draftPreviewPath } from '../../preview/draftSurface.js';
-import { emitMetadataRefresh, publishPlanApprovalPending } from '../../assistant/assistantBus.js';
+import { emitMetadataRefresh, publishPlanApprovalPending, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { getRuntimeConfig, isAiStudioEnabled } from '../../runtime-config.js';
 import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
@@ -2722,6 +2722,7 @@ export function ChatPane({
         // Live lifecycle truth for draft cards: the server's pending count per
         // package, so reloaded conversations show Published/Publish honestly.
         fetchPendingDraftCount={fetchPendingDraftCount}
+        subscribeMetadataRefresh={subscribeMetadataRefresh}
         onPublishDrafts={async (packageId) => {
           // Promote the conversation's staged drafts to live (ADR-0033 gate —
           // the human still clicks). Same call as the floating chat + PackagesPage.

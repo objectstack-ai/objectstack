@@ -908,6 +908,16 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   fetchPendingDraftCount?: (packageId: string) => Promise<number>;
   /**
+   * The host's live-metadata pulse (app-shell's `subscribeMetadataRefresh`):
+   * called once with a listener, returns the unsubscriber. On every pulse
+   * each draft card re-reads its package's count through
+   * `fetchPendingDraftCount`, so a publish this card did not run (the chat
+   * banner, Studio) still turns its Publish (N) into Published. Ignored
+   * without `fetchPendingDraftCount`; absent, the count refreshes only on the
+   * card's own publish / discard, as before.
+   */
+  subscribeMetadataRefresh?: (listener: () => void) => () => void;
+  /**
    * Auto-fire `onPublishDrafts` the moment a turn finishes drafting an app —
    * the self-use "magic moment" where the user refreshes and the app is already
    * live WITH data, instead of clicking Publish. Server-gated by the plan
@@ -2077,6 +2087,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       surfaceContextLabel,
       surfaceContextTitle,
       fetchPendingDraftCount,
+      subscribeMetadataRefresh,
       autoPublishDrafts = false,
       processVisibility = 'summary',
       surface = 'card',
@@ -2222,6 +2233,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       ReadonlyMap<string, number>
     >(() => new Map());
     const pendingFetchedRef = React.useRef<Set<string>>(new Set());
+    // Every package a draft card on screen is bound to — what a metadata
+    // pulse re-reads.
+    const pendingPackagesRef = React.useRef<Set<string>>(new Set());
     const refreshPendingCount = React.useCallback(
       async (packageId: string) => {
         if (!fetchPendingDraftCount) return;
@@ -2255,12 +2269,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           const key = tool.toolCallId;
           if (pkg && key && !pendingFetchedRef.current.has(key)) {
             pendingFetchedRef.current.add(key);
+            pendingPackagesRef.current.add(pkg);
             due.add(pkg);
           }
         }
       }
       for (const pkg of due) void refreshPendingCount(pkg);
     }, [messages, isLoading, fetchPendingDraftCount, refreshPendingCount]);
+    // A publish this card did not run (the chat banner, Studio, another
+    // card's package) changes the server's count without touching this
+    // component; the host's metadata pulse is the one signal that it did.
+    // Subscribed once per host subscriber, not per render; the pulse re-reads
+    // the same source the first fetch used.
+    React.useEffect(() => {
+      if (!subscribeMetadataRefresh || !fetchPendingDraftCount) return;
+      return subscribeMetadataRefresh(() => {
+        for (const pkg of pendingPackagesRef.current) void refreshPendingCount(pkg);
+      });
+    }, [subscribeMetadataRefresh, fetchPendingDraftCount, refreshPendingCount]);
     // Publish a package's drafts and reflect success on exactly the cards that
     // were pending for it at publish time. The host's onPublishDrafts returns
     // `false` / `{ok:false}` on failure (and surfaces its own error); any other
