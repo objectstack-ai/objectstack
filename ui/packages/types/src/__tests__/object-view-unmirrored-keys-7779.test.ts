@@ -2050,7 +2050,7 @@ describe('objectui#7924 — the unread members, in the FOUR buckets the ruling w
  */
 
 const LISTVIEW = 'packages/plugin-list/src/ListView.tsx';
-const APP_SHELL_OBJECT_VIEW = 'packages/app-shell/src/views/ObjectView.tsx';
+const APP_SHELL_OBJECT_VIEW = 'packages/app-shell/src/views/objectViewListRenderer.tsx';
 
 /** A named view's one required member; every literal below is a delta on it. */
 const BASE_VIEW = { label: 'All' } as const;
