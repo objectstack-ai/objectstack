@@ -233,7 +233,7 @@ describe('#26462 — an explicitly named version with no history row is refused 
         const repo = new SysMetadataRepository({ engine });
 
         const diffErr = await refusalOf(protocol.diffMetaItem({ type: TYPE, name: NAME, fromVersion: 1, toVersion: 999 }));
-        const rollbackErr = await refusalOf(repo.restoreVersion({ type: TYPE, name: NAME }, 999, { actor: null }));
+        const rollbackErr = await refusalOf(repo.restoreVersion({ org: 'system', type: TYPE, name: NAME }, 999, { actor: null }));
 
         expect(rollbackErr).not.toBeNull();
         expect(diffErr).not.toBeNull();
