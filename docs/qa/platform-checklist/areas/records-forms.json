@@ -2814,12 +2814,12 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the comment author",
-        "a second user, minted by the admin with POST /api/v1/auth/admin/create-user — the @mention TARGET. A stock showcase boot is invite_only, so a fresh POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration')"
+        "a second user, minted by the admin with POST /api/v1/auth/admin/create-user — the @mention TARGET. The target must hold a permission set that grants read on `sys_comment` as well as being able to read the record: the producer gate admits a mentioned user only when both reads succeed, so a target with no comment read is withheld (`cannot_read_thread`) and every bell clause scores against the wrong persona. A stock showcase boot is invite_only, so a fresh POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration')"
       ],
       "fixtures": {
         "app": "showcase",
@@ -2910,7 +2910,7 @@
           "evidence": "the 'all' feed screenshot showing the custom-type row (or the pin output + the substitution note)"
         },
         {
-          "clause": "an @mention notification reaches a mentioned user only when that user can READ the comment's record — whether the mention names them by user id or by email — and the author is never notified: the collab.mention notification carries the comment's preview and a deep link to the record, so it reaches exactly the readers the thread itself reaches. The gate sits at the producer (plugin-audit's mention writer), judged in each mentioned user's own envelope by the same grant resolver, organization-claim vetting and parent-read evaluator a request uses, so the tenant wall, sharing, RLS and object CRUD decide (#24785, fixed by #24794)",
+          "clause": "an @mention notification reaches a mentioned user only when that user can READ both the comment's record and the comment itself — whether the mention names them by user id or by email — and the author is never notified: the collab.mention notification carries the comment's preview and a deep link to the record, so it reaches exactly the readers the thread itself reaches. The gate sits at the producer (plugin-audit's mention writer), judged in each mentioned user's own envelope by the same grant resolver, organization-claim vetting and parent-read evaluator a request uses, so the tenant wall, sharing, RLS and object CRUD decide (#24785, fixed by #24794)",
           "oracle": "api",
           "verify": "step-14 inbox reads: the member gains NO collab.mention for either comment on the private note (by id, by email), gains exactly one for the account comment (data.notifications[] row of type collab.mention, actionUrl '/showcase_account/ID'), unreadCount up by one, with that deep link naming the account record and that record readable by the member (200); the admin's inbox gains none for any of the three, though the account comment named the admin. Each recipient reads only their own inbox, so the count is taken per user over GET /api/v1/notifications, never from sys_notification as admin alone. Each mentioned user withheld for want of read access is logged once at warn — '[audit] mention notification withheld' with reason cannot_read_source, the user id (the email mention resolved to it) and the comment id, never the comment text — record both lines; the author is dropped without a line. On a walled boot the cross-organization user's inbox is unchanged. Score the presence or absence of a collab.mention row per recipient and comment, not the notification's wording",
           "evidence": "both users' inbox reads before and after, the member's two access reads, the three comment create responses, and the withheld-recipient log lines"
@@ -2923,7 +2923,7 @@
         "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
         "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts), so a run that reports the 403 without the 2xx control has not measured the gate",
         "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop",
-        "a collab.mention notification reaching a mentioned user who cannot read the comment's record is a FAIL in either spelling of the mention (user id or email): the notification is a copy of what the thread shows, preview and deep link included (#24785). A notification withheld from a mentioned user who CAN read the record is a FAIL the other way: the gate is read access, not organization membership or the author's own view"
+        "a collab.mention notification reaching a mentioned user who cannot read the comment's record, or cannot read the comment itself, is a FAIL in either spelling of the mention (user id or email): the notification is a copy of what the thread shows, preview and deep link included (#24785). A notification withheld from a mentioned user who CAN read the record is a FAIL the other way: the gate is read access, not organization membership or the author's own view"
       ],
       "variants": [
         "all — the full merged comment + activity feed",
@@ -2999,6 +2999,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) acceptance[5]: the comments-permission-matrix FEEDS_DISABLED case asserts 403 + code only and never reads the thread's zero rows; the ref says so. (2) acceptance[8] names recordActivityFeed.test.ts as its fallback oracle, but the ref did not, so a ref-driven run never ran it; it is added, at ui/packages/plugin-detail/src/renderers/__tests__/. The run's notes on acceptance[6] / negative[3] and acceptance[9] confirm the clause and ref text as written (engine-level pins, partial at most). No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "The mention recipient gate now also asks each mentioned user's own read of the comment (fix landed in #26497 for #26453). personas[1] states that the @mention target must hold read on sys_comment as well as the record; acceptance[9] and negative[6] name both reads. No pin changed.",
+          "ref": "#26497"
         }
       ]
     },
