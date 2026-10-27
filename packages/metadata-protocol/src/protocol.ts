@@ -167,7 +167,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -411,6 +411,8 @@ import { readItemFromMetadataService } from './protocol-metadata-service-read.js
 import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 // [#25467 cut 22] A row-less view name's expansion for the by-name read, and a container's expansion under its own name.
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
+// [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
+import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2260,7 +2262,7 @@ export function projectStorableViewBody(
  * `null`), and an explicit value is left as it is. Returns the input itself
  * when nothing is filled.
  */
-function withDeclaredPageTypeDefault(type: string, item: unknown): unknown {
+export function withDeclaredPageTypeDefault(type: string, item: unknown): unknown {
     if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'page') return item;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
     if ((item as Record<string, unknown>).type !== undefined) return item;
@@ -6414,19 +6416,13 @@ export class ObjectStackProtocolImplementation implements
      * its bytes.
      */
     private convertStoredItem(type: string, data: unknown): unknown {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const converted = this.convertStoredItemDetailed(type, data, (n) => {
-            const name = (data as { name?: unknown } | null | undefined)?.name;
-            const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
-            if (this.storedConversionWarned.has(key)) return;
-            this.storedConversionWarned.add(key);
-            console.warn(
-                `[Protocol] stored ${singular}/${String(name ?? '<unnamed>')} carries a pre-protocol shape; ` +
-                `${n.message} The row itself is unchanged — re-save it (Studio edit → save, or run ` +
-                `"os migrate meta --stored --apply") to persist the canonical shape.`,
-            );
-        }).item;
-        return withDeclaredPageTypeDefault(singular, converted);
+        // [#25467 cut 23] The body moved to `protocol-stored-item-conversion.ts` (see `StoredItemConversionHost`).
+        const readStoredConversionWarned = () => this.storedConversionWarned;
+        const host: ThisParameterType<typeof convertStoredItem> = {
+            convertStoredItemDetailed: (...a) => this.convertStoredItemDetailed(...a),
+            get storedConversionWarned() { return readStoredConversionWarned(); },
+        };
+        return convertStoredItem.call(host, type, data);
     }
 
     /**
@@ -6455,21 +6451,8 @@ export class ObjectStackProtocolImplementation implements
         onNotice?: (notice: ConversionNotice) => void,
         knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>,
     ): { item: unknown; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (singular === 'flow') return { item: data, notices: [], todos: [] };
-        const notices: ConversionNotice[] = [];
-        const todos: ConversionTodoNotice[] = [];
-        const item = applyConversionsToStoredItem(singular, data, {
-            onNotice: (n) => {
-                notices.push(n);
-                onNotice?.(n);
-            },
-            onTodo: (t) => {
-                todos.push(t);
-            },
-            ...(knownDatasources ? { knownDatasources } : {}),
-        });
-        return { item, notices, todos };
+        // [#25467 cut 23] The body moved to `protocol-stored-item-conversion.ts`.
+        return convertStoredItemDetailed(type, data, onNotice, knownDatasources);
     }
 
     /**
