@@ -10,12 +10,23 @@
  *                  free-text box — the reason this exists)
  *   2. Events    — the lifecycle events it subscribes to (write + query)
  *   3. Function  — language (expression / sandboxed JS) + the handler body in a
- *                  DEDICATED code editor (the second reason this exists)
+ *                  DEDICATED code editor (the second reason this exists), and
+ *                  for a sandboxed-JS body the capabilities it is granted
  *   4. Options   — priority / async / a CEL run condition
  *
- * Rare/advanced props (handler ref, js capabilities/timeout/memory, …) fall
- * through to a collapsed "More fields" SchemaForm fed the live server schema,
- * with the curated keys hidden so nothing is double-edited or lost.
+ * Rare/advanced props (handler ref, …) fall through to a collapsed "More
+ * fields" SchemaForm fed the live server schema, with the curated keys hidden
+ * so nothing is double-edited or lost. `body` is one of those curated keys, as
+ * a whole, so none of its members reaches that form.
+ *
+ * Capabilities (objectstack#26726). The sandbox throws on a `ctx` call the body
+ * was not granted, and `body.capabilities` was reachable from no control here,
+ * so a Studio-authored hook that read data could only be fixed through the
+ * API. The grant list is a checkbox per `HookBodyCapability` token, read from
+ * the spec enum, shown for a `js` body only: an expression body is strict and
+ * refuses `capabilities` by name, so switching to `expression` drops the grant
+ * rather than carrying a key the save would refuse. Nothing is inferred from
+ * the source text.
  *
  * `object` is spec `string | string[]` (or `'*'` for every object). The picker
  * normalises to/from that: `'*'` ⇒ all, one selection ⇒ a string, many ⇒ an
@@ -47,6 +58,7 @@ import {
   flagUnknownValue,
   rosterFrom,
 } from './_shared.js';
+import { HookBodyCapability } from '@objectstack/spec/data';
 import { useObjectOptions } from '../previews/useObjectOptions.js';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
@@ -76,6 +88,19 @@ const QUERY_EVENTS = [
 ];
 
 const ALL_OBJECTS = '*';
+
+/** The grantable tokens, in the spec's order — the order a grant is written in. */
+const CAPABILITY_TOKENS: readonly string[] = HookBodyCapability.options;
+
+/** The `ctx` call each token unlocks, shown under its checkbox. Code, so it
+ *  reads the same in every locale; a token with no entry shows none. */
+const CAPABILITY_CALLS: Partial<Record<HookBodyCapability, string>> = {
+  'api.read': 'ctx.api.object(…).find / findOne / count / aggregate',
+  'api.write': 'ctx.api.object(…).insert / update / delete',
+  'api.transaction': 'ctx.api.transaction(async () => { … })',
+  'crypto.uuid': 'ctx.crypto.randomUUID()',
+  log: 'ctx.log.info / warn / error',
+};
 
 /**
  * objectui#11820 — what the host knows about where the hook is authored: the
@@ -208,6 +233,29 @@ export function HookDefaultInspector({
   );
 
   const patchBody = (p: Record<string, unknown>) => onPatch({ body: { ...body, ...p } });
+
+  // objectstack#26726 — a stored token the spec does not list (a typo, a
+  // retired `crypto.hash`) stays on screen, flagged, so it is never dropped
+  // unseen; the save's parse names it, and unticking it removes it.
+  const granted: string[] = Array.isArray(body.capabilities)
+    ? body.capabilities.filter((c): c is string => typeof c === 'string')
+    : [];
+  const capabilityOptions = [
+    ...CAPABILITY_TOKENS,
+    ...granted.filter((c) => !CAPABILITY_TOKENS.includes(c)),
+  ];
+  const toggleCapability = (cap: string, on: boolean) => {
+    const next = new Set(granted);
+    if (on) next.add(cap);
+    else next.delete(cap);
+    // Unticking the last grant writes `[]`, the spec's default.
+    patchBody({ capabilities: capabilityOptions.filter((c) => next.has(c)) });
+  };
+  const setLanguage = (v: string) => {
+    const next: Record<string, unknown> = { ...body, language: v };
+    if (v !== 'js') delete next.capabilities;
+    onPatch({ body: next });
+  };
 
   const toggleObject = (name: string, on: boolean) => {
     const next = on ? [...new Set([...objectNames, name])] : objectNames.filter((n) => n !== name);
@@ -385,7 +433,7 @@ export function HookDefaultInspector({
           label={tr('engine.inspector.hook.language')}
           value={language}
           options={BODY_LANG_OPTS.map((o) => ({ value: o.value, label: tr(o.labelKey) }))}
-          onCommit={(v) => patchBody({ language: v })}
+          onCommit={setLanguage}
           disabled={readOnly}
         />
         <div className="space-y-1">
@@ -406,6 +454,33 @@ export function HookDefaultInspector({
               : tr('engine.inspector.hook.bodyHint.js')}
           </div>
         </div>
+        {language === 'js' && (
+          <div className="space-y-1" data-testid="hook-body-capabilities">
+            <Label className="text-xs text-muted-foreground">{tr('engine.inspector.hook.capabilities')}</Label>
+            <div className="space-y-1 rounded-md border p-2">
+              {capabilityOptions.map((cap) => (
+                <div key={cap} className="space-y-0.5">
+                  <InspectorCheckboxField
+                    label={
+                      CAPABILITY_TOKENS.includes(cap)
+                        ? cap
+                        : flagUnknownValue(cap, tr('engine.inspector.hook.capabilityUnknown'), locale)
+                    }
+                    value={granted.includes(cap)}
+                    onCommit={(on) => toggleCapability(cap, on)}
+                    disabled={readOnly}
+                  />
+                  {CAPABILITY_CALLS[cap as HookBodyCapability] && (
+                    <div className="pl-5 font-mono text-[10px] text-muted-foreground/70">
+                      {CAPABILITY_CALLS[cap as HookBodyCapability]}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="text-[11px] text-muted-foreground/70">{tr('engine.inspector.hook.capabilitiesHint')}</div>
+          </div>
+        )}
       </div>
 
       {/* 4 ─ Options */}
