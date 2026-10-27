@@ -250,7 +250,7 @@ describe('pendingApproverReadGrants — the records a pending approval step lets
     expect(rig.finds).toEqual(['sys_user', 'sys_approval_approver']);
 
     // Any write through the engine retires the memo: the next read asks again.
-    await rig.engine.insert(OTHER, { id: 'm_1', title: 'unrelated' }, { context: SYSTEM });
+    await rig.engine.insert(OTHER, { id: 'm_1', title: 'unrelated', organization_id: DEFAULT_ORGANIZATION_ID }, { context: SYSTEM });
     rig.finds.length = 0;
     await grantsOf(rig, OBJECT, ctx);
     expect(rig.finds).toEqual(['sys_user', 'sys_approval_approver', 'sys_approval_request']);
