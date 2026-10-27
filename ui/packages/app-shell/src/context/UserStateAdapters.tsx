@@ -49,11 +49,18 @@ interface UserStateAdaptersValue {
    * is not one of the public {@link UserStateKind}s.
    */
   listState: UserPreferenceFamily<any> | null;
+  /**
+   * objectstack#25883 — the per-object record-page state (`ui.record.<object>`),
+   * a key family loaded by prefix in the same shared read as `listState`.
+   * Console-internal, like `listState`.
+   */
+  recordState: UserPreferenceFamily<any> | null;
 }
 
 interface AttachApi {
   attach(kind: UserStateKind, adapter: UserDataAdapter<any> | null): void;
   attachListState(family: UserPreferenceFamily<any> | null): void;
+  attachRecordState(family: UserPreferenceFamily<any> | null): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +72,7 @@ const ReadCtx = createContext<UserStateAdaptersValue>({
   recent: null,
   flowPaletteRecents: null,
   listState: null,
+  recordState: null,
 });
 const WriteCtx = createContext<AttachApi | null>(null);
 
@@ -78,6 +86,7 @@ export function UserStateAdaptersProvider({ children }: { children: ReactNode })
     recent: null,
     flowPaletteRecents: null,
     listState: null,
+    recordState: null,
   });
 
   // Stable attach API so bridge useEffect deps don't churn.
@@ -87,6 +96,9 @@ export function UserStateAdaptersProvider({ children }: { children: ReactNode })
     },
     attachListState: (family) => {
       setAdapters(prev => (prev.listState === family ? prev : { ...prev, listState: family }));
+    },
+    attachRecordState: (family) => {
+      setAdapters(prev => (prev.recordState === family ? prev : { ...prev, recordState: family }));
     },
   });
 
@@ -131,6 +143,22 @@ export function useAttachListStateFamily() {
   return useCallback(
     (family: UserPreferenceFamily<any> | null) => {
       ctx?.attachListState(family);
+    },
+    [ctx],
+  );
+}
+
+/** The attached per-object record-page family (objectstack#25883), or null. */
+export function useRecordStateFamily<T>(): UserPreferenceFamily<T> | null {
+  return useContext(ReadCtx).recordState as UserPreferenceFamily<T> | null;
+}
+
+/** Plug the record-page family in/out. Stable across re-renders. */
+export function useAttachRecordStateFamily() {
+  const ctx = useContext(WriteCtx);
+  return useCallback(
+    (family: UserPreferenceFamily<any> | null) => {
+      ctx?.attachRecordState(family);
     },
     [ctx],
   );

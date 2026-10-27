@@ -645,33 +645,33 @@ describe('objectui#13047 — each kind\'s own block, handed to the node of the v
   it('`calendar`: `startDateField` / `endDateField` / `titleField` bind the calendar', async () => {
     const control = mount({ type: 'calendar' });
     await loaded(control.dataSource);
-    expect(lastHanded('object-calendar')?.startDateField).toBeUndefined();
+    expect((lastHanded('object-calendar')?.calendar as Row | undefined)?.startDateField).toBeUndefined();
     cleanup();
     resetHanded();
 
     const { dataSource } = mount({ type: 'calendar', calendar: { startDateField: 'due', endDateField: 'finish', titleField: 'owner' } });
     await handedTo('object-calendar');
     await loaded(dataSource);
+    // objectstack#25923 — the binding rides the node's own `calendar` block, never flat.
     const calendar = lastHanded('object-calendar');
-    expect(calendar.startDateField).toBe('due');
-    expect(calendar.endDateField).toBe('finish');
-    expect(calendar.titleField).toBe('owner');
+    expect(calendar.calendar).toEqual({ startDateField: 'due', endDateField: 'finish', titleField: 'owner' });
+    expect(calendar).not.toHaveProperty('startDateField');
   });
 
   it('`gantt`: `startDateField` / `endDateField` / `titleField` bind the chart', async () => {
     const control = mount({ type: 'gantt' });
     await loaded(control.dataSource);
-    expect(lastHanded('object-gantt')?.startDateField).toBeUndefined();
+    expect((lastHanded('object-gantt')?.gantt as Row | undefined)?.startDateField).toBeUndefined();
     cleanup();
     resetHanded();
 
     const { dataSource } = mount({ type: 'gantt', gantt: { startDateField: 'due', endDateField: 'finish', titleField: 'owner' } });
     await handedTo('object-gantt');
     await loaded(dataSource);
+    // objectstack#25923 — the binding rides the node's own `gantt` block, never flat.
     const gantt = lastHanded('object-gantt');
-    expect(gantt.startDateField).toBe('due');
-    expect(gantt.endDateField).toBe('finish');
-    expect(gantt.titleField).toBe('owner');
+    expect(gantt.gantt).toEqual({ startDateField: 'due', endDateField: 'finish', titleField: 'owner' });
+    expect(gantt).not.toHaveProperty('startDateField');
   });
 
   it('`gallery`: `coverField` and `titleField` reach the gallery', async () => {

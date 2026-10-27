@@ -195,7 +195,8 @@ describe('objectui#8980 — a canonical top-level view-kind block reaches the re
   it('`calendar` → `object-calendar` (ObjectCalendar)', async () => {
     const node = await generatedNodeFor({ label: 'Cal', type: 'calendar', calendar: { startDateField: 'due_at' } });
     expect(node.type).toBe('object-calendar');
-    expect(node.startDateField).toBe('due_at');
+    // objectstack#25923 — the node's own `calendar` block, never flat.
+    expect(node.calendar.startDateField).toBe('due_at');
   });
 
   it('`gallery` → `object-gallery` (ObjectGallery)', async () => {
@@ -225,8 +226,8 @@ describe('objectui#8980 — a canonical top-level view-kind block reaches the re
       gantt: { startDateField: 'start_at', endDateField: 'end_at', titleField: 'subject' },
     });
     expect(node.type).toBe('object-gantt');
-    expect(node.startDateField).toBe('start_at');
-    expect(node.endDateField).toBe('end_at');
+    // objectstack#25923 — the node's own `gantt` block, never flat.
+    expect(node.gantt).toEqual({ startDateField: 'start_at', endDateField: 'end_at', titleField: 'subject' });
   });
 
   it('`map` → `object-map` (ObjectMap)', async () => {

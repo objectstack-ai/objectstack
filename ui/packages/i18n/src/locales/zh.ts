@@ -2589,6 +2589,9 @@ const zh = {
       invitationDescription: '请使用收到邀请的邮箱。',
       invitationSignUpButton: '注册并加入',
       invitationSignInDivider: '或登录已有账号',
+      invitationPreviewTitle: '{{inviter}} 邀请你加入 {{organization}}',
+      invitationPreviewTitleNoInviter: '你受邀加入 {{organization}}',
+      invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）。',
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2601,6 +2604,7 @@ const zh = {
       description: '创建账号，开始搭建。',
       invitationTitle: '注册账号并加入',
       invitationDescription: '请使用收到邀请的邮箱注册，邀请只能由该邮箱接受。',
+      invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）注册，邀请只能由该邮箱接受。',
       nameLabel: '姓名',
       namePlaceholder: '张三',
       emailLabel: '邮箱',

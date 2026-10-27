@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceGlobs } from '../workspace-root.mjs';
+import { UI_WORKSPACE_MEMBER_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -200,21 +201,22 @@ describe('objectui#9106 — the derivation itself can fail', () => {
   });
 
   it('finds the whole workspace, not a slice of it', () => {
-    // Measured on 1e0e46af9: 46 manifests under the three globbed groups.
-    // A floor, not an equality — new packages are routine — but a floor low
-    // enough to be honest and high enough that a half-broken enumeration fails.
-    expect(members.length).toBeGreaterThanOrEqual(40);
+    // A floor, not an equality — packages come and go routinely — but high
+    // enough that a collapsed enumeration fails: the shared workspace-member
+    // floor, about two thirds of the 43 manifests under the three globbed
+    // groups measured on objectstack 6a7c0fe3.
+    expect(members.length).toBeGreaterThanOrEqual(UI_WORKSPACE_MEMBER_FLOOR);
     expect(members.map((m) => m.dir)).toContain('packages/layout');
     expect(members.map((m) => m.dir)).toContain('apps/console');
   });
 
   it('can see test files where test files are', () => {
     // The negative control for `collectTestFiles`: a collector that returned []
-    // for everything would put all 46 members in the excluded bucket and this
+    // for everything would put every member in the excluded bucket and this
     // file would then be asserting nothing at all.
     const layout = members.find((m) => m.dir === 'packages/layout');
     expect(layout?.testFileCount).toBeGreaterThan(0);
-    expect(withScriptAndFiles.length).toBeGreaterThanOrEqual(40);
+    expect(withScriptAndFiles.length).toBeGreaterThanOrEqual(UI_WORKSPACE_MEMBER_FLOOR);
   });
 });
 

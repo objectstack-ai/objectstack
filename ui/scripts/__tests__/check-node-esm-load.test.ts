@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 
 import {
   ESM_MODULE_EDGE,
@@ -448,7 +449,10 @@ describe('the load leg evaluates rather than resolves', () => {
 
 describe('the gate cannot be green about nothing', () => {
   it('keeps a floor under both legs', () => {
-    expect(MIN_PACKAGES).toBeGreaterThanOrEqual(30);
+    // The package floor is the shared ui published-package floor, not a number of
+    // its own: re-measuring the population moves it in one place for every reader.
+    expect(MIN_PACKAGES).toBe(UI_PUBLISHED_PACKAGE_FLOOR);
+    expect(MIN_PACKAGES).toBeGreaterThan(0);
     expect(MIN_LOADED).toBeGreaterThan(0);
   });
 
