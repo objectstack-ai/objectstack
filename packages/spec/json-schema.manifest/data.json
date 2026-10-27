@@ -97,6 +97,7 @@
     "data/HookBodyCapability",
     "data/HookContext",
     "data/HookEvent",
+    "data/HookRefusal",
     "data/ImportFieldMapping",
     "data/Index",
     "data/InlineGridColumn",

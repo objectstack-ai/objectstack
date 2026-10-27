@@ -11,7 +11,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/data/datasource.zod.ts` — Exports: DriverType, DriverDefinitionSchema, SchemaModeSchema, ExternalDatasourceSettingsSchema, DatasourceSchema
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
-- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookEvent, HookSchema, HookContextSchema
+- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookRefusalSchema, HookEvent, HookSchema, HookContextSchema
 - `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
 - `node_modules/@objectstack/spec/src/data/seed.zod.ts` — Exports: SeedMode, SeedColumnSchema, SeedSchema, leadSeed
 - `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol

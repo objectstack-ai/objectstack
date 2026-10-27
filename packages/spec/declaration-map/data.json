@@ -173,6 +173,8 @@
     "HookContext": "data/HookContext",
     "HookContextSchema": "data/HookContext",
     "HookEvent": "data/HookEvent",
+    "HookRefusal": "data/HookRefusal",
+    "HookRefusalSchema": "data/HookRefusal",
     "HookSchema": "data/Hook",
     "ImportFieldMapping": "data/ImportFieldMapping",
     "ImportFieldMappingSchema": "data/ImportFieldMapping",

@@ -245,6 +245,7 @@ function refuseUndeclaredLiteralRefusalCode(
 export const HookRefusalSchema = lazySchema(() => strictObject(
   {
     surface: 'this hook refusal',
+    history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
     aliases: { text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status' },
     guidance: {
       code:
