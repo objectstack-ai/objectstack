@@ -2980,14 +2980,43 @@ const NAV_TARGET_KEY = {
  * Whether a listed row can be a nav target. A record page needs a record id a
  * `page` entry cannot pass (`isStaticPageOption`), and an action bound to an
  * object is not addressable from the nav, which runs GLOBAL actions only
- * (`useNavActionDispatch`). Only a CONFIRMED one is left out: a draft header
- * carries no body, so a draft-only row is kept, as `isStaticPageOption` keeps
- * a row with no `type`.
+ * (`useNavActionDispatch`). Only a CONFIRMED one is left out, as
+ * `isStaticPageOption` keeps a row with no `type`.
+ *
+ * objectstack-ai/objectstack#26743 — a `_drafts` header names the METADATA
+ * type (`page`), never the body's own `type` (`record`), so a draft-only row
+ * is judged on its draft body instead ({@link NAV_TARGET_BODY_KEYED}). A draft
+ * record page is still a record page once it is published with the app.
  */
 function isNavTargetRow(metaType: string, row: Record<string, unknown>): boolean {
   if (metaType === 'page') return isStaticPageOption(row as { type?: string });
   if (metaType === 'action') return !row.objectName;
   return true;
+}
+
+/** The types whose {@link isNavTargetRow} verdict reads a body key, so a draft-only row's body is read for it. */
+const NAV_TARGET_BODY_KEYED: ReadonlySet<string> = new Set(['page', 'action']);
+
+/**
+ * Whether a draft-only row can be a nav target, judged on its draft body. A
+ * body that cannot be read (no draft served, a failed read) leaves the row in,
+ * as a published row with no `type` is left in: only a confirmed non-target
+ * is dropped.
+ */
+async function isDraftNavTarget(
+  client: MetadataClient,
+  metaType: string,
+  name: string,
+  packageId: string,
+): Promise<boolean> {
+  if (!NAV_TARGET_BODY_KEYED.has(metaType)) return true;
+  let body: Record<string, unknown> | null;
+  try {
+    body = extractDraftBody(await client.getDraft(metaType, name, { packageId }));
+  } catch {
+    return true;
+  }
+  return !body || isNavTargetRow(metaType, body);
 }
 
 /**
@@ -3021,10 +3050,19 @@ function usePackageNavTargets(
         // objectui#11862 — a draft-only target carries the label its `_drafts`
         // row serves (objectstack-ai/objectstack#22200), so the picker offers
         // it by that label, as it offers a published one.
+        const draftOnly: NavTargetRow[] = [];
         for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
           const name = typeof draft?.name === 'string' ? draft.name : '';
-          if (name && !byName.has(name)) byName.set(name, { name, label: draft.label ?? undefined });
+          if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
+            draftOnly.push({ name, label: draft.label ?? undefined });
+          }
         }
+        const verdicts = await Promise.all(
+          draftOnly.map((row) => isDraftNavTarget(client, metaType, row.name, packageId)),
+        );
+        draftOnly.forEach((row, i) => {
+          if (verdicts[i]) byName.set(row.name, row);
+        });
       } catch {
         /* non-fatal — the picker just stays empty */
       }
