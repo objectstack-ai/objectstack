@@ -34,6 +34,12 @@ import { FIELD_TYPE_META, type FieldTypeId } from '../metadata-admin/previews/fi
 import { fieldTypeName } from '../metadata-admin/previews/fieldTypeName';
 import { t, tFormat } from '../metadata-admin/i18n';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 afterEach(cleanup);
 
 type Lang = 'en' | 'zh';

@@ -6035,11 +6035,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       const suffix = Date.now().toString(36);
       name = `${base}_${suffix}`;
     }
+    // `data` is a list view key. A flat spec declares it at the top level; a
+    // ViewItem envelope (`{ name, object, viewKind, config }`) declares it only
+    // inside `config`, and the platform's `view` write door refuses a key the
+    // envelope does not declare (objectstack#26711), so an envelope is sent
+    // without one.
+    const isEnvelope = spec?.config !== undefined && spec?.config !== null;
     const fullSpec = {
       ...spec,
       name,
       object: spec?.object || objectName,
-      data: spec?.data || { provider: 'object', object: objectName },
+      ...(isEnvelope ? {} : { data: spec?.data || { provider: 'object', object: objectName } }),
     };
     const result: any = await this.client.meta.saveItem('view', name, fullSpec);
     // `saveItem` is an UPSERT: an explicit `spec.name` that already exists
