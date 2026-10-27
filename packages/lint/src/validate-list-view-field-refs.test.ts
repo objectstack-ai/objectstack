@@ -12,11 +12,13 @@
 import { describe, expect, it } from 'vitest';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import {
   validateListViewFieldRefs as validateListViewFieldRefsUnrecorded,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   listViewWalkedPositions,
@@ -1292,6 +1294,162 @@ describe('[#22161] one-line fixes — list-view-field-unknown, list-view-field-d
     const dotted = explainRule(LIST_VIEW_FIELD_DOTTED)!.paragraphs.join('\n');
     for (const fact of ['a stored field, written when the source changes', 'read the related record with `expand`', 'filter on a column of the bound object itself']) {
       expect(dotted, fact).toContain(fact);
+    }
+  });
+});
+
+// [#26719] A list view's chart bound to a dataset declared over ANOTHER object
+// than the one the list view lists. Measured at the save door before the rule
+// landed: such a view saved and published 200 with no advisory.
+describe('[#26719] a list-view chart bound to a dataset over another object', () => {
+  const DATASETS = [
+    // Over the list's own object.
+    {
+      name: 'duly_task_metrics',
+      object: 'duly_task',
+      dimensions: [{ name: 'status', field: 'status' }],
+      measures: [{ name: 'task_count', aggregate: 'count' }],
+    },
+    // Over another object.
+    {
+      name: 'duly_person_metrics',
+      object: 'duly_person',
+      dimensions: [{ name: 'name', field: 'name' }],
+      measures: [{ name: 'person_count', aggregate: 'count' }],
+    },
+    // Over `duly_task`, reaching `duly_person` through the declared `owner`
+    // relationship.
+    {
+      name: 'duly_task_by_owner',
+      object: 'duly_task',
+      include: ['owner'],
+      dimensions: [{ name: 'owner_name', field: 'owner.name' }],
+      measures: [{ name: 'task_count', aggregate: 'count' }],
+    },
+  ];
+  const chartOn = (dataset: string, extra: AnyRec = {}): AnyRec => ({
+    name: 'by_status',
+    type: 'chart',
+    data: { provider: 'object', object: 'duly_task' },
+    columns: ['title'],
+    chart: { chartType: 'bar', dataset, dimensions: ['status'], values: ['task_count'] },
+    ...extra,
+  });
+  const withDatasets = (stack: AnyRec): AnyRec => ({ ...stack, datasets: DATASETS });
+  const rulesOf = (fs: Array<{ rule: string }>) => fs.map((f) => f.rule);
+
+  it('REFUSES a dataset over another object — `error`, at `chart.dataset`, naming the view, the dataset and both objects', () => {
+    const findings = validateListViewFieldRefs(withDatasets(stackWith(chartOn('duly_person_metrics'))));
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f).toMatchObject({
+      severity: 'error',
+      rule: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
+      path: 'views[0].list.chart.dataset',
+    });
+    expect(f.where).toContain('duly_task');
+    for (const name of ['"duly_person_metrics"', '"duly_person"', '"duly_task"']) {
+      expect(f.message, name).toContain(name);
+    }
+    expect(f.hint).not.toContain('\n');
+    expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+  });
+
+  it('CONTROL — a chart over a dataset on the list\'s own object reports nothing', () => {
+    expect(validateListViewFieldRefs(withDatasets(stackWith(chartOn('duly_task_metrics'))))).toEqual([]);
+  });
+
+  it('REFUSES a dataset that reaches the list\'s object only through a declared relationship', () => {
+    // A `duly_person` list charting a dataset over `duly_task` that includes
+    // `owner`: the chart still counts tasks.
+    const listView = chartOn('duly_task_by_owner', { data: { provider: 'object', object: 'duly_person' }, columns: ['name'] });
+    const findings = validateListViewFieldRefs(withDatasets(stackWith(listView)));
+    expect(rulesOf(findings)).toEqual([LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT]);
+    expect(findings[0].message).toContain('"duly_task_by_owner" over object "duly_task"');
+  });
+
+  it('…while the same dataset under the `duly_task` list is that object\'s own', () => {
+    expect(validateListViewFieldRefs(withDatasets(stackWith(chartOn('duly_task_by_owner'))))).toEqual([]);
+  });
+
+  it.each([
+    ['objects[].listViews.<key>', { objects: [{ ...OBJECTS[0], listViews: { by_status: chartOn('duly_person_metrics', { data: undefined }) } }, OBJECTS[1]] }, 'objects[0].listViews.by_status.chart.dataset'],
+    ['views[].listViews.<key>', { objects: OBJECTS, views: [{ name: 'duly_task', object: 'duly_task', listViews: { by_status: chartOn('duly_person_metrics') } }] }, 'views[0].listViews.by_status.chart.dataset'],
+    ['a flattened list overlay', { objects: OBJECTS, views: [{ ...chartOn('duly_person_metrics'), name: 'duly_task.by_status', object: 'duly_task', viewKind: 'list' }] }, 'views[0].chart.dataset'],
+    ['a ViewItem record', { objects: OBJECTS, views: [{ name: 'duly_task.by_status', object: 'duly_task', viewKind: 'list', config: chartOn('duly_person_metrics') }] }, 'views[0].config.chart.dataset'],
+  ])('walks %s', (_label, stack, path) => {
+    const findings = validateListViewFieldRefs(withDatasets(stack as AnyRec));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT, path]]);
+  });
+
+  it('judges the list view\'s own `data.object` binding, which wins over its container\'s', () => {
+    // A built-in list view of `duly_task` retargeted to `duly_person`: the
+    // person dataset is its own, the task dataset is foreign.
+    const retargeted = (dataset: string) => ({
+      objects: [{ ...OBJECTS[0], listViews: { people: chartOn(dataset, { data: { provider: 'object', object: 'duly_person' }, columns: ['name'] }) } }, OBJECTS[1]],
+    });
+    expect(validateListViewFieldRefs(withDatasets(retargeted('duly_person_metrics')))).toEqual([]);
+    expect(rulesOf(validateListViewFieldRefs(withDatasets(retargeted('duly_task_metrics'))))).toEqual([
+      LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
+    ]);
+  });
+
+  it('is silent where another verdict owns the case: an unknown dataset, a dataset with no `object`, an unresolved binding', () => {
+    expect(validateListViewFieldRefs(withDatasets(stackWith(chartOn('no_such_dataset'))))).toEqual([]);
+    const objectless = { ...stackWith(chartOn('loose_metrics')), datasets: [{ name: 'loose_metrics', measures: [] }] };
+    expect(validateListViewFieldRefs(objectless)).toEqual([]);
+    const unbound = stackWith(chartOn('duly_person_metrics', { data: { provider: 'object', object: 'sys_elsewhere' } }));
+    expect(validateListViewFieldRefs(withDatasets(unbound))).toEqual([]);
+  });
+
+  it('judges an object that declares no readable field map — the verdict reads object NAMES only', () => {
+    const external = [{ name: 'duly_task', label: 'Task', external: true }, OBJECTS[1]];
+    const findings = validateListViewFieldRefs(withDatasets(stackWith(chartOn('duly_person_metrics'), external)));
+    expect(rulesOf(findings)).toEqual([LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(
+        runAuthoringRules(command, { normalized: withDatasets(stackWith(chartOn('duly_person_metrics'))) }),
+      );
+      expect(errors.map((f) => f.rule)).toContain(LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT);
+    });
+  }
+
+  describe('at the runtime save door', () => {
+    const SCOPE = { packageId: 'com.qa.gap', dependencies: [] as string[] };
+    const owned = (o: AnyRec, pkg: string) => ({ ...o, _packageId: pkg });
+    const objects = [owned(OBJECTS[0], 'com.qa.gap'), owned(OBJECTS[1], 'com.other.app')];
+    const datasets = [owned(DATASETS[0], 'com.qa.gap'), owned(DATASETS[1], 'com.other.app')];
+    const item = (dataset: string): AnyRec => ({
+      name: 'duly_task.by_status',
+      object: 'duly_task',
+      viewKind: 'list',
+      label: 'By status',
+      config: chartOn(dataset),
+    });
+    const write = (dataset: string) =>
+      runRuntimeAuthoringRules({ type: 'view', item: item(dataset), context: { objects, datasets }, packageScope: SCOPE });
+
+    it('REFUSES a view written into one package bound to a dataset over another package\'s object', () => {
+      const result = write('duly_person_metrics');
+      expect(rulesOf(result.errors)).toEqual([LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT]);
+      expect(result.errors[0].path).toMatch(/chart\.dataset$/);
+    });
+
+    it('CONTROL — the same view bound to a dataset over its own object is admitted', () => {
+      const result = write('duly_task_metrics');
+      expect(result.errors).toEqual([]);
+    });
+  });
+
+  it('`os explain` carries the reasoning, the relationship answer included', () => {
+    const entry = explainRule(LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT);
+    expect(entry, 'no `os explain` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of ['base `object`', '`include`', 'to-one relationships', 'a draft save', '`chart-dataset-unknown`', 'dashboard']) {
+      expect(text, fact).toContain(fact);
     }
   });
 });
