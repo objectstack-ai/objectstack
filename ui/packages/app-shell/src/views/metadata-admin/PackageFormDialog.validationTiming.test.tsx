@@ -20,6 +20,12 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
+// The form's field labels (`engine.packages.create.*`) live in `@object-ui/i18n`'s
+// `studio` namespace, whose `zh` catalogue is fetched on demand. Resident before
+// any case, so `getByLabelText(/软件包 ID/)` reads the zh label, never the en
+// fallback while the chunk is in flight (objectstack#26863).
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 let localeFixture: 'en-US' | 'zh-CN' = 'zh-CN';
 vi.mock('./i18n', async (importOriginal) => ({
