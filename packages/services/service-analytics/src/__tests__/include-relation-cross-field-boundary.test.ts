@@ -106,8 +106,16 @@ const RELATION_BARE: FilterCondition = {
   completed_on: { $lte: { $field: 'duty.grace_days' } },
 };
 
-/** The dataset: `duty` IS in `include`, and a dimension already reads through it. */
-const DATASET = DatasetSchema.parse({
+/**
+ * The dataset: `duty` IS in `include`, and a dimension already reads through it.
+ *
+ * [#26601] The offset arm is a DOTTED `addDays` offset, which the dataset write
+ * door now refuses (ruling A on #25808 bounds the offset to a same-record
+ * column). So the dataset is parsed with the same-table filter in that slot
+ * and the dotted one put back PAST the save door — the read-time half of the
+ * boundary is still this file's to pin, for a row that never met that door.
+ */
+const PARSED = DatasetSchema.parse({
   name: 'task_health_by_duty',
   label: 'Task health by duty',
   object: TASK,
@@ -119,10 +127,14 @@ const DATASET = DatasetSchema.parse({
   measures: [
     { name: 'total', aggregate: 'count' },
     { name: 'done_on_time', aggregate: 'count', filter: SAME_TABLE_ON_TIME },
-    { name: 'done_on_time_by_duty', aggregate: 'count', filter: RELATION_OFFSET_ON_TIME },
+    { name: 'done_on_time_by_duty', aggregate: 'count', filter: SAME_TABLE_ON_TIME },
     { name: 'done_by_duty_bare', aggregate: 'count', filter: RELATION_BARE },
   ],
 });
+const DATASET = {
+  ...PARSED,
+  measures: PARSED.measures.map((m) => (m.name === 'done_on_time_by_duty' ? { ...m, filter: RELATION_OFFSET_ON_TIME } : m)),
+} as typeof PARSED;
 
 interface WireBearingError extends Error {
   code?: string;
@@ -209,6 +221,17 @@ describe('[#15103] a cross-field comparand on an `include`d relation — the bou
       expect(byGrace.get(2)).toBe(4);
       expect(byGrace.has(-3)).toBe(false);
       expect(byGrace.has(null)).toBe(false);
+    });
+  });
+
+  describe('[#26601] the save door refuses the dotted OFFSET; the dotted bare reference still validates', () => {
+    it('DatasetSchema refuses the offset arm at its slot, in the SQL read\'s words, and keeps the bare arm', () => {
+      const offset = DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'x', aggregate: 'count', filter: RELATION_OFFSET_ON_TIME }] });
+      expect(offset.success).toBe(false);
+      expect(offset.error?.issues[0]?.path).toEqual(['measures', 0, 'filter', 'completed_on', '$lte']);
+      expect(offset.error?.issues[0]?.message).toContain('"duty.grace_days" is a dotted path');
+      expect(offset.error?.issues[0]?.message).toContain('same-table column references only');
+      expect(DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'x', aggregate: 'count', filter: RELATION_BARE }] }).success).toBe(true);
     });
   });
 

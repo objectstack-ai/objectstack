@@ -98,9 +98,15 @@ import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinem
  * never to a column. The ruling put the offset ON the reference: `addDays` is
  * either an INTEGER literal of any sign (a negative value subtracts; there is no
  * `subDays`, and no other unit — whole days only) or a nested `{ $field }`
- * reference to a numeric column (dot-path allowed exactly as `$field` allows it;
- * SQL push-down applies the same same-table rule to it). Options B (a derived
+ * reference to a numeric column of the SAME record. Options B (a derived
  * date-difference measure) and C (a computed dimension) were not taken.
+ * [#26601] A DOTTED offset path is refused at every door, the authoring doors
+ * included: SQL push-down refuses it on every read (the 2026-08-06 same-table
+ * rule), and the one executor that walks the path, the memory evaluator, reads
+ * a lookup's id there on a stored row and counts the offset as zero days. This
+ * retires the earlier reading that the dotted spelling validates and is
+ * answered in memory; the base `$field` itself keeps the asymmetry stated
+ * above.
  *
  * The NULL semantics are stated here, and pinned, rather than inherited from
  * SQL three-valued logic — the shape #5146 used for `$not`:
@@ -183,7 +189,8 @@ import { OPERATOR_PREFIX_KEY_PATTERN, bannedKeyPattern } from '../shared/refinem
  *
  * Both standing rulings hold unchanged: the offset column is a column of the
  * SAME record (letter A; a path-valued offset — B′ — was not taken), and no
- * JOIN is planned for it.
+ * JOIN is planned for it. [#26601] So a dotted offset is refused at the
+ * authoring doors too, in the driver's words, not first on a read.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/25808 (the `$now` anchor)
  *
@@ -238,6 +245,8 @@ function addDaysOffsetMessage(input: unknown): string {
     'addDays is an integer literal of any sign (a negative value subtracts; whole days only, no '
     + 'other unit) or a nested { "$field": "numeric_column" } reference. A NULL offset column '
     + 'contributes zero days; a NULL referenced column makes the comparison false.';
+  const dotted = dottedAddDaysReference(input);
+  if (dotted !== undefined) return `${dottedAddDaysOffsetSentence(dotted)} ${prescription}`;
   if (typeof input === 'number') {
     return `addDays must be a whole number of days, and ${String(input)} is not an integer. ${prescription}`;
   }
@@ -255,12 +264,40 @@ function addDaysOffsetMessage(input: unknown): string {
 }
 
 /**
+ * [#26601] The `$field` of an `addDays` offset object when it names a DOTTED
+ * path, else `undefined`. The offset column is a column of the same record
+ * (ruling A on #25808), and SQL push-down refuses a dotted one on every read.
+ */
+function dottedAddDaysReference(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const ref = (input as Record<string, unknown>).$field;
+  return typeof ref === 'string' && ref.includes('.') ? ref : undefined;
+}
+
+/**
+ * [#26601] The dotted-offset refusal, in `driver-sql`'s own words for the same
+ * refusal at read time, so the save door and the first read say one sentence.
+ * The comparand-type walk (`filter-comparand-type.ts`) spells it too, for the
+ * `FilterCondition` door; `filter.test.ts` pins both to this wording.
+ */
+function dottedAddDaysOffsetSentence(ref: string): string {
+  return `The addDays offset ${JSON.stringify(ref)} is a dotted path, and SQL push-down compiles `
+    + 'same-table column references only (no relation traversal, no alias-qualified columns): name a '
+    + 'numeric column of the same record instead, holding the related value.';
+}
+
+/**
  * [#14104] The offset's nested reference. Deliberately its OWN object rather
  * than `FieldReferenceSchema` again: an offset on an offset has no ruled
- * meaning, so the nested shape carries `$field` and nothing else.
+ * meaning, so the nested shape carries `$field` and nothing else. [#26601] A
+ * dotted `$field` is refused here: see {@link dottedAddDaysReference}.
  */
 const AddDaysReferenceSchema = z.object({
-  $field: z.string().describe('Numeric column whose value is the number of days to add'),
+  // A pattern rather than a refinement, so the published JSON Schema carries
+  // the rule too (`pattern`) instead of joining the dropped-refinement ledger.
+  $field: z.string()
+    .regex(/^[^.]*$/, { error: (issue) => dottedAddDaysOffsetSentence(String(issue.input)) })
+    .describe('Numeric column of the same record whose value is the number of days to add (no dotted path)'),
 }).describe('A { $field } reference to the numeric column holding the day offset');
 
 export const FieldReferenceSchema = lazySchema(() => z.object({

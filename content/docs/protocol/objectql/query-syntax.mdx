@@ -509,9 +509,11 @@ On SQL push-down the offset compiles only between two temporal columns of the sa
 class (`date` with `date`, `datetime` with `datetime`) against a numeric offset column,
 on every dialect the `$field` compiler covers (SQLite, PostgreSQL, MySQL); the
 memory evaluator matches, and a fractional offset *value* is truncated toward zero on
-both. The same-table rule applies to the offset column too: `addDays: { $field:
-'duty.grace_days' }` (a relation path) is resolved by the memory evaluator and refused
-by SQL push-down with `INVALID_FILTER`, exactly as a dotted `$field` is.
+both. The same-table rule applies to the offset column too, and the offset is held to it
+at save time: `addDays: { $field: 'duty.grace_days' }` (a relation path) is refused with
+`INVALID_FILTER` by `os validate`, by the filter and dataset save doors and by every read,
+in the SQL push-down's own words. Only the referenced `$field` itself keeps the older
+asymmetry — resolved by the memory evaluator, refused by SQL push-down.
 
 **A dataset's `include` does not widen this.** A dataset compiles a `LEFT JOIN` for every
 relation it `include`s (ADR-0071, up to three hops), and on the native-SQL path those joins
@@ -521,7 +523,8 @@ declines it so that the driver, which alone holds the declared field set, the co
 and the tenant column the cross-field rules check, compiles it (#7598) — and the driver
 compiles single-table statements, with no join in scope. So
 `completed_on <= due_on + duty.grace_days` is refused with `INVALID_FILTER` even when `duty`
-is in the dataset's `include`; measured and pinned in
+is in the dataset's `include` — at save time now, and by the driver for a dataset that
+never met the save door; measured and pinned in
 `packages/services/service-analytics/src/__tests__/include-relation-cross-field-boundary.test.ts`
 (#15103). The spelling that answers on both paths is the same-table one — every column the
 reference names, offset included, is a column of the object the filter runs over.
@@ -583,9 +586,11 @@ strategy declines a query carrying an anchor so that the driver compiles it, as 
 
 **The SLA held on a related record.** The shape that compiles is the same-table one: the SLA
 (or its negative) propagated onto the row, or the dataset's base object carrying the column.
-A dotted offset (`addDays: { $field: 'queue.sla_days' }`) validates, is resolved by the
-memory evaluator, and is refused by SQL push-down with `INVALID_FILTER`, exactly as a dotted
-`$field` is — a dataset's `include` does not widen it (see above).
+A dotted offset (`addDays: { $field: 'queue.sla_days' }`) is refused with `INVALID_FILTER`
+when the filter, dataset or stack is saved or validated, in the SQL push-down's words — a
+dataset's `include` does not widen it (see above). The memory evaluator would walk the path,
+but on a stored row the relation holds the related record's id, so the offset would read as
+zero days: copy the related value onto a numeric column of the row instead.
 
 ### Date, Datetime, and Time Filters
 
