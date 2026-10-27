@@ -196,6 +196,7 @@ All functions are pure given a pinned `now`, which is what makes
 | `abs(x)` / `round(x)` | number | Numeric helpers |
 | `floor(x)` / `ceil(x)` | number | Round toward −∞ / +∞ (`floor(-1.2) == -2`) — **not** integer-division's round-toward-zero |
 | `min(a, b)` / `max(a, b)` | dyn | Smaller / larger operand (numeric comparison) |
+| `label(record.f)` | string | A select field's option label in the reader's locale — see [Record name from an option label](#record-name-from-an-option-label) |
 
 Add new helpers in
 [`packages/formula/src/stdlib.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/formula/src/stdlib.ts).
@@ -264,6 +265,40 @@ type-soundness check applies.
 `joinNonEmpty` skips blank parts, so you avoid the verbose triple-coalesce.
 Building the string by hand with `+` would also work, but CEL throws on
 `null + string`, so each nullable operand must be wrapped in `coalesce(..., '')`.
+
+### Record name from an option label
+
+A select field stores its option's **value** (`clean`), not its label. To put
+the label a reader reads into a composed name, wrap the field in `label()`:
+
+```ts
+{
+  name: 'display_name',            // the object's nameField
+  type: 'formula',
+  expression: F`'v' + string(record.version_no) + ' · ' + label(record.kind)`,
+}
+```
+
+The same record reads `v2 · 清稿` to a reader whose locale is `zh-CN` and
+`v2 · Clean` to an `en-US` reader. The label is the one the select control
+shows that reader: the field's declared option label, with the object's
+translation bundle laid over it (`objects.<object>.fields.<field>.options.<value>`,
+then a shared picklist's `picklists.<picklist>.options.<value>`), exactly as
+`GET /meta/object/:name` serves it. The locale is the request's
+`Accept-Language`, so the write response the save toast reads, the record
+page title, related lists and lookups all follow it.
+
+- `label()` takes exactly `record.<field>`, a field that declares `options`.
+  An empty value reads `''`; a stored value no option declares reads as itself.
+  A multi-value select is refused.
+- A read with no locale (a script, a scheduled job) reads the declared labels.
+- A **stored** computed field (a `text` field with an `expression`) is computed
+  once, on the write, so it stores the declared label whatever the writer's
+  locale. Search never indexes a formula field, so it is unaffected.
+- `label()` answers only where the engine serves formula fields. A validation
+  rule, predicate or flow condition that calls it fails loudly instead of
+  comparing against a label; compare the stored value there
+  (`record.kind == 'clean'`).
 
 ### Conditional formula
 

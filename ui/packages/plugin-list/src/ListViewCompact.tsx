@@ -25,6 +25,11 @@
  * only when the block hands a destination through
  * {@link CompactListDestinationContext}, which it builds from the host's
  * `listHref` / `openList`. A host without that seam draws no link.
+ *
+ * Also the CAPPED posture's rows (objectstack#26613), the one a list block
+ * takes in a region half the page or wider: {@link ListViewCappedRows}, a
+ * short table of the view's first {@link CAPPED_LIST_MAX_COLUMNS} columns over
+ * the first rows, ending with 「View all N →」 to the same destination.
  */
 
 import * as React from 'react';
@@ -32,7 +37,8 @@ import { cn } from '@object-ui/components';
 import { getRecordDisplayName, isEmptyValue, columnIdentity, isDeadlineSettled } from '@object-ui/core';
 import { usePredicateScope } from '@object-ui/react';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
-import { useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
+import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 
 /**
  * Where the compact list's "View all" link goes: a document href and the SPA
@@ -53,8 +59,12 @@ export interface CompactListDestination {
 
 export const CompactListDestinationContext = React.createContext<CompactListDestination | null>(null);
 
-/** The compact list's footer: a real link to the rest of the list. */
-export function ListViewCompactFooter({ destination }: { destination: CompactListDestination }) {
+/**
+ * The compact and capped lists' footer: a real link to the rest of the list.
+ * With a `count` (the capped list, objectstack#26613) it says how many records
+ * the link opens, 「View all N」; without one, "View all".
+ */
+export function ListViewCompactFooter({ destination, count }: { destination: CompactListDestination; count?: number | null }) {
   const { t } = useObjectTranslation();
   return (
     <div className="border-t px-3 py-2 shrink-0" data-testid="list-compact-footer">
@@ -74,7 +84,7 @@ export function ListViewCompactFooter({ destination }: { destination: CompactLis
           destination.open();
         }}
       >
-        {t('list.viewAll')}
+        {count != null ? t('list.viewAllCount', { count }) : t('list.viewAll')}
         <span aria-hidden="true">→</span>
       </a>
     </div>
@@ -132,11 +142,13 @@ export interface ListViewCompactRowsProps {
   onRowClick?: (record: Record<string, unknown>) => void;
 }
 
-/** The compact list's rows: the first visible column over the second, muted. */
-export function ListViewCompactRows({ rows, fields, objectName, objectDef, onRowClick }: ListViewCompactRowsProps) {
+/**
+ * Field labels and value cells as the shared cell renderers draw them, for
+ * the compact and the capped rows. Values go through `getCellRenderer`, so a
+ * date, a picklist label or a related record reads the way the grid draws it.
+ */
+function useListCells(objectName: string | undefined, objectDef: ListViewCompactRowsProps['objectDef']) {
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
-  const { primary, secondary } = compactRowColumns(fields);
-  const destination = React.useContext(CompactListDestinationContext);
   // The host predicate scope a row's declared deadline is judged in (objectui#11815).
   const predicateScope = usePredicateScope();
 
@@ -166,6 +178,15 @@ export function ListViewCompactRows({ rows, fields, objectName, objectDef, onRow
     const deadlineSettled = isDeadlineSettled(objectDef?.fields?.[name], record, { scope: predicateScope, fields: objectDef?.fields });
     return <Cell value={value} field={field as never} deadlineSettled={deadlineSettled} />;
   };
+
+  return { fieldFor, cell };
+}
+
+/** The compact list's rows: the first visible column over the second, muted. */
+export function ListViewCompactRows({ rows, fields, objectName, objectDef, onRowClick }: ListViewCompactRowsProps) {
+  const { primary, secondary } = compactRowColumns(fields);
+  const destination = React.useContext(CompactListDestinationContext);
+  const { cell } = useListCells(objectName, objectDef);
 
   return (
     <>
@@ -208,6 +229,126 @@ export function ListViewCompactRows({ rows, fields, objectName, objectDef, onRow
         })}
       </ul>
       {destination && <ListViewCompactFooter destination={destination} />}
+    </>
+  );
+}
+
+/**
+ * How many rows a capped list draws when its block states no `limit`
+ * (objectstack#26613). A block caps at its `dataSource.limit`, which lands on
+ * `pagination.pageSize` through the element binding, and at this otherwise.
+ */
+export const CAPPED_LIST_DEFAULT_LIMIT = 5;
+
+/** How many of the view's columns a capped list draws; the rest are dropped, not scrolled. */
+export const CAPPED_LIST_MAX_COLUMNS = 4;
+
+/** The capped list's columns: the view's first {@link CAPPED_LIST_MAX_COLUMNS} visible ones. */
+export function cappedListColumns(fields: readonly unknown[]): Array<{ name: string; entry: unknown }> {
+  const columns: Array<{ name: string; entry: unknown }> = [];
+  for (const entry of fields) {
+    const name = columnIdentity(entry);
+    if (typeof name !== 'string' || name.length === 0) continue;
+    columns.push({ name, entry });
+    if (columns.length === CAPPED_LIST_MAX_COLUMNS) break;
+  }
+  return columns;
+}
+
+export interface ListViewCappedRowsProps extends ListViewCompactRowsProps {
+  /** The records the list's query matched, for 「View all N」; `null` while not known. */
+  total: number | null;
+}
+
+/**
+ * The CAPPED posture's rows (objectstack#26613): what a list block in a page
+ * region half the page or wider draws in place of the object list's grid. A
+ * short table of the view's first four columns over the rows this component
+ * fetched (the window is the cap), then the link to the rest, 「View all N →」.
+ * No row-number column, no selection, no pager, and no horizontal scroll: the
+ * table is fixed to the block's width and each cell truncates.
+ *
+ * The first cell of each row is a button, so a keyboard reaches the record the
+ * row opens; a click anywhere else on the row opens it too.
+ */
+export function ListViewCappedRows({ rows, fields, objectName, objectDef, total, onRowClick }: ListViewCappedRowsProps) {
+  const columns = cappedListColumns(fields);
+  const destination = React.useContext(CompactListDestinationContext);
+  const displayLocale = useDisplayLocale();
+  const { fieldFor, cell } = useListCells(objectName, objectDef);
+
+  // A column entry's own label wins over the field's, as the grid's header reads it.
+  const headerFor = ({ name, entry }: { name: string; entry: unknown }): string => {
+    const own = entry && typeof entry === 'object' ? (entry as { label?: unknown }).label : undefined;
+    const resolved = own != null ? resolveInlineI18nLabel(own as never, displayLocale) : undefined;
+    return typeof resolved === 'string' && resolved.length > 0 ? resolved : String(fieldFor(name).label ?? name);
+  };
+
+  const open = (record: Record<string, unknown>, target: EventTarget) => {
+    // A link inside a cell (an email, a URL) is its own click.
+    if ((target as HTMLElement).closest('a')) return;
+    onRowClick?.(record);
+  };
+
+  return (
+    <>
+      <table className="w-full table-fixed border-collapse text-sm" data-testid="list-capped-table">
+        {columns.length > 0 && (
+          <thead>
+            <tr className="border-b">
+              {columns.map((column) => (
+                <th
+                  key={column.name}
+                  scope="col"
+                  className="truncate px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                  data-testid="list-capped-header"
+                >
+                  {headerFor(column)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody className="divide-y">
+          {rows.map((record, i) => {
+            const id = (record.id ?? record._id ?? i) as string | number;
+            // No columns declared: one column, the record's display name, as
+            // the compact row reads it.
+            const cells = columns.length > 0
+              ? columns.map(({ name }) => cell(record, name))
+              : [null];
+            return (
+              <tr
+                key={String(id)}
+                className="cursor-pointer hover:bg-muted/50"
+                data-testid="list-capped-row"
+                onClick={(e) => open(record, e.target)}
+              >
+                {cells.map((content, c) => (
+                  <td key={columns[c]?.name ?? c} className="truncate px-3 py-2 align-middle">
+                    {c === 0 ? (
+                      <button
+                        type="button"
+                        className="w-full min-w-0 truncate text-left text-foreground focus-visible:underline focus-visible:outline-none"
+                        onClick={(e) => {
+                          // The row's own click opens it; this one only stops a second open.
+                          e.stopPropagation();
+                          open(record, e.target);
+                        }}
+                      >
+                        {content ?? getRecordDisplayName(objectDef, record)}
+                      </button>
+                    ) : (
+                      content
+                    )}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {destination && <ListViewCompactFooter destination={destination} count={total} />}
     </>
   );
 }

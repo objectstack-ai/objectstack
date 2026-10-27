@@ -174,6 +174,22 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes:
       'Regime C (ADR-0131 D6): package-declared rules (`sharingRules` in objectstack.config.ts), served from the registry and switched off through the activation ledger (POST /api/v1/security/_activation/sharing_rule/:name). Organizations author their own through POST /api/v1/sharing/rules. Code-only kind: PUT /meta/sharing_rule/:name answers 403 NOT_CREATABLE (NOT_OVERRIDABLE over a declared rule), which runtime meta-sharing-rule-door.test.ts pins.',
   },
+  // [ADR-0142 D1/D5] Ownership queues and the assignment rules that route inserted
+  // rows into them joined the registry as code-only kinds. Waived until a fixture
+  // app adopts them: an assignment rule changes who owns a newly inserted row, so
+  // adding one to the showcase is fixture work with its own review.
+  queue: {
+    status: 'waived',
+    reason:
+      'Not yet demonstrated. The runtime is proven by suites (plugin-sharing ownership-queue, the plugin-security queue gate, the approvals queue approver), but no showcase object is routed through a queue yet; the adoption phase of ADR-0142 (#25769) brings the first app that declares one.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/25769',
+  },
+  assignment_rule: {
+    status: 'waived',
+    reason:
+      'Not yet demonstrated, for the same reason as `queue`: a declared assignment rule routes every matching insert that arrives with no owner, so it lands with the app that adopts queues (ADR-0142 adoption phase, #25769) rather than inside the showcase\'s existing objects.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/25769',
+  },
 
   // ── ai ──
   agent: {

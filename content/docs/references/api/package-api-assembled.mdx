@@ -130,6 +130,8 @@ Installed package row whose manifest is the assembled package body
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
 | **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
 | **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
+| **queues** | `{ name: string; label: string; description?: string; members?: object[]; … }[]` | optional | [ADR-0142 D1] Ownership queues — named sets of people records can sit in until a member claims them |
+| **assignmentRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | [ADR-0142 D5] Assignment rules — route new ownerless records to a queue or a person, once, on insert |
 | **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
@@ -374,6 +376,8 @@ This schema accepts one of the following structures:
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
 | **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
 | **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
+| **queues** | `{ name: string; label: string; description?: string; members?: object[]; … }[]` | optional | [ADR-0142 D1] Ownership queues — named sets of people records can sit in until a member claims them |
+| **assignmentRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | [ADR-0142 D5] Assignment rules — route new ownerless records to a queue or a person, once, on insert |
 | **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |
 | **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |

@@ -91,11 +91,12 @@ export interface ValidateHost {
   resolvePredicateRelated: ObjectQL['resolvePredicateRelated'];
   resolveOptionPermissions: ObjectQL['resolveOptionPermissions'];
   getSummaryDescriptors: ObjectQL['getSummaryDescriptors'];
+  assertReferencesResolve: ObjectQL['assertReferencesResolve'];
 }
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {
@@ -496,7 +497,10 @@ export async function validate(
     ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
     : undefined;
 
-  const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
+  // [#26684] Judged one row after another, as the write's validation loop
+  // judges them: a row's admission (the reference check below) is awaited
+  // before the next row reads what the earlier rows added.
+  const judgeRow = async (row: Record<string, unknown>, i: number): Promise<NonNullable<ValidateDataResponse['results']>[number]> => {
     const warnings: ValidateDataIssue[] = [];
     // Warn-first admissions are the posture signal the caller came for, so
     // they are reported — into this row's own bucket, never into the
@@ -552,6 +556,17 @@ export async function validate(
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
       }));
+      // [#26684] The insert's admit step, run as `insert()` runs it: after
+      // the rules, the reference check on the ids the caller supplied
+      // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
+      // a row the write refuses on a dangling reference is refused here
+      // with the same finding, and is not counted toward a later row's
+      // parent summary. ⛔ Behind the same write-gate probe as the related
+      // read above: the probe on a `lookup` target is elevated, so a caller
+      // the probe refuses learns nothing about which ids exist.
+      if (mode === 'insert' && mayWrite) {
+        await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
+      }
     } catch (e) {
       if (e instanceof ValidationError) {
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
@@ -568,7 +583,9 @@ export async function validate(
     // when nothing would be taken.
     const droppedFields = droppedFieldEvents(object, computedStrip.droppedPerRow[i]!, readonlyDroppedPerRow[i]!);
     return { valid: true, errors: [], warnings, ...(droppedFields.length > 0 ? { droppedFields } : {}) };
-  });
+  };
+  const results: NonNullable<ValidateDataResponse['results']> = [];
+  for (let i = 0; i < rows.length; i++) results.push(await judgeRow(rows[i]!, i));
 
   return {
     object,

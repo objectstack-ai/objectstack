@@ -19,10 +19,10 @@ describe('resolveInjectedSystemColumns — the injected columns, so author-time 
 
   it('gives a default business object every system column', () => {
     const plan = resolveInjectedSystemColumns(business);
-    expect(plan).toMatchObject({ tenant: true, audit: true, owner: true, owningBusinessUnit: true });
+    expect(plan).toMatchObject({ tenant: true, audit: true, owner: true, owningBusinessUnit: true, queue: true });
     expect([...plan.names].sort()).toEqual([
       'created_at', 'created_by', 'id', 'organization_id', 'owner_id',
-      'owning_business_unit_id', 'updated_at', 'updated_by',
+      'owning_business_unit_id', 'queue', 'updated_at', 'updated_by',
     ]);
   });
 
@@ -41,6 +41,9 @@ describe('resolveInjectedSystemColumns — the injected columns, so author-time 
     expect(plan.owningBusinessUnit).toBe(false);
     expect(plan.names.has('owner_id')).toBe(false);
     expect(plan.names.has('owning_business_unit_id')).toBe(false);
+    // [ADR-0142 D3] The queue column rides with owner_id: no user owner, no queue.
+    expect(plan.queue).toBe(false);
+    expect(plan.names.has('queue')).toBe(false);
     // The tenant + audit columns are unaffected by the ownership tier.
     expect(plan.names.has('organization_id')).toBe(true);
     for (const f of AUDIT_PROVENANCE_FIELDS) expect(plan.names.has(f)).toBe(true);
@@ -54,6 +57,7 @@ describe('resolveInjectedSystemColumns — the injected columns, so author-time 
     expect(plan.owningBusinessUnit).toBe(true);
     expect(plan.names.has('owner_id')).toBe(false);
     expect(plan.names.has('owning_business_unit_id')).toBe(true);
+    expect(plan.names.has('queue')).toBe(false);
   });
 
   it.each([
