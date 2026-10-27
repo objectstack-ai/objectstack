@@ -1,5 +1,134 @@
 # @objectstack/plugin-email
 
+## 18.2.0
+
+### Patch Changes
+
+- 92a0073: fix(plugin-email)!: retire `renderTemplate`, the render export that takes an email template body with no save moment
+  
+  The hole-placement rule for mail templates is judged where a template is authored or published: `os validate`, `os build`, `os lint` and the runtime publish gate. The `renderTemplate` function on the package entry took a template body inline and rendered its html face at once, with no save moment, so the rule could not see it. It leaves the published entry of `@objectstack/plugin-email`. Nothing in this repository imported it from that entry. The renderer stays inside the package: `services.email` still renders every stored `email_template` through it, unchanged.
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/plugin-email#renderTemplate) One runtime function leaves a published package entry; no key of any metadata schema, no object definition and no stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. A TypeScript consumer meets the break at its own import, and the line below names the door to use instead. -->
+  
+  **BREAKING** (a runtime export is removed). It ships as `patch` because the metadata protocol does not move. There is no staged window.
+  
+  - FROM `renderTemplate` TO an `email_template` item for the name and locale, rendered by `services.email` through `renderTemplate({ template, data, locale })` (render only) or `sendTemplate` (render and send).
+  
+  Unchanged: `IEmailService.renderTemplate` (the render-by-name method of the same name), `requireVars`, `htmlToText` and the template loader; and how every stored template renders.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- d284ff3: fix(plugin-auth,plugin-email)!: the invitation mail says when its role label stayed English, and states when the invitation expires
+  
+  **The role label.** The organization invitation mail names the invitee's role by its `sys_member.role` option label in the mail's locale (`成员`, `メンバー`, `Miembro`). When the i18n service answered without a translation for that locale, the mail named the English label (`Member`) inside a Chinese, Japanese or Spanish sentence, and logged nothing. Only a read that threw was reported. That happens when there is no i18n service, when the service holds no bundle for the locale, or when its reported locales (`i18n.supportedLocales`, when declared) do not name the locale as the bundles spell it. Now one `warn` is logged for the send: `[AuthManager] invitation mail: no 'zh-CN' label was found for the membership role(s) 'member'; …`. It names the locale, the roles and what to check. The mail is still sent as before. A mail in English, or a read that already warned because it threw, logs nothing extra.
+  
+  **The expiry.** The `auth.invitation` mail never said when its link stops working (better-auth's window, 48 hours by default), so an invitation opened late failed at the accept page with no warning. The sender now passes `invitation.expiresAt` as a new template variable, `expiresAt`, as an ISO-8601 instant. Each of the four built-in bodies, HTML and text, ends with one sentence that renders it with the `datetime:long` formatter. The date reads in the mail's locale and the send's reference timezone, with the zone named: 「此邀请将于 2031年3月4日 UTC 05:06:07 过期。」 / "This invitation expires on March 4, 2031 at 5:06:07 AM UTC.". The template engine has no conditionals, so every body states the expiry, and the built-in rows declare `expiresAt` **required**. A send without it is refused (`MISSING_VARIABLES: expiresAt`) and is never sent with a dangling sentence. The built-in sender always has better-auth's expiry. If the value does not read as a date, the sender leaves it out and logs one `warn` naming the invitation id and saying the mail will be refused, so the invitation can be resent. A tenant or app override of `auth.invitation` keeps its own bodies and variables, and can use `{{ expiresAt | datetime:long }}`.
+  
+  Clause-②: no (narrowing: the built-in `auth.invitation` rows declare a new required variable, `expiresAt`, so a `sendTemplate` of `auth.invitation` that names no `expiresAt` is now refused with `MISSING_VARIABLES` where it used to be sent)
+  
+  Metadata-protocol: none (a built-in template row's declared variables, read by the email service at send time; no spec key, authorable spelling or stored shape moves)
+  
+  **BREAKING** for code that sends `auth.invitation` itself (the built-in organization-invitation sender already passes the value).
+  
+  - **Before.** `auth.invitation` declared no expiry, and a send naming `inviter`, `organization`, `role`, `acceptUrl` and `appName` was delivered.
+  - **Now.** The same send is refused with `MISSING_VARIABLES: expiresAt`.
+  - **Fix (one line).** Add the invitation's expiry instant to the send's `data` as `expiresAt`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a send-time refusal of an `auth.invitation` mail that names no `expiresAt`: no authorable key, spelling or stored shape moves, the email-template schema is unchanged, and no stored row is read, rewritten or converted. The repair is a value only the sender holds (the invitation's expiry), which no ledger entry can derive. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a template row's declaration, not a TS interface (not runtime-interface-only). -->
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

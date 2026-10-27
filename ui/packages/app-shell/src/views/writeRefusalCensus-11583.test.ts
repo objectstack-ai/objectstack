@@ -88,32 +88,32 @@ const LEDGER: Row[] = [
     reason: 'Issues one `updateView` per patch and hands every promise back; set-as-default and reorder await them and answer for the refusal.',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handleViewConfigSave', callee: 'persistRuntimeMetadata', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handleViewConfigSave', callee: 'persistRuntimeMetadata', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'The view-config panel\'s edit Save: a toast with the door\'s message, and the panel is told the save failed, so it stays dirty (objectui#11583).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handleViewCreate', callee: 'createRuntimeMetadata', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handleViewCreate', callee: 'createRuntimeMetadata', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.createViewRefusal-11578.test.tsx',
     reason: 'Create View: a toast with the door\'s message, and the dialog stays open (objectui#11578).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handleRenameView', callee: 'updateView', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handleRenameView', callee: 'updateView', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'Rename: the translated `objectViewActions.renameFailed` title, with the door\'s message as the description (objectui#12417).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handleDeleteView', callee: 'deleteView', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handleDeleteView', callee: 'deleteView', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'Delete: the translated `objectViewActions.deleteFailed` title, with the door\'s message as the description (objectui#12398).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handlePinView', callee: 'updateView', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handlePinView', callee: 'updateView', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'Pin and unpin: a toast with the door\'s message (objectui#11583).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'handleSetDefaultView', callee: 'dispatchViewPatches', calls: 1,
+    file: 'objectViewViewCrud.tsx', symbol: 'handleSetDefaultView', callee: 'dispatchViewPatches', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'Set as default: a toast with the door\'s message; it was a bare untranslated literal with no description until the objectui#11583 patch round.',
   },

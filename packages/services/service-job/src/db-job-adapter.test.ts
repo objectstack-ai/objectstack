@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { scheduledJobs } from 'croner';
 import { DbJobAdapter } from './db-job-adapter.js';
 import { CronJobAdapter } from './cron-job-adapter.js';
@@ -442,5 +442,73 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
     expect(replayRows[0].status).toBe('failed');
     expect(replayRows[0].error).toBe('replayed and failed');
     expect(replayRows[0].completed_at).toBeTruthy();
+  });
+});
+
+// ─── #25235 — readArming: how the previous holder left a job ────────────────
+//
+// The scheduled-flow trigger reads this BEFORE it schedules a flow's job, to
+// tell "the kernel stopped ticking" (row still `active`: eviction cancels
+// nothing) from "the flow was unbound on purpose" (`cancel()` cleared it), and
+// to learn where the silence began (`lastAliveAt`).
+describe('DbJobAdapter — readArming (#25235)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('answers null for a job never scheduled here', async () => {
+    const adapter = new DbJobAdapter({ engine: makeFakeEngine() });
+    expect(await adapter.readArming('flow-schedule:nightly')).toBeNull();
+    await adapter.destroy();
+  });
+
+  it('reads back the armed schedule of every type', async () => {
+    const engine = makeFakeEngine();
+    const adapter = new DbJobAdapter({ engine });
+    await adapter.schedule('c', { type: 'cron', expression: '0 8 * * *', timezone: 'Asia/Shanghai' }, async () => {});
+    await adapter.schedule('i', { type: 'interval', intervalMs: 60_000 }, async () => {});
+    await adapter.schedule('o', { type: 'once', at: '2026-10-22T12:00:00.000Z' }, async () => {});
+    expect((await adapter.readArming('c'))?.schedule).toEqual({ type: 'cron', expression: '0 8 * * *', timezone: 'Asia/Shanghai' });
+    expect((await adapter.readArming('i'))?.schedule).toEqual({ type: 'interval', intervalMs: 60_000 });
+    expect((await adapter.readArming('o'))?.schedule).toEqual({ type: 'once', at: '2026-10-22T12:00:00.000Z' });
+    await adapter.destroy();
+  });
+
+  it('a fire moves lastAliveAt; cancel() disarms; eviction leaves the row armed for the next kernel', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const engine = makeFakeEngine();
+    const NAME = 'flow-schedule:nightly';
+
+    vi.setSystemTime(new Date('2026-10-21T07:00:00.000Z'));
+    const first = new DbJobAdapter({ engine });
+    await first.schedule(NAME, { type: 'cron', expression: '0 8 * * *' }, async () => {});
+    expect(await first.readArming(NAME)).toMatchObject({ active: true, lastAliveAt: '2026-10-21T07:00:00.000Z' });
+
+    vi.setSystemTime(new Date('2026-10-21T08:00:01.000Z'));
+    await first.trigger(NAME);
+    expect((await first.readArming(NAME))?.lastAliveAt).toBe('2026-10-21T08:00:01.000Z');
+
+    // Eviction: the kernel's timers go, its rows stay — the next kernel finds
+    // the job still armed, and the silence starting at the last fire.
+    await first.destroy();
+    vi.setSystemTime(new Date('2026-10-22T09:30:00.000Z'));
+    const rebuilt = new DbJobAdapter({ engine });
+    expect(await rebuilt.readArming(NAME)).toEqual({
+      active: true,
+      schedule: { type: 'cron', expression: '0 8 * * *' },
+      lastAliveAt: '2026-10-21T08:00:01.000Z',
+    });
+
+    // A deliberate unbind is not a silence.
+    await rebuilt.schedule(NAME, { type: 'cron', expression: '0 8 * * *' }, async () => {});
+    await rebuilt.cancel(NAME);
+    expect((await rebuilt.readArming(NAME))?.active).toBe(false);
+    await rebuilt.destroy();
+  });
+
+  it('a read that fails rejects — it never answers "inactive"', async () => {
+    const engine = makeFakeEngine();
+    const adapter = new DbJobAdapter({ engine });
+    engine.find = async () => { throw new Error('no such table: sys_job'); };
+    await expect(adapter.readArming('flow-schedule:nightly')).rejects.toThrow('no such table: sys_job');
+    await adapter.destroy();
   });
 });

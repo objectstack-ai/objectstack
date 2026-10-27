@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -215,9 +216,18 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
 
   it('…and that subtraction is non-empty, so it is not silently subtracting nothing', () => {
     // Each leg separately: a union that is non-empty overall would stay green
-    // with one of its four members returning nothing at all.
+    // with one of its four members returning nothing at all. The root `docs/*.md`
+    // leg is read on a fixture page: the tree's one root page, the app-shell
+    // extraction guide, was retired with the package's publishing (#25922).
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-fence-languages-rootdocs-'));
+    try {
+      fs.mkdirSync(path.join(fixture, 'docs'));
+      fs.writeFileSync(path.join(fixture, 'docs', 'PAGE.md'), '# top level\n');
+      expect(snippetRootDocsPages(fixture)).toEqual(['docs/PAGE.md']);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
     for (const leg of [
-      snippetRootDocsPages(ROOT),
       snippetAdrDocsPages(ROOT),
       snippetAuditDocsPages(ROOT),
       snippetNestedPackageReadmes(ROOT),

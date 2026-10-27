@@ -445,7 +445,9 @@ describe('published packages that declare a license ship its text (objectui#3696
     // flipped — would otherwise report success over an empty set. Lowered by
     // one when `@object-ui/sdui-parser` was retired for the root
     // `@objectstack/sdui-parser` (objectstack#25712 item 3): 37 measured then.
-    expect(owingPackages.length).toBeGreaterThanOrEqual(37);
+    // Lowered by one again when `@object-ui/app-shell` went private
+    // (objectstack#25922): 36 measured then.
+    expect(owingPackages.length).toBeGreaterThanOrEqual(36);
 
     // The package objectui#3696 fixed must be in scope BY NAME. If it drops
     // out of the population, this guard has stopped watching the exact spot

@@ -11,9 +11,11 @@ import {
   ImportRequestSchema,
   CreateImportJobRequestSchema,
   ImportRowResultSchema,
+  ImportResponseSchema,
   ImportJobResultsSchema,
   isMatchKeySets,
 } from './export.zod';
+import { ValidateDataIssueSchema } from './protocol.zod';
 import type { ValidateDataIssue } from './protocol.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 import type { DroppedFieldsEvent } from '../data/data-engine.zod';
@@ -475,6 +477,81 @@ describe('ImportRowResultSchema — droppedFields and warnings', () => {
   it('the typed reader sees both keys, in the engine\'s and the verdict\'s types', () => {
     expectTypeOf<NonNullable<ImportRowResult['droppedFields']>[number]>().toEqualTypeOf<DroppedFieldsEvent>();
     expectTypeOf<NonNullable<ImportRowResult['warnings']>[number]>().toEqualTypeOf<ValidateDataIssue>();
+  });
+});
+
+// ==========================================
+// Import Row Result — every cell error of a failed row
+// ==========================================
+
+/**
+ * A failed row reports every bad cell in `errors`, and the first-error keys
+ * `field` / `code` / `error` keep naming element 0. As above, the schema STRIPS
+ * an undeclared key rather than refusing it, so the pin asserts `errors`
+ * survives a parse, never bare `success`.
+ */
+describe('ImportRowResultSchema — errors (every cell error of a failed row)', () => {
+  const cellErrors = [
+    { field: 'close_date', code: 'invalid_date', message: 'Close Date: "31/02/2026" is not a valid date' },
+    { field: 'stage', code: 'invalid_option', message: 'Stage: "Wonn" is not one of the options' },
+    { field: 'amount', code: 'invalid_number', message: 'Amount: "1,2,3" is not a number' },
+  ];
+  const first = cellErrors[0]!;
+  const failedRow = {
+    row: 4, ok: false, action: 'failed' as const,
+    field: first.field, code: first.code, error: first.message,
+    errors: cellErrors,
+  };
+
+  it('keeps every cell error through a parse, in order', () => {
+    const parsed = ImportRowResultSchema.parse(failedRow);
+    expect(parsed.errors).toEqual(cellErrors);
+  });
+
+  it('the first-error keys stay, and agree with element 0', () => {
+    const parsed = ImportRowResultSchema.parse(failedRow);
+    expect(parsed.field).toBe(parsed.errors?.[0]?.field);
+    expect(parsed.code).toBe(parsed.errors?.[0]?.code);
+    expect(parsed.error).toBe(parsed.errors?.[0]?.message);
+  });
+
+  it('is optional: a failed row with only the first-error keys parses unchanged', () => {
+    const { errors: _omitted, ...firstOnly } = failedRow;
+    const parsed = ImportRowResultSchema.parse(firstOnly);
+    expect(parsed).toEqual(firstOnly);
+    expect('errors' in parsed).toBe(false);
+  });
+
+  it('the element is ValidateDataIssueSchema itself — no third issue shape', () => {
+    const element = ImportRowResultSchema.shape.errors.unwrap().element;
+    expect(element).toBe(ValidateDataIssueSchema);
+    expect(element).toBe(ImportRowResultSchema.shape.warnings.unwrap().element);
+  });
+
+  it('refuses an element without a message', () => {
+    const partial = ImportRowResultSchema.safeParse({ ...failedRow, errors: [{ field: 'x', code: 'y' }] });
+    expect(partial.success).toBe(false);
+    const issue = partial.success ? undefined : partial.error.issues[0];
+    expect(issue?.path).toEqual(['errors', 0, 'message']);
+  });
+
+  it('the response and the async job sample carry it', () => {
+    const response = ImportResponseSchema.parse({
+      object: 'opportunity', dryRun: true, writeMode: 'insert',
+      total: 1, ok: 0, errors: 1, created: 0, updated: 0, skipped: 0, results: [failedRow],
+    });
+    expect(response.results[0]?.errors).toEqual(cellErrors);
+    const job = ImportJobResultsSchema.parse({
+      jobId: 'imp_1', object: 'opportunity', status: 'succeeded', dryRun: false, writeMode: 'insert',
+      total: 1, processed: 1, created: 0, updated: 0, skipped: 0, errors: 1, percentComplete: 100,
+      undoable: false, createdAt: '2026-10-27T00:00:00.000Z',
+      results: [failedRow], resultsTruncated: false,
+    });
+    expect(job.results[0]?.errors).toEqual(cellErrors);
+  });
+
+  it('the typed reader sees the verdict\'s issue type', () => {
+    expectTypeOf<NonNullable<ImportRowResult['errors']>[number]>().toEqualTypeOf<ValidateDataIssue>();
   });
 });
 

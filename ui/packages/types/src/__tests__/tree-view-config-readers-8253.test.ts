@@ -77,7 +77,7 @@ const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), 'utf8');
 const RESOLVER = 'packages/plugin-tree/src/ObjectTree.tsx';
 const VIEW_BRANCH = 'packages/plugin-view/src/ObjectView.tsx';
 const LIST_BRANCH = 'packages/plugin-list/src/ListView.tsx';
-const CONSOLE_COMPOSITION = 'packages/app-shell/src/views/ObjectView.tsx';
+const CONSOLE_COMPOSITION = 'packages/app-shell/src/views/objectViewListRenderer.tsx';
 
 /**
  * The declared keys, as a value — `it.each` needs one, and a failure named

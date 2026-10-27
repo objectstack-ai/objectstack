@@ -11,18 +11,15 @@ Fast lookup for the ObjectStack protocols organized by category.
 Click on any protocol name to view its complete API reference.
 </Callout>
 
-**Reading the counts.** Every heading below says `(N of M schemas)`. **N** is how many
-protocols this table lists; **M** is how many reference pages the matching
-`content/docs/references/<category>/` directory publishes. These tables are a *curated*
-fast lookup, not a mirror of the reference tree — `N < M` is normal and intended. Both
-numbers are checked by `pnpm check:quick-reference-counts`, so a category that gains or
-loses a page shows up here instead of drifting unnoticed. A row marked ↗ links outside
-its category's reference tree: it is one of the N rows, but it is not one of the M pages.
-Categories that have no section here at all are named under
+**Reading the tables.** Each table below is a *curated* fast lookup, not a mirror of the
+reference tree: it lists the protocols a beginner reaches for first, and a category usually
+publishes more reference pages than its table shows. The complete set for every category is on
+the [reference index](/docs/references). A row marked ↗ links outside its category's reference
+tree. Categories that have no section here at all are named under
 [Categories Without a Section](#categories-without-a-section) — that curation is stated,
 not left implicit.
 
-## Data Protocol (15 of 31 schemas)
+## Data Protocol
 
 Core business logic and data modeling schemas.
 
@@ -44,7 +41,7 @@ Core business logic and data modeling schemas.
 | **[Postgres Driver](/docs/references/data/driver-postgres)** | `driver/postgres.zod.ts` | PostgresConfig | PostgreSQL configuration |
 | **[Mongo Driver](/docs/references/data/driver-mongo)** | `driver/mongo.zod.ts` | MongoConfig | MongoDB configuration |
 
-## UI Protocol (10 of 16 schemas)
+## UI Protocol
 
 Presentation layer - views, forms, dashboards, and app branding.
 
@@ -61,7 +58,7 @@ Presentation layer - views, forms, dashboards, and app branding.
 | **[Chart](/docs/references/ui/chart)** | `chart.zod.ts` | Chart, ChartType | Chart definitions |
 | **[Widget Contract](/docs/protocol/objectui/widget-contract)** ↗ | `widget.zod.ts` | FieldWidgetProps | Props a custom field widget receives — the contract is documented with ObjectUI, outside `references/ui/` |
 
-## Kernel Protocol (17 of 29 schemas)
+## Kernel Protocol
 
 Plugin architecture, manifests, and kernel runtime.
 
@@ -85,7 +82,7 @@ Plugin architecture, manifests, and kernel runtime.
 | **[Metadata Loader](/docs/references/kernel/metadata-loader)** | `metadata-loader.zod.ts` | MetadataLoaderContract | Metadata loading |
 | **[Package Registry](/docs/references/kernel/package-registry)** | `package-registry.zod.ts` | InstalledPackage, InstallPackageRequest | Package resolution |
 
-## System Protocol (16 of 37 schemas)
+## System Protocol
 
 Runtime environment, logging, jobs, caching, and observability.
 
@@ -108,7 +105,7 @@ Runtime environment, logging, jobs, caching, and observability.
 | **[Translation](/docs/references/system/translation)** | `translation.zod.ts` | Translation | i18n support |
 | **[Worker](/docs/references/system/worker)** | `worker.zod.ts` | Worker | Background workers |
 
-## AI Protocol (11 of 12 schemas)
+## AI Protocol
 
 AI/ML capabilities - agents, skills, tools, MCP exposure, RAG, and cost tracking.
 
@@ -126,7 +123,7 @@ AI/ML capabilities - agents, skills, tools, MCP exposure, RAG, and cost tracking
 | **[Usage](/docs/references/ai/usage)** | `usage.zod.ts` | AIUsageRecord, TokenUsage | AI usage and cost tracking |
 | **[Solution Blueprint](/docs/references/ai/solution-blueprint)** | `solution-blueprint.zod.ts` | BlueprintObject, BlueprintApp | Blueprint format for AI app generation |
 
-## API Protocol (17 of 32 schemas)
+## API Protocol
 
 REST endpoints, real-time subscriptions, and discovery.
 
@@ -150,7 +147,7 @@ REST endpoints, real-time subscriptions, and discovery.
 | **[Metadata](/docs/references/api/metadata)** | `metadata.zod.ts` | Metadata | API metadata endpoints |
 | **[Storage](/docs/references/api/storage)** | `storage.zod.ts` | Storage | API storage operations |
 
-## Automation Protocol (3 of 14 schemas)
+## Automation Protocol
 
 Flows, approvals, and integrations. A record's lifecycle transitions are a `state_machine` validation rule on the object (see [State Machine](/docs/protocol/objectql/state-machine)).
 
@@ -160,7 +157,7 @@ Flows, approvals, and integrations. A record's lifecycle transitions are a `stat
 | **[Approval](/docs/references/automation/approval)** | `approval.zod.ts` | ApprovalNodeConfig | Flow approval-node config |
 | **[Webhook](/docs/references/automation/webhook)** | `webhook.zod.ts` | Webhook | Outbound webhooks |
 
-## Security Protocol (3 of 5 schemas)
+## Security Protocol
 
 Access control, permissions, and row-level security.
 
@@ -170,7 +167,7 @@ Access control, permissions, and row-level security.
 | **[RLS](/docs/references/security/rls)** | `rls.zod.ts` | RowLevelSecurityPolicy | Row-level security filters |
 | **[Sharing](/docs/references/security/sharing)** | `sharing.zod.ts` | SharingRule | Record sharing rules |
 
-## Identity Protocol (4 of 5 schemas)
+## Identity Protocol
 
 User identity, organizations, and position management.
 
@@ -181,7 +178,7 @@ User identity, organizations, and position management.
 | **[Position](/docs/references/identity/position)** | `position.zod.ts` | Position | Permission-set distribution (岗位, ADR-0090) |
 | **[SCIM](/docs/references/identity/scim)** | `scim.zod.ts` | SCIMUser, SCIMGroup | SCIM 2.0 provisioning |
 
-## Marketplace Protocol (2 of 4 schemas)
+## Marketplace Protocol
 
 The package & marketplace format — what a package author publishes and what the
 marketplace answers with. (The cloud control plane's own contracts — environments,
@@ -194,7 +191,7 @@ cloud repo beside their producer.)
 | **[Package](/docs/references/marketplace/package)** | `package.zod.ts` | Package, CreatePackageRequest, PackageTranslations | Package identity and listing text |
 | **[Marketplace](/docs/references/marketplace/marketplace)** | `marketplace.zod.ts` | MarketplaceListing, PackageSubmission | Plugin marketplace |
 
-## Integration Protocol (1 of 1 schema)
+## Integration Protocol
 
 External system connectors — one protocol (ADR-0097): a connector entry is
 either a catalog descriptor or a provider-bound instance that a generic
@@ -207,7 +204,7 @@ from the provider itself, not from hand-written spec files.
 |:---------|:-----------|:------------|:--------|
 | **[Connector](/docs/references/integration/connector)** | `connector.zod.ts` | Connector | The connector protocol — auth, sync, webhooks, rate limiting |
 
-## Shared Protocol (5 of 10 schemas)
+## Shared Protocol
 
 Common utilities used across all protocols.
 
@@ -219,7 +216,7 @@ Common utilities used across all protocols.
 | **[Mapping](/docs/references/shared/mapping)** | `mapping.zod.ts` | FieldMapping | Field mapping utilities |
 | **[Connector Auth](/docs/references/integration/connector)** ↗ | `connector-auth.zod.ts` | ConnectorInstanceAuth | Declarative connector auth (ADR-0097). The file sits in `src/shared/` but `@objectstack/spec/shared` does not publish it — it reaches consumers through `@objectstack/spec/integration`, so it is documented on the Connector page |
 
-## QA Protocol (1 of 1 schema)
+## QA Protocol
 
 Testing and quality assurance.
 
@@ -229,14 +226,13 @@ Testing and quality assurance.
 
 ## Categories Without a Section
 
-`content/docs/references/` holds one more category directory that deliberately gets no
+These category directories under `content/docs/references/` deliberately get no
 section above. Curation happens at the category level as well as inside each table, and
-this is where it is stated. The same gate reads this table, so a new category directory —
-or a page landing in this one — goes red until this page is updated.
+this is where it is stated.
 
-| Category directory | Pages | Why it has no section |
-|:---|---:|:---|
-| [`studio`](/docs/references/studio) | 3 | Designer-facing metadata (`flow-builder`, `object-designer`, `plugin`) — Studio's own authoring surfaces, not protocols an app declares. Reach them from the [reference index](/docs/references). |
+| Category directory | Why it has no section |
+|:---|:---|
+| [`studio`](/docs/references/studio) | Designer-facing metadata (`flow-builder`, `object-designer`, `plugin`) — Studio's own authoring surfaces, not protocols an app declares. Reach them from the [reference index](/docs/references). |
 
 ---
 

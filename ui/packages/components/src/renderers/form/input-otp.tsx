@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { InputOTPSchema } from '@object-ui/types';
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('input-otp', 
-  ({ schema, className, onChange, value, ...props }: { schema: InputOTPSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, onChange, value, ...props }: { schema: InputOTPSchema; className?: string; onChange?: (value: string) => void; value?: string; [key: string]: unknown } & RendererHostProps) => {
     // `style` forwarded by name; the rest through the form-control
     // declaration (objectui#5632).
     const { style, ...otpProps } = props;

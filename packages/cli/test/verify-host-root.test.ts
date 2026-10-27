@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one `os verify --app` spawn from a foreign cwd, in its beforeAll; slowest CI reading 13.13 s (run 40392443783) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * PIN — `os verify --app <dir>/objectstack.config.mjs`, run from a working

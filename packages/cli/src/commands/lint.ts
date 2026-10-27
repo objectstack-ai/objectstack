@@ -16,6 +16,7 @@ import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+import { checkDependencyRanges } from '../utils/dependency-range-check.js';
 import {
   artifactPackages,
   packageBodyAsStack,
@@ -583,6 +584,22 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
         fix: `engines: { protocol: '^${PROTOCOL_MAJOR}' }`,
       });
     }
+  }
+
+  // ── Dependency ranges (ADR-0141 D2, author side) ──
+  // The SAME findings, at the same severity, `os build` / `os validate` report:
+  // an `error` is an entry every install refuses (an unreadable range on an
+  // out-of-artifact entry), a `warning` an in-artifact mismatch the install
+  // admits. Judged on the packages one install act delivers — `packages[]`
+  // bodies, or the top-level manifest — which the fold above keeps verbatim.
+  for (const d of checkDependencyRanges(stack)) {
+    issues.push({
+      severity: d.severity,
+      rule: `dependencies/${d.code}`,
+      message: d.message,
+      path: d.path,
+      fix: d.fix,
+    });
   }
 
   // ── Hook/action bodies that cannot be lowered to metadata (commit ada3834ad) ──

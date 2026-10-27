@@ -2341,6 +2341,7 @@ const en = {
       assistant: 'Assistant',
       liveCanvas: 'Live preview — {{app}} (draft)',
       liveCanvasUnlisted: 'Live app — {{app}} (unlisted until published)',
+      liveCanvasLive: 'Live app — {{app}}',
       loadingAgents: 'Loading agents…',
       askAnything: 'Ask anything…',
       askOrChangeApp: 'Ask about your data, or ask me to change this app…',
@@ -4471,7 +4472,7 @@ const en = {
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
-      draftPosture: 'Later changes are saved as drafts, and you publish them in Studio.',
+      draftPosture: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
       checksPassed: 'Checks passed {{passed}}/{{total}}',
     },
     changes: {

@@ -8,7 +8,15 @@
  * `packages/objectql/` falls to a low, stable level (it was ~88% when the
  * ADR was written — i.e. the engine still co-evolves with the rest of the
  * monorepo and is NOT separable). This script computes that ratio from git
- * history so CI can track it over time.
+ * history.
+ *
+ * It runs ON DEMAND, by whoever is weighing the split. The weekly
+ * report-only workflow that used to run it was retired (#26445): a ratio
+ * nobody had a threshold for, written to a run summary nobody opened, is not
+ * tracking. A fresh full-history checkout (`fetch-depth: 0`, or the
+ * `git fetch --shallow-since` below) and the command above give the same
+ * reading the moment someone needs it. Its `--self-test` still runs on every
+ * pull request (lint.yml), so the instrument stays correct while unrun.
  *
  * Run:  node scripts/check-engine-split-ratio.mjs [--days N] [--threshold PCT]
  *       node scripts/check-engine-split-ratio.mjs --self-test
@@ -35,9 +43,9 @@
  *
  * `git log --since=<N days ago>` in a shallow clone answers from whatever part
  * of the window happens to be present, **exits 0, and prints no warning** — the
- * graft boundary is invisible to it. The scheduled run is safe
- * (`engine-split-metric.yml` checks out with `fetch-depth: 0`); a seat running
- * this locally is not, and agent containers clone shallow.
+ * graft boundary is invisible to it. A full-history checkout is safe
+ * (`actions/checkout` with `fetch-depth: 0`); a seat running this locally is
+ * not, and agent containers clone shallow.
  *
  * Measured in one such container on 2026-08-21 (graft floor 2026-06-02, window
  * `--days 90` reaching back to 2026-05-23):

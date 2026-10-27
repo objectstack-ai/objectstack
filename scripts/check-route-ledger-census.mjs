@@ -69,9 +69,8 @@
  * and this lane spent one day deleting three instances of it (#16919, #17039 ->
  * #17055, #17075 -- where re-typed counts went wrong within hours and the fix
  * was to remove the digits rather than correct them). So the digits in
- * `route-ledger.ts` are written by `--fix` and read by nobody's memory. The
- * shape is `check-lockstep-package-count.mjs`'s, including its ROTTED_ANCHOR
- * behaviour: the anchor must resolve to EXACTLY ONE match before the number it
+ * `route-ledger.ts` are written by `--fix` and read by nobody's memory. It
+ * has a ROTTED_ANCHOR rule: the anchor must resolve to EXACTLY ONE match before the number it
  * captured is compared to the truth, because zero matches (the sentence was
  * reworded, or the slice took the comment with the rows) and more than one are
  * both failures to report rather than agreements to assume. Silence on a stale

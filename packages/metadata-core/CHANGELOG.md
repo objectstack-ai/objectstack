@@ -1,5 +1,149 @@
 # @objectstack/metadata-core
 
+## 18.2.0
+
+### Patch Changes
+
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- be78977: feat(install): a package that declares an installed app in `manifest.dependencies` may share that app's namespace, and a boot hydrates installed packages in dependency order (ADR-0141 D5)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning. The one narrowing is an install-local acceptance detail of the not-yet-released ADR-0141 D2 check (an artifact wrapper's own id no longer counts as a delivered package), plus the matching removal of the unreleased `DeclaredDependencyCheck.deliveredIds` option; there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **Namespace co-ownership by declaration.** The install gate (`SchemaRegistry.installPackage`) used to admit packages into one namespace only when one release artifact delivered them together. A module shipped as its own artifact that uses its app's namespace was refused `422 NAMESPACE_CONFLICT` beside the installed app, whatever it declared. Now an installed package P co-owns namespace N with:
+  
+  - an installed X that P declares in `manifest.dependencies`, when both use N;
+  - a sitting owner of N that declares P, which is the same relation read from the other end, so an upgrade or reinstall of the app beside its modules is admitted;
+  - a sibling S, when S and P each declare one installed package that holds N (two modules of one app, neither declaring the other).
+  
+  Only direct declarations count. The shared parent must be installed and must hold N itself.
+  
+  The object-name check reads the same co-owner set. A co-owner by declaration that defines an object name another co-owner already owns is refused `422 DUPLICATE_ARTIFACT_OBJECT_NAME` before any DDL. Examples: a module redefining its app's object, a sibling redefining the other sibling's object, or an app upgrade newly defining a name one of its modules owns. The message is worded per source (same artifact, declared dependency, sibling). `NAMESPACE_CONFLICT` now names the declaration as the fix for a package that extends the app holding the namespace.
+  
+  **Hydrate order.** The `sys_packages` hydrate and the install-local `kernel:ready` rehydrate used to register in source-listing order. Now they sort their batch by `manifest.dependencies`, with declared ids as optional edges, through `resolvePluginOrder`. Before this, a module that hydrated before the app whose namespace it shares could be refused and stay absent for the process lifetime. In the install-local rehydrate, each ledger entry is one node, so a declared id resolves to the entry that carries that package. A dependency cycle never stops a hydrate: its members keep source order and an error names them.
+  
+  **BREAKING** (an install-acceptance narrowing of the unreleased ADR-0141 D2 check) at `POST /api/v1/marketplace/install-local`. A multi-package artifact's own wrapper id no longer counts as delivered unless one of its packages carries it. A module declaring the wrapper id is judged like any other entry, because it would be `absent` on its first standalone install. `DeclaredDependencyCheck.deliveredIds` is removed with it. Also, an undecided range union whose installed version is readable is now reported `found: 'unreadable-range'` instead of `'unreadable-version'`; for example, `<5 || latest` against `7.0.0`.
+  
+  **What changes for you.**
+  
+  - A module that extends an app and uses its namespace declares the app in `manifest.dependencies`, and then installs beside it as its own artifact. Two modules of one app need not declare each other.
+  - Every package of the app's own artifact that uses the namespace should declare the app too.
+  - New exports: `@objectstack/core` exports `orderHydrationBatch` and `declaredDependencyIds`.
+- 3446d43: feat(install): installing a package checks its declared `dependencies` first — every entry must name a package installed at a version inside its range, or one the same artifact delivers, or the install is refused `422 DEPENDENCY_MISSING` (ADR-0141 D2)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the answer the three install doors give a package whose declared dependencies the target environment does not satisfy. -->
+  
+  **BREAKING** (an install-acceptance narrowing) for a package whose manifest declares a `dependencies` entry the target environment does not satisfy. The three install doors — `POST /api/v1/packages` (both its protocol arm and its no-protocol fallback), the protocol's `installPackage` called in-process, and `POST /api/v1/marketplace/install-local` — used to install such a package and let the gap surface at its first cross-app save. They now refuse the whole install, before anything is registered, written or synced, with `422 DEPENDENCY_MISSING`.
+  
+  An entry `(id, range)` is satisfied when `id` is installed at a `manifest.version` inside `range`, or is delivered by the same artifact (presence only: the packages of one artifact are one tested unit). Ranges are read at exact-version granularity in npm style: `^`, `~`, `>=`, `>`, `<=`, `<`, `=`, an exact version, `x` / `*` wildcards, hyphen ranges, space- or comma-joined intersections and `||` unions. A range outside that grammar (`latest` included) or an installed version that is not `MAJOR.MINOR.PATCH` does not satisfy — the check fails closed.
+  
+  The refusal names every unmet entry in one answer: `error.details.issues` carries one `AppCompatibilityCheck` issue per entry (`severity: 'error'`, `category: 'dependency_missing'`), and `error.details.unmet` the facts per entry — `packageId`, `dependency`, `range`, `found` (`absent`, `out-of-range`, `unreadable-range`, `unreadable-version` or `unreadable-declaration`) and the `installedVersion` when one is installed.
+  
+  Unchanged: a package that declares no dependencies installs exactly as before; a boot never runs the check (what an install admitted stays admitted); `PATCH /api/v1/packages/:id` still applies a `dependencies` edit as given.
+  
+  **What changes for you.** Install a package's dependencies, at versions inside its declared ranges, before the package itself; the refusal says which and at what range. `@objectstack/metadata-core` exports the check (`checkDeclaredDependencies`, `assertDeclaredDependencies`), its error (`DependencyMissingError`, `isDependencyMissingError`, `dependencyMissingAnswer`) and the range reader (`rangeAdmitsVersion`, `readExactVersion`, `DEPENDENCY_RANGE_GRAMMAR`). `DEPENDENCY_MISSING` is registered in the error-code ledger under `@objectstack/metadata-core`.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 40f5c6e: fix(metadata-core,service-cluster,create-objectstack): ESM-only subpaths declare their types under `import`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/metadata-core/testing`, `@objectstack/service-cluster/testing` and `create-objectstack/created-summary` are ESM-only, and now say so in their export maps: the subpath's `types` moved inside its `import` condition. `require()` of these subpaths already failed at runtime with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Before this change, TypeScript under `node16`/`nodenext` resolved their declarations for a CommonJS caller anyway (attw `CJSResolvesToESM`). Now it resolves them for `import` only, which is what Node does. ESM callers, and every resolution mode that reads the `import` condition, see no change. Each package's README now says the subpath is ESM-only.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- 6e47e16: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@objectstack/spec/ui` now exports `anonymousFormObjectName`, the object an open anonymous form candidate submits into (the form's `data.object`, else the view's `list.data.object`, `form.data.object`, `object`). `@objectstack/metadata-core` re-exports the same function, and the public-form file-field lint rule in `@objectstack/lint` resolves the object through it instead of a retyped copy, so the doors and the lint cannot disagree.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

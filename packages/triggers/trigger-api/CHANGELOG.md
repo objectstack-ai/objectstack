@@ -1,5 +1,120 @@
 # @objectstack/trigger-api
 
+## 18.2.0
+
+### Minor Changes
+
+- fa44dd2: feat(spec): an `api` flow's start node may name its inbound hook secret (`config.secretRef`) instead of carrying it
+  
+  An app package can now ship an inbound `api` flow without publishing its credential. The start node names the secret, the deployment fills that name, and the engine reads it at every post:
+  
+  ```ts
+  {
+    id: 'start',
+    type: 'start',
+    config: { triggerType: 'api', hookId: 'heartbeat', secretRef: 'SRM_HEARTBEAT_SECRET' },
+  }
+  ```
+  
+  - The name resolves through the automation plugin's `credentialResolver`, the one a declarative connector's `auth.credentialRef` already uses: in the open tier it is the environment variable of that name (`process.env.SRM_HEARTBEAT_SECRET`); a host that wires a secrets service serves it from there.
+  - It is read per post, never cached, so a rotation applies to the next post. A post that arrives while the name has no value is refused `503 SERVICE_UNAVAILABLE` and is never verified; the server log names the flow and the reference, never a value.
+  - `FlowSchema` refuses a reference that is not a name (a letter or `_`, then letters, digits and `_`), one in the platform's `OS_` namespace (whoever signs the posts holds the hook secret, so a platform secret named there would be handed out with it), one beside a literal `secret`, and one on a flow that binds no inbound `api` trigger.
+  - `os validate` (`flow-api-trigger-secret-missing`) and the engine's registration check accept a usable reference in place of a literal, and the remedy they print now names `config.secretRef`.
+  - The reference is a name, not a credential: a flow read serves it as written. Saving a flow through the metadata API with a reference removes any hook secret the write-only flow credential store held for that start node.
+  - New exports from `@objectstack/spec/automation`: `ApiTriggerSecretRefSchema`, `apiTriggerSecretRefOf`, `apiTriggerSecretRefRefusals`, `API_TRIGGER_SECRET_REF_KEY`, `API_TRIGGER_SECRET_REF_RESERVED_PREFIX`. `AutomationEngineOptions` gains `credentialResolver`.
+  
+  A literal `config.secret` still works. To move a flow off one, replace `secret: '<value>'` with `secretRef: 'YOUR_NAME'` and set `YOUR_NAME` in the deployment's environment.
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: added
+  
+  Ruling-ref: 6386630545
+
+### Patch Changes
+
+- 2409c9c: chore(packages): ship a LICENSE in the 14 published packages that had none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  npm packs a package's own `LICENSE` whatever its `files` says, and nothing in the release tooling copies the repository's root `LICENSE` into a package, so these 14 published tarballs carried no licence text at all while declaring `"license": "Apache-2.0"`. Each now carries a byte-for-byte copy of the root `LICENSE`, the same file the other 59 published packages already ship. With this, every one of the 73 published packages outside `ui/` ships a LICENSE and a README.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes
