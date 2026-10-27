@@ -85,6 +85,25 @@ describe('[#26464] renderSkillMarkdown — the authoring section follows the gra
     expect(OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING).not.toContain('\n');
   });
 
+  it('metadata:write alone does not teach describe_object in the Build section — that grant registers no data tool', () => {
+    const md = renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoringTools: TOOLS });
+    const section = md.slice(md.indexOf(SECTION), md.indexOf('## Conventions & gotchas'));
+    expect(section).not.toContain('describe_object');
+    expect(section).not.toContain('list_objects');
+    expect(section).toContain('no `data:read`');
+    expect(section).toMatch(/before you change an object/);
+  });
+
+  it('metadata:write beside data:read teaches describe_object before a change — the same grant registers it', () => {
+    const md = renderSkillMarkdown({
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoringTools: TOOLS,
+    });
+    const section = md.slice(md.indexOf(SECTION), md.indexOf('## Conventions & gotchas'));
+    expect(section).toContain('`describe_object` on an object');
+    expect(section).not.toContain('no `data:read`');
+  });
+
   it('the section is placed after the native tools and before the conventions, with the data content untouched', () => {
     const md = renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoringTools: TOOLS });
     const tools = md.indexOf('## Tools');

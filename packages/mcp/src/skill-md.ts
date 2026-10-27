@@ -31,7 +31,7 @@
  */
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
-import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import { grantsAuthoringTools } from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
@@ -108,8 +108,17 @@ function oneLine(text: string): string {
  * UI — from the same source as the data loop, so the client model learns both
  * the same way. Tool names come from the host; none is hard-coded here.
  */
-function renderAuthoringSection(tools: ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>): string {
+function renderAuthoringSection(
+  tools: ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>,
+  describeObjectRegistered: boolean,
+): string {
   const bullets = tools.map((t) => `- **${t.name}** — ${oneLine(t.description)}`).join('\n');
+  // Name `describe_object` only when the same grant registers it (the data
+  // gate: `data:read`). A metadata:write-only connection has no data tool, so
+  // teaching one there would be teaching a tool the server refuses.
+  const discover = describeObjectRegistered
+    ? 'Discover first here too — `describe_object` on an object\nbefore you change it.'
+    : 'Your grant carries no `data:read`, so the data tools are not on this\nconnection: read the current state through the authoring tools\' own verify\nstep before you change an object.';
   return `
 ## Build — authoring tools (\`${MCP_OAUTH_SCOPE_METADATA_WRITE}\`)
 
@@ -125,8 +134,7 @@ broken.
 The build loop is **create → verify → draft**: create or change the metadata,
 verify it (the environment validates what you wrote and reports what it
 refuses, so read the result before the next step), and leave it as a draft for
-a person to publish. Discover first here too — \`describe_object\` on an object
-before you change it.
+a person to publish. ${discover}
 
 ${bullets}
 `;
@@ -150,6 +158,8 @@ export function renderSkillMarkdown(options: RenderSkillOptions = {}): string {
       ? options.authoringTools
       : undefined;
   const description = authoringTools ? OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING : OBJECTSTACK_SKILL_DESCRIPTION;
+  // Mirrors the native data gate in `wireBridgeTools` (`!scopes || scopes.includes(data:read)`).
+  const describeObjectRegistered = !options.grantedScopes || options.grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
 
   return `---
 name: ${OBJECTSTACK_SKILL_NAME}
@@ -264,7 +274,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${authoringTools ? renderAuthoringSection(authoringTools) : ''}
+${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a

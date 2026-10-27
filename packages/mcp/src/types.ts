@@ -71,7 +71,7 @@ export interface McpAuthoringToolContext extends ToolExecutionContext {
   door: McpToolDoor;
   /** The token's user, as the actor a `ToolExecutionContext` reader expects (RLS on, as that user). */
   actor: { id: string };
-  /** The token principal, verbatim from the host. */
+  /** The token principal: a frozen per-call copy of what the host passed, so a tool cannot taint the next call. */
   principal: McpTokenPrincipal;
   /** The environment the request was dispatched for, verbatim from the host. */
   environmentId?: string;
@@ -98,9 +98,17 @@ export interface McpAuthoringToolRegistry {
  * provenance of every call into it.
  */
 export interface McpAuthoringInjection {
-  /** The authoring registry — which tools it holds is the host's business. */
+  /**
+   * The authoring registry — which tools it holds is the host's business. Its
+   * names must not collide with the native surface or with each other: the SDK
+   * throws on a duplicate registration and the request fails with it.
+   */
   registry: McpAuthoringToolRegistry;
-  /** The token principal the host resolved for this request. */
+  /**
+   * The token principal the host resolved for this request — from the SAME
+   * token whose scopes the host passes as `toolOptions.grantedScopes`, since
+   * that list is what admits the registry. Copied and frozen per call.
+   */
   principal: McpTokenPrincipal;
   /** The environment the host dispatched this request for. */
   environmentId?: string;

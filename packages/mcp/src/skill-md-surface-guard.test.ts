@@ -164,4 +164,18 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
       expect(mdWithoutScope).not.toContain(t.name);
     }
   });
+
+  it('[#26464] the Build section names no native tool the same grant does not register (metadata:write alone has no data tool)', async () => {
+    const registry = makeAuthoringRegistry();
+    const native = await listRegisteredToolNames({ grantedScopes: EVERY_SCOPE });
+    expect(native.length).toBeGreaterThanOrEqual(9);
+    const metadataOnly = await listRegisteredToolNames({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
+    expect(metadataOnly.sort()).toEqual(AUTHORING_TOOLS.map((t) => t.name).sort());
+
+    const md = renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoringTools: registry.getAll() });
+    const section = md.slice(md.indexOf('## Build — authoring tools'), md.indexOf('## Conventions & gotchas'));
+    expect(section.length).toBeGreaterThan(0);
+    const taughtButUnregistered = native.filter((name) => section.includes(name) && !metadataOnly.includes(name));
+    expect(taughtButUnregistered, `the Build section teaches a tool this grant does not register: ${taughtButUnregistered.join(', ')}`).toEqual([]);
+  });
 });

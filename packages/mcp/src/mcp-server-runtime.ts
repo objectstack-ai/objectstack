@@ -10,6 +10,7 @@ import { MCP_TOOL_DOOR } from './types.js';
 import type {
   McpAuthoringInjection,
   McpAuthoringToolContext,
+  McpTokenPrincipal,
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
@@ -1130,7 +1131,16 @@ function registerToolFromDefinition(
  * so no header can reach the context — a client sending `x-door`,
  * `x-environment-id` or any other spelling changes nothing a tool sees. The
  * host's access check and tier mapping read the door from the context; that is
- * the whole reason it is stamped on the server side of the transport.
+ * the whole reason it is stamped on the server side of the transport. The
+ * principal (and its `scopes` array) is copied and frozen per call, so a tool
+ * that writes into its context taints neither the next call nor the host's
+ * object.
+ *
+ * Tool names are the host's to keep unique: the SDK refuses a second
+ * registration under a name already on the server — a native name such as
+ * `describe_object`, or a duplicate within the registry — by throwing, and
+ * the request fails with it. A host checks its names against the native
+ * surface before injecting.
  *
  * ## What stays the host's
  *
@@ -1154,12 +1164,22 @@ export function registerAuthoringTools(
   if (!grantsAuthoringTools(grantedScopes)) return registered;
 
   const { registry, principal, environmentId } = authoring;
-  const provenance = (): McpAuthoringToolContext => ({
-    door: MCP_TOOL_DOOR,
-    actor: { id: principal.userId },
-    principal,
-    ...(environmentId !== undefined ? { environmentId } : {}),
-  });
+  // Each call gets its own FROZEN copy of the principal (and of its one array,
+  // `scopes`): a tool that writes into its context taints neither the next
+  // call in this request nor the host's own object. The context object itself
+  // is fresh per call for the same reason.
+  const provenance = (): McpAuthoringToolContext => {
+    const frozenPrincipal: McpTokenPrincipal = Object.freeze({
+      ...principal,
+      ...(principal.scopes !== undefined ? { scopes: Object.freeze([...principal.scopes]) } : {}),
+    });
+    return {
+      door: MCP_TOOL_DOOR,
+      actor: Object.freeze({ id: frozenPrincipal.userId }),
+      principal: frozenPrincipal,
+      ...(environmentId !== undefined ? { environmentId } : {}),
+    };
+  };
 
   for (const tool of registry.getAll()) {
     registerToolFromDefinition(server, tool, (call) => registry.execute(call, provenance()), logger);
