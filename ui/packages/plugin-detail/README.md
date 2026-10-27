@@ -826,12 +826,31 @@ every width.
 A host wires it with three exports:
 
 ```tsx
-import { RecordPageColumns, buildDefaultPageColumns, useRecordPageTier } from '@object-ui/plugin-detail';
+import * as React from 'react';
+import { SchemaRenderer } from '@object-ui/react';
+import { RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, useRecordPageTier } from '@object-ui/plugin-detail';
+import type { ObjectDefLike } from '@object-ui/plugin-detail';
 
-// `root` is the element the record page occupies; `null` until measured.
-const tier = useRecordPageTier(root, { embedded, enabled: !authoredPage });
-const columns = tier === 'two-column' || tier === 'three-column' ? buildDefaultPageColumns(page) : null;
-// columns ? <RecordPageColumns tier={tier} columns={columns} footer={…} /> : <SchemaRenderer schema={page} />
+declare const objectDef: ObjectDefLike;
+
+export function RecordPage({ embedded }: { embedded: boolean }) {
+  // The element the record page occupies: its width picks the tier.
+  const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
+  const page = buildDefaultPageSchema(objectDef);
+  // `null` until the first reading lands, so nothing is drawn for that one commit.
+  // Pass `enabled: false` for an authored page, which is drawn as authored.
+  const tier = useRecordPageTier(root, { embedded, enabled: true });
+  const columns = tier === 'two-column' || tier === 'three-column' ? buildDefaultPageColumns(page) : null;
+  return (
+    <div ref={setRoot}>
+      {tier === null ? null : columns && (tier === 'two-column' || tier === 'three-column') ? (
+        <RecordPageColumns tier={tier} columns={columns} />
+      ) : (
+        <SchemaRenderer schema={page} />
+      )}
+    </div>
+  );
+}
 ```
 
 ## Reference Rail decision matrix
