@@ -87,7 +87,7 @@ import { renderOperationMessage } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
-import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { II18nService, IMetadataService, IObjectQLEngine, SharingWriteVerdict } from '@objectstack/spec/contracts';
 import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@objectstack/formula';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
@@ -106,6 +106,17 @@ import {
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { PermissionDeniedError, MaskedValueWriteError } from './errors.js';
+import {
+  QUEUE_FIELD,
+  CLAIM_REFUSAL,
+  INSERT_QUEUE_REFUSAL,
+  MOVE_REFUSAL,
+  RELEASE_REFUSAL,
+  assertQueueResolves,
+  queueName,
+  queueOrganizationOf,
+  writesQueue,
+} from './ownership-queue-gate.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { grantRowPolicySpeaks, stampExternalGrant } from './external-owd-grant-stamp.js';
 
@@ -242,18 +253,20 @@ export interface AuthzMiddlewareHost {
   getCallerPreImage: SecurityPlugin['getCallerPreImage'];
   getObjectFieldNames: SecurityPlugin['getObjectFieldNames'];
   maskOperationResult: SecurityPlugin['maskOperationResult'];
+  ownershipQueues: SecurityPlugin['ownershipQueues'];
   raiseWriteWallRefusal: SecurityPlugin['raiseWriteWallRefusal'];
   readableRowsScopeForPredicateWrite: SecurityPlugin['readableRowsScopeForPredicateWrite'];
   resolveCallerPosture: SecurityPlugin['resolveCallerPosture'];
   resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
+  resolveSharingWriteVerdict: SecurityPlugin['resolveSharingWriteVerdict'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
 }
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -491,6 +504,10 @@ export function registerAuthzMiddleware(
     // the ordinary path and until step 2.7 runs; step 3.6 reads it so the
     // post-image is held to the delegator's own check as well.
     let delegatorPreImageFloorOpts: RlsFilterOptions | null = null;
+    // [ADR-0142 D4] The sharing write verdict step 2.7 obtained for the row it
+    // judged, where it asked one (the floor in play, not delegated). Step 3.5's
+    // claim admission reads it rather than asking a second time.
+    let preImageSharingVerdict: { id: string; verdict: SharingWriteVerdict } | null = null;
 
     // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
     // platform-global flag, capability contract) once for the checks below.
@@ -963,6 +980,9 @@ export function registerAuthzMiddleware(
           opCtx.context,
           permissionSets,
           !!delegatorSets,
+          (verdict) => {
+            if (rlsOperation === 'update') preImageSharingVerdict = { id: String(targetId), verdict };
+          },
         );
         // [commit 6feac910b] The COVERAGE VOUCH for ADR-0055 details. This gate and the
         // master gate (step 2.8, immediately below) run on the same middleware
@@ -1319,6 +1339,15 @@ export function registerAuthzMiddleware(
     //     back) is tolerated by comparing against the pre-image; a bulk
     //     change-set carrying `owner_id` has no pre-image to compare and
     //     fails CLOSED.
+    //   • QUEUE — [ADR-0142 D3/D4] the ownership-queue column is the second
+    //     anchor, owned the same way. An insert naming a queue is admitted for
+    //     a member of it or under the grant (and must resolve: QUEUE_NOT_FOUND
+    //     otherwise); an update that changes it is a MOVE, grant only. Two
+    //     owner changes are admitted without the grant: the CLAIM (an unowned
+    //     record, to the caller, by id, where the sharing verdict is `allow`;
+    //     made conditional on the owner still being empty) and the RELEASE
+    //     (the owner, back to the record's home queue). The full table is
+    //     `ownership-queue-gate.ts`.
     //   • GUEST — [ADR-0138 D1] the guest is a principal, never an owner. For
     //     the anonymous principal ({@link isGuestEnvelope}) the step stamps
     //     nothing: there is no user id to stamp, and nothing stands in for
@@ -1372,19 +1401,42 @@ export function registerAuthzMiddleware(
       const isScalarId = (v: unknown): v is string | number =>
         (typeof v === 'string' && v !== '') || (typeof v === 'number' && Number.isFinite(v));
 
-      // Cheap pre-check: does any row actually WRITE owner_id? On update this
-      // skips the whole guard (and the field-set resolution) for the common
-      // path whose change-set never mentions the anchor. Insert always runs —
-      // it must stamp an absent owner.
-      if (isInsert || rows.some(writesOwner)) {
+      // Cheap pre-check: does any row actually WRITE an anchor (`owner_id`, or
+      // [ADR-0142 D3] `queue`)? On update this skips the whole guard (and the
+      // field-set resolution) for the common path whose change-set mentions
+      // neither. Insert always runs — it must stamp an absent owner.
+      if (isInsert || rows.some(writesOwner) || rows.some(writesQueue)) {
         const fields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
         if (fields?.has('owner_id')) {
           const userId = opCtx.context?.userId;
+          // [ADR-0142 D3] The ownership-queue column rides with `owner_id` — it
+          // is injected on exactly the objects the owner is — and this step
+          // owns it the way it owns the owner. The admissions are tabled in
+          // `ownership-queue-gate.ts`.
+          const hasQueue = fields.has(QUEUE_FIELD);
+          const queues = hasQueue ? this.ownershipQueues() : null;
+          const refusalDetails = { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets };
           const denyOwnerWrite = (action: string): never => {
             throw new PermissionDeniedError(
               `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ` +
                 `${action} requires the transfer grant (allowTransfer or modifyAllRecords)`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              refusalDetails,
+            );
+          };
+          // [ADR-0142 D4] A claim or a release the step did not admit names the
+          // condition that failed, and still names the grant for everything else.
+          const denyOwnershipChange = (condition: string): never => {
+            throw new PermissionDeniedError(
+              `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ${condition}; any ` +
+                'other change of ownership requires the transfer grant (allowTransfer or modifyAllRecords)',
+              refusalDetails,
+            );
+          };
+          const denyQueueWrite = (condition: string): never => {
+            throw new PermissionDeniedError(
+              `[Security] Access denied: 'queue' on '${opCtx.object}' is system-managed — ${condition} ` +
+                '(allowTransfer or modifyAllRecords)',
+              refusalDetails,
             );
           };
           // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
@@ -1396,7 +1448,17 @@ export function registerAuthzMiddleware(
                 `a guest never owns a record and never assigns one, whatever it is granted. Leave 'owner_id' out ` +
                 `of the request: the owner of a row a guest writes is set by the object's own hooks or ` +
                 `record-change flows, and stays unset when none sets it (ADR-0138 D1)`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              refusalDetails,
+            );
+          };
+          // [ADR-0142 D3] The queue is an ownership anchor too: a guest never
+          // routes a row, and no grant changes that.
+          const denyGuestQueueWrite = (): never => {
+            throw new PermissionDeniedError(
+              `[Security] Access denied: 'queue' on '${opCtx.object}' cannot be set by an anonymous caller — a ` +
+                `guest never puts a record in a queue, whatever it is granted. Leave 'queue' out of the request: ` +
+                `the object's assignment rules or its own hooks route a row a guest writes`,
+              refusalDetails,
             );
           };
           // Lazily evaluated + memoized (incl. a `false` result): the common
@@ -1411,15 +1473,41 @@ export function registerAuthzMiddleware(
             }
             return transferGrant;
           };
+          // A supplied queue is any own `queue` that is not empty: a value that
+          // is not a non-empty string names no queue and is refused as one.
+          const suppliesQueue = (r: Record<string, unknown>): boolean =>
+            hasQueue && writesQueue(r) && r.queue != null && r.queue !== '';
 
           if (isInsert) {
             for (const row of rows) {
               if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+              // [ADR-0142 D3] A supplied queue is resolved in the row's
+              // organization, then admitted under the grant or for a member of
+              // it. The stamp below is unchanged, so a member's insert naming a
+              // queue is an OWNED record with a home queue; parking a new row in
+              // one write (`owner_id` supplied empty beside the queue) is the
+              // grant holder's alone. A supplied owner beside the queue meets
+              // the forge rule below as before: the caller's own id is what the
+              // stamp would write, any other id needs the grant.
+              let park = false;
+              if (hasQueue && writesQueue(row) && guest) {
+                if (suppliesQueue(row)) denyGuestQueueWrite();
+                if (row.queue === '') row.queue = null;
+              } else if (suppliesQueue(row)) {
+                const organizationId = queueOrganizationOf(row, opCtx.context);
+                const name = await assertQueueResolves(queues, opCtx.object, row.queue, organizationId);
+                if (hasTransferGrant()) {
+                  park = writesOwner(row) && (row.owner_id == null || row.owner_id === '');
+                } else if (!(userId != null && queues && (await queues.isMember(String(userId), name, organizationId)))) {
+                  denyQueueWrite(INSERT_QUEUE_REFUSAL);
+                }
+              }
               if (!writesOwner(row) || row.owner_id == null || row.owner_id === '') {
+                if (park) row.owner_id = null;
                 // Auto-stamp the acting user (batch rows included — the
                 // single-record-only stamp left bulk-inserted rows NULL-owned
                 // and invisible to their creator).
-                if (userId) row.owner_id = userId;
+                else if (userId) row.owner_id = userId;
                 // [ADR-0138 D1 item 5] A guest is stamped with nothing, and
                 // its empty owner is left UNSET: an empty string would land
                 // in the anchor as a value that is neither an owner nor none.
@@ -1436,47 +1524,108 @@ export function registerAuthzMiddleware(
               }
             }
           } else {
-            // UPDATE — a supplied owner_id is a transfer/disown. Only the
-            // single-id no-op echo (a form save resending the UNCHANGED owner)
-            // is tolerated; an array / bulk change-set has no single pre-image
-            // to compare and fails CLOSED.
+            // UPDATE — a supplied owner_id is a transfer/disown, and a supplied
+            // queue that differs from the stored one is a MOVE (ADR-0142 D3).
+            // Tolerated without the grant: the single-id no-op echo (a form
+            // save resending the UNCHANGED anchor), and [ADR-0142 D4] the
+            // claim and the release. An array / bulk change-set has no single
+            // pre-image to compare and fails CLOSED.
             const single = !Array.isArray(opCtx.data);
+            const targetId = single ? this.extractSingleId(opCtx) : null;
+            // [ADR-0142 D4] A claim is a BY-ID write, by the engine's own
+            // dispatch: only that branch honours the one-owner precondition.
+            const claimable = targetId != null &&
+              resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options).kind === 'by-id';
+            // Read the pre-image under the CALLER's context (NOT isSystem): a
+            // form echo, a claim and a release only make sense for a row the
+            // caller can already see. This threads the caller's open
+            // transaction (an in-tx echo isn't spuriously denied) AND closes
+            // the owner-enumeration oracle a system read would open (a caller
+            // who can't read the row gets null → deny, indistinguishable from
+            // a non-owner).
+            //
+            // [#7505] A throw here is NOT evidence about ownership, so it
+            // propagates (the write is still refused — this throws before
+            // `next()`): the caller learns the store is down instead of that
+            // it tried to steal a record. The oracle is untouched: an absent
+            // row, and a row the caller cannot read, both come back `null` and
+            // still deny below.
+            const preImage = async (): Promise<Record<string, unknown> | null> =>
+              targetId != null && this.ql ? this.getCallerPreImage(opCtx, targetId) : null;
+            // [ADR-0142 D4] The claim's sharing verdict: the one step 2.7 asked
+            // for this row where it asked one, else asked here. Under
+            // delegation both principals must be positively admitted.
+            const claimAdmitted = async (): Promise<boolean> => {
+              const recordId = String(targetId);
+              const own = preImageSharingVerdict && preImageSharingVerdict.id === recordId
+                ? preImageSharingVerdict.verdict
+                : await this.resolveSharingWriteVerdict('update', opCtx.object, recordId, opCtx.context, permissionSets);
+              if (own !== 'allow') return false;
+              if (!delegatorSets) return true;
+              return (
+                await this.resolveSharingWriteVerdict('update', opCtx.object, recordId, delegatorContext, delegatorSets)
+              ) === 'allow';
+            };
             for (const row of rows) {
-              if (!writesOwner(row)) continue;
+              const ownerWritten = writesOwner(row);
+              const queueWritten = hasQueue && writesQueue(row);
+              if (!ownerWritten && !queueWritten) continue;
               // [ADR-0138 D1] A guest assigns no ownership — not a transfer,
-              // not a disown, not an echo — and no grant changes that.
-              if (guest) denyGuestOwnerWrite();
-              if (hasTransferGrant()) break; // authorized transfer — allow every row
-              let unchanged = false;
-              if (single && isScalarId(row.owner_id)) {
-                const targetId = this.extractSingleId(opCtx);
-                if (targetId != null && this.ql) {
-                  // Read the pre-image under the CALLER's context (NOT
-                  // isSystem): a form echo only makes sense for a row the
-                  // caller can already see. This threads the caller's open
-                  // transaction (an in-tx echo isn't spuriously denied) AND
-                  // closes the owner-enumeration oracle a system read would
-                  // open (a caller who can't read the row gets null → deny,
-                  // indistinguishable from a non-owner).
-                  //
-                  // [#7505] A throw here is NOT evidence about ownership, so
-                  // it no longer collapses into `unchanged = false`. That
-                  // catch predates the probe distinguishing "row absent"
-                  // from "could not be read": with both facts arriving as
-                  // `null` it was the only available fail-closed answer, and
-                  // it answered a store outage with `403 changing record
-                  // ownership` — a refusal an SDK also treats as terminal.
-                  // The fault now propagates (the write is still refused —
-                  // this throws before `next()`), so the caller learns the
-                  // store is down instead of that it tried to steal a
-                  // record. The oracle is untouched: an absent row, and a
-                  // row the caller cannot read, both still come back `null`
-                  // and still deny below.
-                  const pre = await this.getCallerPreImage(opCtx, targetId);
-                  unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
-                }
+              // not a disown, not an echo, not a queue — and no grant changes that.
+              if (guest) {
+                if (ownerWritten) denyGuestOwnerWrite();
+                denyGuestQueueWrite();
               }
-              if (!unchanged) denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
+              if (hasTransferGrant()) {
+                // An authorized transfer or move. [ADR-0142 D3] A move still
+                // names a queue that resolves in the row's organization; an
+                // echo of the stored value is not a move.
+                if (queueWritten && suppliesQueue(row)) {
+                  const pre = await preImage();
+                  if (!(pre && queueName(pre.queue) === row.queue)) {
+                    await assertQueueResolves(queues, opCtx.object, row.queue, queueOrganizationOf(pre, opCtx.context));
+                  }
+                }
+                continue;
+              }
+              const pre = await preImage();
+              // [ADR-0142 D3] A changed queue is a move, whatever else the
+              // change-set does: denied without the grant.
+              if (queueWritten) {
+                const echo = !!pre && (row.queue == null || typeof row.queue === 'string') &&
+                  queueName(row.queue) === queueName(pre.queue);
+                if (!echo) denyQueueWrite(MOVE_REFUSAL);
+              }
+              if (!ownerWritten) continue;
+              const storedOwner = pre?.owner_id;
+              // The echo: the unchanged owner resent.
+              if (pre && isScalarId(row.owner_id) && storedOwner != null && String(storedOwner) === String(row.owner_id)) continue;
+              const self = userId != null ? String(userId) : null;
+              // [ADR-0142 D4] CLAIM — an unowned record, to the caller's own id,
+              // by id, on a row the sharing model positively admits the caller
+              // to (a queue member through the queue basis, an `edit` share,
+              // Modify All). The write is made conditional on the owner still
+              // being empty, so two claimants produce exactly one owner; the
+              // loser's write answers 409 CONCURRENT_UPDATE.
+              if (
+                pre && (storedOwner == null || storedOwner === '') &&
+                self !== null && isScalarId(row.owner_id) && String(row.owner_id) === self
+              ) {
+                if (claimable && (await claimAdmitted())) {
+                  opCtx.writePrecondition = { ...(opCtx.writePrecondition ?? {}), owner_id: null };
+                  continue;
+                }
+                denyOwnershipChange(CLAIM_REFUSAL);
+              }
+              // [ADR-0142 D4] RELEASE — the owner hands the record back to its
+              // home queue (the queue is unchanged: a change was refused above),
+              // whether or not the owner is still a member of it. With no home
+              // queue it stays what it was: a disown, which needs the grant.
+              if (pre && (row.owner_id == null || row.owner_id === '') && self !== null && storedOwner != null && String(storedOwner) === self) {
+                if (hasQueue && queueName(pre.queue) !== null) continue;
+                denyOwnershipChange(RELEASE_REFUSAL);
+              }
+              denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
             }
           }
         }

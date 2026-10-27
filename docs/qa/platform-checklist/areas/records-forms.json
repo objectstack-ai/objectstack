@@ -4182,7 +4182,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4254,7 +4254,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0]'s masked-GET half ONLY (its API oracle; knownGaps[2] makes the raw-column read the DB-inspectable extra, and that leg, the 'secret:' ref column and the sys_secret ciphertext, is asserted only by the engine-layer secret-fields.test.ts below), acceptance[1] and negative[0], at the HTTP door: the showcase is booted in-process, POST /data/showcase_field_zoo writes both fields, and GET /data/showcase_field_zoo/ID reads them back as SECRET_MASK, never the written value. packages/objectql/src/secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP, so it scores NO api clause of this item: it is engine-layer evidence beside acceptance[0]'s DB-inspectable leg ('encrypts on write: row stores a ref, sys_secret holds ciphertext, no cleartext on the row'), and for acceptance[2] ('update: echoing the read mask back does NOT overwrite the stored secret'), acceptance[3] ('fail-closed: writing a secret field with no CryptoProvider throws'), acceptance[4] (the 'objectql aggregate() rejects credential fields (ADR-0100 / #3171)' describe) and negative[1]–[3]. acceptance[2] and [4] are driven over the API; acceptance[3] is blocked(fixture) on every stock composition (knownGaps[1])"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0]'s masked-GET half ONLY, acceptance[1] and negative[0], at the HTTP door (POST then GET /data/showcase_field_zoo/ID reads both fields back as SECRET_MASK). packages/qa/dogfood/test/encrypted-field-behavior.dogfood.test.ts, at the REST data door: on the showcase, acceptance[2] and negative[2] (a PATCH echoing SECRET_MASK leaves the driver-held secret: ref byte-identical and resolveSecretField still answers the original) and acceptance[4] and negative[3] (POST /data/showcase_field_zoo/query grouping by, or taking MIN/MAX of, f_secret or f_password is 400 INVALID_FIELD; a group-by naming no credential column is the 200 control); on a scratch object whose engine is left with no crypto provider (unset once after bootstrap, before any request — the engine state of a boot that never wired one, which no stock composition is, fixtures.knownGaps[1]), acceptance[3] and negative[1] (a non-empty secret POST is refused, 500 INTERNAL_ERROR, the sanitised branch of the engine's plain fail-closed Error, and no row is stored; a password write is 201 and masked on read). packages/objectql/src/secret-fields.test.ts drives a real engine over a stub driver with no HTTP: engine-layer evidence beside acceptance[0]'s DB-inspectable leg, never an api clause's pass"
       },
       "source": [
         "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
@@ -4294,6 +4294,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says the dogfood pin scores acceptance[0]'s masked-GET half only; the 'secret:' ref column and sys_secret ciphertext leg is asserted only in packages/objectql/src/secret-fields.test.ts, at the engine layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin for acceptance[2]–[4] and negative[1]–[3] at the REST data door (#26573 slice 1). acceptance[3] is now pinned on an engine left unwired in-process; on a stock live boot it stays blocked(fixture) as fixtures.knownGaps[1] says, and that note's 'NO live leg' now reads only for a live boot. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -5029,7 +5035,7 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5088,8 +5094,8 @@
         "seed-data-thin"
       ],
       "automated": {
-        "kind": "test",
-        "ref": "acceptance[3] ONLY. packages/objectql/src/engine-predicate-relationship.test.ts, on a real engine: 'reads the related row under SYSTEM authority' (the related read runs with isSystem true and the acting userId carried), 'ACCEPTS and REFUSES on the real write path, per the parent field', and 'resolves the FK off the PRIOR row when the patch does not carry it'. The other clauses still need the run"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/predicate-relationship-traversal.dogfood.test.ts, at the REST data door of a booted stack: on the showcase as shipped, acceptance[0] (an invoice on an active account is 2xx and reads back, no unevaluable fault), acceptance[1] and negative[0] (an invoice on a churned account is 400 VALIDATION_FAILED with one _record rule_violation entry carrying the authored message, and nothing is stored), acceptance[2] (a PATCH carrying only the repointed account is refused and the stored account is unchanged) and negative[1] (no readable-parent case answers the unevaluable fault); on a scratch pair, acceptance[3] and negative[2] for the persona no stock showcase persona is (fixtures.knownGaps): a member with create/edit on the child and no grant on the parent, whose parent read is the control (403 PERMISSION_DENIED), writes 2xx against a non-tripping parent and 400 with the authored message against a tripping one. packages/objectql/src/engine-predicate-relationship.test.ts stays engine-layer evidence of the mechanism ('reads the related row under SYSTEM authority' and its two siblings)"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
@@ -5120,6 +5126,12 @@
           "date": "2026-10-26",
           "change": "acceptance[3].verify says its engine-pin route is a declared layer exception, not a rule-6 pass of an HTTP oracle, and the run record names the layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin that scores every clause at the api layer (#26573 slice 1): the showcase invoice rule over REST for acceptance[0]–[2] and negative[0]–[1], and the scratch substitute fixtures.knownGaps describes for acceptance[3] and negative[2], so acceptance[3] no longer rests on the engine layer alone. kind test → dogfood. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -5355,7 +5367,7 @@
       "title": "Write-time value judgement on v18: picking an option whose stored visibleWhen cannot be evaluated is refused (reason unevaluable), an import with createMissingOptions keeps an unmatched select value while a later PATCH sending it back is refused, an import dry run admits exactly what the write admits, and a malformed element in a multi-valued lookup is refused with its index",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5412,7 +5424,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/validation/rule-validator.option-visibility.test.ts + packages/objectql/src/engine-field-predicate-fault.test.ts + packages/objectql/src/import-kept-option-values.test.ts + packages/objectql/src/validation/record-validator.kept-option-values.test.ts + packages/objectql/src/validate-update-stored-row.test.ts + packages/objectql/src/validate-preview-parent.test.ts + packages/objectql/src/engine-multi-reference-element-shape.test.ts"
+        "ref": "packages/objectql/src/validation/rule-validator.option-visibility.test.ts + packages/objectql/src/engine-field-predicate-fault.test.ts + packages/objectql/src/import-kept-option-values.test.ts + packages/objectql/src/validation/record-validator.kept-option-values.test.ts + packages/objectql/src/validate-update-stored-row.test.ts + packages/objectql/src/validate-preview-parent.test.ts + packages/objectql/src/engine-multi-reference-element-shape.test.ts — acceptance[0]'s pins, each evidence of its own layer (RUNNER rule 6). The api clauses' pin: packages/qa/dogfood/test/write-time-option-and-element-shape.dogfood.test.ts, at the REST doors of a booted scratch stack: acceptance[1] (picking an option whose visibleWhen reads a misspelt key is 400 VALIDATION_FAILED, rule_violation, constraint rule visibleWhen reason unevaluable, nothing stored), acceptance[2] (POST /data/OBJECT/import with createMissingOptions stores the unmatched select value, its dry run reports the same verdict, the option off refuses it invalid_option, and a later PATCH sending it back is 400 invalid_option), acceptance[3] (an update-mode import matched by name: the dry run and the real import agree, admitting a note whose requiredWhen reads the omitted, stored country, and both refusing note required where the merge violates the rule) and acceptance[4] (an object, false or a number in a multiple lookup is 400 invalid_type with constraint.detail 'at index 1: …', nothing stored)"
       },
       "source": [
         "packages/objectql/src/validation/rule-validator.ts",
@@ -5426,6 +5438,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin that scores acceptance[1]–[4] at the REST data and import doors (#26573 slice 1); the objectql pins stay acceptance[0]'s. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -5434,7 +5452,7 @@
       "title": "Write semantics changed on v18: a warning-severity validation hit comes back in the 2xx write answer as warnings[], a blocking after* hook abort rolls the whole write back, a `tree` field (with or without an explicit reference) honours its deleteBehavior, and a cascade delete is distinguishable to the child hook",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5485,7 +5503,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/validation/advisory-write-answer.test.ts + packages/objectql/src/engine-after-hook-abort-unit.test.ts + packages/objectql/src/engine-cascade-delete.test.ts + packages/objectql/src/engine-cascade-delete-tree.test.ts + packages/verify/src/delete-behavior-referenceless-tree.test.ts — acceptance[0]'s pins. For the api clauses they are evidence of their own layers (RUNNER rule 6): advisory-write-answer.test.ts calls ObjectStackProtocolImplementation createData / updateData in-process, so the REST PATCH body acceptance[1] reads is not observed; engine-after-hook-abort-unit.test.ts drives ObjectQL directly, so no HTTP pin covers the aborting afterInsert (acceptance[2], negative[0])"
+        "ref": "packages/objectql/src/validation/advisory-write-answer.test.ts + packages/objectql/src/engine-after-hook-abort-unit.test.ts + packages/objectql/src/engine-cascade-delete.test.ts + packages/objectql/src/engine-cascade-delete-tree.test.ts + packages/verify/src/delete-behavior-referenceless-tree.test.ts — acceptance[0]'s pins, each evidence of its own layer for the api clauses (RUNNER rule 6). The api clauses' pins, at the REST door of a booted stack: packages/qa/dogfood/test/write-answer-warnings-rest.dogfood.test.ts for acceptance[1] (on the showcase as shipped, a health jump on showcase_project answers 200 with warnings [{rule: project_health_progression, severity: warning, field: health, code: invalid_transition, message}] and the write is stored; a one-step change and the create answer carry no warnings key); packages/qa/dogfood/test/hook-after-abort-rollback.dogfood.test.ts for acceptance[2] and negative[0] (an aborting afterInsert refuses POST /data/OBJECT, and neither the row nor the hook chain's ctx.api write is stored)"
       },
       "source": [
         "packages/objectql/src/engine.ts",
@@ -5504,6 +5522,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says what its pins reach at the api clauses' layer (Tier 1 run #25815 (6679644a, pin b41ed7f68956); re-read on main cc378e93): advisory-write-answer.test.ts calls the protocol in-process, so acceptance[1]'s REST PATCH body is unobserved; engine-after-hook-abort-unit.test.ts drives ObjectQL directly, so acceptance[2] and negative[0] have no HTTP pin. The run's third note, acceptance[3] scored on the referenceless rtl_* tree fixture, needs no edit: the clause names no carrier. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "automated.ref names the HTTP pins for acceptance[1], acceptance[2] and negative[0] (#26573 slice 1): the new write-answer-warnings-rest dogfood file reads the REST PATCH body, and the existing hook-after-abort-rollback dogfood file already refused the aborting create over REST and read the store back, which revision 2 had not named. acceptance[3] is unchanged. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -5512,7 +5536,7 @@
       "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5565,7 +5589,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.test.ts + packages/plugins/plugin-security/src/comment-reaction-own-record-floor.test.ts + packages/plugins/plugin-audit/src/comment-edit-stamp.integration.test.ts + packages/plugins/plugin-audit/src/sys-comment-reactions-door.integration.test.ts (a 'door' test by name only: it boots ObjectKernel + ObjectQLPlugin over sqlite-wasm and maps the thrown error with mapDataError, with no HTTP adapter, so it is engine-layer evidence beside acceptance[1] and [2] and never their pass, RUNNER rule 6) + packages/plugins/plugin-audit/src/activity-field-redaction.test.ts"
+        "ref": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.test.ts + packages/plugins/plugin-security/src/comment-reaction-own-record-floor.test.ts + packages/plugins/plugin-audit/src/comment-edit-stamp.integration.test.ts + packages/plugins/plugin-audit/src/sys-comment-reactions-door.integration.test.ts + packages/plugins/plugin-audit/src/activity-field-redaction.test.ts — acceptance[0]'s pins, each engine-layer evidence (the 'door' test boots no HTTP adapter, RUNNER rule 6). The api clauses' pin: packages/qa/dogfood/test/comment-reactions-and-edit-stamps.dogfood.test.ts, at the REST data door of an org-bound stack (the comments fixture + plugin-audit, the member armed as org_member and holding a delete-capable set on sys_comment_reaction): acceptance[1] (201 with user_id forced to the caller; duplicate 409 UNIQUE_VIOLATION; a comment the member cannot read 403 RECORD_NOT_ACCESSIBLE; PATCH 405 OBJECT_API_METHOD_NOT_ALLOWED; another member's reaction 403 PERMISSION_DENIED and the row survives, the own delete the control), acceptance[2] (reactions on PATCH and in a $filter 400 INVALID_FIELD, absent from the read) and acceptance[3] (a body edit stores is_edited true and a server edited_at; the client-sent false and 2000-01-01 are dropped)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.ts",
@@ -5590,6 +5614,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says sys-comment-reactions-door.integration.test.ts drives no HTTP door (Tier 1 run #25815 (6679644a, pin b41ed7f68956); re-read on main cc378e93): it boots ObjectKernel + ObjectQLPlugin over sqlite-wasm and maps errors with mapDataError, so it cannot score the api clauses acceptance[1] and [2]. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin that scores acceptance[1]–[3] at the REST data door (#26573 slice 1), with the measured refusals: an update is refused 405 OBJECT_API_METHOD_NOT_ALLOWED (the object offers no update) and a foreign delete 403 PERMISSION_DENIED (the own-record floor). No clause changed",
+          "ref": "#26573"
         }
       ]
     },

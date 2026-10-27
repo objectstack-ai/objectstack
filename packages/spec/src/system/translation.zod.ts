@@ -14,27 +14,32 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /**
- * The shape a locale tag must have: a 2–8 letter language subtag, then any
+ * The shape a locale tag must have: a 2–3 letter language subtag, then any
  * number of hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`,
- * `zh-Hans-CN`, `es-419`). The same pattern as `SYS_USER_LOCALE_TAG_PATTERN`
- * (`@objectstack/platform-objects/identity`), the shape a user's own `locale`
- * column accepts, so a translation is stored only under tags a session can
- * ask for.
+ * `zh-Hans-CN`, `es-419`, `yue-HK`). The same pattern as
+ * `SYS_USER_LOCALE_TAG_PATTERN` (`@objectstack/platform-objects/identity`),
+ * the shape a user's own `locale` column accepts, so a translation is stored
+ * only under tags a session can ask for.
  *
  * Shape only, by decision: membership has no registry to check against
  * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
  * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
  * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
- * What it refuses is what no resolver ever matches: an underscore separator
- * (`zh_CN`), whitespace, a language name.
+ * The primary subtag is held to the 2–3 letters of the ISO 639 codes every
+ * tag in use starts with: BCP-47 reserves 4 letters and registers no 5–8
+ * letter language, so the only values that wider grammar ever admitted were
+ * words. What it refuses is what no resolver ever matches: an underscore
+ * separator (`zh_CN`), whitespace, a language name (`Chinese`,
+ * `Chinese (Simplified)`).
  */
-const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
 
 const LOCALE_TAG_REFUSAL =
-  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–8 letter language '
+  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–3 letter language '
   + 'subtag, then hyphen-separated subtags. Refused since @objectstack/spec 18, because a translation '
-  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name) is under a locale no '
-  + 'session ever asks for, so its strings never render. Separate subtags with `-`, not `_`.';
+  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name such as `Chinese`) '
+  + 'is under a locale no session ever asks for, so its strings never render. Separate subtags with '
+  + '`-`, not `_`, and write the tag, not the name (`zh-CN`, not `Chinese`).';
 
 export const LocaleSchema = lazySchema(() => z
   .string()
@@ -125,6 +130,21 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
   help: z.string().optional().describe('Translated help text'),
   placeholder: z.string().optional().describe('Translated placeholder text for form inputs'),
   options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map'),
+  /**
+   * The field's own `inlineTitle` — the heading of the inline child grid a
+   * `master_detail` / `lookup` field with `inlineEdit` draws on its PARENT's
+   * form. The field lives on the child object, so the address is the child's:
+   * `objects.<child>.fields.<field>.inlineTitle`. Overlaid by
+   * `translateObject` on the served child object, which is what the console's
+   * inline-subform pass copies the heading from.
+   *
+   * No fallback to the child object's translated plural label: an authored
+   * `inlineTitle` with no entry here keeps its authored text, because a
+   * bundle translates an attribute and never swaps another attribute in over
+   * authored text. An absent `inlineTitle` already renders the child's
+   * (translated) label.
+   */
+  inlineTitle: z.string().optional().describe("Translated inline master-detail grid title — overlays the field's own `inlineTitle`"),
 }).describe('Translation data for a single field'));
 
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
@@ -177,6 +197,8 @@ const actionTranslationSchema = (surface: string) => strictObject({
     name: 'label', title: 'label',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
   },
@@ -191,6 +213,9 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+  // action shows; overlaid by `translateAction` like the copy keys above.
+  disabledReason: z.string().optional().describe('Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -427,6 +452,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.disabledReason
    *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -943,6 +969,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.disabledReason
    *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
@@ -1140,6 +1167,10 @@ const appTranslationDataShape = () => ({
    *
    *   reports.<name>.label        → the report's own `label`
    *   reports.<name>.description  → the report's own `description`
+   *   reports.<name>.blocks.<block_name>.label / .description
+   *                               → a joined report block's own `label` /
+   *                                 `description`, keyed by the block's
+   *                                 required `name`
    *
    * The two strings the console's report index lists each report by, and the
    * report page's heading. Overlaid by `translateReport` (`i18n-resolver.ts`)
@@ -1148,9 +1179,9 @@ const appTranslationDataShape = () => ({
    * O), so, as on a dashboard, the catalog yields to a label or description
    * an org has re-authored on top of the packaged report (ADR-0029 D9.2a).
    *
-   * The face stops at those two strings. A report's selection (`dataset`,
-   * `rows`, `columns`, `values`) is machine names whose display copy is the
-   * dataset's, translated at `datasets.<dataset_name>`.
+   * The face stops at those strings. A report's selection (`dataset`,
+   * `rows`, `columns`, `values`), and a block's, is machine names whose
+   * display copy is the dataset's, translated at `datasets.<dataset_name>`.
    *
    * ⚠️ `label` and `description` are `I18nLabelSchema` at the authoring site,
    * so a report's copy may already be an inline `{ en, 'zh-CN' }` map.
@@ -1164,6 +1195,22 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe("Translated report label — overlays the report's own `label`"),
     description: z.string().optional().describe("Translated report description — overlays the report's own `description`"),
+    /**
+     * A joined report's block copy, keyed by the block's `name`
+     * (`JoinedReportBlockSchema.name`, required). The heading and caption the
+     * joined renderer draws above each block; without this slot a localized
+     * report showed a translated title over block headings left in the
+     * authoring language. Overlaid by `translateReport`, block by block, under
+     * the same packaged-base rule as the report's own two strings.
+     */
+    blocks: z.record(z.string(), strictObject({
+      surface: 'this joined report block translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', heading: 'label' },
+    }, {
+      label: z.string().optional().describe("Translated block label — overlays the joined report block's own `label`"),
+      description: z.string().optional().describe("Translated block description — overlays the joined report block's own `description`"),
+    })).optional().describe('Joined report block translations keyed by block name'),
   })).optional().describe('Report translations keyed by report name'),
 
   /**

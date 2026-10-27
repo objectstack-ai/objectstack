@@ -6,14 +6,15 @@
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed) and every call is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted. Shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670).",
     "qa-flow-status-doors": {
-      "title": "Two scratch probe flows (qa_no_start_node / qa_always_fails) in a scratch package, so every never-dispatched and ran-and-failed row of the #9378 status table has a target",
-      "why": "Stock showcase can reach four rows of the trigger table on its own — 404 (any unheld name), 409 (toggle showcase_urgent_task_alert OFF), 200 success, and 200 PAUSED (showcase_reassign_wizard) — but NOT the two that need a purpose-built definition. 422 FLOW_NO_START_NODE needs a flow whose `nodes` array holds no `start` node, and 400 FLOW_FAILED needs one that reaches a node and fails TERMINALLY: the showcase's only deterministic failure, showcase_resilient_sync, is wrapped in a try_catch that HANDLES it, so the run succeeds and the 400 row is never exercised. Without this recipe those two rows are blocked(fixture) and a regression that reverted either one leaves the area green.",
-      "provenance": "authored from source in the 17.1.0 post-release sweep (#10236); the scratch-package authoring path is the one automation.flow-error-handling already declares ('a writable/scratch package to author the UNPROTECTED probe flow into — the showcase itself ships read-only') and the call shapes are qa-scratch-authz's (#7670). Proven by a live run in the 18.2.0 sweep (QA run #25817, at 6679644a): every step answered 2xx, and the 422 and 400 rows answered at both trigger routes; the four stock rows were first hand-verified in #10225.",
+      "title": "Two scratch probe flows (qa_no_start_node / qa_always_fails) in a scratch package, so every never-dispatched and ran-and-failed row of the #9378 status table has a target, plus a store-unreadable fault arm (step 5) for the resume door's 503 STORE_UNAVAILABLE row",
+      "why": "Stock showcase can reach four rows of the trigger table on its own — 404 (any unheld name), 409 (toggle showcase_urgent_task_alert OFF), 200 success, and 200 PAUSED (showcase_reassign_wizard) — but NOT the two that need a purpose-built definition. 422 FLOW_NO_START_NODE needs a flow whose `nodes` array holds no `start` node, and 400 FLOW_FAILED needs one that reaches a node and fails TERMINALLY: the showcase's only deterministic failure, showcase_resilient_sync, is wrapped in a try_catch that HANDLES it, so the run succeeds and the 400 row is never exercised. Without this recipe those two rows are blocked(fixture) and a regression that reverted either one leaves the area green. The resume door's 503 STORE_UNAVAILABLE row has no stock trigger either: it needs the durable suspended-run store to fail a read while the server and the resume route stay up, which no request can cause. Step 5 makes that read fail for one resume, out of process, and puts the store back; without it the row is blocked(fixture), as it scored in both 18.2.0 waves (QA run #25817, and the wave-2 run #26476).",
+      "provenance": "authored from source in the 17.1.0 post-release sweep (#10236); the scratch-package authoring path is the one automation.flow-error-handling already declares ('a writable/scratch package to author the UNPROTECTED probe flow into — the showcase itself ships read-only') and the call shapes are qa-scratch-authz's (#7670). Proven by a live run in the 18.2.0 sweep (QA run #25817, at 6679644a): every step answered 2xx, and the 422 and 400 rows answered at both trigger routes; the four stock rows were first hand-verified in #10225. Step 5 was added and proven by #26622 on a fresh showcase boot at d31329f1 (2026-10-27): the resume answered 503 STORE_UNAVAILABLE while the table was away, and after the rename back the run read paused and a valid resume answered 200.",
       "app": "showcase",
       "requires": [
         "an admin session holding `manage_metadata` — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough",
         "a boot on its own port and file DB (dogfood §0) — this recipe authors metadata into the running app",
-        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the own-port/OS_PORT connector standing fact)"
+        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the own-port/OS_PORT connector standing fact)",
+        "step 5 only: a boot on a FILE database (`pnpm dev -- --fresh` gives one; the boot prints its primary as `Database: file:…`) and Node 22.5 or later for `node:sqlite` — the fault arm edits the boot's telemetry database from a second process, so a non-file datasource has no such arm"
       ],
       "sequence": [
         {
@@ -63,12 +64,108 @@
           "call": "toggle a stock record-change flow OFF for the 409 row: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}",
           "expect": "2xx. No authoring needed — the 409 FLOW_DISABLED row is reachable on stock fixtures. ⚠️ Toggle it back ON in teardown: it is the fixture automation.flow-toggle-kill-switch drives, and leaving it off silently changes that item's baseline.",
           "source": "packages/runtime/src/domains/automation.ts#flow (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
+        },
+        {
+          "step": 5,
+          "call": "fault arm for automation.trigger-status-contract acceptance[4]'s 503 STORE_UNAVAILABLE row, run AT that row and never up front: with a live paused showcase_reassign_wizard run (RUNID) in hand, rename the durable suspended-run table away in the boot's TELEMETRY database from a second process — node -e \"new (require('node:sqlite').DatabaseSync)('PRIMARY.telemetry.db').exec('ALTER TABLE sys_automation_run RENAME TO sys_automation_run__qa_off')\" — send one valid resume, POST /api/v1/automation/showcase_reassign_wizard/runs/RUNID/resume {\"inputs\": {\"new_assignee\": \"…\"}}, then rename it back (ALTER TABLE sys_automation_run__qa_off RENAME TO sys_automation_run)",
+          "expect": "the resume answers 503 with error.code STORE_UNAVAILABLE and a message beginning 'Durable suspended-run store unreachable for run' and ending in the driver's refusal; after the rename back, GET /api/v1/automation/showcase_reassign_wizard/runs/RUNID reads status 'paused' and the same valid resume answers 200 — the intact-suspension half of the row. ⚠️ The table lives in the TELEMETRY file beside the primary (PRIMARY.telemetry.db), not in the primary: a rename aimed at the primary answers 'no such table'. ⚠️ While the table is away every run read and write in the boot fails, so rename it back before anything else touches a run. A 404 RUN_NOT_FOUND here is the defect the row exists for: an unreadable store reported as a missing run",
+          "source": "packages/services/service-automation/src/suspended-run-store.ts#ObjectStoreSuspendedRunStore (the durable store reads and writes sys_automation_run through the data engine); packages/services/service-automation/src/run-resume.ts#loadSuspendedRunStrict and packages/services/service-automation/src/run-resume.ts#resumeInternal (a strict load that throws answers STORE_UNAVAILABLE and leaves the suspension unconsumed, never RUN_NOT_FOUND); packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath (the telemetry file is the primary's path plus `.telemetry.db`); packages/runtime/src/domains/automation.ts — the resume route's STORE_UNAVAILABLE → 503 arm"
         }
       ],
-      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
+      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly. Step 5 undoes itself with its rename back; if a run stopped between the two renames, rename the table back before anything else.",
       "knownGaps": [
         "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem(type, name, item)` does NOT send `?package=` (packages/client/src/index.ts) — issue steps 2 and 3 as raw HTTP with the query string appended, or the flows land outside the package and the teardown misses them.",
         "Proven by a live run once (QA run #25817, at 6679644a: every step 2xx). If step 2 or 3 4xxs on the flow body in a later run, re-read the cited schema line before assuming the recipe rotted — a publish-time refusal of a start-less flow would itself be a finding (it would mean the 422 row has moved from dispatch time to author time, which changes what the item is asserting)."
+      ]
+    },
+    "qa-second-packaged-caller": {
+      "title": "A scratch package installed through the package loader (POST /api/v1/marketplace/install-local, inline manifest) whose one flow calls showcase_notify_owner as a subflow — a SECOND packaged caller of a stock child",
+      "why": "Stock showcase gives each packaged child exactly one packaged caller (showcase_task_done_notify_owner → showcase_notify_owner, and two more pairs), so the door leg of automation.packaged-flow-subflow-disable-refusal negative[1] (the refusal names EVERY packaged caller, not only the first) has nothing to observe. A flow counts as packaged only when the package loader registered it (the metadata protocol's packagedArtifactOwner reads the loader's set, never the body's stamps), so a flow authored through PUT /api/v1/meta/flow/NAME?package=… or POST /api/v1/automation is deployment-authored and does not stand in, and POST /api/v1/packages installs an authored package. The install-local door registers an inline manifest through the kernel's manifest service as marketplace code and announces the re-sync the automation engine reads its flows from. Without this recipe negative[1]'s door leg is blocked(fixture), as it scored in both 18.2.0 waves (QA run #25817, and the wave-2 run #26476).",
+      "provenance": "#26622: authored from source and proven by a live run on a fresh showcase boot at d31329f1 (2026-10-27): step 1 answered 200 with hotLoaded true, step 2 served the flow with _provenance 'package' and _packageId 'com.objectstack.qa.qasub', the disable of showcase_notify_owner answered 409 DELETE_RESTRICTED naming both callers, and after the teardown the same disable named showcase_task_done_notify_owner alone.",
+      "app": "showcase",
+      "requires": [
+        "an admin session holding `manage_metadata` — the install-local routes require it outright (packages/cloud-connection/src/marketplace-install-local-plugin.ts#MarketplaceInstallLocalPlugin, the module note)",
+        "a boot on its own port and file DB (dogfood §0), with OS_PORT exported as well as -p",
+        "the marketplace plugins mounted: the showcase composes MarketplaceInstallLocalPlugin only while resolveCloudUrl() answers a URL (examples/app-showcase/objectstack.config.ts), so ⛔ not under OS_CLOUD_URL=off. The inline-manifest branch fetches nothing from the cloud, so no network is needed",
+        "⚠️ the install ledger is written into the PROJECT tree, examples/app-showcase/.objectstack/installed-packages/ (gitignored), not into the --fresh tempdir — discarding the run's DB does not undo it, and the next boot rehydrates the package. The teardown DELETE is mandatory"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/marketplace/install-local",
+          "body": {
+            "manifest": {
+              "id": "com.objectstack.qa.qasub",
+              "namespace": "qasub",
+              "name": "QA second packaged subflow caller",
+              "version": "1.0.0",
+              "type": "app",
+              "flows": [
+                {
+                  "name": "qasub_second_notify_caller",
+                  "label": "QA second packaged caller of showcase_notify_owner",
+                  "type": "autolaunched",
+                  "status": "active",
+                  "nodes": [
+                    {
+                      "id": "start",
+                      "type": "start",
+                      "label": "Start"
+                    },
+                    {
+                      "id": "call_notify",
+                      "type": "subflow",
+                      "label": "Notify Owner",
+                      "config": {
+                        "flowName": "showcase_notify_owner",
+                        "input": {
+                          "ownerId": {
+                            "dialect": "cel",
+                            "source": "null"
+                          },
+                          "message": {
+                            "dialect": "cel",
+                            "source": "'qa'"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "id": "end",
+                      "type": "end",
+                      "label": "End"
+                    }
+                  ],
+                  "edges": [
+                    {
+                      "id": "e1",
+                      "source": "start",
+                      "target": "call_notify"
+                    },
+                    {
+                      "id": "e2",
+                      "source": "call_notify",
+                      "target": "end"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "expect": "200 {success: true, data: {manifestId: 'com.objectstack.qa.qasub', hotLoaded: true, …}}. hotLoaded false, or 422 PLUGIN_REGISTER_FAILED, means the running kernel does NOT hold the package and every later step measures nothing. A re-run over a live ledger is a managed RE-install, not a fresh one — run the teardown first. The caller has no trigger (a bare start node) and constant subflow inputs, so it never runs on its own: it exists only to be a packaged caller",
+          "source": "packages/cloud-connection/src/marketplace-install-local-plugin.ts#MarketplaceInstallLocalPlugin — the inline-manifest branch (an offline file import: the manifest's id is the package id), registered through the kernel's `manifest` service with source 'marketplace', then `metadata:reloaded`, from which service-automation re-syncs its flows"
+        },
+        {
+          "step": 2,
+          "call": "GET /api/v1/automation/qasub_second_notify_caller",
+          "expect": "200, the definition served with status 'active', _provenance 'package' and _packageId 'com.objectstack.qa.qasub' — the loader's set holds it, so the engine classifies it packaged. A 404, or a body without the package stamps, means step 1 did not reach the engine",
+          "source": "packages/metadata-protocol/src/protocol.ts#packagedArtifactOwner (the loader's set, read at question time); packages/services/service-automation/src/subflow-guards.ts#packagedSubflowCallers (only packaged callers are counted, the subflow and map nodes both read through config.flowName)"
+        }
+      ],
+      "teardown": "DELETE /api/v1/marketplace/install-local/com.objectstack.qa.qasub → 200 with a cleanups list; it removes the cached ledger file and withdraws the package from the running kernel, after which a disable of showcase_notify_owner names showcase_task_done_notify_owner alone. Mandatory even on a throwaway DB, because the ledger sits in the project tree (requires[3])",
+      "knownGaps": [
+        "Proven by one live run (#26622, at d31329f1). The flow name carries the package namespace prefix (qasub_); an unprefixed name was not measured.",
+        "The packaged SELF-caller arm of automation.packaged-flow-subflow-disable-refusal (its fixtures.knownGaps[0]) needs a package-loader install too, which this door provides; whether a flow whose subflow node names itself installs and is spared by the guard was not measured, and that arm is not part of this recipe."
       ]
     }
   },
@@ -1513,7 +1610,7 @@
       "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)", "org member for the resume 403 arm — created by the admin with POST /api/v1/auth/admin/create-user and past its password change (POST /api/v1/auth/change-password): a held session answers 403 PASSWORD_RESET_REQUIRED, the right status for the wrong reason"],
@@ -1525,7 +1622,7 @@
         ],
         "provisioning": {
           "use": "qa-flow-status-doors",
-          "why": "unblocks the 422 FLOW_NO_START_NODE and 400 FLOW_FAILED rows of clause 0 and their per-door repeats in clause 2. Without it those two rows are blocked(fixture): stock showcase has no start-less flow, and its one deterministic failure (showcase_resilient_sync) is wrapped in a try_catch that HANDLES the failure, so the run SUCCEEDS and the 400 row is never exercised. The item would score partial with the two most-regressible rows unproven."
+          "why": "unblocks the 422 FLOW_NO_START_NODE and 400 FLOW_FAILED rows of clause 0 and their per-door repeats in clause 2. Without it those two rows are blocked(fixture): stock showcase has no start-less flow, and its one deterministic failure (showcase_resilient_sync) is wrapped in a try_catch that HANDLES the failure, so the run SUCCEEDS and the 400 row is never exercised. The item would score partial with the two most-regressible rows unproven. The recipe's step 5 also unblocks clause 4's 503 STORE_UNAVAILABLE arm, which no request can cause: it renames the durable suspended-run table away in the boot's telemetry database for one resume and puts it back. Without it that arm is blocked(fixture), as it scored in both 18.2.0 waves."
         },
         "knownGaps": [
           "The MCP `run_action` bridge shares action-execution.ts's mapper with POST /api/v1/actions/... but is not an HTTP door, so it has no status to observe — clause 2 covers it by asserting the two share ONE mapper (source-level), not by driving MCP."
@@ -1537,7 +1634,7 @@
         "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold (404 RESOURCE_NOT_FOUND: the status table's 404 row names no code of its own, so the envelope carries the spec's status default, HttpStatusErrorCodeMap in packages/spec/src/api/errors.zod.ts); qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
         "record for every response the HTTP status AND error.code together — neither alone is the contract, and a run that captured only the status cannot tell 409 FLOW_DISABLED from any other 409",
         "on the 400 FLOW_FAILED responses, additionally record error.details.errorMessage and error.details.summary (the flow author's own text and the per-node accounting) — they are the documented payload of that row and the console reads them from exactly there",
-        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a valid resume, carrying the screen's required new_assignee (200, next screen or completion) — ⚠️ a BODYLESS resume is not a valid one on the stock wizard: it answers 400 INVALID_SCREEN_INPUT, the screen-input row below; a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"inputs\": {\"new_assignee\": \"…\"}, \"output\": {\"$x\": 1}}, which lands as collect.$x. The screen check runs first (refuseInvalidScreenInput before applyResumeSignal, engine.ts), so the body must also satisfy the screen's required new_assignee: {\"output\": {\"$x\": 1}} alone answers 400 INVALID_SCREEN_INPUT (QA run #24779), as does a `$` key inside `inputs`; and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
+        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a valid resume, carrying the screen's required new_assignee (200, next screen or completion) — ⚠️ a BODYLESS resume is not a valid one on the stock wizard: it answers 400 INVALID_SCREEN_INPUT, the screen-input row below; a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"inputs\": {\"new_assignee\": \"…\"}, \"output\": {\"$x\": 1}}, which lands as collect.$x. The screen check runs first (refuseInvalidScreenInput before applyResumeSignal, engine.ts), so the body must also satisfy the screen's required new_assignee: {\"output\": {\"$x\": 1}} alone answers 400 INVALID_SCREEN_INPUT (QA run #24779), as does a `$` key inside `inputs`; and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume while the durable run store is unreadable (503 STORE_UNAVAILABLE) — the qa-flow-status-doors recipe's step 5, the table renamed away for that one resume and back before the re-read; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
         "after each RETRYABLE refusal, re-read the run and confirm the suspension is STILL PAUSED and a later valid resume still works — 'the refusal left the suspension intact' is half of what those arms mean, and a status alone does not show it",
         "cross-door: dispatch a disabled flow through POST /api/v1/actions/... with a type:'flow' action and through a declared type:'flow' endpoint, and record what each answers. No stock flow is reachable from all three doors, so each door takes its own: showcase_reassign_wizard through its declared action (POST /api/v1/actions/showcase_task/showcase_bulk_reassign), and showcase_inquiry_purge through its endpoint (POST /api/v1/apps/showcase/inquiries/purge, examples/app-showcase/src/system/apis/index.ts) — toggle each OFF first and back ON in teardown. The /actions door's 400 FLOW_FAILED and 422 FLOW_NO_START_NODE rows need a type:'flow' action targeting qa_always_fails or qa_no_start_node, which stock does not declare: author one into the recipe's package (PUT /api/v1/meta/action/NAME?package=com.objectstack.qa.automation, the route QA run #25817 names) — the qa-flow-status-doors recipe does not carry that step",
         "capture the per-row × per-door verdict table"
@@ -1570,7 +1667,7 @@
         {
           "clause": "every RESUME refusal answers its own status and code, and the retryable ones LEAVE THE SUSPENSION INTACT: 403 PERMISSION_DENIED, 400 INVALID_SIGNAL, 400 INVALID_SCREEN_INPUT, 409 RESUME_IN_PROGRESS, 503 STORE_UNAVAILABLE all keep the run paused; 404 RUN_NOT_FOUND and 400 FLOW_FAILED are terminal",
           "oracle": "api",
-          "verify": "per reachable arm: the (status, code) pair, THEN a re-read of the run proving it is still paused and a subsequent valid resume still succeeds. The intact-suspension half is what separates these arms from the terminal ones and no status shows it. 503 STORE_UNAVAILABLE has no stock trigger — record it blocked(fixture) rather than inferring it from the code being registered",
+          "verify": "per reachable arm: the (status, code) pair, THEN a re-read of the run proving it is still paused and a subsequent valid resume still succeeds. The intact-suspension half is what separates these arms from the terminal ones and no status shows it. 503 STORE_UNAVAILABLE has no stock trigger: drive it with the qa-flow-status-doors recipe's step 5 (sys_automation_run renamed away in the boot's telemetry database for one resume, then back), and only then re-read and resume. ⛔ Never infer it from the code being registered; a run that cannot edit the telemetry file (a non-file datasource) records the arm blocked(fixture), with packages/runtime/src/domains/automation-resume-refusal-codes.test.ts (the in-process 503 mapping) beside it as evidence of its own layer only (RUNNER rule 6)",
           "evidence": "per-arm response + the post-refusal run state + the successful later resume"
         },
         {
@@ -1614,6 +1711,7 @@
       "source": [
         "packages/runtime/src/flow-dispatch-status.ts#FlowRefusalCode — the ONE definition of the trigger-side table (FlowRefusalCode, classifyFlowRefusal, isPausedRun, FLOW_NOT_FOUND_STATUS) and the note on why it is a module rather than a route mapper",
         "packages/runtime/src/domains/automation.ts — both trigger routes and the resume route's code→status arms",
+        "packages/services/service-automation/src/run-resume.ts#loadSuspendedRunStrict — the strict load whose throw becomes STORE_UNAVAILABLE (resumeInternal), so an unreadable store is never reported as a missing run; the qa-flow-status-doors recipe's step 5 makes that read fail",
         "packages/runtime/src/action-execution.ts and packages/runtime/src/endpoint-executor.ts — the other two doors reading the same table",
         "packages/services/service-automation/src/engine.ts#disabled — the FLOW_NO_START_NODE exit; the disabled-flow exit stamps FLOW_DISABLED, and neither carries `status`, which is what lets a transport tell a never-dispatched exit from a run that dispatched and failed",
         "packages/spec/src/contracts/automation-service.ts#AutomationResult — AutomationResult.code, the closed union the two trigger-time refusals were added to",
@@ -1657,6 +1755,12 @@
           "date": "2026-10-26",
           "change": "steps[5] says a bodyless resume is not the valid one; steps[7] and acceptance[2].verify name the stock flow each door takes and the type:'flow' action the /actions 400 and 422 rows need; the area recipe qa-flow-status-doors (which carries no revision of its own) drops its two 'NOT yet proven by a live run' notes. Checklist-accuracy findings of the 18.2.0 sweep (QA run #25817, release-18.2.0-manual-set, at 6679644a; wave anchor #25807, card #25840): steps[7] asked for the SAME disabled flow through /actions and an endpoint, but no stock flow is reachable from all three doors — the runner used showcase_reassign_wizard with showcase_bulk_reassign and showcase_inquiry_purge with its endpoint; the /actions 400 and 422 rows need a type:'flow' action, which the run suggests authoring with PUT /api/v1/meta/action/NAME?package=com.objectstack.qa.automation; the recipe provisioned live with every step 2xx; and a bodyless resume of the stock wizard answers 400 INVALID_SCREEN_INPUT, not 200. Re-read at base 9753d1637f (examples/app-showcase/src/ui/actions/index.ts: showcase_bulk_reassign is type 'flow' targeting showcase_reassign_wizard; examples/app-showcase/src/system/apis/index.ts: the purge endpoint targets showcase_inquiry_purge). No clause changed",
           "ref": "#25840"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "acceptance[4].verify, steps[5] and fixtures.provisioning.why name the qa-flow-status-doors recipe's new step 5, the store-unreadable fault arm, and source cites run-resume.ts#loadSuspendedRunStrict. Card #26622 (maintainer-directed in the 18.2.0 wave-2 session: 「补测试数据配方。立卡」): clause 4's 503 STORE_UNAVAILABLE arm scored blocked(fixture) in both 18.2.0 waves for want of a stock trigger. The item keeps its one recipe reference; the arm is a step of that recipe. Re-driven once on a fresh showcase boot at d31329f1: with a live paused showcase_reassign_wizard run, sys_automation_run renamed away in the boot's telemetry database (PRIMARY.telemetry.db), a valid resume answered 503 STORE_UNAVAILABLE, 'Durable suspended-run store unreachable for run …'; after the rename back the run read status paused and the same resume answered 200, the update_record node acting once. Verdict for the 503 arm of acceptance[4]: pass. No clause changed",
+          "ref": "#26622"
         }
       ]
     },
@@ -1790,7 +1894,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1801,9 +1905,14 @@
         "requires": [
           "the three stock packaged caller→child pairs (examples/app-showcase/src/automation/flows/index.ts): showcase_task_done_notify_owner → showcase_notify_owner via a subflow node · showcase_project_closure → showcase_closure_signoff via subflow · showcase_release_signoff → showcase_one_task_signoff via a MAP node — the map pair is load-bearing, because a scan that read only `subflow` nodes would pass the first two and miss it"
         ],
+        "provisioning": {
+          "use": "qa-second-packaged-caller",
+          "why": "unblocks negative[1]'s door leg: with the recipe's package installed showcase_notify_owner has TWO packaged callers, so the disable refusal must name both showcase_task_done_notify_owner and qasub_second_notify_caller. Without it that leg is blocked(fixture) — stock fixtures give each child one packaged caller, and a ?package=-authored flow is deployment-authored, so it cannot stand in."
+        },
         "knownGaps": [
           "two arms have no stock HTTP specimen: a NON-packaged caller must not guard (a tenant's own flow cannot hold a packaged one hostage), and a flow calling ITSELF must not guard its own disable. Both are pinned engine-level in packages/services/service-automation/src/flow-activation-ledger.test.ts, over a fake store: evidence of the engine layer only, never a pass for the toggle door's answer (RUNNER rule 6, a pin scores only the layer it drives). Over HTTP the two arms differ. The NON-packaged arm is drivable: author a tenant caller through the create door, POST /api/v1/automation, with a subflow node naming a packaged child — the child's disable then lands, with no DELETE_RESTRICTED naming that caller. The SELF-caller arm is not, from scratch metadata: the toggle door switches only PACKAGED flows, and a flow authored through PUT /api/v1/meta/flow/NAME?package=… counts as authored in this deployment — its own toggle answers 409 RESOURCE_CONFLICT 'authored in this deployment' (packages/services/service-automation/src/subflow-guards.ts) — so a packaged self-caller needs a package-loader-installed package, and a run without one records that door leg blocked(fixture), with the pin beside it",
-          "there is NO HTTP-level pin of this refusal anywhere (the pins above are engine unit tests against a fake store) — which is exactly why the wire shape (does the thrown {code:'DELETE_RESTRICTED', status:409} survive the dispatcher's error mapping intact?) is this item's job and not a formality"
+          "there is NO HTTP-level pin of this refusal anywhere (the pins above are engine unit tests against a fake store) — which is exactly why the wire shape (does the thrown {code:'DELETE_RESTRICTED', status:409} survive the dispatcher's error mapping intact?) is this item's job and not a formality",
+          "CLOSED by the qa-second-packaged-caller recipe (#26622): negative[1]'s several-callers door leg, which stock fixtures could not stage, is driven over HTTP with a second packaged caller installed through the package loader (steps[8]). Fall back to the engine pin (flow-activation-ledger.test.ts) only beside a blocked(fixture) verdict, when the install-local door is not mounted, and record which of the two the verdict rests on."
         ]
       },
       "steps": [
@@ -1814,7 +1923,8 @@
         "remedy sequence (the refusal's own instruction): POST /api/v1/automation/showcase_task_done_notify_owner/toggle {\"enabled\": false} (the CALLER — it has no packaged callers of its own, so this lands), then RETRY POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record what it answers",
         "enable arm, child FIRST: POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": true} while its caller is still off (confirm it is never refused), then toggle showcase_task_done_notify_owner back ON, then repeat the child's enable with the caller armed (a no-op enable). ⚠️ Enabling the CALLER while its packaged subflow is still disabled is refused by design since 679f95e (#20711) — 409 RESOURCE_CONFLICT 'cannot be enabled while 1 packaged subflow it calls is disabled … Enable it first' — so the caller-first order is not a fail of this item",
         "teardown: re-enable anything left disabled (or discard the run's own DB)",
-        "scope, not a probe: the UI half (the caller names rendered verbatim in a role=alert on the Setup packaged-automation page) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause"
+        "scope, not a probe: the UI half (the caller names rendered verbatim in a role=alert on the Setup packaged-automation page) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause",
+        "several-callers leg (negative[1]): run the qa-second-packaged-caller recipe, then POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record the answer — 409 DELETE_RESTRICTED whose message counts 2 packaged callers and names both showcase_task_done_notify_owner and qasub_second_notify_caller, and NO sys_metadata_activation row for showcase_notify_owner; then the recipe's teardown, after which the same disable names the stock caller alone"
       ],
       "acceptance": [
         {
@@ -1850,7 +1960,7 @@
       ],
       "negative": [
         "a 2xx on step 2 or 3 (the disable landing despite packaged callers) is a FAIL of §7.3 itself — the vendor caller would then break mid-run at its subflow node with the late 'subflow … failed: Flow … is disabled' this guard exists to prevent",
-        "a refusal naming only the FIRST caller when several exist is a FAIL — the message must name every packaged caller (pinned engine-level, flow-activation-ledger.test.ts); with stock fixtures each child has one caller, so the door leg needs a second PACKAGED caller — only a package-loader-installed package can stage one, because a ?package=-authored flow is deployment-authored (fixtures.knownGaps[0]) — and is recorded blocked(fixture) without one; the engine pin is evidence beside that verdict, never its pass (RUNNER rule 6)"
+        "a refusal naming only the FIRST caller when several exist is a FAIL — the message must name every packaged caller (pinned engine-level, flow-activation-ledger.test.ts); with stock fixtures each child has one caller, so the door leg needs a second PACKAGED caller, which the qa-second-packaged-caller recipe stages through the package loader (a ?package=-authored flow is deployment-authored, fixtures.knownGaps[0], and does not stand in): with it installed, the disable of showcase_notify_owner must name both showcase_task_done_notify_owner and qasub_second_notify_caller (steps[8]). A run that cannot mount the install-local door (OS_CLOUD_URL=off) records the leg blocked(fixture); the engine pin is evidence beside that verdict, never its pass (RUNNER rule 6)"
       ],
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1862,6 +1972,7 @@
         "packages/spec/src/api/errors.zod.ts#DELETE_RESTRICTED (DELETE_RESTRICTED — standard 409 catalog member, no new code minted; its DELETE_ prefix fits per the #10243 ruling quoted at the throw site)",
         "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (the engine-level pins: names every caller, map counts, non-packaged and self do not guard, enable never guarded, no-callers lands)",
         "examples/app-showcase/src/automation/flows/index.ts#TaskDoneNotifyOwnerFlow + examples/app-showcase/src/automation/flows/index.ts#ProjectClosureFlow + examples/app-showcase/src/automation/flows/index.ts#ReleaseSignoffFlow (the three stock caller→child pairs: each caller's subflow or map node names its child by config.flowName — showcase_notify_owner, showcase_closure_signoff and showcase_one_task_signoff)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts#MarketplaceInstallLocalPlugin (the install-local door: an inline manifest registered as packaged code, the second-caller fixture) + packages/metadata-protocol/src/protocol.ts#packagedArtifactOwner (packaged = in the loader's set, never the body's stamps)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: automation.packaged-flow-disable-durable (what a disable that LANDS must do); automation.setup-packaged-automation-board (the refusal rendered in the UI)"
       ],
@@ -1884,6 +1995,12 @@
           "date": "2026-10-26",
           "change": "fixtures.knownGaps[0] and negative[1] say which arms scratch metadata can stage over HTTP. Checklist-accuracy findings of the 18.2.0 sweep (QA run #25817, release-18.2.0-manual-set, at 6679644a; wave anchor #25807, card #25840): knownGaps[0] was partly stale — a tenant caller can be authored through POST /api/v1/automation, and it does not guard — and a ?package=-authored flow counts as deployment-authored (the toggle answers 409 RESOURCE_CONFLICT 'authored in this deployment'), so the self-caller arm and negative[1] need a package-loader-installed package. Re-read at base 9753d1637f (packages/services/service-automation/src/subflow-guards.ts: the packaged-only toggle refusal; toggle-door-packaged-only.test.ts names the create door's no-envelope shape as customer-authored). No clause changed",
           "ref": "#25840"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "fixtures.provisioning opts into the new area recipe qa-second-packaged-caller, negative[1] says how its door leg is staged, steps[8] drives it, fixtures.knownGaps gains its CLOSED-by-recipe line and source cites the install-local door and packagedArtifactOwner. Card #26622 (maintainer-directed in the 18.2.0 wave-2 session: 「补测试数据配方。立卡」): negative[1] scored blocked(fixture) in both 18.2.0 waves because only a package-loader-installed package can add a second PACKAGED caller. Re-driven once on the recipe, on a fresh showcase boot at d31329f1: with the package installed, POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} answered 409 DELETE_RESTRICTED, 'cannot be disabled while 2 packaged flows still call it as a subflow: 'showcase_task_done_notify_owner', 'qasub_second_notify_caller'', with both callers in the remedy sentence; sys_metadata_activation held no row; after the teardown the same disable named showcase_task_done_notify_owner alone. Verdict for negative[1]: pass (no FAIL observed). No clause changed",
+          "ref": "#26622"
         }
       ]
     },

@@ -78,7 +78,7 @@ export const RECIPIENT_LOCALE_FIELD = 'locale';
 export const USER_OBJECT = 'sys_user';
 
 /**
- * BCP-47-shaped: a 2–8 letter language subtag, then any number of 1–8
+ * BCP-47-shaped: a 2–3 letter language subtag, then any number of 1–8
  * alphanumeric subtags (`zh`, `zh-CN`, `zh-Hans-CN`, `es-419`). Shape only —
  * membership is the template bundle's business, and the ladders below handle
  * a shipped-nowhere tag by falling to their floor.
@@ -99,20 +99,20 @@ export const USER_OBJECT = 'sys_user';
  * This module keeps its independent job either way, and the two are NOT
  * redundant. The write-side rule guards values ARRIVING through the data API;
  * this guards values already at rest — rows written before the rule existed
- * and rows written below the data API. It is also strictly the stricter of the
- * two: `"null"` is four letters and therefore SHAPE-LEGAL, so the write rule
- * would accept it and only {@link NOTHING_LITERALS} below stops it reaching a
- * template lookup. That asymmetry is deliberate rather than a gap in the
- * regex — the shape is shared with the write side byte-for-byte, and a
- * lossy producer's stringified nothing is a data-at-rest problem, not a
- * language a user can be typing.
+ * and rows written below the data API. It is also never the looser of the
+ * two: the shape is shared with the write side byte-for-byte, and on top of it
+ * {@link NOTHING_LITERALS} below refuses a lossy producer's stringified
+ * nothing. Since the primary subtag is 2–3 letters both of those literals
+ * also fail the shape, so the list no longer changes an answer; it stays as
+ * the read side's own floor, so a future widening of the shared shape cannot
+ * hand `"null"` to a template lookup again.
  *
  * Exported for that pin and for nothing else — the normalizer below is the
  * supported entry point, and a caller that reaches for the raw regex is
  * re-implementing {@link normalizeRecipientLocale} minus the parts that
  * matter.
  */
-export const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+export const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
 
 /**
  * The stringified-nothing literals a lossy producer can leave in a column.

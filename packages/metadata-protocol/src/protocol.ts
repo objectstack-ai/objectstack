@@ -413,6 +413,12 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
+// [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
+import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
+// [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
+import { saveConflict } from './protocol-save-conflict.js';
+// [#25467 cut 25] The post-persistence mutation fan-out: projector, local listeners, cluster publish, publish listeners.
+import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7489,18 +7495,12 @@ export class ObjectStackProtocolImplementation implements
     private async runMutationProjector(
         evt: MetadataMutationEvent & { body?: unknown },
     ): Promise<MutationProjectionOutcome | undefined> {
-        const projector = this.mutationProjectors.get(evt.type);
-        if (!projector) return undefined;
-        try {
-            await projector(evt);
-            return { success: true };
-        } catch (e) {
-            const error = e instanceof Error ? e.message : String(e);
-            console.warn(
-                `[Protocol] mutation projector failed for ${evt.type}/${evt.name} (state=${evt.state}): ${error}`,
-            );
-            return { success: false, error };
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMutationProjectors = () => this.mutationProjectors;
+        const host: ThisParameterType<typeof runMutationProjector> = {
+            get mutationProjectors() { return readMutationProjectors(); },
+        };
+        return runMutationProjector.call(host, evt);
     }
 
     /**
@@ -7557,16 +7557,12 @@ export class ObjectStackProtocolImplementation implements
      * messages) could not stop the storm.
      */
     private notifyMutationListenersLocal(evt: MetadataMutationEvent): void {
-        for (const listener of this.metadataMutationListeners) {
-            try {
-                listener(evt);
-            } catch (e) {
-                console.warn(
-                    `[Protocol] metadata-mutation listener failed for ${evt.type}/${evt.name}: `
-                    + `${e instanceof Error ? e.message : String(e)}`,
-                );
-            }
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMetadataMutationListeners = () => this.metadataMutationListeners;
+        const host: ThisParameterType<typeof notifyMutationListenersLocal> = {
+            get metadataMutationListeners() { return readMetadataMutationListeners(); },
+        };
+        return notifyMutationListenersLocal.call(host, evt);
     }
 
     // ── [#13331] Cross-node registry convergence ────────────────────────────
@@ -7669,22 +7665,14 @@ export class ObjectStackProtocolImplementation implements
      * converge on a no-op.
      */
     private publishMetadataMutation(evt: MetadataMutationEvent): void {
-        if (!this.clusterPubSub) return;
-        if (evt.state === 'draft') return;
-        const payload: ClusterMetadataMutationPayload = {
-            originNode: this.clusterNodeId,
-            event: evt,
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readClusterPubSub = () => this.clusterPubSub;
+        const readClusterNodeId = () => this.clusterNodeId;
+        const host: ThisParameterType<typeof publishMetadataMutation> = {
+            get clusterPubSub() { return readClusterPubSub(); },
+            get clusterNodeId() { return readClusterNodeId(); },
         };
-        void this.clusterPubSub
-            .publish(METADATA_MUTATION_CLUSTER_CHANNEL, payload, {
-                partitionKey: `${evt.type}:${evt.name}`,
-            })
-            .catch((err) => {
-                console.warn(
-                    `[Protocol] cluster metadata-mutation publish failed for `
-                    + `${evt.type}/${evt.name}: ${err instanceof Error ? err.message : String(err)}`,
-                );
-            });
+        return publishMetadataMutation.call(host, evt);
     }
 
     /**
@@ -7858,21 +7846,12 @@ export class ObjectStackProtocolImplementation implements
      * this log.
      */
     private async emitMetaItemPublished(evt: MetaItemPublishedEvent): Promise<void> {
-        for (const listener of this.metaItemPublishedListeners) {
-            try {
-                await listener(evt);
-            } catch (e) {
-                console.warn(
-                    `[Protocol] the post-publish re-bind announce FAILED for ${evt.type}/${evt.name} — the item IS `
-                    + `published and stored, but boot-cached consumers keep the PRE-publish view until this process `
-                    + `restarts: a newly published record-triggered flow does not bind its trigger (it will not fire), `
-                    + `an edited schedule-triggered flow keeps running its old definition, and authored hooks, actions `
-                    + `and translations are not re-synced. Nothing retries this announce. Re-publish the item once the `
-                    + `cause below is resolved (it is idempotent), or restart the process to rebuild every subscriber `
-                    + `from storage. Cause: ${e instanceof Error ? e.message : String(e)}`,
-                );
-            }
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMetaItemPublishedListeners = () => this.metaItemPublishedListeners;
+        const host: ThisParameterType<typeof emitMetaItemPublished> = {
+            get metaItemPublishedListeners() { return readMetaItemPublishedListeners(); },
+        };
+        return emitMetaItemPublished.call(host, evt);
     }
 
     /**
@@ -8492,21 +8471,14 @@ export class ObjectStackProtocolImplementation implements
      * One accessor, no second vocabulary.
      */
     private async listLiveMetadataTypes(): Promise<string[]> {
-        const schemaTypes = this.engine.registry.getRegisteredTypes();
-
-        // Also include types from MetadataService (runtime-registered: agent, tool, etc.)
-        let runtimeTypes: string[] = [];
-        try {
-            const services = this.getServicesRegistry?.();
-            const metadataService = services?.get('metadata');
-            if (metadataService && typeof metadataService.getRegisteredTypes === 'function') {
-                runtimeTypes = await metadataService.getRegisteredTypes();
-            }
-        } catch {
-            // MetadataService not available
-        }
-
-        return Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+        // [#25467 cut 24] The body moved to `protocol-live-metadata-types.ts` (see `LiveMetadataTypesHost`).
+        const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof listLiveMetadataTypes> = {
+            get engine() { return readEngine(); },
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return listLiveMetadataTypes.call(host);
     }
 
     async getMetaTypes() {
@@ -21471,22 +21443,12 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string; name: string; actor?: string; parentVersion?: string | null; mode?: 'draft' | 'publish' },
         writeSource: string,
     ): Promise<Error> {
-        const conflict = await this.metadataConflictRefusal(
-            err,
-            `${request.type}/${request.name}`,
-            `${request.type}/${request.name} has been modified since you loaded it.`,
-            request.parentVersion === null ? (request.mode === 'draft' ? 'draft' : 'active') : undefined,
-        );
-        await this.recordOptimisticConflictAudit({
-            type: request.type,
-            name: request.name,
-            operation: 'save',
-            ...(request.actor ? { actor: request.actor } : {}),
-            source: writeSource,
-            expectedParent: err.expectedParent,
-            actualHead: err.actualHead,
-        });
-        return conflict;
+        // [#25467 cut 24] The body moved to `protocol-save-conflict.ts` (see `SaveConflictHost`).
+        const host: ThisParameterType<typeof saveConflict> = {
+            metadataConflictRefusal: (...a) => this.metadataConflictRefusal(...a),
+            recordOptimisticConflictAudit: (...a) => this.recordOptimisticConflictAudit(...a),
+        };
+        return saveConflict.call(host, err, request, writeSource);
     }
 
     /**

@@ -210,6 +210,67 @@ export const HoursByStatusChartReport = defineReport({
 });
 ```
 
+## Period and export
+
+A non-`joined` report can declare the period it covers and how its table is downloaded.
+Both keys are optional: a report that declares neither shows every period, as it always
+has.
+
+{/* os:check */}
+```typescript
+import { defineReport } from '@objectstack/spec/ui';
+
+export const PipelineByQuarterReport = defineReport({
+  name: 'pipeline_by_quarter',
+  label: 'Pipeline by Quarter',
+  type: 'summary',
+  dataset: 'opportunity_metrics',
+  rows: ['stage'],
+  values: ['amount_sum'],
+  dateRange: { dimension: 'close_date', defaultRange: 'this_quarter' },
+  exportOptions: { formats: ['csv', 'xlsx'], fileNamePrefix: 'pipeline' },
+});
+```
+
+**`dateRange`** is a window over one **date dimension of the dataset**. `defaultRange` and
+`allowCustomRange` are the dashboard's own: the same preset names (`this_month` by default,
+`this_quarter`, `last_30_days`, …, and `custom` to open the picker with no preset) and the
+same custom-range switch, on by default.
+
+- **`dimension`** names a dataset dimension that declares `type: 'date'` — a dimension, not a
+  raw object field. A dimension carries its own relationship path, so a date on a related
+  record works the same way.
+- **Leave `dimension` out** only when the dataset declares exactly one `type: 'date'`
+  dimension. A dataset with none, or with two or more (a task dataset with `due_date` and
+  `completed_date`, say), is an error that names what it found. So is a `dimension` the
+  dataset does not declare, or one that is not `type: 'date'`. `os validate` and `os build`
+  check this against the dataset, and so does publishing the report.
+- **The window is a filter, not a bucket.** It is applied with the report's `runtimeFilter`
+  and the dataset's own filter. How rows are grouped by date stays with the dimension's
+  `dateGranularity` and the report's `rows` / `columns`.
+
+**`exportOptions`** uses the list export's key and member names: `formats`,
+`includeHeaders`, `fileNamePrefix`. A report table downloads as `csv` or `xlsx`. Export is on
+by default (both formats), and `formats: []` turns it off. The download is the table as drawn,
+within the active period and filter, and the file is named for the report label (or
+`fileNamePrefix`) and the period. `maxRecords` and `streaming` are list-only, because a report's
+rows are already aggregated.
+
+**Who may export is not a report key.** The export control is offered to a viewer whose
+permissions allow **export of the dataset's base object**. That is the permission-set
+`allowExport` axis the list toolbar uses (see [Permissions and protection](#permissions-and-protection)).
+
+<Callout type="warn">
+**Declared, not drawn yet.** The Console report page does not read either key yet: there is
+no period chip and no export control on it today. Until the renderer ships, `os validate`
+warns on both keys so the gap is visible. The declarations are the contract the renderer
+implements.
+</Callout>
+
+What is deliberately **not** offered: a `joined` report refuses both keys, because its blocks
+may bind different datasets and it draws one table per block. A report has no subscription or
+scheduled delivery, and no `pdf` or `json` export.
+
 ## Making a report reachable
 
 A report is not reachable because it exists. Give it a navigation entry on an app:
@@ -255,6 +316,10 @@ per joined object** when the dataset is queried — never declared on the datase
 never on the report — and **reachability** comes from the app navigation entry and the
 permissions on the app that carries it. A report is a presentation over a dataset, so it
 inherits the dataset's enforcement rather than restating it.
+
+Export follows the same principle. A report declares *what* its export offers
+(`exportOptions`), never *who* may use it: that is the permission-set `allowExport` grant on
+the dataset's base object, which also governs exporting that object's list views.
 
 ## Related
 

@@ -347,7 +347,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +346 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +347 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -615,6 +615,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `PROJECT_PROVISIONING`
 * `PROJECT_PROVISIONING_FAILED`
 * `QUERY_OBJECT_MISMATCH`
+* `QUEUE_NOT_FOUND`
 * `RAW_SQL_UNSUPPORTED`
 * `READ_BACK_FAILED`
 * `READ_SCOPE_COMPILE_FAILED`

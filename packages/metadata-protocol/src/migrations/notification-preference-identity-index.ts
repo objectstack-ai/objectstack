@@ -88,7 +88,7 @@
  * exactly as they do for `sys_setting`.
  */
 
-import { logProblem, probeThenReplaceIndex, resolveIndexSeamForTable, type IndexExec, type IndexMigrationLogger, type PartialIndexStatus } from './partial-index-probe.js';
+import { countDuplicateKeys, describeDuplicateKeys, logProblem, probeThenReplaceIndex, resolveIndexSeamForTable, type IndexExec, type IndexMigrationLogger, type PartialIndexStatus } from './partial-index-probe.js';
 import { readTablePresence } from './read-probe.js';
 
 /** The one table this migration touches. */
@@ -233,6 +233,9 @@ export async function ensureNotificationPreferenceIdentityIndex(
         indexName: NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME,
         probeIndexName: NOTIFICATION_PREFERENCE_IDENTITY_PROBE_INDEX_NAME,
         buildSql: buildNotificationPreferenceIdentityIndexSql,
+        // [#26630] Selects PostgreSQL's constraint-aware drop and read-back.
+        table: NOTIFICATION_PREFERENCE_TABLE,
+        client: opts.client,
     });
     if (outcome.status === 'created') return { status: 'created' };
 
@@ -250,7 +253,12 @@ export async function ensureNotificationPreferenceIdentityIndex(
         return { status: 'failed', detail };
     }
 
-    reportDegradation(outcome.status, detail, logger);
+    // [#26630] A conflict is reported with its size (keys and rows, no values).
+    const duplicates =
+        outcome.status === 'conflict'
+            ? describeDuplicateKeys(await countDuplicateKeys(exec, buildNotificationPreferenceDuplicateProbeSql()))
+            : '';
+    reportDegradation(outcome.status, detail, logger, duplicates);
     return { status: outcome.status, detail };
 }
 
@@ -262,7 +270,12 @@ export async function ensureNotificationPreferenceIdentityIndex(
  * notification defaults for one (topic, channel) can coexist, and which one
  * applies to every user is unspecified.
  */
-function reportDegradation(status: PartialIndexStatus, detail: string, logger?: IndexMigrationLogger): void {
+function reportDegradation(
+    status: PartialIndexStatus,
+    detail: string,
+    logger?: IndexMigrationLogger,
+    duplicates = '',
+): void {
     const columns = NOTIFICATION_PREFERENCE_IDENTITY_INDEX_COLUMNS.join(', ');
     const keyParts = notificationPreferenceIdentityKeyParts().join(', ');
     const duplicateQuery = buildNotificationPreferenceDuplicateProbeSql();
@@ -289,7 +302,7 @@ function reportDegradation(status: PartialIndexStatus, detail: string, logger?: 
         logProblem(
             logger,
             `[metadata-protocol] cannot tighten '${NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME}' on ` +
-                `"${NOTIFICATION_PREFERENCE_TABLE}" — existing rows violate (${keyParts}). The previous index is ` +
+                `"${NOTIFICATION_PREFERENCE_TABLE}" — existing rows violate (${keyParts})${duplicates}. The previous index is ` +
                 `left in place and the NULL-safe key is NOT enforced, so ${consequence}. Preferences are ` +
                 'admin-authored, so no row is discarded automatically and this migration keeps refusing until an ' +
                 `operator deletes the one that should not apply. List them with: ${duplicateQuery} — or run ` +

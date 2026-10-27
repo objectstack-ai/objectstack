@@ -338,7 +338,9 @@ describe('objectui#6875 — the copy set is derived from the consumers, not rest
     expect(body).toContain('FieldEditWidget');
     // LIT CONTROL for the zero: the identifier IS all over this file, so the
     // instrument can see it. Only the editor seam is free of it.
-    const wholeFile = readFileSync(path.join(GRID_SRC, 'ObjectGrid.tsx'), 'utf8');
+    const wholeFile = ['ObjectGrid.tsx', 'objectGridGenerateColumns.tsx']
+      .map((file) => readFileSync(path.join(GRID_SRC, file), 'utf8'))
+      .join('\n');
     expect(wholeFile.split('fieldMeta').length - 1).toBeGreaterThan(10);
     expect(
       body.split('fieldMeta').length - 1,

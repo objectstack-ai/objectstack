@@ -82,6 +82,8 @@ const PRIMARY_KEY_COLUMN = 'id';
 const OWNER_COLUMN = 'owner_id';
 /** [ADR-0117 D1] The record-level owning-business-unit column. */
 const OWNING_BUSINESS_UNIT_COLUMN = 'owning_business_unit_id';
+/** [ADR-0142 D3] The ownership-queue column: the queue a record sits in, or its home queue. */
+const QUEUE_COLUMN = 'queue';
 /** THE tenant isolation key. */
 const TENANT_SCOPE_COLUMN = 'organization_id';
 
@@ -110,7 +112,8 @@ export type InjectedSystemColumnName =
   | typeof TENANT_SCOPE_COLUMN
   | (typeof AUDIT_PROVENANCE_FIELDS)[number]
   | typeof OWNER_COLUMN
-  | typeof OWNING_BUSINESS_UNIT_COLUMN;
+  | typeof OWNING_BUSINESS_UNIT_COLUMN
+  | typeof QUEUE_COLUMN;
 
 /**
  * Which system columns an object carries, as the four independent decisions the
@@ -130,6 +133,13 @@ export interface InjectedSystemColumnPlan {
   owner: boolean;
   /** `owning_business_unit_id` — [ADR-0117 D1] the org-unit ownership tier. */
   owningBusinessUnit: boolean;
+  /**
+   * `queue` — [ADR-0142 D3] the ownership-queue column. Exactly where
+   * {@link InjectedSystemColumnPlan.owner} is: a record sits in a queue only
+   * while its `owner_id` is empty, so the column means nothing on a tier with
+   * no owning person.
+   */
+  queue: boolean;
   /**
    * Every column addressable on this object without being authored — the
    * columns the flags above select, plus the driver-provisioned primary key.
@@ -157,8 +167,8 @@ export interface InjectedSystemColumnPlan {
  * | `systemFields.audit: false`            | no audit family                             |
  * | `managedBy: <any>` or a `sys_*` name   | no ownership anchors (either tier)          |
  * | `ownership: 'org' \| 'none'`           | no ownership anchors (either tier)          |
- * | `ownership: 'business_unit'`           | `owning_business_unit_id` but NOT `owner_id` |
- * | `ownership: 'user'` / omitted          | both ownership anchors                      |
+ * | `ownership: 'business_unit'`           | `owning_business_unit_id` but NOT `owner_id` or `queue` |
+ * | `ownership: 'user'` / omitted          | both ownership anchors, and `queue`         |
  *
  * The ownership rows are a POSITIVE list, not a deny-list, for the reason
  * ADR-0117 D1 / #5677 record at the injection site: under a deny-list a NEW
@@ -196,7 +206,7 @@ export function resolveInjectedSystemColumns(
   // even on the two "nothing is injected" rows below.
   const names = new Set<InjectedSystemColumnName>([PRIMARY_KEY_COLUMN]);
   const nothing: InjectedSystemColumnPlan = {
-    tenant: false, audit: false, owner: false, owningBusinessUnit: false, names,
+    tenant: false, audit: false, owner: false, owningBusinessUnit: false, queue: false, names,
   };
 
   // 1. Hard opt-out at object level (e.g. seed/migration tables).
@@ -231,11 +241,15 @@ export function resolveInjectedSystemColumns(
 
   const owner = ownershipEligible && (ownership === undefined || ownership === 'user');
   const owningBusinessUnit = owner || (ownershipEligible && ownership === 'business_unit');
+  // [ADR-0142 D3] The queue column rides with the owner anchor, never apart
+  // from it: "sits in Q" is `queue == Q AND owner_id IS NULL`.
+  const queue = owner;
 
   if (tenant) names.add(TENANT_SCOPE_COLUMN);
   if (audit) for (const f of AUDIT_PROVENANCE_FIELDS) names.add(f);
   if (owner) names.add(OWNER_COLUMN);
   if (owningBusinessUnit) names.add(OWNING_BUSINESS_UNIT_COLUMN);
+  if (queue) names.add(QUEUE_COLUMN);
 
-  return { tenant, audit, owner, owningBusinessUnit, names };
+  return { tenant, audit, owner, owningBusinessUnit, queue, names };
 }

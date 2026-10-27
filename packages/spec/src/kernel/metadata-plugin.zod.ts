@@ -188,6 +188,15 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // wall. Regime C (ADR-0131 D6) has two sources and only two; the registry
   // entry declares the type code-only so both doors read one sealed answer.
   'sharing_rule', // Package-declared sharing rules (SharingRuleSchema, ADR-0131 D6 regime C)
+  // [ADR-0142 D1] An ownership queue — a named set of people records sit in.
+  // Regime C exactly as `sharing_rule`: a package declares it (the stack's
+  // `queues`, read from the registry) and an organization authors its own
+  // (`sys_queue` rows); the registry entry below is code-only.
+  'queue',       // Package-declared ownership queues (QueueSchema, ADR-0142 D1)
+  // [ADR-0142 D5] Declared routing of an inserted row to a queue or a user,
+  // evaluated by the engine once per insert. Declared only (merge question
+  // 11); switched off through the activation ledger.
+  'assignment_rule', // Package-declared assignment rules (AssignmentRuleSchema, ADR-0142 D5)
 
   // AI Protocol
   'agent',       // AI agent definitions (AgentSchema)
@@ -1252,6 +1261,22 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // the glob. `supportsOverlay: false` — a declared rule is customized by a
   // clone, never by an overlay of it.
   { type: 'sharing_rule', label: 'Sharing Rule', description: 'A rule a package declares to share records; organizations author their own in Setup', filePatterns: ['**/*.sharing-rule.ts', '**/*.sharing-rule.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 16, domain: 'security' },
+  // [ADR-0142 D1, regime C] Declared ownership queues — modelled on the
+  // `sharing_rule` entry above, for the same two-source reason: a package
+  // declares a queue (the stack's `queues`, served from the registry, switched
+  // off through the activation ledger) and an organization authors its own as
+  // `sys_queue` rows, where the same-name refusal and the organization wall
+  // hold. A runtime `sys_metadata` item is neither, so the type is code-only.
+  // `position`'s entry allows runtime creation and is deliberately not the
+  // model. `loadOrder: 16` — after `position` (15), which a declared queue's
+  // members name.
+  { type: 'queue', label: 'Queue', description: 'A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup', filePatterns: ['**/*.queue.ts', '**/*.queue.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 16, domain: 'security' },
+  // [ADR-0142 D5] Declared assignment rules — code-only for the `queue`
+  // reason, and declared only: organization-authored routing is deferred
+  // (merge question 11). `loadOrder: 17` — after `queue`, which an entry's
+  // target names. Disabled through the activation ledger or `active: false`;
+  // customized by a clone under a new name, never by an overlay.
+  { type: 'assignment_rule', label: 'Assignment Rule', description: 'A rule a package declares to route new records to a queue or a person', filePatterns: ['**/*.assignment-rule.ts', '**/*.assignment-rule.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 17, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the

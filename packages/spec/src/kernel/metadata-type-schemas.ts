@@ -54,6 +54,8 @@ import { CubeSchema } from '../data/analytics.zod';
 import { DeclarativeConnectorEntrySchema } from '../integration/connector.zod';
 
 import { SharingRuleSchema } from '../security/sharing.zod';
+import { QueueSchema } from '../security/queue.zod';
+import { AssignmentRuleSchema } from '../automation/assignment-rule.zod';
 
 import { ApiEndpointSchema } from '../api/endpoint.zod';
 
@@ -192,6 +194,11 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // ADR-0010 envelope. It is an AUTHOR-shape check applied where author shapes
   // are submitted, never a filter on rows already in `sys_sharing_rule`.
   sharing_rule: SharingRuleSchema,
+  // [ADR-0142 D1/D5] Bound to the schemas the stack's `queues` and
+  // `assignmentRules` are validated against — the same author-shape check the
+  // `sharing_rule` binding above makes, never a filter on `sys_queue` rows.
+  queue: QueueSchema,
+  assignment_rule: AssignmentRuleSchema,
 
   // AI Protocol
   agent: AgentSchema,

@@ -620,6 +620,70 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
   });
 
+  // ── [ADR-0142 D3/D4] the queue story on the sharing layer ──────────────
+  const QUEUED_ROW = { id: 'r1', organization_id: 'org1', owner_id: null, queue: 'support_intake' };
+  const queueMember = (members: string[]) => async (userId: string, queue: string, org: string | null) =>
+    queue === 'support_intake' && org === 'org1' && members.includes(userId);
+
+  it('[ADR-0142 D3] a record sitting in a queue reports queue_membership — admits a member', async () => {
+    const d = await explainAccess(
+      { ...recDeps({ layered: { layer0: null, layer1: null }, record: QUEUED_ROW }), queueMember: queueMember(['u1']) },
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    const rules = d.layers.find((l) => l.layer === 'sharing')!.record!.rules ?? [];
+    expect(rules).toContainEqual(expect.objectContaining({ kind: 'queue_membership', name: 'support_intake', effect: 'admits' }));
+    expect(ExplainDecisionSchema.safeParse(d).success).toBe(true);
+  });
+
+  it('[ADR-0142 D3] a non-member is reported neutral, an owned record reports no queue rule at all', async () => {
+    const outsider = await explainAccess(
+      { ...recDeps({ layered: { layer0: null, layer1: null }, record: QUEUED_ROW }), queueMember: queueMember(['u2']) },
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(outsider.layers.find((l) => l.layer === 'sharing')!.record!.rules)
+      .toContainEqual(expect.objectContaining({ kind: 'queue_membership', effect: 'neutral' }));
+    const owned = await explainAccess(
+      { ...recDeps({ layered: { layer0: null, layer1: null }, record: { ...QUEUED_ROW, owner_id: 'u9' } }), queueMember: queueMember(['u1']) },
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    expect((owned.layers.find((l) => l.layer === 'sharing')!.record!.rules ?? []).map((r) => r.kind)).not.toContain('queue_membership');
+  });
+
+  it('[ADR-0142 D4] a transfer of an unowned record reports queue_claim from the sharing verdict', async () => {
+    const asked: unknown[] = [];
+    const claimant = await explainAccess(
+      {
+        ...recDeps({ layered: { layer0: null, layer1: null }, record: QUEUED_ROW }),
+        queueMember: queueMember(['u1']),
+        claimVerdict: async (o, rid) => { asked.push([o, rid]); return 'allow'; },
+      },
+      { object: 'leave_request', operation: 'transfer', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(asked).toEqual([['leave_request', 'r1']]);
+    expect(claimant.layers.find((l) => l.layer === 'sharing')!.record!.rules)
+      .toContainEqual(expect.objectContaining({ kind: 'queue_claim', name: 'support_intake', effect: 'admits' }));
+    const refused = await explainAccess(
+      { ...recDeps({ layered: { layer0: null, layer1: null }, record: QUEUED_ROW }), claimVerdict: async () => 'abstain' },
+      { object: 'leave_request', operation: 'transfer', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(refused.layers.find((l) => l.layer === 'sharing')!.record!.rules)
+      .toContainEqual(expect.objectContaining({ kind: 'queue_claim', effect: 'neutral' }));
+  });
+
+  it('[ADR-0142 D3] a delete explanation reports no queue rule — queue members never delete', async () => {
+    const d = await explainAccess(
+      {
+        ...recDeps({ layered: { layer0: null, layer1: null }, record: QUEUED_ROW }),
+        queueMember: queueMember(['u1']),
+        claimVerdict: async () => 'allow',
+      },
+      { object: 'leave_request', operation: 'delete', context: REC_CTX, recordId: 'r1' },
+    );
+    const kinds = (d.layers.find((l) => l.layer === 'sharing')!.record!.rules ?? []).map((r) => r.kind);
+    expect(kinds).not.toContain('queue_membership');
+    expect(kinds).not.toContain('queue_claim');
+  });
+
   // ── [#4647] the bypass, at row granularity ──────────────────────────────
   // The report: `allowed: true` + a `vama_bypass` layer saying "ownership and
   // sharing checks are skipped", sitting next to `record: { visible: false,

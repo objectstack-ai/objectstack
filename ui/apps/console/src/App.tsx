@@ -396,10 +396,10 @@ export function App() {
 
               `RequireAiSurface` keeps these from dead-ending on a runtime that
               serves no AI (Community Edition): with AI unavailable a stale
-              bookmark / external link redirects to home instead of mounting a
-              chat with no agent to talk to. Cloud installs pass straight
-              through. Purely additive runtime gating — same server signal the
-              floating-chat FAB has always used.
+              bookmark / external link gets a screen saying so, with the way
+              home, instead of a chat with no agent to talk to. Cloud installs
+              pass straight through. Purely additive runtime gating — same
+              server signal the floating-chat FAB has always used.
             */}
             <Route path="/ai" element={
               <ProtectedRoute>

@@ -253,10 +253,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // major it retired in — at 18 they left the declared set with their
         // tombstones. The declared total shrinks by exactly those three; the
         // live sample below still holds every live key.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(47);
+        // [#26619] 47 → 48: `disabledReason` (why a greyed action is
+        // unavailable) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(48);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
@@ -331,7 +333,9 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * 12 → 13 the same way when it gained `permissionSets` (ADR-0131 D3/D4,
      * the sets a position distributes). `flow` moved 23 → 24 the same way
      * when it gained `requiredPermissions` (who may start the flow, checked at
-     * every start door).
+     * every start door). `report` moved 21 → 23 the same way when it gained
+     * `dateRange` and `exportOptions` (#26548, the report's period and the
+     * download of its table).
      */
     // [#25767] The ≤16.x tombstones aged out of the declared sets at 18 (a kit
     // lives one major past the major it retired in), so each count below moved
@@ -343,7 +347,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // 17 → 16 (`triggerPhrases`). The live sets are unchanged.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 22, dashboard: 20, dataset: 16, field: 79, flow: 22,
-        hook: 22, object: 48, page: 26, position: 13, report: 21, skill: 16, tool: 14,
+        hook: 22, object: 48, page: 26, position: 13, report: 23, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

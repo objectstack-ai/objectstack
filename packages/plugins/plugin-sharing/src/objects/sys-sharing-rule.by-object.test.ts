@@ -52,6 +52,10 @@ describe('sharing list views — no grouping on a field that stores an object AP
       sys_record_share: ['object_name'],
       sys_sharing_rule: ['object_name'],
       sys_share_link: ['object_name'],
+      // [ADR-0142] The queue tables name a queue and a rule, never an object.
+      sys_queue: [],
+      sys_queue_member: [],
+      sys_assignment_cursor: [],
     });
   });
 

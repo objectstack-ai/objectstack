@@ -119,7 +119,8 @@ import { FLOORS, TEST_FILE } from '../check-test-path-roots.mjs';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import { maskComments } from '../js-comment-mask.mjs';
 import { rootWorkflow, rootWorkflowFiles, rootWorkflowsDir, withoutComments } from './helpers/root-ci';
-import { repoRoot } from './workflow-checks.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const SCRIPT = 'scripts/check-lockfile-dedupe.mjs';
 const CONTEXT = 'Lockfile Dedupe Check';

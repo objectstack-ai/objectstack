@@ -232,12 +232,25 @@
  * step wrote nothing here, and the next screen appearing is its whole answer.
  * The terminal toasts are untouched.
  *
- * The flat footer's button still reads Submit on every step, and that is a
- * measured limit, not a choice. "Next" on a step that is not the last needs to
- * know which step IS the last, and nothing on the wire says so: the paused
- * screen (`ScreenSpec` in `@objectstack/spec/contracts`) carries no final-step
- * or step-count member, and a flow can branch after any screen, so only the
- * engine could tell from the graph. The same gap keeps a step counter out.
+ * ## A step says Next or Submit, and counts itself only when it can (objectstack#26657)
+ *
+ * The flat footer's button used to read Submit on every step, so a requester
+ * believed the whole wizard was submitted on step 1. Which step is the last
+ * is a fact of the flow graph, and a flow can branch after any screen, so
+ * the engine answers it on the paused screen (`ScreenSpec.progress`) and
+ * this dialog ⛔ never walks the graph itself:
+ * - `nextScreen` `'certain'` or `'possible'` reads `common.next` — a later
+ *   screen may still come, and a step that turns out to finish the run is
+ *   answered by the completion toast; `'none'` reads `common.submit`.
+ * - The step counter (`form.stepOf`, the wording the form wizard already
+ *   uses) is drawn beside the flow's name only when the engine served both
+ *   `step` and `stepCount`, which it does only where every path agrees. A
+ *   branch or a loop leaves the count out rather than drawing a wrong one.
+ * - No `progress` at all — a server that predates it, or a screen of a child
+ *   run whose graph cannot see the parent's — keeps Submit and no counter,
+ *   exactly as before.
+ * The `object-form` step's own button (`flowRunner.saveAndContinue`) is the
+ * form's, and is not relabelled here.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -665,6 +678,14 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // A long flat screen widens to two columns (objectui#12080 — see the header).
   const isLongScreen = !isObjectForm && screenFields(screen).length > NARROW_SCREEN_MAX_FIELDS;
   const isWide = showScreenBody && (isObjectForm || isLongScreen);
+  // The engine's word on what follows this step (objectstack#26657 — see the
+  // header): Next while another screen may come, Submit on the last or when
+  // the server says nothing, and a counter only from an exact count.
+  const progress = screen.progress;
+  const anotherScreen = progress !== undefined && progress.nextScreen !== 'none';
+  const stepCounter = progress?.step !== undefined && progress.stepCount !== undefined
+    ? t('form.stepOf', { current: progress.step, total: progress.stepCount, defaultValue: 'Step {{current}} of {{total}}' })
+    : undefined;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !submitting) onClose(); }}>
@@ -677,7 +698,12 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
         <DialogHeader>
           {/* The flow being run (objectui#11092), above the step's own heading,
               which stays the dialog's title. */}
-          <p className="text-xs font-medium text-muted-foreground">{shownFlowLabel}</p>
+          <div className="flex flex-wrap items-baseline justify-center gap-x-2 sm:justify-start">
+            <p className="text-xs font-medium text-muted-foreground">{shownFlowLabel}</p>
+            {stepCounter && (
+              <p className="text-xs text-muted-foreground" data-testid="flow-step-counter">{stepCounter}</p>
+            )}
+          </div>
           <DialogTitle>{shown.title || t('flowRunner.title', { defaultValue: 'Input' })}</DialogTitle>
           {/* Heading and body text are drawn as served: the engine already
               translated both in the run's locale (objectstack#22507 ruling A,
@@ -760,7 +786,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                     ? t('flowRunner.submitting', { defaultValue: 'Submitting…' })
                     : uploads.anyUploading
                       ? t('fields.file.uploading', { defaultValue: 'Uploading…' })
-                      : t('common.submit', { defaultValue: 'Submit' })}
+                      : anotherScreen
+                        ? t('common.next', { defaultValue: 'Next' })
+                        : t('common.submit', { defaultValue: 'Submit' })}
                 </Button>
               </>
             )}

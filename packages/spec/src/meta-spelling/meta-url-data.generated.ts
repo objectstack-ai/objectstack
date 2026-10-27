@@ -30,6 +30,8 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "permissions": "permission",
   "capabilities": "capability",
   "sharingRules": "sharing_rule",
+  "queues": "queue",
+  "assignmentRules": "assignment_rule",
   "apis": "api",
   "webhooks": "webhook",
   "agents": "agent",
@@ -53,6 +55,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "translations": "translation",
   "email_templates": "email_template",
   "sharing_rules": "sharing_rule",
+  "assignment_rules": "assignment_rule",
 });
 
 /**
@@ -86,6 +89,8 @@ export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze
   "position",
   "capability",
   "sharing_rule",
+  "queue",
+  "assignment_rule",
   "agent",
   "tool",
   "skill",
