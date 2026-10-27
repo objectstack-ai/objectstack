@@ -292,7 +292,7 @@
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
-- 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
+- 本仓 CI 并发组按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
 - `get_check_run` 回空 `output.text`;`get_job_logs` 带 `tail_lines` 只回尾部的 service-container teardown。
 - ⇒ 改带 `return_content: true` 整份日志回包(2026-09-20 一 job)⇒ REST 腿被拒只是该腿的读数。
