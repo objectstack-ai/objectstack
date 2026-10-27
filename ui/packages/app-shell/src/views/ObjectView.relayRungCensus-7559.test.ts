@@ -131,7 +131,7 @@ const sourceOf = (fromRoot: string, fromPackage: string): string => {
   return readFileSync(path, 'utf8');
 };
 
-const RELAY_SOURCE = sourceOf('packages/app-shell/src/views/ObjectView.tsx', 'src/views/ObjectView.tsx');
+const RELAY_SOURCE = sourceOf('packages/app-shell/src/views/objectViewListRenderer.tsx', 'src/views/objectViewListRenderer.tsx');
 const UPSTREAM_SOURCE = sourceOf('packages/plugin-view/src/ObjectView.tsx', '../plugin-view/src/ObjectView.tsx');
 const TYPES_SOURCE = sourceOf('packages/types/src/objectql.ts', '../types/src/objectql.ts');
 const LIST_VIEW_SOURCE = sourceOf('packages/plugin-list/src/ListView.tsx', '../plugin-list/src/ListView.tsx');
@@ -225,7 +225,7 @@ const collectLiteral = (literal: ts.ObjectLiteralExpression, prefix: string, out
 };
 
 const relayLiteral = ((): ts.ObjectLiteralExpression => {
-  const sf = parse('ObjectView.tsx', RELAY_SOURCE);
+  const sf = parse('objectViewListRenderer.tsx', RELAY_SOURCE);
   let found: ts.ObjectLiteralExpression | null = null;
   const visit = (node: ts.Node): void => {
     if (
@@ -244,7 +244,7 @@ const relayLiteral = ((): ts.ObjectLiteralExpression => {
   if (!found) {
     throw new Error(
       'objectui#7559 census cannot find the relay literal `const fullSchema = { … }` in\n'
-      + 'app-shell/src/views/ObjectView.tsx. The census anchors on that name. If the literal was\n'
+      + 'app-shell/src/views/objectViewListRenderer.tsx. The census anchors on that name. If the literal was\n'
       + 'renamed or moved, re-point this anchor — ⛔ do not delete the census, which is the only\n'
       + 'thing standing between a dropped rung and silence (objectui#7199, #7218, #7516).',
     );

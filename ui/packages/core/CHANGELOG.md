@@ -1,5 +1,207 @@
 # @object-ui/core
 
+## 18.2.0
+
+### Minor Changes
+
+- dc71845: feat(spec,console): a `type: 'flow'` action may declare `onSuccess`, and the console navigates after a run that completes
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A flow action that creates a record could not take the user to it. `ActionSchema` refused `onSuccess` beside `type: 'flow'` (and the page action rows refused it beside a `flow` executor), so after the run the user stayed on the page they started from.
+  
+  - **`@objectstack/spec`:** `onSuccess` is now accepted on a `type: 'flow'` action and beside a page action row's `flow` executor, next to `api` and `script`. On a flow action, `${result.*}` reads the completed run's answer (`AutomationResult`). Its `output` holds the flow's `isOutput` variables, so a `create_record` node that writes an `isOutput` variable `renewal` is reached as `${result.output.renewal.id}`. A variable the flow does not declare `isOutput: true` is not in `output`. The refusal text for `url`, `navigation`, `modal` and `form` now names the three executors. The Studio action form shows the `onSuccess` row for a flow action.
+  - **`@object-ui/types`:** `ActionResult` gains `handedOff`: the success is a hand-off to a follow-up surface, not a completion.
+  - **`@object-ui/app-shell`:** the flow launch judge marks a run that pauses at a screen, or ends refused, `handedOff`. A run that completes is not marked, including one whose toast is the flow's own `successMessage`.
+  - **`@object-ui/core`:** the action runner performs no `onSuccess` hop for a `handedOff` success. A flow run that pauses at a screen or ends refused does not navigate, neither when the screen or the refusal notice opens nor when the flow runner later finishes the run.
+  
+  Example:
+  
+  ```ts
+  {
+    name: 'start_renewal',
+    type: 'flow',
+    target: 'renewal_start',
+    onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}' },
+  }
+  ```
+  
+  with the flow declaring `variables: [{ name: 'renewal', type: 'object', isOutput: true }]` and its `create_record` node writing `outputVariable: 'renewal'`.
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+
+### Patch Changes
+
+- ef025fe: refactor(react): `AdapterCtx` / `useAdapter` are typed by `DataSource`, and `@object-ui/react` no longer depends on `@object-ui/data-objectstack`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/react/src/context/AppShellContext.tsx#ContextAdapter) No metadata moves: the narrowed type is the one `AdapterCtx` and `useAdapter()` carry, a runtime TypeScript type of a React context, with no Zod schema, spec declaration or stored row behind it, so there is nothing for objectstack migrate meta to rewrite; the compiler names the affected call site. -->
+  
+  The runtime no longer depends on one adapter, so a bring-your-own backend installs `@object-ui/react` without the ObjectStack adapter, and learns at the type level which `DataSource` members it lacks.
+  
+  - **`@object-ui/react`**: `AdapterCtx` and `useAdapter()` are typed by the protocol-level `DataSource` from `@object-ui/types`, not by `ObjectStackAdapter`. A new exported extension point, `AdapterContextRegister`, lets a host declare the concrete adapter its provider installs; `useAdapter()` then returns that adapter and an `AdapterCtx.Provider` value is checked against it. `ContextAdapter` names the resolved type. `@object-ui/data-objectstack` moves from `dependencies` to `devDependencies` (one boundary test still reads it).
+  - **`@object-ui/core`**: exports `API_ACCESS_DENIED_CODES` and `isApiAccessDeniedError`, the `enable`-block API denial predicate, moved here unchanged so `@object-ui/react` can classify the denial without the adapter.
+  - **`@object-ui/data-objectstack`**: re-exports both names from `@object-ui/core`; its published face is unchanged.
+  - **`@object-ui/app-shell`**: declares `ObjectStackAdapter` on `AdapterContextRegister`, and the declaration ships in its published types, so a host that mounts `AdapterProvider` keeps today's `useAdapter()` type.
+  - **`@object-ui/plugin-designer`**: declares the same adapter for its own pages, which read the ObjectStack client.
+  
+  **BREAKING** (a type narrowing) for a TypeScript reader of `useAdapter()` / `AdapterCtx` from `@object-ui/react` that reads an `ObjectStackAdapter` member `DataSource` does not declare (`getClient`, `probeAppAccess`, `probeMetaItemAccess`, `getConnectionState`, `onConnectionStateChange`, `clearCache`, `queryDataset`, …) and does not import `@object-ui/app-shell`. Runtime behaviour is unchanged: the context holds the same adapter object as before.
+  
+  - **Before.** `useAdapter()` returned `ObjectStackAdapter | null` whatever the host installed.
+  - **Now.** It returns `DataSource | null` unless the host declares its adapter, and reading `getClient` off it is `error TS2339`.
+  - **Fix.** Either declare the adapter your provider installs, once, in your own package:
+  
+    ```ts
+    import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+  
+    declare module '@object-ui/react' {
+      interface AdapterContextRegister {
+        adapter: ObjectStackAdapter;
+      }
+    }
+    ```
+  
+    or narrow at the call site that needs the ObjectStack-only member, and keep reading `DataSource` members everywhere else.
+- 4f48d2b: feat(ui): an edit form's `state_machine` select offers only the moves the server accepts
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A record whose `status` is governed by an error-severity `state_machine` validation used to offer every option in the edit form, and the server refused the invalid ones only after submit, without naming the allowed next states. The form now offers the persisted value plus the states the machine declares as its next moves.
+  
+  - **`@object-ui/core`:** new export `stateMachineNextValues(objectSchema, fieldName, currentValue)`. It returns the set of values a field may move to from its persisted value, or `null` for "don't constrain". It narrows only where the server refuses: rules with `severity: 'error'` (the default), `active` not `false`, and `events` covering `update` (the default covers it). A from-state the transition map does not declare stays unconstrained, and several applicable rules on one field intersect. It is a read of the declared transition map for choice controls, not a client-side rule engine.
+  - **`@object-ui/plugin-form`:** `gateFormFields` takes an optional `previousValues` (the persisted record) and narrows each single-value select governed by such a machine, on both the entry's own `options` and its `field.options`. Every layout passes its persisted record: the simple, modal, drawer, tabbed, split and wizard forms. The from-state is the stored row, never the live form value. A create form is unconstrained, and the current value always stays offered. Options outside the reachable set are left out rather than drawn disabled.
+  - **`@object-ui/plugin-grid`:** `stateMachineNextValues` is now re-exported from `@object-ui/core`. The grid's inline editor therefore stops narrowing on a `warning` / `info` machine, an inactive one, or one whose `events` leave out `update`. The server never refuses those moves, so the editor now offers every option for them.
+- 14b5597: fix(formula,core,react): a template's formatter locale comes from a reserved context channel, so a root named `locale` is just a value, and the console passes the viewer's display locale
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. What changes is which input sets the template dialect's formatter locale: the evaluate context's own `locale` field instead of a root named `locale`. A template that names a root `locale` keeps compiling and rendering; its hole still prints that value, only the number and date formatting no longer follows it. There is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no runtime interface, type or export is removed or narrowed: `EvalContext` gains an optional member and `fillTemplateHoles` an optional trailing argument (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  The `template` dialect's formatters (`number`, `currency`, `percent`, `date`, `datetime`) used to take their locale from `extra.locale`, the same bag a caller passes the template's roots in. A template's roots are author-visible values, so a bulk action param or a flow variable named `locale` silently set the locale of every formatted value in the sentence, and no caller ever passed the viewer's locale.
+  
+  - **`@objectstack/formula`**: `EvalContext` gains `locale?: string`, a reserved channel like `timezone`. It is not bound as a variable, and the template engine reads its formatter locale from it alone, defaulting to `en-US` when unset or empty. `extra.locale` is no longer read.
+  - **`@objectstack/service-automation`**: a flow text slot's formatters render in `en-US`, and a flow variable named `locale` is a value like any other. The renderer's doc said the variable was also the formatters' locale; that line is gone.
+  - **`@object-ui/core`**: `fillTemplateHoles(source, roots, locale?)` passes `locale` on the engine's reserved channel, apart from the roots. `ActionRunner.setDisplayLocale(read)` installs where the runner reads the viewer's display locale; `confirmText` and `successMessage` templates format in it, and a `callContext` dispatch keeps it.
+  - **`@object-ui/react`**: `<ActionProvider>` and `useActionRunner` install `useDisplayLocale()` on the runner they build, read when a template is filled, so a locale switch reaches a runner built before it.
+  
+  **BREAKING** (a narrowing) for a caller that set the formatter locale through a root: a template evaluated with `extra: { locale }` (or a flow variable named `locale`) now formats in `en-US` and prints the value only where a hole names it. None was found in this repository: the one test that did so now passes `locale` on the context. What to do: pass the locale as the evaluate context's `locale` (`templateEngine.evaluate(expr, { extra: roots, locale })`), or as `fillTemplateHoles`'s third argument.
+- 48a9d9d: fix(app-shell): a member takes back their own comment reaction through the unreact door, with no object delete grant
+  
+  A member whose grants are the every-member ones could add a reaction on the record feed and never take it back. The reaction chip removed through the generic data door's `DELETE /api/v1/data/sys_comment_reaction/:id`, which needs an object-level `delete` grant that no every-member set may carry (ADR-0090 D5), and the `feedReactionRemove` row of the affordance-to-grant map read that grant, so the chip offered no take-back at all.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The record page now removes the caller's own reaction row through the unreact door, `DELETE /api/v1/comments/reactions/:id`, which `@objectstack/plugin-audit` mounts. The door removes only the caller's own row; a refused take-back puts the reaction back on screen and says it was not saved, as before.
+  - `feedReactionRemove` in `@object-ui/core`'s `AFFORDANCE_GRANTS` now reads `{ crud: null, grant: 'create' }`: its write no longer goes through the data door, so no CRUD bit is read, and it asks the grant the reaction was added under. Whose reaction a chip shows still decides which chips offer the take-back: a click on another member's reaction adds the caller's own.
+  - A member who holds the `delete` grant sees the same behaviour: the take-back goes through the same door.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [c8cb510]
+- Updated dependencies [1bbb7bf]
+- Updated dependencies [e843b5b]
+- Updated dependencies [0b76a1f]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [6ea429d]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+  - @object-ui/types@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

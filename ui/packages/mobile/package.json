@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/mobile",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Mobile optimization for Object UI with responsive components, PWA support, and touch gesture handling.",

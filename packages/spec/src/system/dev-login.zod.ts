@@ -28,11 +28,14 @@ import { strictObject } from '../shared/strict-object';
  * ## What it is NOT
  *
  * ⛔ Not an identity, not a seed, and not an authorization: declaring an entry
- * here CREATES NOTHING. It is presentation — the application naming accounts it
- * seeds by some other means (`data` fixtures, an `onEnable` hook, its own
- * script) so the banner can point the operator at one that shows something.
- * An entry naming an account nothing seeds prints a credential that does not
- * work, exactly as a README line would.
+ * here CREATES NOTHING. It is presentation — the application naming accounts
+ * that exist by some other means so the banner can point the operator at one
+ * that shows something. The way to have a demo account is to declare the person
+ * in `demoStaff`: `os dev` creates the account through the auth door, so it can
+ * sign in. A `sys_user` row seeded through `data` is not that — it lands as a
+ * directory row with no credential and cannot sign in. An entry naming an
+ * account nothing created prints a credential that does not work, exactly as a
+ * README line would.
  *
  * ## Read only in development
  *
@@ -64,14 +67,15 @@ export const DevLoginSchema = lazySchema(() => strictObject(
       permissions:
         'a `devLogins` entry grants nothing — it only names an account for the boot banner to '
         + 'print. Grant capabilities with a permission set (`permissions`) or a position '
-        + '(`positions`), and seed the account itself in `data`.',
+        + '(`positions`), and declare the person in `demoStaff` so `os dev` creates the account.',
       capabilities:
         'a `devLogins` entry grants nothing — it only names an account for the boot banner to '
         + 'print. Declare capabilities in `capabilities` and distribute them with `positions` / '
-        + '`permissions`; seed the account itself in `data`.',
+        + '`permissions`; declare the person in `demoStaff` so `os dev` creates the account.',
       seed:
-        'a `devLogins` entry creates no account. Seed the user record in the stack\'s `data` '
-        + 'fixtures (or in `onEnable`) and name it here so the banner can print it.',
+        'a `devLogins` entry creates no account. Declare the person in `demoStaff` — `os dev` '
+        + 'creates the account so it can sign in — and name it here so the banner can print it. '
+        + 'A `sys_user` row seeded through `data` has no credential and cannot sign in.',
     },
   },
   {
@@ -84,7 +88,7 @@ export const DevLoginSchema = lazySchema(() => strictObject(
      * sign-in form and every seeded fixture key on, so a value that is not one
      * names an account the operator cannot reach.
      */
-    email: z.string().email().describe('Email of an account this application seeds — printed by the development boot banner'),
+    email: z.string().email().describe('Email of an account that can sign in, such as one declared in `demoStaff` — printed by the development boot banner'),
 
     /**
      * The password to print beside {@link DevLogin.email}.

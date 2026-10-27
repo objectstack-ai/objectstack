@@ -19,6 +19,7 @@ import {
   selectAffectedTests,
   trackedFiles,
 } from '../select-affected-tests.mjs';
+import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
 import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
@@ -447,9 +448,14 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {
-    const run = job.slice(job.indexOf('- name: Run the ui tests (shard ${{ matrix.shard }}/16)'));
-    expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]');
-    expect(run).toContain(`${uiRun('test')} --shard=` + '${{ matrix.shard }}/16');
-    expect(run).toContain('pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"');
+    // The width is the job's own `shard:` list, read by the monorepo's one reader of
+    // shard sizes (it refuses any other spelling); every `/N` the job's run step
+    // spells must be that width.
+    const shards = shardTotal(rootCi(), UI_JOBS.test);
+    const header = `- name: Run the ui tests (shard \${{ matrix.shard }}/${shards})`;
+    expect(job).toContain(header);
+    const run = job.slice(job.indexOf(header));
+    expect(run).toContain(`${uiRun('test')} --shard=\${{ matrix.shard }}/${shards}`);
+    expect(run).toContain(`pnpm --dir ui exec vitest run --shard=\${{ matrix.shard }}/${shards} --reporter=default --reporter=github-actions "\${filters[@]}"`);
   });
 });

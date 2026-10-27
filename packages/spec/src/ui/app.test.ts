@@ -209,7 +209,49 @@ describe('GroupNavItemSchema', () => {
     };
 
     const result = GroupNavItemSchema.parse(navItem);
+    // ADR-0087 D3 `ui-nav-group-expanded-default-open`: a group that says nothing opens.
+    expect(result.expanded).toBe(true);
+  });
+
+  it('keeps an authored expanded: false closed', () => {
+    const navItem = {
+      id: 'nav_advanced',
+      label: 'Advanced',
+      type: 'group' as const,
+      expanded: false,
+    };
+
+    const result = GroupNavItemSchema.parse(navItem);
     expect(result.expanded).toBe(false);
+  });
+
+  it('refuses a non-boolean expanded', () => {
+    const result = GroupNavItemSchema.safeParse({
+      id: 'nav_sales',
+      label: 'Sales',
+      type: 'group' as const,
+      expanded: 'yes',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toContain('expanded');
+  });
+
+  it('opens a silent group nested in a parsed app', () => {
+    const app = AppSchema.parse({
+      name: 'nav_probe',
+      label: 'Nav Probe',
+      navigation: [
+        {
+          id: 'grp_outer',
+          type: 'group',
+          label: 'Outer',
+          children: [{ id: 'grp_inner', type: 'group', label: 'Inner', expanded: false, children: [] }],
+        },
+      ],
+    });
+    const outer = app.navigation?.[0] as { expanded?: boolean; children?: Array<{ expanded?: boolean }> };
+    expect(outer.expanded).toBe(true);
+    expect(outer.children?.[0]?.expanded).toBe(false);
   });
 
   it('should accept group with expanded state', () => {

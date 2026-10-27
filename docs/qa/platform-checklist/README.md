@@ -211,7 +211,7 @@ Why this shape:
   census and not a verdict). Adding anchors never reds; ⛔ lowering a floor is
   MAINTAINER-ONLY. ⚠️ Note what a red here reaches: `check:platform-checklist` is not
   CI-wired (see "Operating cadence"), so it reaches whoever runs the gate — **not every
-  PR** — plus the daily `platform-checklist-watchdog` workflow, which files or refreshes
+  PR** — plus the daily `platform-checklist-watchdog` job of `fleet-patrols.yml`, which files or refreshes
   one issue when the gate is red.
 - **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
   something — the same discipline as a coverage waiver. Landing the fixture in the
@@ -433,7 +433,7 @@ checklist drift. It runs on a **manual / periodic cadence** instead. Run
 - **alongside a `checklist-author`** (find gaps) **or `checklist-test`** (execute items).
 
 A red gate does have a reporting channel, and it is not this cadence:
-[`.github/workflows/platform-checklist-watchdog.yml`](../../../.github/workflows/platform-checklist-watchdog.yml)
+the `platform-checklist-watchdog` job of [`.github/workflows/fleet-patrols.yml`](../../../.github/workflows/fleet-patrols.yml)
 runs `pnpm check:platform-checklist` on `main` daily and files or refreshes one issue when
 it is red (⛔ and does nothing when it is green). That closes the visibility half only —
 the cadence above is still how the gate gets run *before* a red can matter.

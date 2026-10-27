@@ -219,6 +219,20 @@ reject) — enforced before any write, with no elevation bypass, so the run
 cannot resume past the node with the key a later `expression` approver reads
 still missing.
 
+### Reading the lock
+
+A page over a record under approval must not offer an edit the server then
+refuses with `409 RECORD_LOCKED`. The request row tells only a participant,
+or any reader once the object declares `enable.approvalsVisibleToReaders`;
+everyone else is served no row. Ask the lock itself —
+`GET /api/v1/approvals/records/:object/:recordId/lock`, in the SDK
+`client.approvals.getRecordLock(object, recordId)` — answered to anyone who
+can read the record as `{ success: true, data: { locked } }`: `locked` and
+nothing else (request, approvers and history stay behind that switch), the
+same judgement the lock hook applies to an edit. The record is read as the
+caller: one they cannot read answers `404 RECORD_NOT_FOUND`, the same body
+an id that does not exist gets.
+
 ### Approver Types
 
 | `type` | Resolves to |
@@ -350,7 +364,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
-| `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
+| `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) — see *Send-back for revision* above |
 
 ### Branching, side-effects & rejection
 
@@ -362,9 +376,7 @@ These are wired on the **graph**, not in node config:
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise (the old `back_to_previous`).
-- **Send back for revision (ADR-0044)** — distinct from a plain reject: a
-  `revise` out-edge into an **`approval_revise`** window, closed by a
-  `type: 'back'` resubmit edge. See *Send-back for revision* above.
+- **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
 - **Hard reject** — route the `reject` edge to an `end` node (the old
   `reject_process`).
 
