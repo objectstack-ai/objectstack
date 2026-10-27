@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#26596] An authorization verdict follows a runtime metadata change,
+// [#26596, #26698] An authorization verdict follows a runtime metadata change,
 // with no restart, in both directions.
 //
 // ── what this file pins ───────────────────────────────────────────────────
@@ -17,7 +17,10 @@
 //
 //   A  `sharingModel`, opened to `public_read_write` (#8023's ruling, reached
 //      by a change rather than by an object born with that OWD);
-//   B  `sharingModel`, narrowed to `public_read`.
+//   B  `sharingModel`, narrowed to `public_read`;
+//   C  the `access` block;
+//   D  `requiredPermissions`;
+//   E  `fields`.
 //
 // ── why this file is HTTP-level ───────────────────────────────────────────
 // The verdict a member gets is an HTTP status. Every case drives the real REST
@@ -45,9 +48,15 @@ const UPDATE_FLOOR_DISARM =
   "`['everyone']` ⇒ the positions-gated floor never applies and case B passes without measuring " +
   'it. `orgContext: true` in the boot options is what arms it.';
 
-/** The objects, one per case, each saved at runtime by the admin. */
+/** The capability case D adds to an object's `requiredPermissions`. */
+const CAP = 'vfm_gate_capability';
+
+/** The five objects, one per case, each saved at runtime by the admin. */
 const OPENS = 'vfm_opens';      // A: private → public_read_write
 const CLOSES = 'vfm_closes';    // B: public_read_write → public_read
+const POSTURE = 'vfm_posture';  // C: access public → private
+const GATED = 'vfm_gated';      // D: requiredPermissions added
+const GROWS = 'vfm_grows';      // E: a field added after first use
 
 /**
  * Every member holds a wildcard CRUD grant and authors no row-level policy, so
@@ -60,6 +69,14 @@ const MemberSet = definePermissionSet({
   objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
 });
 
+/** The same grant plus the capability case D gates on — D's control persona. */
+const CapableSet = definePermissionSet({
+  name: 'vfm_capable',
+  label: 'Verdict follows metadata — wildcard object CRUD + the gate capability',
+  objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  systemPermissions: [CAP],
+});
+
 const probeApp = defineStack({
   manifest: {
     id: 'com.example.verdictfollowsmeta',
@@ -69,7 +86,7 @@ const probeApp = defineStack({
     name: 'Authorization Verdict Follows Runtime Metadata Probe',
     engines: { protocol: '^18' },
   },
-  permissions: [MemberSet],
+  permissions: [MemberSet, CapableSet],
 });
 
 const SYS = { isSystem: true } as const;
@@ -90,12 +107,13 @@ const objectBody = (name: string, over: Record<string, unknown> = {}, extraField
 
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
 
-describe('[#26596] the authorization verdict follows a runtime metadata change', () => {
+describe('[#26596, #26698] the authorization verdict follows a runtime metadata change', () => {
   let stack: VerifyStack;
   let ql: any;
   let adminToken: string;
   let aliceToken: string;  // creates the rows — the `created_by` the update floor keys on
   let bobToken: string;    // the measured member: wildcard CRUD, created nothing
+  let carolToken: string;  // wildcard CRUD + the capability case D gates on
 
   /** alice's row per object. */
   const rows: Record<string, string> = {};
@@ -132,6 +150,7 @@ describe('[#26596] the authorization verdict follows a runtime metadata change',
     adminToken = await stack.signIn(); // dev admin seed (first user)
     aliceToken = await stack.signUp('vfm-alice@verify.test');
     bobToken = await stack.signUp('vfm-bob@verify.test');
+    carolToken = await stack.signUp('vfm-carol@verify.test');
 
     ql = await stack.kernel.getServiceAsync('objectql');
     const uid = async (email: string) =>
@@ -147,6 +166,7 @@ describe('[#26596] the authorization verdict follows a runtime metadata change',
     };
     await bindSet('vfm-alice@verify.test', 'vfm_member');
     await bindSet('vfm-bob@verify.test', 'vfm_member');
+    await bindSet('vfm-carol@verify.test', 'vfm_capable');
 
     await assertArmed([
       principalArmed({
@@ -163,9 +183,12 @@ describe('[#26596] the authorization verdict follows a runtime metadata change',
     // Each object's FIRST declaration, saved at runtime.
     await save(objectBody(OPENS, { sharingModel: 'private' }));
     await save(objectBody(CLOSES, { sharingModel: 'public_read_write' }));
+    await save(objectBody(POSTURE, { sharingModel: 'public_read_write' }));
+    await save(objectBody(GATED, { sharingModel: 'public_read_write' }));
+    await save(objectBody(GROWS, { sharingModel: 'public_read_write' }));
 
     // alice's rows, created over HTTP so `created_by` is genuinely hers.
-    for (const object of [OPENS, CLOSES]) {
+    for (const object of [OPENS, CLOSES, POSTURE, GATED, GROWS]) {
       rows[object] = await createAs(aliceToken, object, `alice ${object}`);
     }
   }, 180_000);
@@ -217,5 +240,79 @@ describe('[#26596] the authorization verdict follows a runtime metadata change',
 
     const row = await ql.findOne(CLOSES, { where: { id: rows[CLOSES] }, context: { ...SYS } });
     expect(row?.body, 'nothing persisted after the change').toBe('before');
+  });
+
+  // ── C. the access block ─────────────────────────────────────────────────────
+
+  it('[C] the verdict follows a runtime change — access block', async () => {
+    const before = await stack.apiAs(bobToken, 'GET', `/data/${POSTURE}`);
+    expect(before.status, 'a public object is covered by the wildcard grant').toBe(200);
+
+    const saved = await save(objectBody(POSTURE, { sharingModel: 'public_read_write', access: { default: 'private' } }));
+    expect(saved?.access?.default, 'the metadata door reports the new posture').toBe('private');
+
+    const list = await stack.apiAs(bobToken, 'GET', `/data/${POSTURE}`);
+    expect(list.status, 'a private object needs an explicit grant').toBe(403);
+    expect((await json(list))?.code, 'ADR-0112 error code').toBe('PERMISSION_DENIED');
+    const byId = await stack.apiAs(bobToken, 'GET', `/data/${POSTURE}/${rows[POSTURE]}`);
+    expect(byId.status, 'by id as well').toBeGreaterThanOrEqual(400);
+
+    // And back: the posture follows the change in the other direction too.
+    await save(objectBody(POSTURE, { sharingModel: 'public_read_write', access: { default: 'public' } }));
+    const reopened = await stack.apiAs(bobToken, 'GET', `/data/${POSTURE}`);
+    expect(reopened.status, 'public again ⇒ covered by the wildcard grant again').toBe(200);
+  });
+
+  // ── D. requiredPermissions ──────────────────────────────────────────────────
+
+  it('[D] the verdict follows a runtime change — requiredPermissions', async () => {
+    const before = await stack.apiAs(bobToken, 'GET', `/data/${GATED}`);
+    expect(before.status, 'no capability contract yet').toBe(200);
+    const carolBefore = await stack.apiAs(carolToken, 'GET', `/data/${GATED}`);
+    expect(carolBefore.status).toBe(200);
+
+    const saved = await save(objectBody(GATED, { sharingModel: 'public_read_write', requiredPermissions: [CAP] }));
+    expect(saved?.requiredPermissions, 'the metadata door reports the new contract').toEqual([CAP]);
+
+    const bob = await stack.apiAs(bobToken, 'GET', `/data/${GATED}`);
+    expect(bob.status, 'bob does not hold the capability').toBe(403);
+    expect((await json(bob))?.code, 'ADR-0112 error code').toBe('PERMISSION_DENIED');
+    const carol = await stack.apiAs(carolToken, 'GET', `/data/${GATED}`);
+    expect(carol.status, 'carol holds it — the gate is the capability, not a blanket refusal').toBe(200);
+
+    const explain = await stack.apiAs(adminToken, 'POST', '/security/explain', {
+      object: GATED,
+      operation: 'read',
+      userId: (await ql.findOne('sys_user', { where: { email: 'vfm-bob@verify.test' }, context: { ...SYS } }))?.id,
+    });
+    expect(explain.status, 'explain answers').toBe(200);
+    expect(JSON.stringify(await json(explain)), 'explain reads the same declaration').toContain(CAP);
+  });
+
+  // ── E. fields ───────────────────────────────────────────────────────────────
+
+  it('[E] the verdict follows a runtime change — fields', async () => {
+    const before = await stack.apiAs(bobToken, 'GET', `/meta/object/${GROWS}`);
+    expect(before.status).toBe(200);
+    expect(Object.keys((await json(before))?.item?.fields ?? {}), 'the field does not exist yet')
+      .not.toContain('late_note');
+    const rowBefore = await stack.apiAs(bobToken, 'GET', `/data/${GROWS}/${rows[GROWS]}`);
+    expect(rowBefore.status).toBe(200);
+
+    const saved = await save(objectBody(GROWS, { sharingModel: 'public_read_write' }, {
+      late_note: { type: 'text', label: 'Late note', maxLength: 200 },
+    }));
+    expect(Object.keys(saved?.fields ?? {}), 'the metadata door reports the new field').toContain('late_note');
+
+    const patched = await stack.apiAs(aliceToken, 'PATCH', `/data/${GROWS}/${rows[GROWS]}`, { late_note: 'added later' });
+    expect(patched.status, `alice writes the new field: ${JSON.stringify(await json(patched))}`).toBeLessThan(300);
+
+    const meta = await stack.apiAs(bobToken, 'GET', `/meta/object/${GROWS}`);
+    expect(meta.status).toBe(200);
+    expect(Object.keys((await json(meta))?.item?.fields ?? {}), 'the member reads the new field in the definition')
+      .toContain('late_note');
+    const row = await stack.apiAs(bobToken, 'GET', `/data/${GROWS}/${rows[GROWS]}`);
+    expect(row.status).toBe(200);
+    expect((await json(row))?.record?.late_note, 'and its value on the record').toBe('added later');
   });
 });
