@@ -419,6 +419,14 @@ export interface ExplainEngineDeps {
     recordId: string,
     context: any,
   ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
+  /**
+   * [#26180] The pending approval requests that grant the principal READ of
+   * the record while their step is pending (`SharingService.listApprovalReadGrants`,
+   * the same answer the sharing read filter ORs in). Each is attributed on the
+   * sharing layer as a read share "via approval request N". Optional: a deps
+   * bag wired without it attributes no approval, as before.
+   */
+  listApprovalReadGrants?: (object: string, recordId: string, context: any) => Promise<string[]>;
   /** The sharing service's per-record UPDATE gate (`canEdit`) — the by-construction verdict for update operations. */
   canEditRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
   /**
@@ -1863,6 +1871,22 @@ async function applyRecordAttribution(
       effect: recipMatchesUser ? 'admits' : 'neutral',
     };
   });
+  // [#26180] A pending approval step the principal is on grants READ of the
+  // one record it is about, while it is pending: named as the read share it is
+  // ("via approval request N"). It admits a read and nothing else: on a write
+  // it is evaluated and neutral, as the write gates never read it.
+  const approvalRequests = deps.listApprovalReadGrants && recordExists
+    ? await deps.listApprovalReadGrants(object, recordId, context).catch(() => [] as string[])
+    : [];
+  for (const requestId of approvalRequests ?? []) {
+    shareRules.push({
+      kind: 'record_share',
+      name: String(requestId),
+      grants: 'read',
+      via: `approval request ${requestId}`,
+      effect: isRead ? 'admits' : 'neutral',
+    });
+  }
   // [ADR-0142 D3/D4] The queue story, attributed on this layer beside the
   // shares, because the sharing service decides it: a record that SITS in a
   // queue (`owner_id` empty, `queue` set) is read and edited by the queue's
@@ -2084,7 +2108,10 @@ async function applyRecordAttribution(
                 ? (ownerIsMe
                     ? 'Caller owns the record — visible without a share.'
                     : anyShareAdmits
-                      ? `${shareRules.length} share(s) attached; access is granted for this record.`
+                      ? (isRead && approvalRequests.length > 0
+                          ? `Read is granted via approval request ${approvalRequests.join(', ')}: the principal is on ` +
+                            "its pending step's slate or holds the override, and the grant ends when the step resolves."
+                          : `${shareRules.length} share(s) attached; access is granted for this record.`)
                       : sharingFilter === null
                         ? `${shareRules.length} share(s) attached; none grants the caller access, but the sharing ` +
                           'service imposes no owner-match on this object (rowFilter null), so the record is admitted without one.'

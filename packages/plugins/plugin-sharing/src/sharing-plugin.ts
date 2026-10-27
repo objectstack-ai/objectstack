@@ -63,6 +63,7 @@ import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-ob
 import {
   SharingService,
   type SharingEngine,
+  type SharingApprovalReadProbe,
   type SharingSecurityProbe,
   type SharingTenancyProbe,
 } from './sharing-service.js';
@@ -754,6 +755,13 @@ export class SharingServicePlugin implements Plugin {
         },
         // [ADR-0142 D3] Records sitting in the caller's queues.
         ownershipQueues: () => this.queues ?? null,
+        // [#26180] Late-bound `approvals` service: the records a pending
+        // approver may read, ORed into the read filter. Optional plugin, so
+        // the slice is declared structurally; absent → no approval grant.
+        approvals: () => {
+          try { return ctx.getService<SharingApprovalReadProbe>('approvals'); }
+          catch { return null; }
+        },
       });
       ctx.registerService('sharing', this.service);
 

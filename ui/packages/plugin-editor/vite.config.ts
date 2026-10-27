@@ -66,7 +66,7 @@ export default defineConfig({
       // `vitest.config.mts` alias table.
       '@object-ui/i18n': resolve(__dirname, '../i18n/src'),
       '@object-ui/core': resolve(__dirname, '../core/src'),
-      '@object-ui/sdui-parser': resolve(__dirname, '../sdui-parser/src'),
+      '@objectstack/sdui-parser': resolve(__dirname, '../../../packages/sdui-parser/src'),
       '@object-ui/types': resolve(__dirname, '../types/src'),
       '@object-ui/react': resolve(__dirname, '../react/src'),
       '@object-ui/components': resolve(__dirname, '../components/src'),

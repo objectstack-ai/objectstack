@@ -33,8 +33,9 @@
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
 // Relative, as other packages' tests reach a sibling's source: this package
-// declares no dependency on the parser, and the test is the only reader.
-import { manifestFromConfigs, validateTree } from '../../../sdui-parser/src/index';
+// declares no dependency on the parser, and the test is the only reader. The
+// one parser is the monorepo root's `packages/sdui-parser` (#25712 item 3).
+import { manifestFromConfigs, validateTree } from '../../../../../packages/sdui-parser/src/index';
 import '../index';
 
 const EXPECTED: Record<string, string[]> = {

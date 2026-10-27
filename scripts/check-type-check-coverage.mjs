@@ -1337,8 +1337,6 @@ const UNCHECKED_SOURCE_DEBT = {
     'objectui import: demo/main.tsx, the package\'s vite dev page. Probe: 1 x TS2882 (side-effect import of @object-ui/components/style.css).',
   'ui/packages/plugin-grid/demo':
     'objectui import: demo/main.tsx and demo/bulk-actions.tsx, vite dev pages. Probe: 2 x TS2882 (style.css side-effect imports) + 1 x TS2322 (bulk-actions i18n resources prop).',
-  'ui/packages/sdui-parser/scripts':
-    'objectui import: scripts/gen-manifest.ts, the SDUI manifest generator run with tsx. Probe: 1 x TS2591 (`node:fs`, no node types in the package program).',
 };
 // The ceiling those six set. The self-test's FLOOR battery holds the ledger at
 // or below it, so the list only shrinks from the import on.

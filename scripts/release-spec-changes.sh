@@ -3,7 +3,7 @@
 # `spec-changes.json` and the protocol upgrade guide.
 #
 #   bash scripts/release-spec-changes.sh --prepare    # BEFORE `changeset publish` (release.yml)
-#   bash scripts/release-spec-changes.sh --generate   # BEFORE `changeset publish` (cut-rc.yml)
+#   bash scripts/release-spec-changes.sh --generate   # BEFORE `changeset publish`
 #   bash scripts/release-spec-changes.sh --verify     # after either, BEFORE `changeset publish`
 #   bash scripts/release-spec-changes.sh --attach     # AFTER the GitHub Release exists
 #

@@ -1810,7 +1810,7 @@ jobs:
       # from a primary checkout, a detached HEAD and a non-repo cwd with
       # identical results, so neither this checkout's depth nor its branch is an
       # input. This step itself needs only `jq` and `git` (both in the runner
-      # image; `jq` is already relied on bare by cut-rc.yml and release.yml),
+      # image; `jq` is already relied on bare by release.yml),
       # plus whatever each discovered matrix declares in its own header —
       # discovery above is by glob, so a matrix needing more (node, pnpm, a
       # built tree, a generator) must say so there; this comment is not the

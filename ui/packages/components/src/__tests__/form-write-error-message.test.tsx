@@ -160,3 +160,53 @@ describe('a producer-marked refusal reaches the user', () => {
     expect(await screen.findByText(/title must be unique/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * objectstack#26059 Q3 (child #26190) — a delegated administrator who saves
+ * outside their own scope is told which boundary refused it.
+ *
+ * `403 DELEGATION_SCOPE_VIOLATION` is the one denial whose server reason is
+ * shown: it describes only the caller's own delegated scope. Every other denial
+ * keeps the fixed line (objectstack#24914 B′, unchanged), which the plain-403
+ * control below holds.
+ */
+describe('a delegated-admin scope refusal shows the server reason', () => {
+  const REASON =
+    "Outside your delegated scope: delegated 'update' on sys_user_position rejected — business unit 'bu_west' is outside the delegated subtree (scope from 'regional_admin').";
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  function scopeRefusal() {
+    // The shape `@objectstack/client` hands the form for a 403: the server's
+    // message on `message`, the semantic code on `code`, the status on
+    // `httpStatus`.
+    return Object.assign(new Error(`[Security] ${REASON}`), {
+      code: 'DELEGATION_SCOPE_VIOLATION',
+      httpStatus: 403,
+    });
+  }
+
+  it("renders the server's reason, without the machine prefix, instead of the fixed line", async () => {
+    const { container } = renderForm(async () => { throw scopeRefusal(); });
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(await screen.findByText(REASON)).toBeInTheDocument();
+    expect(screen.queryByText(/permission to save/i)).not.toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/\[Security\]/);
+  });
+
+  it('CONTROL: a plain 403 PERMISSION_DENIED keeps the fixed line and withholds its text', async () => {
+    const { container } = renderForm(async () => {
+      throw Object.assign(
+        new Error("[Security] Access denied: delegated 'update' on sys_user_position rejected — no delegated scope covers this write."),
+        { code: 'PERMISSION_DENIED', httpStatus: 403 },
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(await screen.findByText(/permission to save/i)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/sys_user_position/);
+  });
+});

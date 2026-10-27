@@ -12,7 +12,7 @@
  * spec row requires it. The family's closing card, after objectui#11569
  * (`record:line_items` and `childObject`).
  *
- * The page compile (`compile()` in `@object-ui/sdui-parser`, whose `ok` is the
+ * The page compile (`compile()` in `@objectstack/sdui-parser`, whose `ok` is the
  * save gate) reads each registration's `inputs`, and its only requiredness
  * check is `input.required && !(input.name in node)`. So a registration that
  * declared `{ name: 'objectName', required: true }` refused a node whose
@@ -56,7 +56,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { compile, type Manifest, type ManifestInput } from '@object-ui/sdui-parser';
+import { compile, type Manifest, type ManifestInput } from '@objectstack/sdui-parser';
 // Module scope, not a hook: the whole registration graph loads at import time.
 import '../../dev/manifest-registry';
 import { emitSduiManifest } from '../../scripts/emit-sdui-manifest';

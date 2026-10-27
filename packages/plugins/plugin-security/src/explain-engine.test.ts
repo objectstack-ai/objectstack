@@ -539,6 +539,57 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(d.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
   });
 
+  // [#26180] A pending approval step the principal is on grants READ of the
+  // one record: the sharing service ORs its record id in, and explain names
+  // the request it came through — on a read, and as no grant on a write.
+  it('[#26180] names the pending approval request a read comes through: "via approval request N"', async () => {
+    const asked: unknown[] = [];
+    const deps = (canEdit?: boolean) => ({
+      ...recDeps({
+        layered: { layer0: null, layer1: null },
+        record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' },
+        shares: [],
+        sharingFilter: { $or: [{ owner_id: 'u1' }, { id: { $in: ['r1'] } }] },
+        canEdit,
+      }),
+      listApprovalReadGrants: async (object: string, recordId: string, context: unknown) => {
+        asked.push([object, recordId, context]);
+        return ['apr_7'];
+      },
+    });
+    const read = await explainAccess(deps(), { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' });
+    const sharing = read.layers.find((l) => l.layer === 'sharing')!;
+    expect(sharing.record!.outcome).toBe('admitted');
+    expect(sharing.record!.rules).toEqual([
+      { kind: 'record_share', name: 'apr_7', grants: 'read', via: 'approval request apr_7', effect: 'admits' },
+    ]);
+    expect(sharing.record!.detail).toContain('via approval request apr_7');
+    expect(read.record).toMatchObject({ visible: true, decidedBy: 'sharing' });
+    // Asked with the EXPLAINED principal's context, for this record.
+    expect(asked).toEqual([['leave_request', 'r1', REC_CTX]]);
+
+    // A write: the same grant is evaluated, grants no write, and the gate decides.
+    const update = await explainAccess(deps(false), { object: 'leave_request', operation: 'update', context: REC_CTX, recordId: 'r1' });
+    const writeSharing = update.layers.find((l) => l.layer === 'sharing')!;
+    expect(writeSharing.record!.rules).toEqual([
+      { kind: 'record_share', name: 'apr_7', grants: 'read', via: 'approval request apr_7', effect: 'neutral' },
+    ]);
+    expect(writeSharing.record!.outcome).toBe('excluded');
+    expect(update.record).toMatchObject({ visible: false });
+  });
+
+  it('[#26180] a failing approval lookup attributes nothing and fails nothing', async () => {
+    const d = await explainAccess(
+      {
+        ...recDeps({ layered: { layer0: null, layer1: null }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' }, shares: [], sharingFilter: { owner_id: 'u1' } }),
+        listApprovalReadGrants: async () => { throw new Error('approvals unavailable'); },
+      },
+      { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+    );
+    expect(d.layers.find((l) => l.layer === 'sharing')!.record!.rules).toEqual([]);
+    expect(d.record).toMatchObject({ visible: false, decidedBy: 'sharing' });
+  });
+
   it('private object, non-owner, no admitting share — not visible, decidedBy sharing', async () => {
     const d = await explainAccess(
       recDeps({ layered: { layer0: null, layer1: null }, record: { id: 'r1', organization_id: 'org1', owner_id: 'u_other' }, shares: [], sharingFilter: { owner_id: 'u1' } }),

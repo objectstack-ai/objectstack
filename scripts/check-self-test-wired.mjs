@@ -243,9 +243,9 @@ const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/*
  *
  *   - a leading `./` is stripped rather than kept, because it is the same file
  *     under a different spelling and paths are compared by EXACT equality here.
- *     `cut-rc.yml` and `release.yml` both import from `"./scripts/check-docs-
- *     image-tag.mjs"`; keying those to `./scripts/…` would silently drop two
- *     live invocations the old pattern did credit.
+ *     `release.yml` imports from `"./scripts/check-docs-image-tag.mjs"`;
+ *     keying that to `./scripts/…` would silently drop a live invocation the
+ *     old pattern did credit.
  *   - a segment must START with an alphanumeric or `_`, so `..` is not a
  *     prefix segment. A `../…` path cannot be resolved against this ROOT
  *     without knowing what it is relative to, and inventing a key for it is how
@@ -1148,8 +1148,8 @@ function selfTest() {
   }
   {
     // Control 2 — `./scripts/…` still normalises onto the walk's key. Live
-    // spelling: `cut-rc.yml` and `release.yml` import from `"./scripts/…"`,
-    // and keying those anywhere else silently drops two real invocations.
+    // spelling: `release.yml` imports from `"./scripts/…"`, and keying that
+    // anywhere else silently drops a real invocation.
     const got = collectInvocations(
       wf('    - run: node --input-type=module -e \'import { X } from "./scripts/g.mjs";\'\n'),
       {},

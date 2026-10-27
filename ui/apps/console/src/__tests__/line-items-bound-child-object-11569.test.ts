@@ -22,7 +22,7 @@
  *
  * The manifest has no vocabulary for "one of these is required"
  * (`ComponentInput` in `@object-ui/types` and `ManifestInput` in
- * `@object-ui/sdui-parser` carry a boolean `required` and nothing beside it), so
+ * `@objectstack/sdui-parser` carry a boolean `required` and nothing beside it), so
  * the registration stops requiring the key (triage ruling on objectui#11569).
  *
  * Judged against the manifest the console SHIPS: `emitSduiManifest` over the
@@ -53,7 +53,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { compile, type Manifest } from '@object-ui/sdui-parser';
+import { compile, type Manifest } from '@objectstack/sdui-parser';
 // Module scope, not a hook: the whole registration graph loads at import time.
 import '../../dev/manifest-registry';
 import { emitSduiManifest } from '../../scripts/emit-sdui-manifest';

@@ -1648,7 +1648,7 @@ async function selfTest() {
       'mode "exit" (after `changeset pre exit`, before the version pass that deletes pre.json) still expects the '
         + `newest GA -- keying on "pre" alone reds every PR in that window. Got ${JSON.stringify(inExit)}`,
     );
-    // 6 -- an rc line (cut-rc.yml runs only in pre mode, tag rc) is a prerelease line too.
+    // 6 -- an rc line (pre mode, tag rc) is a prerelease line too.
     const inRc = expectedVersion(preTree('pre-rc', { cli: '17.8.0-rc.0', pre: '{"mode":"pre","tag":"rc"}' }));
     assert(
       inRc.version === '17.7.0' && inRc.preMode?.tag === 'rc',

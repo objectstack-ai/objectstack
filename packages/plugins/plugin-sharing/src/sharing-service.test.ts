@@ -229,6 +229,100 @@ describe('SharingService.buildReadFilter', () => {
   });
 });
 
+// [#26180 · ruling 6429330267, letter A] The records a pending approval step
+// lets the caller READ, asked of the late-bound `approvals` service and ORed in
+// beside the record shares. The derivation (who, while, where, cost) is the
+// approvals service's own suite; the door, on a real boot, is dogfood's
+// `approval-pending-approver-record-read`. What this level states is the
+// composition: the ids join the shares on the READ filter only, and every
+// failure grants nothing.
+describe('[#26180] SharingService — the pending approver\'s read', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  const grants = (entries: Array<[string, string[]]>) => new Map<string, readonly string[]>(entries);
+  const serviceWith = (approvals: SharingServiceOptions['approvals']) => new SharingService({ engine, approvals });
+  const asked: Array<{ object: string; userId?: string }> = [];
+  const pendingOn = (entries: Array<[string, string[]]>) => () => ({
+    pendingApproverReadGrants: async (object: string, context: any) => {
+      asked.push({ object, userId: context?.userId });
+      return grants(entries);
+    },
+  });
+
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      lead: LEAD_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    asked.length = 0;
+  });
+
+  it('ORs the pending-approval record ids in beside the owner-match', async () => {
+    const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
+    expect(await svc.buildReadFilter('account', { userId: 'alice' })).toEqual({
+      $or: [{ owner_id: 'alice' }, { id: { $in: ['a9'] } }],
+    });
+    expect(asked).toEqual([{ object: 'account', userId: 'alice' }]);
+  });
+
+  it('joins the record shares, once per id', async () => {
+    await new SharingService({ engine }).grant({ object: 'account', recordId: 'a1', recipientId: 'alice' }, { isSystem: true });
+    const svc = serviceWith(pendingOn([['a1', ['apr_1']], ['a9', ['apr_2']]]));
+    const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
+    expect(f.$or[0]).toEqual({ owner_id: 'alice' });
+    expect([...f.$or[1].id.$in].sort()).toEqual(['a1', 'a9']);
+  });
+
+  it('never reaches a write gate: an approver on the slate who owns nothing edits and deletes nothing', async () => {
+    const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
+    await engine.insert('account', { id: 'a9', owner_id: 'bob' });
+    expect(await svc.canEdit('account', 'a9', { userId: 'alice' })).toBe(false);
+    expect(await svc.canDelete('account', 'a9', { userId: 'alice' })).toBe(false);
+    expect(await svc.buildWriteFilter('account', { userId: 'alice' })).toEqual({ owner_id: 'alice' });
+  });
+
+  it('is not asked where the read filter imposes nothing, or denies all', async () => {
+    const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
+    expect(await svc.buildReadFilter('lead', { userId: 'alice' })).toBeNull();
+    expect(await svc.buildReadFilter('account', {})).toEqual({ id: '__deny_all__' });
+    expect(asked).toEqual([]);
+  });
+
+  it('grants nothing to an on-behalf-of principal: the grant is the person\'s own (ADR-0090 D10)', async () => {
+    const svc = serviceWith(pendingOn([['a9', ['apr_1']]]));
+    const delegated = { userId: 'agent_1', onBehalfOf: { userId: 'alice' } } as any;
+    expect(await svc.buildReadFilter('account', delegated)).toEqual({ owner_id: 'agent_1' });
+    expect(await svc.listApprovalReadGrants('account', 'a9', delegated)).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it('fails closed: no service, no member, a throwing lookup or a rejected read all grant nothing', async () => {
+    const ownerOnly = { owner_id: 'alice' };
+    const warn = vi.fn();
+    const variants: Array<SharingServiceOptions['approvals']> = [
+      undefined,
+      () => null,
+      () => { throw new Error('[Kernel] Service \'approvals\' not found'); },
+      () => ({}),
+      () => ({ pendingApproverReadGrants: async () => { throw new Error('store unavailable'); } }),
+    ];
+    for (const approvals of variants) {
+      const svc = new SharingService({ engine, approvals, logger: { warn } });
+      expect(await svc.buildReadFilter('account', { userId: 'alice' })).toEqual(ownerOnly);
+      expect(await svc.listApprovalReadGrants('account', 'a9', { userId: 'alice' })).toEqual([]);
+    }
+    // The rejected read is the one failure that is said, once per read.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(String(warn.mock.calls[0][0])).toContain('granting none (fail-closed)');
+  });
+
+  it('names, for explain, the requests that grant the one record', async () => {
+    const svc = serviceWith(pendingOn([['a9', ['apr_1', 'apr_2']], ['a8', ['apr_3']]]));
+    expect(await svc.listApprovalReadGrants('account', 'a9', { userId: 'alice' })).toEqual(['apr_1', 'apr_2']);
+    expect(await svc.listApprovalReadGrants('account', 'a7', { userId: 'alice' })).toEqual([]);
+  });
+});
+
 // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
 // 6148183570 on #23266] The guest reaches rows through share links only, never
 // through the object's sharing model: its read filter is deny-all on every
