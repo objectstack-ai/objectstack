@@ -1483,8 +1483,8 @@ export const CEILINGS = new Map([
   // 「`lanes/director.md` 职责行」: the seat an app project summons reviews that
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
-  // 88 → 87 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 87],
+  // 88 → 86 (#25753): the objectui pin-chain line retired, and main's governed-draft rule (#26693) landed one line shorter; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // alternates between the two multi-lane repos, oldest-first inside a repo, with a
   // 4-hour starvation guard). A seat charter is read per seat session like every
