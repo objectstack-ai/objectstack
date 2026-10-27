@@ -3890,8 +3890,8 @@ const zh = {
       nameField: '名称：{{field}}',
     },
     build: {
-      building: '正在构建{{app}}…',
-      built: '已构建{{app}}',
+      building: '正在构建 · {{app}}…',
+      built: '已构建 · {{app}}',
       builtAndLive: '已搭建并上线 · {{app}}',
       appFallback: '你的应用',
       addingSampleData: '正在添加示例数据',
