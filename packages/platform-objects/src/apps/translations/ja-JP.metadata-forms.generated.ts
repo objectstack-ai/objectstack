@@ -1843,6 +1843,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "無効",
         helpText: "CEL 式: 条件が true の場合に無効化"
       },
+      disabledReason: {
+        label: "無効の理由",
+        helpText: "アクションがグレーアウトされている理由。「無効」が true の間、ホバー時に表示され、スクリーンリーダーにも読み上げられます（例:「承認済みの法務レビューが先に必要です。」）。表示専用で、サーバーは引き続き独自のルールで呼び出しを拒否します。空欄の場合は「このレコードでは利用できません」と表示されます。"
+      },
       requiresFeature: {
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"

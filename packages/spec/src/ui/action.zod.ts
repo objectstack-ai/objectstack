@@ -888,6 +888,45 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
 
 /**
+ * [#26619] `disabledReason` — the sentence a greyed action shows to say WHY it
+ * is unavailable, beside the `disabled` predicate that greys it.
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.disabledReason`, or an inline locale map),
+ * so it takes the copy keys' translation route and not a predicate's. It is
+ * DISPLAY ONLY, and both halves of that are the contract:
+ *
+ * - it never enters the server's admission — a disabled action that is called
+ *   anyway is refused by its own rules (a hook, `requiredPermissions`), never
+ *   by this text, so a wrong reason misleads a reader and leaks nothing;
+ * - it is not an expression — no lint or evaluator reads it as a condition,
+ *   and a predicate-looking value is just a sentence.
+ *
+ * A blank reason is refused, in either form: it would replace the console's
+ * default, "Not available for this record", with an empty tooltip. Omitting
+ * the key is how an author keeps that default.
+ */
+const DISABLED_REASON_BLANK =
+  'a blank `disabledReason` would replace the console\'s default reason, "Not available for this '
+  + 'record", with an empty tooltip. Write the sentence that says what is missing (e.g. "An '
+  + 'approved legal review is required first."), or omit the key to keep the default.';
+const actionDisabledReason = () => I18nLabelSchema.superRefine((value, ctx) => {
+  if (typeof value === 'string') {
+    if (value.trim() === '') ctx.addIssue({ code: 'custom', message: DISABLED_REASON_BLANK });
+    return;
+  }
+  const blank = Object.entries(value).filter(([, text]) => text.trim() === '').map(([tag]) => tag);
+  if (Object.keys(value).length === 0 || blank.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: blank.length > 0
+        ? `the inline \`disabledReason\` map gives a blank reason for ${blank.map((tag) => `\`${tag}\``).join(', ')} — ${DISABLED_REASON_BLANK}`
+        : `an empty inline \`disabledReason\` map gives no reason in any locale — ${DISABLED_REASON_BLANK}`,
+    });
+  }
+});
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -916,6 +955,11 @@ const actionObject = () => strictObject({
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
     visibleWhen: 'visible', showWhen: 'visible',
     disabledWhen: 'disabled',
+    // [#26619] The words an author reaches for when naming the greyed
+    // action's explanation by the surface it lands on (a tooltip, a hint) or
+    // by the copy keys' `*Message` family.
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1542,6 +1586,11 @@ const actionObject = () => strictObject({
    * gone entirely.
    */
   disabled: ActionConditionInputSchema.optional().describe('Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled.'),
+  /**
+   * Why the action is greyed — the reason `disabled` gives the user. Display
+   * only; the contract is on {@link actionDisabledReason}.
+   */
+  disabledReason: actionDisabledReason().optional().describe('Display-only reason a greyed action shows (hover title and accessible description) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
