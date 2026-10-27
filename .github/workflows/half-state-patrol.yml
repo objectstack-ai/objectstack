@@ -259,7 +259,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # No `pnpm install`: the sweeper imports only `node:` builtins
       # (`process`, `child_process`, `fs`, `url`), global `fetch`, and one

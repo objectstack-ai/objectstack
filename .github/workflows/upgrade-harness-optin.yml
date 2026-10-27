@@ -84,25 +84,8 @@ jobs:
       - name: Checkout the merge preview
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Restore-only: the dogfood job's entries (seeded from `main`) replay this
       # closure; a PR never writes the cache, as in ci.yml.
@@ -114,9 +97,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-dogfood-1-main-
             ${{ runner.os }}-turbo-dogfood-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Build the dogfood package's dependency closure
         run: pnpm turbo run build --filter=@objectstack/dogfood --concurrency=4
