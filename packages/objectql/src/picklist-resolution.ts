@@ -31,6 +31,11 @@
  * validator refuses every value of the field instead of accepting any.
  */
 
+// The mark that tells the load-time diagnostics these options were resolved
+// here, not authored: they judge what the author wrote, and the field schema
+// refuses `picklist` and `options` together.
+import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-protocol';
+
 /** One option, as `SelectOptionSchema` declares it (only `value` is read here). */
 export interface PicklistOptionLike {
   value: string | number | boolean;
@@ -133,7 +138,15 @@ function resolveField(field: unknown, resolve: (picklist: string) => readonly Pi
   const picklist = (field as { picklist?: unknown }).picklist;
   if (typeof picklist !== 'string' || picklist.length === 0) return field;
   const options = resolve(picklist);
-  if (options) return { ...(field as object), options: options.map((o) => ({ ...o })) };
+  if (options) {
+    const resolved = options.map((o) => ({ ...o }));
+    // Marked as derived unless the body brought `options` of its own: a field
+    // that AUTHORS both keys is still told so. A body that is itself a served
+    // copy (marked) stays marked.
+    const carried = (field as { options?: unknown }).options;
+    if (carried === undefined || isResolvedPicklistOptions(carried)) markResolvedPicklistOptions(resolved);
+    return { ...(field as object), options: resolved };
+  }
   // Unresolved: drop any options the body carried, so a stale served copy
   // cannot stand in for the list. The validator refuses every value of a
   // picklist-bound field that has none.
