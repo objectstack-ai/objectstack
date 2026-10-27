@@ -61,6 +61,32 @@ const PROVENANCE_SHA256 = 'sha256';
 /** How many file ids one `describeFiles` read names. */
 const DESCRIBE_CHUNK = 500;
 
+/**
+ * [#26670] Hand the event loop one macrotask turn.
+ *
+ * A seed file costs its row about two dozen sequential engine calls: the
+ * `sys_file` row written `pending`, the bytes, then the claim (the files read
+ * again, the slot's held files read and released, the row committed), each
+ * with the write hooks they run. On a synchronous driver (better-sqlite3,
+ * the wasm fallback) every one of those `await`s resolves as a microtask, so
+ * a run of rows never reaches the event loop's I/O phase at all: the claims
+ * the loader settles after each 200-row insert batch ran as one unbroken
+ * microtask chain, measured at 3–5 s per batch on a boot seeding 1,500 files,
+ * and every request that arrived meanwhile — a sign-in — waited unread for
+ * the whole chain. The connection pool was never the bottleneck (no hold
+ * over 44 ms); the event loop was.
+ *
+ * So each row's file work ends here, and a request waits behind one row's
+ * files, never behind a dataset's. The same cure as the import runner's
+ * row loop (`@objectstack/core`, `import-runner.ts`), for the same cause.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof setImmediate === 'function') setImmediate(resolve);
+    else setTimeout(resolve, 0);
+  });
+}
+
 /** The file-class fields of an object definition, by name. */
 function fileFieldsOf(definition: unknown): Map<string, FileField> {
   const found = new Map<string, FileField>();
@@ -297,6 +323,8 @@ export class SeedDatasetFiles {
       args.record[field] = def.multiple ? fileIds : fileIds[0];
       claims.push({ field, fileIds });
     }
+    // [#26670] The row's files are stored (or kept): let a waiting request in.
+    if (planned.length > 0) await yieldToEventLoop();
     return { ok: true, claims };
   }
 
@@ -308,6 +336,18 @@ export class SeedDatasetFiles {
    */
   async settleRow(recordId: string, claims: SeedFileClaims, organizationId: string | null): Promise<string | null> {
     if (!this.service || claims.length === 0) return null;
+    try {
+      return await this.settleClaims(recordId, claims, organizationId);
+    } finally {
+      // [#26670] The loader settles a whole insert batch's rows back to back;
+      // each row's claim ends with a turn for whatever request is waiting.
+      await yieldToEventLoop();
+    }
+  }
+
+  /** {@link settleRow}'s claims, field by field; the first failure ends it. */
+  private async settleClaims(recordId: string, claims: SeedFileClaims, organizationId: string | null): Promise<string | null> {
+    const service = this.service!;
     for (const { field, fileIds } of claims) {
       const known = await this.describe(fileIds, organizationId);
       const settled = fileIds.every((id) => {
@@ -319,7 +359,7 @@ export class SeedDatasetFiles {
       });
       if (settled) continue;
       try {
-        await this.service.claimFiles({ object: this.objectName, recordId, field }, fileIds, organizationId);
+        await service.claimFiles({ object: this.objectName, recordId, field }, fileIds, organizationId);
         this.forget(fileIds, organizationId);
       } catch (err) {
         return `${this.objectName}/${recordId}.${field} was written, but its seed file(s) ${fileIds.join(', ')} could ` +
