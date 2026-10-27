@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -119,8 +120,8 @@ describe('[#26871] a multi delete_record runs the referential walk for every row
   const insert = async (object: string, data: Record<string, unknown>): Promise<string> =>
     ((await ql.insert(object, data, { context: SYS })) as any).id;
   /** Rows of `object`, read from the driver with no engine in between. */
-  const rows = async (object: string, where: Record<string, unknown> = {}): Promise<any[]> =>
-    (await driver.find(object, { object, where } as any)) as any[];
+  const rows = async (object: string, where: FilterCondition = {}): Promise<any[]> =>
+    (await driver.find(object, { object, where })) as any[];
 
   function bulkDeleteFlow(name: string, grp: string) {
     return {

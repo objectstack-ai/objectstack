@@ -417,7 +417,7 @@ describe('a plain non-cascade delete is unchanged (#7413 control)', () => {
     await engine.insert('loner', { name: 'solo' });
     driver.writes.length = 0;
 
-    const removed = await engine.delete('loner', { where: { name: 'solo' }, multi: true } as any);
+    const removed = await engine.delete('loner', { where: { name: 'solo' }, multi: true });
 
     expect(removed).toBe(2);
     expect(driver.begun).toHaveLength(0);
@@ -459,7 +459,7 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     await engine.insert('detail', { parent: p1.id });
     await engine.insert('guard', { parent: p2.id });
 
-    await expect(engine.delete('parent', { where: { name: 'doomed' }, multi: true } as any))
+    await expect(engine.delete('parent', { where: { name: 'doomed' }, multi: true }))
       .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, object: 'parent', dependentObject: 'guard' });
 
     // p1's detail was cascaded before p2's restrict refused; the one unit of
@@ -484,7 +484,7 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     const l2 = await engine.insert('link', { parent: p2.id });
     const keptLink = await engine.insert('link', { parent: kept.id });
 
-    const removed = await engine.delete('parent', { where: { name: 'doomed' }, multi: true } as any);
+    const removed = await engine.delete('parent', { where: { name: 'doomed' }, multi: true });
 
     expect(removed).toBe(2);
     expect(driver.rowsOf('parent').map((r: any) => r.id)).toEqual([kept.id]);
@@ -504,7 +504,7 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     await engine.insert('link', { parent: p.id });
     driver.writes.length = 0;
 
-    await engine.delete('parent', { where: { name: 'doomed' }, multi: true } as any);
+    await engine.delete('parent', { where: { name: 'doomed' }, multi: true });
 
     expect(driver.begun).toHaveLength(1);
     const handle = driver.begun[0];
@@ -531,7 +531,7 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     const root = await engine.insert('node', { name: 'root', boss: null });
     const report = await engine.insert('node', { name: 'report', boss: root.id });
 
-    const removed = await engine.delete('node', { where: { boss: null }, multi: true } as any);
+    const removed = await engine.delete('node', { where: { boss: null }, multi: true });
 
     expect(removed).toBe(1);
     expect(driver.rowsOf('node').map((r: any) => [r.id, r.boss ?? null])).toEqual([[report.id, null]]);
@@ -543,7 +543,7 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     await engine.insert('detail', { parent: p.id });
     driver.writes.length = 0;
 
-    const removed = await engine.delete('parent', { where: { name: 'nobody' }, multi: true } as any);
+    const removed = await engine.delete('parent', { where: { name: 'nobody' }, multi: true });
 
     expect(removed).toBe(0);
     expect(driver.writes).toEqual([]);
