@@ -983,6 +983,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
+// The seat record's heading and verdict have ONE reading, shared with
+// fleet-roster's landing-verdict read; H69 asks it, never re-spells it.
+import { SEAT_RECORD_MARKER, seatRecordAccepts, seatRecordOf } from './seat-record.mjs';
 
 /**
  * The repo this file sweeps when nothing says otherwise. It is a FALLBACK for a
@@ -11401,8 +11404,10 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
  * mirrored properties on the literal `## 席位核对` heading: line-anchored, an
  * optional leading blockquote, no `g` flag. A `###` sub-heading or a mention
  * in prose (the landing comment is told ⛔ 不复述 `## 席位核对`) is no record.
+ * DEFINED in `seat-record.mjs`, the one reading fleet-roster's landing-verdict
+ * read shares, and re-exported here under its old name.
  */
-export const SEAT_RECORD_MARKER = /^\s*>?\s*## 席位核对/m;
+export { SEAT_RECORD_MARKER };
 
 /** Governed globs named inline before the sentence degrades to a count — H43's. */
 export const H69_SURFACE_LIST_CAP = 4;
@@ -32331,6 +32336,14 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY69, 'record marker: ⛔ a landing comment that cites the record (⛔ 不复述 `## 席位核对`) is not one', SEAT_RECORD_MARKER.test('落地评论 = 两个读数的探针表,⛔ 不复述 `## 席位核对`'), false);
   b(BATTERY69, 'record marker: a verdict-bearing brief comment is not the record', SEAT_RECORD_MARKER.test('## 维护者速读\n\n**ACCEPT** — lands as ruled'), false);
   b(BATTERY69, 'record marker: no `g` flag, so two reads of one body agree', [SEAT_RECORD_MARKER.test(RECORD69), SEAT_RECORD_MARKER.test(RECORD69)].join(','), 'true,true');
+  // The live inline spelling: the verdict rides the heading line itself.
+  const INLINE69 = '## 席位核对 — ACCEPT · domain:skills#2 · session_01x · 2026-10-26T12:30Z\n\n1. 范围 ✓';
+  const BARE69 = '## 席位核对\n\n**ACCEPT** · domain:skills seat 2 · head `7cc88889`';
+  const CONTRACT69 = '## Contract review\n\nServed-tier: x\n\n**VERDICT: PASS**';
+  b(BATTERY69, 'record marker: the inline `— ACCEPT` heading is a record', SEAT_RECORD_MARKER.test(INLINE69), true);
+  b(BATTERY69, 'H69: an inline `— ACCEPT` record NEWER than the head -> clean', h69(pr69(), [cm69(INLINE69, NEWER69)], HEAD69), null);
+  b(BATTERY69, 'shared reading: the three measured bodies read record + ACCEPT alike (bare, inline, Contract review)', [BARE69, INLINE69, CONTRACT69].map((x) => `${SEAT_RECORD_MARKER.test(x)}/${seatRecordAccepts(x)}`).join(), 'true/true,true/true,false/false');
+  b(BATTERY69, 'shared reading: ⛔ an inline REWORK or a REJECT below is a record that never accepts', [seatRecordOf('## 席位核对 — REWORK · 补测试'), seatRecordOf('## 席位核对\n\nREJECT · rework')].map((r) => r?.verdict).join(), 'REWORK,REJECT');
 
   // The sentence.
   b(BATTERY69, 'H69 row: the remedy is the record as a COMMENT for the current head', h69row(pr69(), []).includes('post the `## 席位核对` record as a COMMENT for head `7cc8888`'), true);

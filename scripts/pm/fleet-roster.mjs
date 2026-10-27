@@ -43,7 +43,8 @@
  *   awaiting landing open pulls on a `claude/` head that close an in-flight
  *                    card of the seat (`Fixes|Closes|Resolves #n`) and carry a
  *                    review verdict — a `## 席位核对` comment whose verdict
- *                    line is ACCEPT, or a `## Contract review` with
+ *                    is ACCEPT, inline on the heading or on a line below it
+ *                    (`seat-record.mjs`), or a `## Contract review` with
  *                    `VERDICT: PASS`. ⛔ `pm:mailbox` pulls never count
  *                    (`LEDGER_EXCLUSION`).
  *   wall note        a line-initial `Wall:` (or `撞墙:`) line in the post
@@ -91,6 +92,10 @@ import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 // the mailbox opener (#25417); this file reads them, never re-spells them.
 import * as mailboxOpen from './mailbox-open.mjs';
 import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL } from './mailbox-open.mjs';
+// The seat record's heading and verdict have ONE reading, shared with H69 in
+// check-half-states; this file asks it, never re-spells the heading.
+import * as seatRecord from './seat-record.mjs';
+import { seatRecordAccepts } from './seat-record.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const PM_DIR = dirname(SELF_PATH);
@@ -222,7 +227,7 @@ export function closingRefs(body, repo) {
 export function hasLandingVerdict(comments) {
   return (Array.isArray(comments) ? comments : []).some((c) => {
     const body = String(c?.body ?? '');
-    if (/^##[ \t]*席位核对[ \t]*$/m.test(body) && /^[ \t]*(?:\*\*)?ACCEPT(?:\*\*)?\b/m.test(body)) return true;
+    if (seatRecordAccepts(body)) return true;
     return /^##[ \t]*Contract review\b/m.test(body) && /^[ \t]*(?:\*\*)?VERDICT:[ \t]*PASS\b/im.test(body);
   });
 }
@@ -590,6 +595,11 @@ async function selfTest() {
   t('席位核对 with REJECT is not', hasLandingVerdict([{ body: '## 席位核对\n\nREJECT · rework' }]), false);
   t('Contract review VERDICT: PASS is a verdict', hasLandingVerdict([{ body: '## Contract review\n\nServed-tier: x\n\n**VERDICT: PASS**' }]), true);
   t('an ACCEPT outside a seat record is not', hasLandingVerdict([{ body: 'ACCEPT this please' }]), false);
+  t('the live inline heading `## 席位核对 — ACCEPT · …` is a verdict', hasLandingVerdict([{ body: '## 席位核对 — ACCEPT · domain:skills#2 · session_01x · 2026-10-26T12:30Z\n\n1. 范围 ✓' }]), true);
+  t('⛔ an inline REWORK heading is not, whatever a later line opens with', hasLandingVerdict([{ body: '## 席位核对 — REWORK · 补测试\n\nACCEPT once the test lands' }]), false);
+  t('a blockquoted record is read as H69 reads it', hasLandingVerdict([{ body: '> ## 席位核对\n>\n> **ACCEPT** · seat 1' }]), true);
+  t('⛔ an ACCEPT line ABOVE the heading is not the record\'s verdict', hasLandingVerdict([{ body: 'ACCEPT\n\n## 席位核对\n\nREWORK · rework' }]), false);
+  t('the heading is H69\'s marker, imported not re-spelled: the three measured bodies read record alike', ['## 席位核对\n\n**ACCEPT** · x', '## 席位核对 — ACCEPT · x', '## Contract review\n\n**VERDICT: PASS**'].map((b) => `${seatRecord.SEAT_RECORD_MARKER.test(b)}/${hasLandingVerdict([{ body: b }])}`), ['true/true', 'true/true', 'false/true']);
   t('the mailbox constants are the opener\'s own, imported not re-spelled', [MAILBOX_LABEL, LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX], [mailboxOpen.MAILBOX_LABEL, mailboxOpen.LEDGER_EXCLUSION, mailboxOpen.MAILBOX_BRANCH_PREFIX]);
   t('a mailbox is read by head, then by body line; no label ⇒ none', [mailboxLogin({ labels: ['pm:mailbox'], head: { ref: 'mailbox/os-bill' } }), mailboxLogin({ labels: ['pm:mailbox'], head: { ref: 'claude/x' }, body: 'Mailbox-of: os-sales\n' }), mailboxLogin({ labels: [], head: { ref: 'mailbox/os-bill' } })], ['os-bill', 'os-sales', null]);
 
