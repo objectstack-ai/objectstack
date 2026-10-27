@@ -76,6 +76,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
+import { RelatedListCompactContext } from './relatedListCompact';
 
 export interface RelatedListProps {
   title: string;
@@ -2340,6 +2341,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const hasCustomRowActions = Array.isArray(rowActions) && rowActions.length > 0;
   const hasRowActions = !!onRowEdit || !!onRowDelete || hasCustomRowActions;
   const isMobile = useIsMobile();
+  // In the record page's related column (objectstack#26678) the list is a
+  // ~20rem card that names its first rows: the identity column alone, since a
+  // second column does not fit beside it and the table would be cut off at the
+  // column's edge. Display only — the read, filter and sort are unchanged.
+  const compact = React.useContext(RelatedListCompactContext);
 
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
@@ -2387,7 +2393,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return {
           type: 'data-table',
           data: paginatedData,
-          columns: tableColumns,
+          columns: compact ? tableColumns.slice(0, 1) : tableColumns,
           pagination: false, // We handle pagination ourselves
           pageSize: effectivePageSize || 10,
           searchable: false,
@@ -2425,7 +2431,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, onRowClick, isMobile, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, onRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = collapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = collapsible ? () => setCollapsed((c) => !c) : undefined;
@@ -2488,7 +2494,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         className={cn('py-3 px-4 sm:py-3 min-h-12 sm:min-h-0', headerClassName)}
         onClick={handleHeaderClick}
       >
-        <CardTitle className="flex items-center justify-between gap-2 text-sm font-semibold">
+        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
             {collapsible && (
               collapsed

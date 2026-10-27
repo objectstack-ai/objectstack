@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, resolveTitleField, useRecordEditable } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -810,6 +810,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return buildDefaultPageSchema(objectDef as any, assignedSlots ? { slots: assignedSlots } : undefined);
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
+  // ─── One page at two widths (objectstack#26678) ──────────────────────
+  // The synthesized default page — and a slotted page that keeps the default
+  // tab strip — is laid out by the width of the container it occupies: three
+  // resident columns from 1280 px, two from 1024 px, the tab strip below that
+  // and whenever this view is embedded (drawer / split pane), whatever the
+  // screen. Measured on this view's root, never the viewport. An authored full
+  // page and an authored `slots.tabs` strip are drawn as authored, so they
+  // never measure. `null` until the first reading lands (a layout effect, so
+  // never painted): the page body is held for that one commit rather than
+  // mounting the tab strip only to replace it.
+  const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
+  const pageColumnsEligible =
+    !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
+  const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
+  const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
   const [pageRecord, setPageRecord] = useState<any>(null);
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —
   // distinguishes "haven't tried yet" from each way the read can end. The
@@ -2040,9 +2055,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     () => (feedsEnabled ? effectivePage : stripDiscussionNodes(effectivePage)),
     [feedsEnabled, effectivePage],
   );
+  // In a column tier the page has no tab strip: every block it composes is
+  // on screen at open, so a feed block anywhere in it is (objectstack#26678).
   const feedConsumerOnScreen = useMemo(
-    () => feedPage != null && pageShowsNodeOnOpen(feedPage, FEED_CONSUMER_TYPES, activeTabParam),
-    [feedPage, activeTabParam],
+    () =>
+      feedPage != null
+      && ((pageInColumnTier && buildDefaultPageColumns(feedPage) !== null)
+        || pageShowsNodeOnOpen(feedPage, FEED_CONSUMER_TYPES, activeTabParam)),
+    [feedPage, activeTabParam, pageInColumnTier],
   );
   const [feedConsumerShown, setFeedConsumerShown] = useState(false);
   // Recorded during render, React's pattern for state derived from an earlier
@@ -2090,9 +2110,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       history: { entries: [] },
     });
   }, [historyEnabled, assignedPage, namedPageBlocked, objectDef, assignedSlots]);
+  // In a column tier History is a resident block of the timeline column, so
+  // its read goes out at open (objectstack#26678).
   const historyConsumerOnScreen = useMemo(
-    () => historyPage != null && pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam),
-    [historyPage, activeTabParam],
+    () =>
+      historyPage != null
+      && ((pageInColumnTier && buildDefaultPageColumns(historyPage) !== null)
+        || pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam)),
+    [historyPage, activeTabParam, pageInColumnTier],
   );
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
@@ -3698,6 +3723,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // that tree would double-render the panel (tab + bottom fallback).
   const hasApprovalsNode = hasExplicitApprovals(renderedPage as any);
 
+  // objectstack#26678 — the page as its column tier draws it: the record
+  // header, then details | timeline | related, read off `renderedPage` itself
+  // so the columns hold exactly the blocks the tab strip would (pruning
+  // included). `null` in the tabbed tier, and for a page whose strip the
+  // partition cannot read, which then keeps its tabs.
+  const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
   // record is the page bound to it, and when that page declares `print` it is
@@ -3727,7 +3759,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
 
   return (
-    <div className="h-full bg-background overflow-hidden flex flex-col relative">
+    <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. */}
       {!pageDeclaresPrint && (
@@ -3961,7 +3993,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
               >
-                <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                {/* objectstack#26678 — the column tiers draw the same page's
+                    blocks as resident columns; `?tab=` addresses the strip,
+                    so it is read in the tabbed tier only. Nothing is drawn
+                    while the tier is unmeasured (one unpainted commit). */}
+                {pageColumns && (recordPageTier === 'two-column' || recordPageTier === 'three-column') ? (
+                  <RecordPageColumns
+                    tier={recordPageTier}
+                    columns={pageColumns}
+                    footer={
+                      <RecordMetaFooter
+                        data={readablePageRecord}
+                        objectSchema={objectDef}
+                        objectName={objectName}
+                      />
+                    }
+                  />
+                ) : recordPageTier === null ? null : (
+                  <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                )}
               </RelatedRecordActionsBridge>
               {/* Approval visibility fallback (objectui#3461) — synthesized
                   pages surface approvals as a TAB (`record:approvals` via
@@ -4005,11 +4055,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   so it does not move with the active tab. `readablePageRecord`
                   is the row every block on the page reads, and the footer
                   renders nothing when the record carries no audit field. */}
-              <RecordMetaFooter
-                data={readablePageRecord}
-                objectSchema={objectDef}
-                objectName={objectName}
-              />
+              {/* In a column tier the columns draw it (objectstack#26678). */}
+              {!pageColumns && (
+                <RecordMetaFooter
+                  data={readablePageRecord}
+                  objectSchema={objectDef}
+                  objectName={objectName}
+                />
+              )}
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
                   update; renders (sticky) only while editing. */}
