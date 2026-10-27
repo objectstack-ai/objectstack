@@ -52,7 +52,7 @@ describe('fieldRuleCell — a row draws what the runtime enforces (objectstack#2
     }
   }
 
-  it('a field without an entry draws the object grant, never the defaults of an existing entry', () => {
+  it('a field without an entry draws the object grant', () => {
     expect(fieldRuleCell(undefined, EDIT_ON)).toEqual({
       inherited: true,
       readable: true,

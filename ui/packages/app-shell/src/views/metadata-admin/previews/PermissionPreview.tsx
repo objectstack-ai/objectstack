@@ -167,9 +167,8 @@ export function PermissionPreview({ name, draft, locale }: MetadataPreviewProps)
   // Group field permissions by object name (key format: "<object>.<field>").
   // objectstack#26597 — EVERY declared entry is listed: an entry is a rule the
   // runtime enforces, a read-only one included (the write gate refuses a field
-  // whose entry is not `editable`). `FieldPermissionSchema`'s defaults are the
-  // defaults of an entry that exists, never a reason to hide one; a field with
-  // no entry follows the object grant and has nothing to list.
+  // whose entry is not `editable`); a field with no entry follows the object
+  // grant and has nothing to list.
   const fieldsByObject = React.useMemo(() => {
     const out = new Map<string, Array<{ field: string; perm: FieldPermission }>>();
     for (const [key, perm] of Object.entries(fields)) {

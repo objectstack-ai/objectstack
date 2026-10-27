@@ -122,9 +122,7 @@ export interface FieldPerm {
  * `@objectstack/plugin-security`). A row WITHOUT an entry therefore draws the
  * object row's own Read and Edit, read through the spec's
  * `objectPermissionGrants` (the fold the evaluator answers from, the
- * super-user bits included), and is marked `inherited`. The defaults of
- * `FieldPermissionSchema` (`readable: true`, `editable: false`) are the
- * defaults of an entry that EXISTS; they are never the reading of a missing one.
+ * super-user bits included), and is marked `inherited`.
  *
  * A row WITH an entry draws the entry's bits, read as the runtime's merge reads
  * them (`=== true`, `fieldPermissionVote` in `@objectstack/core`). A bit the

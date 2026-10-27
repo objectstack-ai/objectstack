@@ -3,9 +3,8 @@
 /**
  * objectstack#26597 — the preview's field-level section lists EVERY entry the
  * set declares, by what it declares: hidden, read-only or editable. A
- * read-only entry is a rule the write gate enforces, so it is never hidden as
- * a "default"; a field the set has no entry for follows the object grant and
- * is not listed.
+ * read-only entry is a rule the write gate enforces, so it is listed; a field
+ * the set has no entry for follows the object grant and is not listed.
  */
 
 import '@testing-library/jest-dom/vitest';

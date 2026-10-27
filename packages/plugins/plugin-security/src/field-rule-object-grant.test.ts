@@ -5,11 +5,10 @@
  * set's object grant — measured through a real `ObjectQL` over a real SQL
  * driver, with the real `SecurityPlugin` middleware in front of it.
  *
- * `FieldPermissionSchema`'s defaults (`readable: true`, `editable: false`) are
- * the defaults of an entry that EXISTS. A field the set does not name passes
- * the field write gate and the read mask (`FieldMasker.detectForbiddenWrites` /
- * `maskResults`: "Fields without a permission entry pass through"; ADR-0066 ⑧),
- * so the object grant decides.
+ * A permission set constrains only the fields it names: a field the set does
+ * not name passes the field write gate and the read mask
+ * (`FieldMasker.detectForbiddenWrites` / `maskResults`: "Fields without a
+ * permission entry pass through"; ADR-0066 ⑧), so the object grant decides.
  *
  * This is the runtime half of a pair. Studio's field-permission editor draws a
  * field row from the same table (`fieldRuleCell` in `@object-ui/app-shell`'s
