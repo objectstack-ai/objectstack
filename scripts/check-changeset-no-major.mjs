@@ -1862,7 +1862,7 @@ export function declarationFromPullRequest(pr) {
  *
  *   unreadable-diff       the diff could not be computed               -> exit 1 (#4690)
  *   payload-unreadable    a `pull_request` run whose payload would not read -> exit 1 (#4690)
- *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
+ *   no-pull-request       not a PR run at all (a local run)           -> exit 0
  *   not-measured-material a reading that DECIDES this verdict is unreadable:
  *                         the `Clause-②:` line over a moved package graded
  *                         `patch` with no raise (#16776, unchanged), or the
@@ -1938,9 +1938,9 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false, base
 
   // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
   // did not declare", and #16776 is what happens when the two share an exit
-  // code, so they do not share a verdict either. Two callers reach it and
-  // neither is a PR: the RC cut (`cut-rc.yml`, `workflow_dispatch`, no
-  // `--event`) and a developer running this script in a checkout. The
+  // code, so they do not share a verdict either. One caller reaches it, and
+  // it is not a PR: a developer running this script in a checkout. Every
+  // workflow call site is a PR run (pinned in the wiring battery). The
   // declaration lives on a pull request; where there is none, this axis has no
   // input by construction rather than by omission, and it stands down.
   //
@@ -2237,8 +2237,8 @@ export function renderLevel(result) {
     case 'no-pull-request':
       stdout.push(
         'ℹ️ LEVEL AXIS: NOT APPLICABLE — this run has no `pull_request` to read a declaration from, so the ' +
-          'clause-② axis has no input by construction rather than by omission. It is a PR-scoped reading: the RC cut ' +
-          '(`cut-rc.yml`) and a local run reach here, and neither is a PR that could have declared.',
+          'clause-② axis has no input by construction rather than by omission. It is a PR-scoped reading: a local run ' +
+          'reaches here, and it is not a PR that could have declared.',
         ...readings,
         ...unreadableNote,
       );
@@ -3767,20 +3767,19 @@ function selfTest() {
         'and the refusal states the non-inference out loud: a `yes` is not read as `added` and a `(narrowing)` arm is not read as `narrowed` — the REST widening and the driver narrowing are exactly what ruling A grades `patch`',
       );
 
-      // The two contexts that are NOT a pull request, and the one that only
-      // looks like it. `cut-rc.yml` runs this script on a `workflow_dispatch`
-      // with no `--event` at all, over a whole RC snapshot range that certainly
-      // contains `patch` bumps on packages whose src moved; a rule that reddened
-      // there would have made the material refusal above unshippable.
+      // The context that is NOT a pull request, and the one that only looks
+      // like it. A local run hands over no `--event` at all, over a range that
+      // can contain `patch` bumps on packages whose src moved; a rule that
+      // reddened there would refuse a developer who has no PR body to fix.
       const noPayload = declarationFromPullRequest(readEventPullRequest(null));
       assert(noPayload.payload === false && noPayload.value === null, 'no payload at all reports `payload: false` beside the null value — the two facts are read separately');
       assert(
         judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false }).verdict === 'no-pull-request',
-        'a run with no pull request is NOT APPLICABLE, never an unread declaration: the RC cut and a local run reach here and neither could have declared',
+        'a run with no pull request is NOT APPLICABLE, never an unread declaration: a local run reaches here and could not have declared',
       );
       assert(
         renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false })).exitCode === 0,
-        'and it exits 0 — `cut-rc.yml` gates a whole snapshot range through this script with no event payload, and reddening it would be a rule that cannot ship',
+        'and it exits 0 — a local run has no event payload, and reddening it would refuse a developer who has no PR body to fix',
       );
       assert(
         judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: true }).verdict === 'payload-unreadable',
@@ -5121,28 +5120,38 @@ function selfTest() {
       `wiring: naming \`types:\` REPLACES GitHub's default set, so the five this job already needed must all still be listed beside \`edited\` — the label carriers are read on \`labeled\`/\`unlabeled\` and the diff on \`opened\`/\`synchronize\`/\`reopened\`. Got ${JSON.stringify(types)}`,
     );
 
-    // The OTHER consumer, and why the refusal above may exit 1 at all: the RC cut
-    // runs this same script over a whole snapshot range on a `workflow_dispatch`,
-    // where there is no pull request and therefore no declaration to read. It
-    // reaches the `no-pull-request` lane BECAUSE it hands over no `--event` and
-    // GitHub sets no `pull_request` payload there. A `--event` grown onto that
-    // call site, or a second one that is a PR run, would put an RC cut into the
-    // lane that can refuse — so the shape is pinned where the refusal lives.
-    const cutRcPath = join(REPO_ROOT, '.github/workflows/cut-rc.yml');
-    assert(existsSync(cutRcPath), 'wiring: .github/workflows/cut-rc.yml must exist — it is this script\'s other consumer, and the one the level axis must never red');
-    const cutRc = uncommented(existsSync(cutRcPath) ? readFileSync(cutRcPath, 'utf8') : '');
-    const cutRcCalls = [...cutRc.matchAll(/node scripts\/check-changeset-no-major\.mjs([^\n]*)/g)].map((m) => m[1]);
+    // Why the refusal above may exit 1 at all: every workflow call site of this
+    // script is a PR run, so on CI the `no-pull-request` lane is unreachable and
+    // only a local run stands down there. The retired RC lane, a
+    // `workflow_dispatch` over a whole snapshot range with no `--event`, was the
+    // one CI caller that took that lane; it left with the rc channel. Pinned
+    // over every workflow, not one file, so a NEW non-PR caller cannot arrive
+    // unread: it would stand down silently, and its PR has to move this pin and
+    // say why the stand-down lane is right for it.
+    const workflowDir = join(REPO_ROOT, '.github/workflows');
+    const workflowFiles = existsSync(workflowDir)
+      ? readdirSync(workflowDir).filter((f) => /\.ya?ml$/.test(f)).sort()
+      : [];
     assert(
-      cutRcCalls.length === 2 && cutRcCalls.some((c) => /^\s*--self-test\s*$/.test(c)),
-      `wiring: cut-rc.yml is expected to invoke this script exactly twice — \`--self-test\` then the real scan (found ${cutRcCalls.length}: ${JSON.stringify(cutRcCalls)})`,
+      workflowFiles.length > 1,
+      `wiring: .github/workflows must list the workflow files this pin walks (found ${workflowFiles.length}) — a walk over nothing passes every assertion below`,
+    );
+    const workflowText = (f) => uncommented(readFileSync(join(workflowDir, f), 'utf8'));
+    const callSites = workflowFiles.flatMap((f) =>
+      [...workflowText(f).matchAll(/node scripts\/check-changeset-no-major\.mjs([^\n]*)/g)].map((m) => ({ file: f, args: m[1].trim() })),
     );
     assert(
-      cutRcCalls.every((c) => !/--event\b/.test(c)),
-      'wiring: no cut-rc.yml call site may pass `--event` — the RC cut is a `workflow_dispatch` with no pull request, and the level axis stands down there by having no declaration carrier at all. Handing it one would put a whole snapshot range into the lane that can refuse (#16776)',
+      callSites.some((c) => c.file === 'pr-automation.yml'),
+      `control: the walk finds the real scan in pr-automation.yml — otherwise the two pins below judge an empty list (found ${JSON.stringify(callSites)})`,
     );
     assert(
-      !/pull_request/.test((cutRc.match(/^on:[\s\S]*?\njobs:/m) ?? [''])[0]),
-      'wiring: cut-rc.yml must stay off `pull_request` triggers — its `no-pull-request` lane is what keeps the #16776 refusal shippable, and a PR trigger there would make it a PR run with a payload',
+      callSites.every((c) => c.file === 'pr-automation.yml'),
+      `wiring: every workflow call site of this script must be in pr-automation.yml — a call site anywhere else is a caller the level axis has not been read against, and a non-PR one stands down without a word (found ${JSON.stringify(callSites)})`,
+    );
+    const onBlock = (f) => (workflowText(f).match(/^on:[\s\S]*?\njobs:/m) ?? [''])[0];
+    assert(
+      [...new Set(callSites.map((c) => c.file))].every((f) => /\bpull_request\b/.test(onBlock(f))),
+      'wiring: every workflow that runs this script must be triggered by `pull_request` — on a PR run the runner writes the payload, so an unreadable one fails closed instead of taking the stand-down lane (#16776)',
     );
   }
 
