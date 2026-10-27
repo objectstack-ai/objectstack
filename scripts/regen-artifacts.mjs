@@ -54,8 +54,9 @@ export const ROOT_OWNER = '@objectstack/spec-monorepo';
  * `mixed` is the third answer those two lists could not express. A file can be
  * mixed AND still belong here, when the generated half is unreachable by any text
  * merge (`content/docs/permissions/system-context.mdx` was the measured case, routed
- * from #13646 until #22927 retired the census totals that were its last generated
- * half; no row carries `mixed` today) — but
+ * from #13646 until #22927 retired its census totals; the site register #26442 has
+ * since generated on it is left to text-merge, for the reasons its
+ * `NOT_DRIVER_MANAGED` entry records; no row carries `mixed` today) — but
  * then "defer" is only correct for the merges where the discarded side changed
  * nothing but the generated half. The value NAMES that equivalence, and
  * `git-merge-regen.mjs` holds the mapping from the name to the comparator; an
@@ -237,10 +238,12 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // row with `mixed: 'line-anchors'` (#14064 measured a whole-side deferral dropping
   // its prose). Its generated half was its `file:line` anchors until #15921 made
   // them `path#symbol`, then its census totals until #22927's ruling took those off
-  // the page with `gen:system-context-census`. Nothing on it is generated, so it is
-  // no artifact and has no row; it text-merges like the prose around it, and
-  // `check:system-context-census` still re-derives the census on every PR. The
-  // measurements this row carried are in `git log -p scripts/regen-artifacts.mjs`.
+  // the page with `gen:system-context-census`. #26442 then generated its site
+  // register (`check-system-context-census.mjs --write`), so it is MIXED again and
+  // still has no row: its `NOT_DRIVER_MANAGED` entry (`content/docs/permissions/**`)
+  // records why, and `check:system-context-census` holds the register to the tree
+  // on every PR. The measurements this row carried are in
+  // `git log -p scripts/regen-artifacts.mjs`.
 
   // #13335 / #13731. The per-skill reference index — one row per `packages/spec`
   // source module, rendered whole by `gen:skill-refs`. Nine tracked files today,
@@ -418,12 +421,24 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
     path: 'content/docs/permissions/**',
     why:
       'the DIRECTORY is not what #13646 routed, and recording that is the point of this ledger. '
-      + 'Its pages are hand-written permissions prose. One — `system-context.mdx` — was routed as a '
-      + 'MIXED file from #13646 until #22927 retired the census totals that were its last generated '
-      + 'half; it is plain prose now and is routed nowhere. Routing the tree the way its sibling '
+      + 'Its pages are hand-written permissions prose, and two of them are MIXED: hand-written prose '
+      + 'around one generated region between BEGIN/END GENERATED markers. `system-context.mdx` was '
+      + 'routed as a MIXED file from #13646 until #22927 retired its census totals, and has carried a '
+      + 'generated site register since #26442 (`node scripts/check-system-context-census.mjs '
+      + '--write`); `tenant-audit-census.mdx` carries the census region `node '
+      + 'scripts/tenant-audit-census.mjs --write` rebuilds. NEITHER is routed, re-weighed at #26535: '
+      + 'a whole-side deferral would drop the other side\'s prose; the `mixed` escape would buy nothing, '
+      + 'since its one comparator, `line-anchors`, blanks `file:line` digits and is the identity on '
+      + 'both pages (measured), so every real edit would still take the driver\'s text-merge limb; a '
+      + 'row needs a `gen:` script its owner manifest declares, and neither page has one; and the '
+      + 'driver runs only in a local merge, never in GitHub\'s server-side one or the queue\'s. What '
+      + 'keeps them right is their gates, which hold each region equal to its `--write` output on '
+      + 'every PR and queue build in the required `Lint & Repo Gates` job, so a text merge that '
+      + 'leaves a region wrong is red, never silent; and the register carries one line per symbol and '
+      + 'no total, so two read-adding branches text-merge apart. Routing the tree the way its sibling '
       + '`content/docs/references/**` is routed reads as symmetry and is not: that sibling is '
       + 'generated whole, this one would defer every prose page to OURS and lose the other side\'s '
-      + 'edits silently. Should a generated page arrive here, route that FILE and leave its '
+      + 'edits silently. Should a page generated WHOLE arrive here, route that FILE and leave its '
       + 'neighbours to text-merge, which is correct for prose and always was.',
   },
   // ── #13731: the remaining generators, one recorded disposition each ──────────
