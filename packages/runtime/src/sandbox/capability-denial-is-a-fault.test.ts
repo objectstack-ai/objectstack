@@ -26,6 +26,10 @@
  * `domains/actions-fault-vs-rejection.test.ts`, which already states that a
  * `SandboxError` with no `innerMessage` is a 500 — this file is what makes a
  * real capability denial actually arrive in that shape.
+ *
+ * [#26903] These are ACTION-origin denials. A HOOK body's denial is a coded
+ * refusal (`403 INSUFFICIENT_PRIVILEGES`) since that card, pinned by
+ * `hook-capability-denial-is-a-refusal.integration.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';

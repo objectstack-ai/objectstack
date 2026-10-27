@@ -486,6 +486,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // as a CRASH and answers 500 through `errorFromThrown`, instead of
           // the 400 a denial used to get — and the client sees the capability
           // text without the `SandboxError: ` debug prefix.
+          // [#26903] A HOOK body's capability denial does not arrive here: it
+          // crosses as a coded refusal (`throwCapabilityDenial`) and takes the
+          // relay below like a body's own coded throw.
           if (info?.sandboxFault) {
             throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
@@ -2017,6 +2020,11 @@ export class SandboxError extends Error {
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
    * own internal errors (capability denials, timeouts, marshalling failures),
    * which have no user-meaningful inner message.
+   *
+   * [#26903] Except a HOOK body's capability denial: that is a refusal naming
+   * the hook and the capability, so it carries this field and its `code`/
+   * `status` (see `throwCapabilityDenial`). An action or job body's denial is
+   * still the fault described above.
    */
   readonly innerMessage?: string;
   /**
