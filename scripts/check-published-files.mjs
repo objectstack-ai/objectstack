@@ -294,7 +294,7 @@ const EXTRA_ENTRIES = {
   },
   '@objectstack/sdui-parser': {
     'LICENSE-MIT':
-      'The MIT permission notice for body-dialect.ts and provenance.ts, which moved in from @object-ui/sdui-parser (#25712) and keep the licence they were written under; MIT requires the notice to travel with every copy, and the bundled dist carries only a pointer to it.',
+      'The MIT permission notice for body-dialect.ts, provenance.ts and retired-visibility-dialects.ts, which moved in from @object-ui/sdui-parser (#25712) and keep the licence they were written under; MIT requires the notice to travel with every copy, and the bundled dist carries only a pointer to it.',
   },
 };
 

@@ -901,8 +901,8 @@ monthly / per-release) catches drift the CI gate missed — it runs the
      `coverage-nightly`, `engine-split-metric`, `prerelease-pin-watch`, `publish-smoke`,
      `rerun-safety-nightly` (retired since), `scaffold-e2e`, `showcase-smoke`, `stale`,
      `validate-deps`) were all unrelated. Derive that list with `grep -rl '^\s*schedule:' .github/workflows/`
-     rather than copying it: an unanchored grep for `schedule:` also matches `cut-rc.yml`,
-     whose only hit is a comment saying it deliberately has no schedule.
+     rather than copying it: an unanchored grep for `schedule:` also matches comment lines,
+     such as one saying a workflow deliberately has no schedule.
      ⚠️ **Read the registered workflow list and its run history, not the YAML on disk.**
      The two disagree in *both* directions: a workflow can be registered in Actions with
      no file on `main` (`matrix-aggregate-experiment.yml` is, today), and a scheduled

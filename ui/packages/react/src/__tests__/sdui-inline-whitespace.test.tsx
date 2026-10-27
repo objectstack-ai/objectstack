@@ -36,9 +36,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ComponentRegistry } from '@object-ui/core';
-import { SchemaRenderer } from '@object-ui/react';
-import { parseJsx } from '../parse.js';
-import type { SchemaElement, ParsedSchemaNode } from '../types.js';
+import { SchemaRenderer } from '../SchemaRenderer';
+import { parseJsx, type SchemaElement, type ParsedSchemaNode } from '@objectstack/sdui-parser';
 
 /** The parsed children of a single-root source. */
 function childrenOf(source: string): ParsedSchemaNode[] {

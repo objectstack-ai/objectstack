@@ -443,7 +443,7 @@ describe('PUBLIC_BLOCKS ↔ console coverage (reverse direction)', () => {
  * compiler's manifest from `getKnownTypes()` — registry-wide, no roster in it —
  * and `validateTree` judges authored pages against that. What this roster gates
  * is `getPublicConfigs()`: the curated AI-authoring vocabulary, and through
- * `sdui-parser/scripts/gen-manifest.ts` the published `sdui.manifest.json` and
+ * `apps/console/scripts/gen-manifest.ts` the published `sdui.manifest.json` and
  * `sdui-intrinsics.d.ts`. That is the surface `box` was missing from — narrower,
  * and true.
  */

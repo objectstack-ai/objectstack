@@ -14,6 +14,8 @@ because the runtime admin was once private; now that both are open-source, they
 are one package. The two plugins still mount independently — merging the package
 did not couple them.)
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Open-source mechanism, injectable tier line
 
 This package is mechanism only. Credential storage is delegated to a

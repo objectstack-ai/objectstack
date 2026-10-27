@@ -368,8 +368,9 @@ interface ReactionLedger {
  * ruling A amended on objectstack-ai/objectstack#22505; objectui#12078).
  *
  * A member adds a reaction by creating their row (`comment_id`, `emoji`; the
- * server stamps `user_id` from the session) and takes it back by deleting that
- * row. Nobody's write touches anyone else's reaction, so two members reacting
+ * server stamps `user_id` from the session) and takes it back by removing that
+ * row through the unreact door ({@link COMMENT_REACTION_REMOVE_PATH}). Nobody's
+ * write touches anyone else's reaction, so two members reacting
  * at the same moment both stay stored, which a whole-set write to
  * `sys_comment.reactions` could not do: the later write replaced the earlier.
  *
@@ -379,6 +380,18 @@ interface ReactionLedger {
  * objectstack-ai/objectstack#22573, after this.
  */
 const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
+
+/**
+ * The unreact door, `DELETE` + `/:id` of a `sys_comment_reaction` row
+ * (objectstack-ai/objectstack#26161): it removes the caller's own reaction
+ * row and refuses anyone else's (`403 PERMISSION_DENIED`). A take-back goes
+ * through it and not through the data door's `delete`, because that one needs
+ * an object-level `delete` grant, which no every-member set may carry
+ * (ADR-0090 D5): a member who reacts on the every-member grants alone could
+ * add a reaction and never take it back. The door reads no body and refuses
+ * any query parameter.
+ */
+const COMMENT_REACTION_REMOVE_PATH = '/api/v1/comments/reactions';
 
 /** The object the record feed's comments and replies are rows of. */
 const COMMENT_OBJECT = 'sys_comment';
@@ -2883,9 +2896,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    * All of the above is the `column` store, which runs only where the
    * deployment has no `sys_comment_reaction`. On the `records` store
    * (objectui#12078) a click writes nothing but the clicker's own row: it
-   * creates that row, or deletes it, so no write can replace another member's
+   * creates that row, or removes it through the unreact door, so no write can replace another member's
    * reaction and two members reacting at once both stay stored. The writes of
-   * one comment and emoji run one after another (a take-back deletes the row an
+   * one comment and emoji run one after another (a take-back removes the row an
    * earlier click is still creating). Once the last of them answers, the row
    * must show the clicker's reaction exactly when the server holds their row;
    * if it does not, a write was refused, and the clicker's own id on that emoji
@@ -2914,11 +2927,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         const userId = currentUser.id;
         const want = !holdsOwnReaction(row.reactions, emoji, userId);
         // The control is offered on the add row (`feedReactionAdd`, where it is
-        // handed over below); taking a reaction back is the delete of the
-        // caller's own row, its own row of the map. A click that would take
-        // back with that row closed writes nothing and shows nothing changed,
-        // rather than showing a take-back the server then refuses
-        // (objectui#12082).
+        // handed over below); taking a reaction back is the removal of the
+        // caller's own row through the unreact door, its own row of the map
+        // (`feedReactionRemove`, which reads no `delete` grant). A click that
+        // would take back with that row closed writes nothing and shows
+        // nothing changed, rather than showing a take-back the server then
+        // refuses (objectui#12082).
         if (!want && !reactionRemoveGranted) return;
         const commentKey = JSON.stringify([key, String(itemId)]);
         const writeKey = JSON.stringify([key, String(itemId), emoji]);
@@ -2958,9 +2972,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             }
             ownRows().set(emoji, String(created.id));
           } else if (!want && rowId !== undefined) {
-            if ((await dataSource.delete(COMMENT_REACTION_OBJECT, rowId)) === false) {
-              throw new Error(`The ${emoji} reaction was not deleted.`);
-            }
+            const res = await authFetch(
+              `${import.meta.env.VITE_SERVER_URL || ''}${COMMENT_REACTION_REMOVE_PATH}/${encodeURIComponent(rowId)}`,
+              { method: 'DELETE', credentials: 'include' },
+            );
+            if (!res.ok) throw new Error(`The ${emoji} reaction was not removed (HTTP ${res.status}).`);
             ownRows().delete(emoji);
           }
         };
@@ -3055,7 +3071,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           () => settle('failed'),
         );
     },
-    [currentUser.id, dataSource, feedRecordKey, feedItemsByRecord, reactionStore, reactionRemoveGranted, t],
+    [authFetch, currentUser.id, dataSource, feedRecordKey, feedItemsByRecord, reactionStore, reactionRemoveGranted, t],
   );
 
   useEffect(() => {

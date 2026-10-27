@@ -47,7 +47,7 @@ import {
   SchemaRendererProvider,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 import { safeValidateSchema } from '@object-ui/types/zod';
 // Registers `object-tree` through this package's own entry, at

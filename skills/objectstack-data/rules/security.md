@@ -116,6 +116,35 @@ bridge (warns). The compiler resolves these
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
 
+## Field permissions — a row-conditioned edit lock (`when`)
+
+A set's `fields` entry (`'OBJECT.FIELD': { readable, editable }`) may carry
+`when`, a row condition in the same canonical CEL as `rowLevelSecurity[].using`.
+**Choose by who loses the edit — one mechanism per need, never both:**
+
+- Locked for **everyone** at that stage → a [validation rule](./validation.md)
+  on the object (`readonlyWhen` likewise strips the write for everyone).
+- Locked for **some permission sets** only → `when` on the field entries of
+  each set that loses the edit; the other sets keep their grant.
+
+```typescript
+// finance may not change the contract's legal terms after approval
+fields: {
+  'clm_contract.governing_law': { readable: true, editable: false, when: "status in ['approved', 'signing', 'active']" },
+}
+```
+
+- **Edit vote only.** Reads are row-blind; `readable: false` beside `when` is
+  refused at parse time.
+- **Same object.** Fields of the entry's object vs a literal or `current_user.*`;
+  no relation reach (refused at `os validate` / publish).
+- **Pre-image.** An update is judged on the stored row, so a write cannot unlock
+  itself by moving `status` back; an insert on the row as sent.
+- **Locks, never grants.** On unmatched rows the entry is absent; another held
+  set's `editable: true` still wins (most-permissive merge).
+- Docs: https://objectstack.ai/docs/permissions/field-level-security#row-conditioned-edit-locks-when
+  and the recipe https://objectstack.ai/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage
+
 ## Sensitive fields — `secret` type + `requiredPermissions`
 
 `maskingRule` is **live** (FieldMasker). Two more channels:

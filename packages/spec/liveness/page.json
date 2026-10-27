@@ -4,7 +4,7 @@
   "props": {
     "source": {
       "status": "live",
-      "note": "JSX-source page authoring (ADR-0080). Consumer: objectui PageRenderer compiles `source` via @object-ui/sdui-parser into the SchemaNode tree (parse, never execute) and renders it — components/src/renderers/layout/page.tsx (kind:'jsx' branch). Browser-verified in the Command Center showcase."
+      "note": "JSX-source page authoring (ADR-0080). Consumer: objectui PageRenderer compiles `source` via @objectstack/sdui-parser into the SchemaNode tree (parse, never execute) and renders it — components/src/renderers/layout/page.tsx (kind:'jsx' branch). Browser-verified in the Command Center showcase."
     },
     "requires": {
       "status": "live",

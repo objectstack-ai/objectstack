@@ -52,7 +52,7 @@ import {
   type ManifestInput,
   type ManifestValidationResult,
   type RegistryConfigLike,
-} from '../index.js';
+} from '@objectstack/sdui-parser';
 
 const NS = 'pin6950';
 const TYPE = `${NS}:probe`;

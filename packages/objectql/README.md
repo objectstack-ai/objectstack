@@ -2,6 +2,8 @@
 
 The **Data Engine** for ObjectStack. It acts as a semantic layer between your application code and the underlying database.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Features
 
 - **Universal API**: A consistent query interface (`find`, `insert`, `update`, `delete`) regardless of the storage backend.
