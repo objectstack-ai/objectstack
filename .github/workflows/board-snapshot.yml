@@ -118,10 +118,11 @@ name: Board Snapshot
 #
 # ## Adopting this in a sibling repo
 #
-# Copy FOUR files, unchanged: `scripts/pm/board-snapshot.mjs`,
+# Copy FIVE files, unchanged: `scripts/pm/board-snapshot.mjs`,
 # `scripts/pm/check-half-states.mjs` (the archiver imports its proxy-re-exec plan
-# and its repo resolver), `scripts/invoked-as.mjs` (imported by both) and this
-# file. A repo that has already adopted the half-state patrol has the middle two.
+# and its repo resolver), `scripts/invoked-as.mjs` (imported by both),
+# `scripts/ci/board-snapshot-r2-upload.sh` (the R2 step runs it) and this
+# file. A repo that has already adopted the half-state patrol has the second and third.
 # ⛔ Do not shorten this list from memory — the imports decide it, not this
 # comment, and the patrol's own adopt list was wrong for months in exactly that
 # way, which installed a dead sweeper that failed before its first predicate.
