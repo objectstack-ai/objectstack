@@ -196,7 +196,9 @@ describe('[#25579] the two engine doors a bulk create reaches', () => {
       { id: 'k2', name: 'Li', supplier: 's1', is_primary: true },
     ]);
     expect(outcomes.map((o) => o.ok)).toEqual([true, false]);
-    expectRuleRefusal(outcomes[1]!.error);
+    const refused = outcomes[1]!;
+    if (refused.ok) throw new Error('expected the second row to be refused');
+    expectRuleRefusal(refused.error);
     expect((await contacts()).map((c) => c.id)).toEqual(['k1']);
     expect(await primaryCount()).toBe(1);
   });
