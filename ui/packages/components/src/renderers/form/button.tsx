@@ -20,8 +20,8 @@ import { resolveIcon } from '../action/resolve-icon';
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const ButtonRenderer = forwardRef<HTMLButtonElement, { schema: ButtonSchema }>(
   // `disabled` is the host-EVALUATED verdict, taken by name. `SchemaRenderer`
-  // evaluates the node's `disabled` / `disabledOn` (either may be a predicate
-  // STRING), strips the raw key from the props it spreads, and forwards the
+  // evaluates the node's `disabled` (which may be a predicate STRING),
+  // strips the raw key from the props it spreads, and forwards the
   // verdict as a real `disabled` prop. Consuming it here rather than re-reading
   // `schema.disabled` keeps one carrier for one question (AGENTS.md #0.1,
   // objectui#7238; precedent `plugin-chatbot`, objectui#6169) — and taking it

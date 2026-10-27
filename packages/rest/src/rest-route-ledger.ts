@@ -430,6 +430,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // ── approvals ─────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/approvals/requests', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listRequests' },
   { route: 'GET /api/v1/approvals/requests/:id', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRequest' },
+  { route: 'GET /api/v1/approvals/records/:object/:recordId/lock', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRecordLock' },
   { route: 'POST /api/v1/approvals/requests/:id/approve', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.approve' },
   { route: 'POST /api/v1/approvals/requests/:id/reject', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reject' },
   { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.recall' },

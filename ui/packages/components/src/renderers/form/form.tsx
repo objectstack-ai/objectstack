@@ -1594,8 +1594,8 @@ ComponentRegistry.register('form',
     } = schema;
 
     // The form-wide enablement verdict, and NOT `schema.disabled` beside it.
-    // `SchemaRenderer` evaluates the node's `disabled` / `disabledOn` — either
-    // may be a predicate STRING — strips the raw key from the props it spreads,
+    // `SchemaRenderer` evaluates the node's `disabled` — which may be a
+    // predicate STRING — strips the raw key from the props it spreads,
     // and forwards the answer as a real `disabled` prop. The raw value is truthy
     // HOWEVER it evaluates, so destructuring it off `schema` here greyed out
     // every field, the submit button and the cancel button on any form that

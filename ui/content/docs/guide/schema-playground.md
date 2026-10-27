@@ -254,7 +254,7 @@ Every schema goes through the following pipeline before becoming visible UI:
 
 1. **Parse** — The JSON string is parsed into a JavaScript object.
 2. **Validate** — The `type` field is checked against the component registry. Required fields are verified.
-3. **Resolve** — The registry maps the `type` to a React component. Expressions like `"visibleOn": "${data.role === 'admin'}"` are evaluated.
+3. **Resolve** — The registry maps the `type` to a React component. Expressions like `"visibleWhen": "${data.role === 'admin'}"` are evaluated.
 4. **Render** — The matched component receives the schema properties as props and renders Shadcn primitives with Tailwind classes.
 
 In code, this is a single call:
@@ -280,7 +280,7 @@ const schema: CardSchema = {
 - **Use `className`** — Any schema object accepts a `className` property for Tailwind utility classes.
 - **Check the `type`** — If nothing renders, verify the `type` value matches a registered component.
 - **Nest schemas** — Use container types like `stack`, `grid`, and `page` to compose multiple components.
-- **Add expressions** — Use `visibleOn` and `disabledOn` for dynamic behavior: `"visibleOn": "${data.showAdvanced}"`.
+- **Add expressions** — Use `visibleWhen`, `hidden` and `disabled` for dynamic behavior: `"visibleWhen": "${data.showAdvanced}"`.
 
 ## Related Resources
 

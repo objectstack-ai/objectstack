@@ -71,8 +71,8 @@ ComponentRegistry.register('chatbot',
   // read-site-censused first; none were dead, so none took the ADR-0049
   // route. `schema` is that one type, referenceable and documentable from
   // outside this file for the first time. `disabled` here is the sibling,
-  // host-EVALUATED prop (`SchemaRenderer`'s verdict on `schema.disabled` /
-  // `schema.disabledOn`, forwarded as `hostDisabled`) — a different carrier
+  // host-EVALUATED prop (`SchemaRenderer`'s verdict on `schema.disabled`,
+  // forwarded as `hostDisabled`) — a different carrier
   // from the authored `schema.disabled` it is derived from; see the comment
   // on `disabled={hostDisabled || isLoading}` below.
   ({ schema, className, disabled: hostDisabled, ...props }: { schema: ChatbotSchema; className?: string; disabled?: boolean; [key: string]: any }) => {
@@ -117,7 +117,7 @@ ComponentRegistry.register('chatbot',
         placeholder={schema.placeholder}
         onSendMessage={handleSendMessage}
         // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on the node's
-        // `disabled` / `disabledOn` (its `_disabled` flag, forwarded as a real
+        // `disabled` (its `_disabled` flag, forwarded as a real
         // `disabled` prop). Consuming it — rather than re-reading the raw
         // `schema.disabled` beside it — keeps one carrier for one question
         // (AGENTS.md #0.1): the raw value may be an expression STRING, which is
