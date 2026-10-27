@@ -1956,6 +1956,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.kindDesc.separator': '一条分隔线,无标签,不打开任何内容',
   'engine.studio.if.addMenuTitle': '添加到导航',
   'engine.studio.if.emptyGroup': '这个软件包里没有条目',
+  // objectstack#26889 — the rail's sections under the nav tree: the items no entry opens.
+  'engine.studio.if.offNav.heading': '不在导航中',
+  'engine.studio.if.offNav.page': '页面',
+  'engine.studio.if.offNav.dashboard': '仪表板',
+  'engine.studio.if.offNav.report': '报表',
+  'engine.studio.if.offNav.view': '视图',
   'engine.studio.if.openInData': '在「数据」中打开',
   // objectui#12725 — 画布上方的状态行，以及条目的 ⋯ 菜单。
   'engine.studio.if.status.design': '设计态',

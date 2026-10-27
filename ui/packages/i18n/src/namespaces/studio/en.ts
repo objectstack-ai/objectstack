@@ -2171,6 +2171,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.kindDesc.separator': 'A divider, no label, opens nothing',
   'engine.studio.if.addMenuTitle': 'Add to navigation',
   'engine.studio.if.emptyGroup': 'No items in this package',
+  // objectstack#26889 — the rail's sections under the nav tree: the items no entry opens.
+  'engine.studio.if.offNav.heading': 'Not in navigation',
+  'engine.studio.if.offNav.page': 'Pages',
+  'engine.studio.if.offNav.dashboard': 'Dashboards',
+  'engine.studio.if.offNav.report': 'Reports',
+  'engine.studio.if.offNav.view': 'Views',
   'engine.studio.if.openInData': 'Open in Data',
   // objectui#12725 — the status line above the canvas, and the item's ⋯ menu.
   'engine.studio.if.status.design': 'Design',
