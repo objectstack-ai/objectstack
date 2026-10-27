@@ -54,10 +54,10 @@
     {
       "id": 6,
       "prompt": "Add zh-CN for the `pipeline_by_stage` report, the `sales_manager` permission set, the `regional_lead` position and the `deal_stage` picklist's option labels.",
-      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, never `permissionSets`), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist. `os i18n extract --no-objects-only` scaffolds all four.",
+      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, never `permissionSets`), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist.",
       "files": [],
       "assertions": {
-        "must_contain": ["reports", "permissions", "positions", "picklists", "--no-objects-only"],
+        "must_contain": ["reports", "permissions", "positions", "picklists"],
         "must_not_contain": ["permissionSets", "report: {"]
       }
     },
@@ -69,6 +69,16 @@
       "assertions": {
         "must_contain": ["_views", "title", "_sections", "fields", "items", "approvals"],
         "must_not_contain": ["stepLabel", "_tabs.overview"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "In zh-CN the `Products` grid heading on the `crm_opportunity` form and the `Open Tasks` block heading of the joined `showcase_task_overview` report are still English.",
+      "expected_output": "`objects.crm_opportunity_line_item.fields.opportunity.inlineTitle` — the field lives on the child object, so the key is the child's, and an untranslated `inlineTitle` keeps its authored text (no fallback to the child's plural label); `reports.showcase_task_overview.blocks.open_block.label`, keyed by the block's required `name`. Neither is a `pages.*.components` key.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["inlineTitle", "crm_opportunity_line_item", "blocks", "open_block"],
+        "must_not_contain": ["fields.opportunity_line_item", "components.open_block"]
       }
     }
   ]

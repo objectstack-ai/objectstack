@@ -874,7 +874,15 @@ export const CEILINGS = new Map([
   // content to delete (five prompts, five distinct surfaces), so the remainder
   // is the whole addition; pinned AT the measurement, zero headroom. The
   // raising PR's body carries the same arithmetic.
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
+  // 1451 -> 1642 (2026-10-27, the owed Skills-docs follow-up of the spec PR that
+  // made a master-detail field's `inlineTitle` and a joined report's block
+  // `label` / `description` translatable): one eval prompt for both keys. Same
+  // ruling as the row above, tap label verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: case 6's `--no-objects-only`
+  // pin duplicated case 5's (77 bytes cut, 20 tokens); the remainder is the new
+  // case; pinned AT the measurement, zero headroom. The raising PR's body carries
+  // the same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1642],
   // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
