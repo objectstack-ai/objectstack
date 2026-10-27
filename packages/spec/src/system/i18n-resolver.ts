@@ -1518,6 +1518,10 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // The console's report index and report page both read `GET /meta/report`,
   // so registering here is the whole wiring.
   report: translateReport,
+  // A doc book's title and section titles: the console's docs portal builds
+  // its sidebar from `GET /meta/book`, and the tree route translates the book
+  // it resolves through this same table (`createMetaBookTreeAnswer`).
+  book: translateBook,
 };
 
 /**
@@ -2230,6 +2234,98 @@ export function translatePermissionSet<T extends SecurityCatalogItemLike>(
   opts?: ResolveOptions,
 ): T {
   return translateSecurityCatalogItem('permissions', doc, bundle, opts);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Doc-book resolver (label + description + group labels)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal book-group shape consumed by {@link translateBook}. */
+export interface BookGroupLike {
+  key?: string;
+  label?: string;
+  [key: string]: any;
+}
+
+/** Minimal doc-book shape consumed by {@link translateBook}. */
+export interface BookLike {
+  name: string;
+  label?: string;
+  description?: string;
+  groups?: BookGroupLike[];
+  [key: string]: any;
+}
+
+function lookupBookAttr(
+  bundle: TranslationBundle | undefined,
+  bookName: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.books?.[bookName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupBookGroupLabel(
+  bundle: TranslationBundle | undefined,
+  bookName: string,
+  groupKey: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.books?.[bookName]?.groups?.[groupKey]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a doc-book metadata document — its `label` and
+ * `description` against `books.<name>.label` / `.description`, and each
+ * group's `label` against `books.<name>.groups.<key>.label`, addressed by the
+ * group's stable `key` as an app's navigation node is by its `id`. The input
+ * document is not mutated; it comes back as the same reference when the
+ * bundle carries none of its keys, and a key the bundle does not carry leaves
+ * the authored string.
+ *
+ * Registered in {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary
+ * localizes every served book (`GET /meta/book`, list and item — the list the
+ * console's docs portal builds its sidebar from), and the book tree route
+ * (`GET /meta/book/:name/tree`) translates the book it resolves through the
+ * same table before the spine is rendered.
+ */
+export function translateBook<T extends BookLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const bookName = doc.name;
+  if (typeof bookName !== 'string' || bookName.length === 0 || !bundle) return doc;
+  const label = lookupBookAttr(bundle, bookName, 'label', opts);
+  const description = lookupBookAttr(bundle, bookName, 'description', opts);
+  let groupsMoved = false;
+  const groups = Array.isArray(doc.groups)
+    ? doc.groups.map((group) => {
+      if (!group || typeof group !== 'object' || typeof group.key !== 'string') return group;
+      const translated = lookupBookGroupLabel(bundle, bookName, group.key, opts);
+      if (translated === undefined) return group;
+      groupsMoved = true;
+      return { ...group, label: translated };
+    })
+    : doc.groups;
+  if (label === undefined && description === undefined && !groupsMoved) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(groupsMoved ? { groups } : {}),
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

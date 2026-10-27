@@ -257,11 +257,12 @@ describe('the acceptance face of ViewMetadataSchema — frozen by the diagnostic
    * are in the table precisely because a surprising accept is the one a
    * refactor silently loses:
    *
-   * - `overlay.badOperator` / `overlay.console*Id` ACCEPT with the payload
+   * - `overlay.badOperator` / `overlay.console*Id` ACCEPTED with the payload
    *   stripped to the binding + `{type:'simple'}` — the form overlay does not
-   *   declare `filter`/`sort`, and `.strip()` drops them. Pre-existing,
-   *   load-bearing for Studio's round-trip, and untouched by #7741 (openness
-   *   is about unknown keys; the binding is about required ones).
+   *   declare `filter`/`sort`, and its `.strip()` dropped them. [#26711] The
+   *   form overlay is closed now, so all three moved to REFUSED; the console's
+   *   row ids on a LIST overlay, where `sort` / `filter` are declared, are the
+   *   `overlay.list.console*Id` rows and still ACCEPT with the ids removed.
    * - `overlay.list.min` (`{type:'grid'}` alone) REJECTS.
    * - `container.empty` REJECTS with `custom`, not `invalid_union`: when
    *   exactly one branch is non-aborted zod's `handleUnionResults` returns THAT
@@ -292,12 +293,10 @@ describe('the acceptance face of ViewMetadataSchema — frozen by the diagnostic
       { type: 'simple', sections: [SECTION], ...BOUND_FORM }],
     ['overlay.form.identity', { name: 'x', object: 'crm_lead', viewKind: 'form', type: 'wizard' },
       { type: 'wizard', name: 'x', object: 'crm_lead', viewKind: 'form' }],
-    ['overlay.badOperator', { filter: [{ field: 'name', operator: 'sorta_equals', value: 'x' }], ...BOUND_FORM },
-      { type: 'simple', ...BOUND_FORM }],
-    ['overlay.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }], ...BOUND_FORM },
-      { type: 'simple', ...BOUND_FORM }],
-    ['overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }], ...BOUND_FORM },
-      { type: 'simple', ...BOUND_FORM }],
+    ['overlay.list.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }], ...BOUND_LIST },
+      { type: 'grid', sort: [{ field: 'name', order: 'asc' }], ...BOUND_LIST }],
+    ['overlay.list.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: 'equals', value: 'x' }], ...BOUND_LIST },
+      { type: 'grid', filter: [{ field: 'name', operator: 'equals', value: 'x' }], ...BOUND_LIST }],
     // [#20186] A lean `viewKind: 'list'` PUT is judged by the LIST member now,
     // so it parses to a list (`type: 'grid'`). It used to parse to
     // `type: 'simple'` — a FORM — because the form member was the one accepting
@@ -329,6 +328,12 @@ describe('the acceptance face of ViewMetadataSchema — frozen by the diagnostic
     ['overlay.list.aux.retiredHidden', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST }, ['invalid_union']],
     ['put.hidden', { hidden: true, ...BOUND_FORM }, ['invalid_union']],
     ['put.owner', { owner: 'usr_7', ...BOUND_LIST }, ['invalid_union']],
+    // [#26711] Formerly ACCEPTED with `filter` / `sort` stripped by the form
+    // overlay, which declares neither: the save stored a bare form overlay.
+    // The member is closed now and refuses both keys by name.
+    ['overlay.badOperator', { filter: [{ field: 'name', operator: 'sorta_equals', value: 'x' }], ...BOUND_FORM }, ['invalid_union']],
+    ['overlay.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }], ...BOUND_FORM }, ['invalid_union']],
+    ['overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }], ...BOUND_FORM }, ['invalid_union']],
     // [#7741] The corpus's former unbound ACCEPTED entries, each re-measured:
     // an overlay that names no `object`/`viewKind` would be stored as a row no
     // object-bound read path can serve, so the members now refuse it with the

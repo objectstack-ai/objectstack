@@ -1365,5 +1365,19 @@ export const ShowcaseTranslationBundle = {
       },
       showcase_hours_by_status_chart: { label: '按状态统计工时（图表）', description: '以柱状图展示按状态统计的预计工时。' },
     },
+    // The docs book: its title and the docs sidebar's section titles, keyed by
+    // the book's `name` and each group's `key`. The docs themselves localize
+    // through `doc.translations` and `<name>.zh-CN.md` variants.
+    books: {
+      showcase_manual: {
+        label: '示例手册',
+        description: '这个综合示例工作区里的一切。',
+        groups: {
+          start: { label: '入门' },
+          tour: { label: '导览' },
+          guides: { label: '指南' },
+        },
+      },
+    },
   },
 };

@@ -267,6 +267,19 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
     expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('1');
   });
 
+  // objectstack#26737 — a selection is never drawn nowhere: at a desktop width
+  // it unfolds a hidden slot on the selected block's properties.
+  it('selecting a block while the slot is hidden unfolds it on the properties', async () => {
+    await openDashboard();
+    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
+    expect(slot()).not.toBeVisible();
+
+    fireEvent.click(screen.getByTestId('pick-block'));
+    await waitFor(() => expect(slot()).toBeVisible());
+    expect(slot()).toHaveAttribute('data-mode', 'props');
+    expect(within(slotProps()).getByTestId('stub-inspector')).toBeVisible();
+  });
+
   it('the copilot tab and strip mark a plan that awaits approval', async () => {
     copilot.planPending = true;
     await openDashboard();

@@ -67,6 +67,12 @@ import { InterfacesPillar, StudioNavItemInspector } from './StudioDesignSurface'
 import { t } from '../metadata-admin/i18n';
 import { listStudioCanvasPreviewTypes } from './studio-canvas-preview';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 // ── StudioDesignSurface.railLabelInherits-11196 ──────────────────────────────
 
 /**

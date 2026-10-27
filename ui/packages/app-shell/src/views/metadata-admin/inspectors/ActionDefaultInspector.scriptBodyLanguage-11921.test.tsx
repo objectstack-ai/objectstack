@@ -131,7 +131,9 @@ describe('scriptBodyPin — the switch to "Run a script" seeds the language (obj
 
     await pick('What it does', RUN_A_SCRIPT);
 
+    // `type` is stored with the switch: the skeleton holds none (objectstack#26734).
     expect(seen.writes.at(-1)).toStrictEqual({
+      type: 'script',
       operation: undefined,
       patch: undefined,
       body: { language: 'expression' },
@@ -293,7 +295,7 @@ describe('scriptBodyPin — controls: the other writes (objectui#11921)', () => 
     const seen = mountHost({ ...NEW_ACTION, target: 'stamp_invoice' });
 
     await pick('What it does', RUN_A_SCRIPT);
-    expect(seen.writes.at(-1)).toStrictEqual({ operation: undefined, patch: undefined });
+    expect(seen.writes.at(-1)).toStrictEqual({ type: 'script', operation: undefined, patch: undefined });
     expect(refusals(seen.draft)).toEqual([]);
   });
 });

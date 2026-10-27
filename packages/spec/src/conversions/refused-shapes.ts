@@ -40,7 +40,8 @@
  *   `AutomationEngine.registerFlow` and `objectstack validate` run
  *   ({@link flowNodeValueTemplateRefusals}), and the `external` binding judge
  *   the object refinement and `defineStack` share
- *   ({@link externalBindingDatasourceRefusal}). A site is listed here exactly
+ *   ({@link externalBindingDatasourceRefusal}), and the one-name-per-action
+ *   judge of the object refinement ({@link duplicateActionNames}). A site is listed here exactly
  *   when that door refuses it. One door lives outside this package: the
  *   page/view `visibleWhen` rule in `@objectstack/lint` judges a `has()`
  *   argument on the engine's AST, which this package cannot parse, so its
@@ -59,6 +60,7 @@ import {
   isControlledByParentMasterField,
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
+import { duplicateActionNames } from '../data/duplicate-action-names.js';
 import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
@@ -478,6 +480,31 @@ const visibilityHasArgument: RefusedStoredShape = {
   },
 };
 
+// ── #26725: an object that declares one action name twice ──
+
+const objectDuplicateActionName: RefusedStoredShape = {
+  id: 'object-duplicate-action-name-refused',
+  toMajor: 18,
+  surface: 'object.actions — two or more entries of one object under the same action name',
+  detect(stack, report) {
+    mapCollection(stack, 'objects', (obj, path) => {
+      for (const duplicate of duplicateActionNames(obj.name, obj.actions)) {
+        report({
+          path: `${path}.actions[${duplicate.indexes[1]}]`,
+          // The name and the sites only: an action body can carry request headers.
+          from: JSON.stringify({ name: duplicate.name, indexes: duplicate.indexes }),
+          reason: 'No lossless rewrite: which declaration keeps the name, and what the others are renamed to '
+            + '(with every button, flow and caller that runs them by name), only the owner knows. Left as stored, '
+            + 'the object registers under `[metadata_spec_invalid]` and its next save is refused with 422 '
+            + 'INVALID_METADATA. '
+            + duplicate.message,
+        });
+      }
+      return obj;
+    });
+  },
+};
+
 /**
  * Every refused stored shape, in report order. A new entry is a reviewed edit:
  * `refused-shapes.test.ts` pins each one.
@@ -488,6 +515,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   flowValueSlotTemplateToken,
   externalBindingOnManagedDatasource,
   visibilityHasArgument,
+  objectDuplicateActionName,
 ];
 
 /**

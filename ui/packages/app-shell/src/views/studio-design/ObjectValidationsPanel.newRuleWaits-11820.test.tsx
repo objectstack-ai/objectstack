@@ -23,7 +23,8 @@
  *
  * Controls: an existing rule is edited exactly as before (a type switch still
  * seeds the valid `'false'` placeholder, since that rule is already in the
- * draft), and a type with no guard is written at once.
+ * draft), and a type with no guard waits for no condition — only for its field
+ * and message (objectstack#26731, pinned in `newRuleComplete-26731`).
  *
  * The harness feeds every `onPatch` back into `draft`, as the Data pillar does,
  * so what the panel shows after a write is what the pillar would show.
@@ -181,10 +182,18 @@ describe('a new validation rule waits for its condition (objectui#11820)', () =>
     expect(screen.queryByText('validation_2')).toBeNull();
   });
 
-  it('control — a type with no guard is written at once, on Create + Update', () => {
+  it('control — a type with no guard waits for no condition: its field and message write it, on Create + Update', async () => {
     const onPatch = vi.fn();
     render(<Harness onPatch={onPatch} />);
     addFromMenu('Format — regex / built-in format');
+    // objectstack#26731 — held until it has a field and a message, never a condition.
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /Expression/ })).toBeNull();
+    fireEvent.keyDown(screen.getByTestId('rule-field'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Name (name)' }));
+    fireEvent.change(screen.getByPlaceholderText('e.g. Completion date is required when status is Done'), {
+      target: { value: 'Bad name' },
+    });
     expect(onPatch).toHaveBeenCalledTimes(1);
     const written = lastValidations(onPatch)[1];
     expect(written).toMatchObject({ type: 'format', name: 'validation_2', events: ['insert', 'update'] });
