@@ -4,6 +4,7 @@
 '@objectstack/runtime': minor
 '@objectstack/cli': minor
 '@objectstack/lint': minor
+'@object-ui/app-shell': minor
 '@object-ui/i18n': minor
 ---
 
