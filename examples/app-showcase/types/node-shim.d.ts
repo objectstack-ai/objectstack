@@ -46,6 +46,10 @@ declare module 'node:path' {
 // test in the file has finished, so no in-process assertion can see it.
 // Narrowed to the synchronous form and to the three result members that pin
 // reads: it must not grow into the whole `child_process` surface.
+// `stdio` is `test/showcase-smoke.live.test.ts`'s one member: it streams the
+// Playwright run to this process's own stdout (the nightly stall guard reads
+// output to tell a slow suite from a hung one) and reads the verdict from a
+// report file, so with `inherit` the two captured streams come back `null`.
 declare module 'node:child_process' {
   export function spawnSync(
     command: string,
@@ -54,6 +58,7 @@ declare module 'node:child_process' {
       encoding: 'utf8';
       timeout?: number;
       env?: Record<string, string | undefined>;
+      stdio?: readonly ('ignore' | 'inherit' | 'pipe')[];
     },
   ): { status: number | null; stdout: string | null; stderr: string | null };
 }

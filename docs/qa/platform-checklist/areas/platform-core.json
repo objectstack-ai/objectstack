@@ -347,7 +347,8 @@
       "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
       "source": [
         "examples/app-showcase/e2e/showcase-smoke.spec.ts#SURFACES (SURFACES)",
-        ".github/workflows/showcase-smoke.yml",
+        "examples/app-showcase/test/showcase-smoke.live.test.ts",
+        ".github/workflows/test-nightly-tiers.yml",
         "objectui: packages/app-shell/src/chrome/ErrorBoundary.tsx (route-level fallback + recovery actions)",
         "examples/app-showcase/src/ui/apps/index.ts (nav truth)"
       ],
