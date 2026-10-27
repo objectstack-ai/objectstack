@@ -184,6 +184,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -293,6 +294,14 @@ Translation data for a single object
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
 
+### Nested Shape: `PlatformTranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
+
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -342,6 +351,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -449,6 +459,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `ServedTranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `ServedTranslationData.settingsCommon`
 
@@ -561,6 +579,7 @@ Per-app translation data for objects, apps, and UI messages
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -669,6 +688,14 @@ Translation data for a single object
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
 
+### Nested Shape: `TranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
+
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -739,6 +766,7 @@ One locale of translations — the `translation` metadata type
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
@@ -856,6 +884,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `TranslationItem.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

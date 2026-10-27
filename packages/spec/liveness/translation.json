@@ -288,7 +288,15 @@
           "status": "live",
           "verifiedAt": "2026-10-27",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
-          "note": "Overlays each group's `label`, addressed by the group's stable `key` — the sidebar's section titles."
+          "note": "Overlays each group's `label`, addressed by the group's stable `key` — the sidebar's section titles.",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
+              "note": "The group's section title in the docs sidebar and in the resolved tree's `groups[].label`."
+            }
+          }
         }
       }
     },
