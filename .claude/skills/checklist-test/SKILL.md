@@ -102,9 +102,8 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
   `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier <paths>` 的输出、
   ⛔ 不凭记忆(floor sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
   能、自己的端口/DB、结果不进仓规则(§4)。
-- **QA 运行不是车道卡。** runner(子代理或云卡 `create_session`,一卡一容器)由发起这一
-  轮的会话按本技能直接派,⛔ 不走车道认领、座位贴与 `domain:*` 归属;pm-dispatch 只管
-  它的写入门(§4)与安全修复派卡(Guardrails)。
+- **QA 运行不是车道卡。** runner(子代理或云卡)由发起本轮的会话直接派,⛔ 不走车道认领
+  与座位贴;pm-dispatch 只管写入门(§4)与安全修复派卡(Guardrails)。
 - **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
   的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
 - 忠实执行每项的 `steps`,按各自声明的 `oracle` 判定每条 `acceptance` 与 `negative`
@@ -127,14 +126,10 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 **issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
-一切 GitHub 写入只走 pm-dispatch 的写入门:`scripts/pm/issue-create.mjs` 立记录与缺陷卡、
-`scripts/pm/post-stamped.mjs` 写评论、`scripts/pm/close-cards.mjs` 关单,批量先
-`scripts/pm/write-pace.mjs --announce-batch N`;从仓根直接调用,⛔ 不加 `cd … &&` 前缀。云容器
-里它们自走 fleet relay(`objectstack-fleet[bot]`)。⛔ 永不 MCP `issue_write`(锁 1 已拒),⛔ 永不裸
-`curl`。写入被会话权限拦下时 ⛔ 不绕行:把全部待发文本落文件,最后一条消息给出路径与正文,
-由维护者放行后照原顺序补发 —— 写入没落地,这一轮就没收口。
-
-记录这样写:
+GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.mjs`、`post-stamped.mjs`、
+`close-cards.mjs`,批量先 `write-pace.mjs --announce-batch N`,云容器内自走 fleet relay;⛔ 永不 MCP
+`issue_write`(锁 1 已拒)或裸 `curl`。写入被会话权限拦下 ⛔ 不绕行:待发文本落文件、终报给
+出路径与正文,放行后照序补发 —— 写入未落地即未收口。记录这样写:
 
 - **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:唯一
   形状、严格解析、分数**强制**;语法与退役写法见 RUNNER.md「The record title」。
@@ -239,14 +234,13 @@ QA-source: #运行记录号 · area.item · 条款
 - **不伪造覆盖。** 缺 fixture → `blocked(fixture)` 带理由;console 没构建 → 构建它
   或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
   blocked 判定是一次成功运行;伪造的 pass 不是。
-- **测试中遇到的每个产品问题都立 issue** —— `fail` 条款与条款外探测所得同样,同一轮经 §4 写入
-  门立卡;⛔ 不只写进运行记录或聊天。认证 / 授权类按下一条走。
+- **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
+  录或聊天;认证 / 授权类按下一条。
 - **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟踪
-  卡,不进评论。记下项 id、条款与 `detail withheld pending maintainer`,复现留在会话里;修复
-  **直接经 pm-dispatch 派卡**:立一张只载项 id、条款与 `detail withheld pending maintainer`
-  的卡,再以席内 `mode:subagent`(披露纪律卡)派 `os-dev`,复现只进派发令,⛔ 不等维护者。
-  一次性 runner 无派发通道时,由派它的会话接手派卡。⚠ 这与 RUNNER 规则 2 是**同一条规则写
-  在两处**,⛔ 两边都不是对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
+  卡,不进评论。卡只载项 id、条款与 `detail withheld pending maintainer`,复现留在会话里;修复直
+  接经 pm-dispatch 派卡:席内 `mode:subagent` 派 `os-dev`,复现只进派发令,⛔ 不等维护者;runner 无
+  派发通道时由派它的会话接手。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边
+  都不是对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
 - **一个选择器、一次运行、一张 issue;验证重测不立 issue,证据进 PR 正文(§5)。** release
   sweep 把 `since:vN` 与 `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。
