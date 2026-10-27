@@ -363,7 +363,9 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     // Neighbours that must NOT match.
     expect(judge("navigation: { mode: 'drawer', size: 'lg' },")).toBe(false);
     expect(judge("navigation: { mode: 'page' }, formType: 'modal'")).toBe(false);
-    expect(judge("addRecord: { enabled: true, mode: 'modal' }")).toBe(false);
+    // Another block's `mode` is not this pin's (spelled off `addRecord`, whose
+    // own tree pin would read it as an authoring).
+    expect(judge("editor: { enabled: true, mode: 'modal' }")).toBe(false);
     expect(judge("recordAction: 'drawer'")).toBe(false);
     expect(judge("a list once wrote `navigation: { mode: 'modal' }`.")).toBe(false);
   });
