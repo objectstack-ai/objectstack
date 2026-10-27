@@ -46,6 +46,8 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
   let stack: VerifyStack;
   let token: string;
   let contactId: string;
+  let createdBody: any;
+  let createdDroppedHeader: string | null;
 
   beforeAll(async () => {
     stack = await getSharedShowcase();
@@ -62,7 +64,9 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
       lead_score: 10, // forged: the UI never renders this on the create form
     });
     expect(created.status, 'create succeeds; the readonly key is dropped, not rejected').toBeLessThan(300);
-    contactId = idOf(await created.json());
+    createdBody = await created.json();
+    createdDroppedHeader = created.headers.get('X-ObjectStack-Dropped-Fields');
+    contactId = idOf(createdBody);
     expect(contactId).toBeTruthy();
   }, 60_000);
 
@@ -74,6 +78,18 @@ describe('showcase: static readonly write enforcement (#2948 / #3003 / #3043)', 
     // No `defaultValue` is declared for `lead_score`, so the stripped field is
     // simply absent — the caller-forged 10 is gone.
     expect(rec.lead_score ?? null, 'insert-forged readonly value must NOT persist').toBeNull();
+  });
+
+  // [#26571] write-path-guards acceptance[0]: the INSERT strip is silent on the
+  // status, never on the answer — the caller is told which key was dropped and
+  // why (#3431), in the body and in the header.
+  it('the INSERT strip is ADVERTISED: droppedFields and X-ObjectStack-Dropped-Fields name lead_score', () => {
+    const dropped = (createdBody?.droppedFields ?? []) as Array<{ fields: string[]; reason: string }>;
+    expect(
+      dropped.some((d) => d.reason === 'readonly' && d.fields.includes('lead_score')),
+      `body droppedFields names the stripped key with reason readonly — got ${JSON.stringify(dropped)}`,
+    ).toBe(true);
+    expect(createdDroppedHeader ?? '', 'and the response header carries it').toContain('lead_score;reason=readonly');
   });
 
   it('a direct PATCH forging the readonly field is silently stripped — sibling editable fields still land', async () => {

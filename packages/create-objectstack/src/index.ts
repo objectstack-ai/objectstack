@@ -17,6 +17,11 @@
  * `template-registry.ts` still names them, so `-t todo` refuses with an
  * explanation instead of a bare "unknown template".
  *
+ * Before anything is written, the resolved project name (the `[name]`
+ * argument, or the current directory's basename) is checked against npm's
+ * package-name rules, and a name npm would refuse is refused here — with the
+ * rule and a suggested slug, never a silent rewrite (package-name.ts).
+ *
  * After the files land in `targetDir`, four files are rewritten with the
  * user-supplied project name:
  *   - package.json              .name
@@ -90,6 +95,7 @@ import {
   skillsSyncedFromPackage,
 } from './skills-install.js';
 import { renderVersionBanner } from './banner.js';
+import { checkProjectName, describeInvalidProjectName } from './package-name.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -500,6 +506,22 @@ const program = new Command()
 
     const cwd = process.cwd();
     const projectName = name || path.basename(cwd);
+
+    // Refused BEFORE anything touches the disk: the name is written verbatim
+    // into package.json and objectstack.manifest.json, and npm is the first to
+    // refuse a name like `My App!` — at publish, far from here. Never
+    // normalised silently: the user re-runs with the slug, or a name of their
+    // own (package-name.ts carries the why).
+    const nameVerdict = checkProjectName(projectName);
+    if (!nameVerdict.valid) {
+      const [headline, ...detail] = describeInvalidProjectName(projectName, nameVerdict, {
+        fromDirectory: !name,
+      });
+      printError(headline);
+      for (const line of detail) console.log(chalk.dim(`  ${line}`));
+      process.exit(1);
+    }
+
     const namespace = sanitizeNamespace(projectName);
     const targetDir = name ? path.resolve(cwd, name) : cwd;
     const isCurrentDir = targetDir === cwd;
