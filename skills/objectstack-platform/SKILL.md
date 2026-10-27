@@ -443,10 +443,11 @@ definition: never write it by hand, and never hand-write a raw
 ### Demo accounts — `demoStaff` vs `devLogins`
 
 A seed deals records to people (`owner_id: 'Legal Counsel 1'`) but cannot
-create one: a `sys_user` row in `data` is refused (ADR-0092). Declare the
-people in `demoStaff`; `os dev` creates each account after the development
-admin, signing in with the seed password (`--admin-password`, default
-`admin123`) — an entry carries no `password`:
+create one: a `sys_user` row written through `data` lands as a directory row
+with no account, so nobody can sign in as it. Declare the people in
+`demoStaff`; `os dev` creates each account after the development admin,
+signing in with the seed password (`--admin-password`, default `admin123`) —
+an entry carries no `password`:
 
 ```typescript
 demoStaff: [{ name: 'Legal Counsel 1', email: 'counsel1@example.com',
