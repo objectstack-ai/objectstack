@@ -38,7 +38,8 @@
 //  (e) the real door: the import dry run, through the protocol, of a created
 //      and of a matched row;
 //  (f) parity: every input a write-side `evaluateValidationRules` call passes
-//      is passed by the preview's call too (read from `engine.ts` itself).
+//      is passed by the preview's call too (read from the source itself: the
+//      writes in `engine.ts`, the preview in `engine-validate.ts`).
 //
 // (a), (b) and (e) were red before the fix.
 
@@ -456,42 +457,44 @@ describe('#22474 (e) — the import dry run of a detail row, through the protoco
 // ─────────────────────────────────────────────────────────────────────────────
 // (f) PARITY — every input a write binds, the preview binds.
 //
-// Read from `engine.ts` itself, so a NEW input added to a write-side
+// Read from the source itself, so a NEW input added to a write-side
 // `evaluateValidationRules` call and not to the preview's fails here. Each call
 // site is found by its callee name in the TypeScript AST and attributed to its
-// enclosing class method: the one in `validate` is the preview, every other is
-// a write. A call's inputs are the keys of its options object literal,
+// enclosing class method or function: the one in `validate` is the preview,
+// every other is a write. [#25522 cut 16] The preview's body moved out of
+// `engine.ts` into `engine-validate.ts` (the function `validate`), so both
+// files are read; the writes stay in `engine.ts`. A call's inputs are the keys of its options object literal,
 // including the keys of an object literal spread into it (`...(c ? { k } : {})`).
 // An options argument this reader cannot see into is a failure, never a pass.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RuleCall = { method: string; mode: string; keys: string[]; line: number };
+type RuleCall = { file: string; method: string; mode: string; keys: string[]; line: number };
 
-function ruleCallsIn(source: string): RuleCall[] {
-  const sf = ts.createSourceFile('engine.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+function ruleCallsIn(file: string, source: string): RuleCall[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const calls: RuleCall[] = [];
   const keysOf = (expr: ts.Expression, line: number): string[] => {
     if (ts.isParenthesizedExpression(expr)) return keysOf(expr.expression, line);
     if (ts.isConditionalExpression(expr)) return [...keysOf(expr.whenTrue, line), ...keysOf(expr.whenFalse, line)];
     if (!ts.isObjectLiteralExpression(expr)) {
-      throw new Error(`engine.ts:${line}: an evaluateValidationRules options value this test cannot read: ${expr.getText(sf)}`);
+      throw new Error(`${file}:${line}: an evaluateValidationRules options value this test cannot read: ${expr.getText(sf)}`);
     }
     const keys: string[] = [];
     for (const p of expr.properties) {
       if (ts.isSpreadAssignment(p)) keys.push(...keysOf(p.expression, line));
       else if ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && ts.isIdentifier(p.name)) keys.push(p.name.text);
-      else throw new Error(`engine.ts:${line}: an options member this test cannot read: ${p.getText(sf)}`);
+      else throw new Error(`${file}:${line}: an options member this test cannot read: ${p.getText(sf)}`);
     }
     return keys;
   };
   const visit = (node: ts.Node, method: string | undefined): void => {
-    const here = ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) ? node.name.text : method;
+    const here = (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name && ts.isIdentifier(node.name) ? node.name.text : method;
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'evaluateValidationRules') {
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       const [, , modeArg, optsArg] = node.arguments;
-      if (!here || !modeArg || !optsArg) throw new Error(`engine.ts:${line}: a call this test cannot attribute`);
+      if (!here || !modeArg || !optsArg) throw new Error(`${file}:${line}: a call this test cannot attribute`);
       const mode = ts.isStringLiteral(modeArg) ? modeArg.text : modeArg.getText(sf);
-      calls.push({ method: here, mode, keys: [...new Set(keysOf(optsArg, line))].sort(), line });
+      calls.push({ file, method: here, mode, keys: [...new Set(keysOf(optsArg, line))].sort(), line });
     }
     ts.forEachChild(node, (child) => visit(child, here));
   };
@@ -500,7 +503,8 @@ function ruleCallsIn(source: string): RuleCall[] {
 }
 
 describe('#22474 (f) — parity: the preview passes every input a write passes', () => {
-  const calls = ruleCallsIn(readFileSync(new URL('./engine.ts', import.meta.url), 'utf8'));
+  const calls = ['engine.ts', 'engine-validate.ts']
+    .flatMap((file) => ruleCallsIn(file, readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')));
   const previews = calls.filter((c) => c.method === 'validate');
   const writes = calls.filter((c) => c.method !== 'validate');
 
@@ -516,7 +520,7 @@ describe('#22474 (f) — parity: the preview passes every input a write passes',
     const previewKeys = new Set(previews[0]!.keys);
     const missing = writes.flatMap((w) => w.keys
       .filter((k) => !previewKeys.has(k))
-      .map((k) => `${k} (passed by ${w.method}'s ${w.mode} call at engine.ts:${w.line})`));
+      .map((k) => `${k} (passed by ${w.method}'s ${w.mode} call at ${w.file}:${w.line})`));
     expect(missing).toEqual([]);
   });
 
