@@ -188,10 +188,10 @@ describe('set as default (#4463)', () => {
 
 describe('the detach-then-call pattern stays gone (ratchet)', () => {
   it('ObjectView.tsx never assigns an adapter method to a local', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('./ObjectView.tsx', import.meta.url)),
+    const source = ['./ObjectView.tsx', './objectViewViewCrud.tsx'].map((file) => readFileSync(
+      fileURLToPath(new URL(file, import.meta.url)),
       'utf8',
-    );
+    )).join('\n');
 
     // Comments are stripped FIRST, and that is not a detail: the fix's own
     // docblock quotes the broken line verbatim to explain it, so a scan over the
