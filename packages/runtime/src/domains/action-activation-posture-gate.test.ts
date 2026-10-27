@@ -176,7 +176,7 @@ describe('ADR-0126 §5 — the action activation write is operator-gated in wall
             const res = await flip(h, TENANT_ADMIN());
 
             expect(statusOf(res)).toBe(200);
-            expect(h.setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+            expect(h.setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false }, expect.anything());
         });
 
         it('so may the platform operator', async () => {
