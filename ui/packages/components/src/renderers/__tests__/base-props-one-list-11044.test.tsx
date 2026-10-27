@@ -13,14 +13,16 @@
  * `validateTree` and the generated JSX types read. This file holds it against
  * the two things it answers to:
  *
- *   - `BaseSchema` (`@object-ui/types`): every entry is a member, and `body` —
- *     retired by objectui#6771 and answered by name in `body-dialect.ts` — is
- *     the one member left out. A member added to `BaseSchema` without a
- *     decision here turns this red, which is how `visibleWhen`, `hiddenOn`,
- *     `testId` (and `bind` / `hidden` before them, objectui#11008) sat as false
+ *   - `BaseSchema` (`@object-ui/types`): every entry is a member, and the
+ *     members left out are exactly the RETIRED ones — `body` (objectui#6771,
+ *     answered by name in `body-dialect.ts`) and the node-level visibility
+ *     dialects `visibleOn` / `hiddenOn` / `disabledOn` (answered by name in
+ *     `retired-visibility-dialects.ts`). A member added to `BaseSchema` without
+ *     a decision here turns this red, which is how `visibleWhen`, `testId`
+ *     (and `bind` / `hidden` before them, objectui#11008) sat as false
  *     `unknown-prop`s;
- *   - the live registrations: no registration declares `visibleWhen`,
- *     `hiddenOn` or `testId`, so making them `every-node` silences no declared
+ *   - the live registrations: no registration declares `visibleWhen`, `hidden`
+ *     or `testId`, so making them `every-node` silences no declared
  *     type check, and none of the three draws a diagnostic naming it on any
  *     registered type. For the `where-undeclared` members, every registration
  *     that declares one keeps its type check, and every one that does not
@@ -56,7 +58,7 @@ const naming = (manifest: Manifest, node: Record<string, unknown>, key: string):
     d.message.includes(`"${key}"`),
   );
 
-const MEMBER_1 = { visibleWhen: "data.role == 'admin'", hiddenOn: 'data.archived', testId: 'the-node' } as const;
+const MEMBER_1 = { visibleWhen: "data.role == 'admin'", hidden: 'data.archived', testId: 'the-node' } as const;
 
 const WHERE_UNDECLARED = SDUI_BASE_PROPS.filter((p) => p.scope === 'where-undeclared').map((p) => p.name);
 
@@ -71,14 +73,14 @@ const WELL_TYPED: Record<string, unknown> = {
 };
 
 describe('the base-prop list answers to `BaseSchema` and to the live registry (objectui#11044)', () => {
-  it('every entry is a `BaseSchema` member, and `body` is the one member left out', () => {
+  it('every entry is a `BaseSchema` member, and the retired members are the ones left out', () => {
     const names = SDUI_BASE_PROPS.map((p) => p.name);
     const members = Object.keys(BaseSchema.shape);
     expect(names.filter((n) => !members.includes(n))).toEqual([]);
-    expect(members.filter((m) => !names.includes(m))).toEqual(['body']);
+    expect(members.filter((m) => !names.includes(m))).toEqual(['body', 'visibleOn', 'hiddenOn', 'disabledOn']);
   });
 
-  it('no live registration declares `visibleWhen`, `hiddenOn` or `testId` as an input', () => {
+  it('no live registration declares `visibleWhen`, `hidden` or `testId` as an input', () => {
     const types = ComponentRegistry.getKnownTypes();
     expect(types.length).toBeGreaterThan(0);
     const declaring = types.flatMap((type) =>

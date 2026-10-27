@@ -5,7 +5,7 @@
  *
  * ## The measurement
  *
- * `os migrate plan`, ObjectStack Cloud's staging control plane, `apply=false`,
+ * `os migrate plan`, ObjectOS Cloud's staging control plane, `apply=false`,
  * inside `docker run --rm`. The command finished and said so:
  *
  * ```

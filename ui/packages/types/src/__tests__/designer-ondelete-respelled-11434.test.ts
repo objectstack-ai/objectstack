@@ -55,10 +55,15 @@ type InputOf<T> = T extends z.ZodType ? z.input<T> : never;
  * `deleteBehavior` carries the spec's vocabulary on both faces, and `onDelete`
  * reads as `undefined` on both — a `?: never` tombstone, and an alias refusal
  * whose `z.input` is `undefined`.
+ *
+ * The TypeScript face IS the spec's member (first row), so the second row names
+ * the three actions rather than restating the spec's enum: an action the spec
+ * adds is not a red here. The zod face's enum is this package's own list, so
+ * its row stays exact, and `zod-mirror-parity.test.ts` holds it to the spec's.
  */
 export type assertionRespelled = [
   Expect<Equal<DataModelRelationship['deleteBehavior'], SpecField['deleteBehavior']>>,
-  Expect<Equal<DataModelRelationship['deleteBehavior'], 'set_null' | 'cascade' | 'restrict' | undefined>>,
+  Expect<Equal<Exclude<'set_null' | 'cascade' | 'restrict', DataModelRelationship['deleteBehavior']>, never>>,
   Expect<Equal<InputOf<ShapeOf<typeof DataModelRelationshipSchema>['deleteBehavior']>, 'set_null' | 'cascade' | 'restrict' | undefined>>,
   Expect<Equal<DataModelRelationship['onDelete'], undefined>>,
   Expect<Equal<InputOf<ShapeOf<typeof DataModelRelationshipSchema>['onDelete']>, undefined>>,

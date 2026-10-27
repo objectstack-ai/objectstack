@@ -120,7 +120,7 @@ Supported: `>`, `<`, `>=`, `<=`, `==`, `===`, `!=`, `!==`
 ```json
 {
   "type": "button",
-  "visibleOn": "${user.isAdmin && user.isActive}"
+  "visibleWhen": "${user.isAdmin && user.isActive}"
 }
 ```
 
@@ -137,7 +137,13 @@ Supported: `&&`, `||`, `!`
 
 ## Conditional Properties
 
-### visibleOn
+The node-level condition keys are `visibleWhen`, `hidden` and `disabled`. The
+`visibleOn` / `hiddenOn` / `disabledOn` spellings are retired: `objectui validate`
+refuses them by name and points at the surviving key (same predicate, same
+polarity — rename the key, the value is unchanged). A form field's `fields[].visibleOn`
+is a different, view-level slot and is unaffected.
+
+### visibleWhen
 
 Show component when expression is true:
 
@@ -145,22 +151,22 @@ Show component when expression is true:
 {
   "type": "button",
   "label": "Admin Panel",
-  "visibleOn": "${user.role === 'admin'}"
+  "visibleWhen": "${user.role === 'admin'}"
 }
 ```
 
-### hiddenOn
+### hidden
 
 Hide component when expression is true:
 
 ```json
 {
   "type": "section",
-  "hiddenOn": "${user.settings.hideSection}"
+  "hidden": "${user.settings.hideSection}"
 }
 ```
 
-### disabledOn
+### disabled
 
 Disable component when expression is true:
 
@@ -168,7 +174,7 @@ Disable component when expression is true:
 {
   "type": "button",
   "label": "Submit",
-  "disabledOn": "${record.status === 'submitted'}"
+  "disabled": "${record.status === 'submitted'}"
 }
 ```
 
@@ -350,7 +356,7 @@ Available: All standard `Math` functions
 ```json
 {
   "type": "alert",
-  "visibleOn": "${(user.role === 'admin' || user.role === 'moderator') && user.isActive && !user.isSuspended}"
+  "visibleWhen": "${(user.role === 'admin' || user.role === 'moderator') && user.isActive && !user.isSuspended}"
 }
 ```
 
@@ -387,7 +393,7 @@ type and stay expressions:
   "type": "badge",
   "label": "Completed",
   "variant": "secondary",
-  "visibleOn": "${status !== 'draft'}"
+  "visibleWhen": "${status !== 'draft'}"
 }
 ```
 
@@ -409,7 +415,7 @@ Two neighbouring traps: `text` is not a `badge` key at all — the badge's text 
 ```json
 {
   "type": "empty",
-  "visibleOn": "${items.length === 0}",
+  "visibleWhen": "${items.length === 0}",
   "title": "No items to display",
   "description": "Start by adding your first item"
 }
@@ -427,7 +433,7 @@ the condition keys are evaluated on every type and stay expressions:
   "type": "progress",
   "value": 75,
   "label": "75% complete",
-  "visibleOn": "${total > 0}"
+  "visibleWhen": "${total > 0}"
 }
 ```
 
@@ -443,7 +449,7 @@ or author each variant and gate it with a condition key:
   "type": "card",
   "title": "${task.name}",
   "className": "border-red-500 border-2",
-  "visibleOn": "${task.isPriority}"
+  "visibleWhen": "${task.isPriority}"
 }
 ```
 
@@ -478,7 +484,7 @@ row:
       "name": "state",
       "type": "select",
       "label": "State/Province",
-      "visibleOn": "${record.country === 'USA'}",
+      "visibleWhen": "${record.country === 'USA'}",
       "options": [
         { "label": "CA", "value": "CA" },
         { "label": "NY", "value": "NY" },
@@ -660,7 +666,7 @@ language's own. A membership test is written with the array method:
 ```json
 {
   "type": "button",
-  "visibleOn": "${user.permissions.includes('admin')}"
+  "visibleWhen": "${user.permissions.includes('admin')}"
 }
 ```
 
@@ -690,7 +696,7 @@ language's own. A membership test is written with the array method:
 
 ```json
 {
-  "visibleOn": "${x && y || z}"
+  "visibleWhen": "${x && y || z}"
 }
 ```
 
@@ -698,7 +704,7 @@ language's own. A membership test is written with the array method:
 
 ```json
 {
-  "visibleOn": "${isAdmin && isActive || isSuperUser}"
+  "visibleWhen": "${isAdmin && isActive || isSuperUser}"
 }
 ```
 

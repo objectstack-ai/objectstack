@@ -140,7 +140,7 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.ok).toBe(true);
     const message = String(r.message);
     expect(message).toContain('@objectstack/knowledge-turso');
-    expect(message).toMatch(/ObjectStack Cloud monorepo/);
+    expect(message).toMatch(/ObjectOS Cloud monorepo/);
     // the un-followable form this card retired: named, with no origin stated
     expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
   });

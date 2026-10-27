@@ -27,7 +27,7 @@ import {
   type ParamCollectionHandler,
   type ResultDialogHandler,
 } from '@object-ui/core';
-import { useActionRunnerTranslator } from './actionRunnerTranslator.js';
+import { useActionRunnerDisplayLocale, useActionRunnerTranslator } from './actionRunnerTranslator.js';
 import { usePredicateScope } from '../hooks/useExpression.js';
 
 export interface ActionProviderProps {
@@ -100,6 +100,8 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
   const [result, setResult] = useState<ActionResult | null>(null);
   // The runner's own copy (the generic success toast) in the session's language.
   const translate = useActionRunnerTranslator();
+  // Its copy templates' formatters in the viewer's display locale (#26232).
+  const displayLocale = useActionRunnerDisplayLocale();
 
   const runner = useMemo(() => {
     // Normalize the evaluator scope so predicates can use *either* flat
@@ -117,6 +119,7 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
     } as ActionCtx;
     const r = new ActionRunner(normalizedContext);
     r.setTranslator(translate);
+    r.setDisplayLocale(displayLocale);
     if (onConfirm) r.setConfirmHandler(onConfirm);
     if (onToast) r.setToastHandler(onToast);
     if (onModal) r.setModalHandler(onModal);

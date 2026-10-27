@@ -105,6 +105,13 @@ npm run validate   # verify metadata: schema + predicates + bindings
 See the docs:
 [Your First Project](https://objectstack.ai/docs/getting-started/your-first-project).
 
+## Library subpath
+
+`create-objectstack/created-summary` (the "what was written" tree summary that
+`objectstack init` reuses) is **ESM-only**: the package is `"type": "module"`
+and the subpath declares only an `import` condition. Load it with `import`;
+`require()` is refused with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+
 ## License
 
 Apache-2.0. See [LICENSING.md](../../LICENSING.md).

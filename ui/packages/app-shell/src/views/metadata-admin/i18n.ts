@@ -255,6 +255,16 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.position.grants.byName': '(by name)',
   'engine.position.grants.byNameHint':
     'Granted because this permission set has the same name as the position. The position does not list it, but holders get it.',
+  // objectstack#26187 — the Setup position page's read-only previews of the
+  // permission sets the position names (`PositionPermissionSetsSection.tsx`).
+  'engine.position.sets.title': 'Permission sets',
+  'engine.position.sets.hint':
+    'What each permission set this position names grants, in the order it names them. Open a set to change it.',
+  'engine.position.sets.empty': 'This position names no permission sets.',
+  'engine.position.sets.loading': 'Loading…',
+  'engine.position.sets.notFound': 'Permission set "{name}" was not found.',
+  'engine.position.sets.readFailed': 'Permission set "{name}" could not be read.',
+  'engine.position.sets.open': 'Open this permission set',
   'engine.list.emptyType': 'No {type} items registered',
   'engine.list.emptyQuery': 'No matches for "{query}"',
   'engine.list.createHint': 'Click "New" above to create the first {type}.',
@@ -2693,6 +2703,19 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'perm.admin.manageAssignments': 'Manage assignments',
   'perm.admin.assignableSets': 'Assignable permission sets',
   'perm.admin.noSets': 'No permission sets loaded.',
+  // The grants a scope's holder needs beside the scope itself before they can
+  // act on it: enter Setup, pick people and units, write the assignment rows.
+  'perm.admin.companions.title': 'What a delegate also needs',
+  'perm.admin.companions.help':
+    'The scope says what its holders may administer; it does not let them in. A delegate also needs to enter Setup, to read people and business units so the lookups can pick them, and to create, read, edit and delete position assignments. These grants may sit on this set or on another set the delegate holds.',
+  'perm.admin.companions.setupAccess': 'Enter Setup',
+  'perm.admin.companions.read': 'Read',
+  'perm.admin.companions.crud': 'Create, read, edit and delete',
+  'perm.admin.companions.granted': 'On this set',
+  'perm.admin.companions.missing': 'Not on this set',
+  'perm.admin.companions.grant': 'Grant the missing ones',
+  'perm.admin.companions.packageNote':
+    'Under a package, grant these on an environment permission set in Setup, one the delegate holds: this editor saves only the package’s own objects.',
   'perm.loading': 'Loading permission set {name}…',
   // objectui#9420 — the package door refuses rather than PUTs when the
   // save-time layered re-read REJECTS: without it the merge base falls back
@@ -4062,6 +4085,13 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.position.grants.none': '无',
   'engine.position.grants.byName': '（同名）',
   'engine.position.grants.byNameHint': '因与岗位同名而授予。岗位定义未列出它，但持有人会获得它。',
+  'engine.position.sets.title': '权限集',
+  'engine.position.sets.hint': '此岗位列出的每个权限集授予的权限，按列出顺序显示。打开权限集可修改它。',
+  'engine.position.sets.empty': '此岗位未列出任何权限集。',
+  'engine.position.sets.loading': '加载中…',
+  'engine.position.sets.notFound': '未找到权限集"{name}"。',
+  'engine.position.sets.readFailed': '无法读取权限集"{name}"。',
+  'engine.position.sets.open': '打开此权限集',
   'engine.list.emptyType': '暂无 {type} 条目',
   'engine.list.emptyQuery': '没有匹配 "{query}" 的结果',
   'engine.list.createHint': '点击上方"新建"创建第一个 {type}。',
@@ -6323,6 +6353,17 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'perm.admin.manageAssignments': '管理分配',
   'perm.admin.assignableSets': '可分配权限集',
   'perm.admin.noSets': '未加载权限集。',
+  'perm.admin.companions.title': '委派管理员还需要的授权',
+  'perm.admin.companions.help':
+    '范围只规定持有者可以管理什么，并不能让其进入。委派管理员还需要：进入 Setup，读取人员与业务单元（供查找字段选择），以及对职位分配的创建、读取、编辑和删除。这些授权可以放在本权限集上，也可以放在委派管理员持有的其他权限集上。',
+  'perm.admin.companions.setupAccess': '进入 Setup',
+  'perm.admin.companions.read': '读取',
+  'perm.admin.companions.crud': '创建、读取、编辑和删除',
+  'perm.admin.companions.granted': '本权限集已授予',
+  'perm.admin.companions.missing': '本权限集未授予',
+  'perm.admin.companions.grant': '授予缺少的项',
+  'perm.admin.companions.packageNote':
+    '在包中时，请在 Setup 中把这些授权放到委派管理员持有的环境权限集上：此编辑器只保存本包自己的对象。',
   'perm.loading': '加载权限集 {name}…',
   // objectui#9420 — 见 EN 表同键注释。
   'perm.save.rereadFailed':

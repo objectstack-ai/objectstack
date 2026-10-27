@@ -301,10 +301,11 @@ function leakingIn(spawns: readonly BuildSpawn[]): string[] {
 /**
  * The floor, plus a named member.
  *
- * Two build spawns exist today, both in `cli-bin.test.ts`. The floor is set at
- * 1 rather than 2 on purpose: it is a vacuity guard, not a second copy of the
- * count, so retiring one spawn stays an ordinary green change while a walk that
- * resolves nothing does not.
+ * Four build spawns exist today, two in `cli-bin.test.ts` and two in
+ * `cli-bin.surface.test.ts` (objectstack#25911 split one file into those two).
+ * The floor is set at 1 rather than 4 on purpose: it is a vacuity guard, not a
+ * second copy of the count, so retiring one spawn stays an ordinary green
+ * change while a walk that resolves nothing does not.
  */
 const POPULATION_FLOOR = 1;
 const NAMED_MEMBER = 'packages/cli/src/__tests__/cli-bin.test.ts';

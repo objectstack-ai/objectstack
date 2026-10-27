@@ -12,7 +12,7 @@
  *      instance (the CRM / Todo / app you're building). Stored in
  *      `credentials.json`, written by `os login`.
  *
- *   2. **Cloud identity** — who you are on the official ObjectStack Cloud
+ *   2. **Cloud identity** — who you are on the official ObjectOS Cloud
  *      package registry (`https://cloud.objectos.ai`). Stored in
  *      `cloud.json`, written by `os cloud login`. Used to publish &
  *      install packages, browse the marketplace, etc.

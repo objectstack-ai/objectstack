@@ -9,14 +9,14 @@
 /**
  * Diagnostic: a node-gate predicate could not be evaluated (objectui#5454,
  * leg 3 of the 2026-08-21 ruling; production coverage added by objectui#6038,
- * maintainer ruling 2026-08-25 option B; the `disabled` / `disabledOn` gate
+ * maintainer ruling 2026-08-25 option B; the `disabled` gate
  * added by objectui#6445).
  *
  * ## The defect this names
  *
  * `SchemaRenderer`'s visibility chain is FAIL-SOFT: `evaluateCondition` answers
  * an unevaluable predicate with `true`. On the negated legs (`visible` /
- * `visibleWhen` / `visibleOn`) that `true` means SHOWN — so "this
+ * `visibleWhen`) that `true` means SHOWN — so "this
  * predicate is broken" and "this predicate said yes" reach the screen as the
  * same pixel. An author who mistyped a root, or who wrote a `record.*` gate
  * before objectui#5454 bound the row, saw their block render and had no signal
@@ -33,8 +33,8 @@
  * It changes NO verdict. `evaluateCondition` already returned `true` for every
  * unevaluable predicate on every one of its paths, and the caller reproduces
  * exactly that from its catch — including on the two NON-negated legs
- * (`hidden` / `hiddenOn`), where the same `true` means HIDE — and, since
- * objectui#6445, on the `disabled` / `disabledOn` gate, where it means GREYED
+ * (`hidden`), where the same `true` means HIDE — and, since
+ * objectui#6445, on the `disabled` gate, where it means GREYED
  * OUT. Flipping fail-soft to fail-closed is a shipped-behaviour change tracked
  * separately upstream (objectstack#5149, appeal 1, undecided); this module is
  * the diagnostic half only, on every gate wired to it.
@@ -57,7 +57,7 @@ export const UNRESOLVABLE_VISIBILITY_PREFIX =
   '[ObjectUI] A visibility predicate could not be evaluated';
 
 /**
- * The same opening line for the ENABLEMENT gate (`disabled` / `disabledOn`,
+ * The same opening line for the ENABLEMENT gate (`disabled`,
  * objectui#6445). A sibling constant rather than a widened one: the six
  * visibility legs keep the bytes they ship today (objectui#6487 pinned them),
  * and calling a `disabled` predicate a "visibility predicate" would send an
@@ -185,7 +185,7 @@ const SCOPE_TIER_ADVICE: Record<PredicateScopeTier, string> = {
  * evaluated reads on screen exactly like one that said yes, which is why the
  * console line is the only signal an author gets.
  *
- * `'enablement'` - `disabled` / `disabledOn`. The SAME `true` GREYS THE CONTROL
+ * `'enablement'` - `disabled`. The SAME `true` GREYS THE CONTROL
  * OUT, so here the safe default is the one that BITES. The author is looking at
  * a control they can see and cannot use; telling them the gate did not bite
  * would be the opposite of what is on their screen, and would send them looking
@@ -200,7 +200,7 @@ const SCOPE_TIER_ADVICE: Record<PredicateScopeTier, string> = {
  * other gate. That is the exact defect class this card and objectui#6487 both
  * exist to remove, so it is not worth re-introducing to save an argument.
  *
- * `'concealment'` - `hidden` / `hiddenOn` (objectui#6503). These are visibility
+ * `'concealment'` - `hidden` (objectui#6503). These are visibility
  * legs, but the only two whose verdict `SchemaRenderer` does NOT negate, so the
  * SAME `true` that SHOWS a node on the four negated legs REMOVES it here. They
  * resolved to `'visibility'` until objectui#6503 and were therefore handed the
@@ -235,7 +235,7 @@ const SCOPE_TIER_ADVICE: Record<PredicateScopeTier, string> = {
  *   fault is a `current_user.can(...)` asked before the permissions payload is
  *   there;
  * - the `page:tabs` item `visibleWhen` gate (objectui#13286);
- * - a page node's `visibleWhen` / `visible` / `visibleOn` (objectui#13299), for
+ * - a page node's `visibleWhen` / `visible` (objectui#13299), for
  *   a DECLARED predicate - a blank gate still means "no gate" and still prints
  *   `'visibility'`.
  *
@@ -280,7 +280,7 @@ const GATE_KIND_COPY: Record<PredicateGateKind, { prefix: string; consequence: s
     prefix: UNRESOLVABLE_VISIBILITY_PREFIX,
     consequence:
       'The node was treated as its safe default, which on THIS leg is the one\n' +
-      'that BITES: `hidden` / `hiddenOn` are NOT negated, so that default\n' +
+      'that BITES: `hidden` is NOT negated, so that default\n' +
       'REMOVED the node - it is not on the page at all, and an absent node is\n' +
       'indistinguishable from metadata that meant to hide it. Nothing is broken\n' +
       'in the renderer: the block is missing because the predicate above could\n' +
@@ -365,7 +365,7 @@ const _warnedVisibilityPredicates = new Set<string>();
  * B: "the silence is no longer an accepted property").
  *
  * The visibility chain was the first gate wired to it and is still the default
- * {@link PredicateGateKind}; `disabled` / `disabledOn` joined it in
+ * {@link PredicateGateKind}; `disabled` joined it in
  * objectui#6445, which is why the name is now narrower than the function. It is
  * kept anyway: this symbol is exported from the package entry and called from
  * `@object-ui/app-shell` and `@object-ui/components`, so renaming it would be a
@@ -399,8 +399,8 @@ const _warnedVisibilityPredicates = new Set<string>();
  * ## Neither is `gate`, and for a stronger reason (objectui#6445)
  *
  * `gate` is a FUNCTION of `key`, which is already in the dedupe key: the
- * enablement gate is exactly `disabled` / `disabledOn` and the visibility gate
- * is exactly the six legs of the visibility chain, two disjoint sets. So adding
+ * enablement gate is exactly `disabled` and the visibility gate
+ * is exactly the legs of the visibility chain, two disjoint sets. So adding
  * it could not separate two entries that `key` does not already separate, and
  * the cross-gate direction is pinned rather than argued: the SAME predicate
  * source authored on `disabled` and on `visibleWhen` produces TWO lines, not
@@ -468,7 +468,7 @@ export const ADAPTER_ONLY_DATA_PREDICATE_PREFIX =
   '[ObjectUI] A visibility predicate read `data.*` that the bound `data` does not answer';
 
 /**
- * The `disabled` / `disabledOn` sibling of the prefix above (objectui#6504,
+ * The `disabled` sibling of the prefix above (objectui#6504,
  * maintainer ruling 2026-08-27 option A). Same reason
  * {@link UNRESOLVABLE_ENABLEMENT_PREFIX} is a sibling of
  * {@link UNRESOLVABLE_VISIBILITY_PREFIX} rather than a reuse: calling a
@@ -486,7 +486,7 @@ export const ADAPTER_ONLY_ENABLEMENT_PREDICATE_PREFIX =
  * the #5687 precedent).
  *
  * A NARROWER union than {@link PredicateGateKind} deliberately, not an
- * oversight: `'concealment'` (`hidden` / `hiddenOn`) is not one of them. Both
+ * oversight: `'concealment'` (`hidden`) is not one of them. Both
  * of this diagnostic's call sites are unchanged by this card — the visibility
  * one (`SchemaRenderer.tsx`'s `evaluateVisibilityPredicate`) still calls
  * {@link reportAdapterOnlyDataPredicate} with no `gate` argument at all, for
@@ -745,8 +745,8 @@ export function formatAdapterOnlyDataMessage(
  * {@link reportUnresolvableVisibilityPredicate}'s own docblock gives for the
  * same omission
  *
- * `gate` is a FUNCTION of `key`: the enablement gate is exactly `disabled` /
- * `disabledOn` and the visibility gate this leg is called for is the six-leg
+ * `gate` is a FUNCTION of `key`: the enablement gate is exactly `disabled`
+ * and the visibility gate this leg is called for is the visibility
  * chain, two disjoint sets. Adding it to the dedupe key could not separate two
  * entries `key` does not already separate — and the cross-gate direction is
  * the one that would matter if it could: the SAME predicate source authored on

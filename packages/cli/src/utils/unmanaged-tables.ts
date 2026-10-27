@@ -10,8 +10,8 @@
  * the tables metadata DECLARES against the physical database, and a table no
  * declaration names is not in that map, so no plan can ever mention it.
  * Retiring an object therefore strands its table forever — measured on
- * ObjectStack Cloud's control DB, where a retired `sys_scim_provider` is still
- * present (0 rows) and every plan since has read as clean.
+ * ObjectOS Cloud's control-plane DB, where a retired `sys_scim_provider` is
+ * still present (0 rows) and every plan since has read as clean.
  *
  * ## ⛔ It never drops anything, and never proposes a drop
  *
