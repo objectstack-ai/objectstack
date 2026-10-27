@@ -59,8 +59,25 @@ const SUITE_BUDGET_MS = 20 * 60_000;
  * reads `SMOKE_API_URL` for the sign-in, the `baseURL` and the `webServer`
  * port alike; with `CI` set it never reuses a server it finds there, so a
  * developer's `pnpm dev` on :3000 can neither be attached to nor collide.
+ *
+ * The port is one the OS hands out (a listen on port 0), never a random pick:
+ * `serve --dev` SHIFTS to the next port when its own is taken, so on a picked
+ * port that turned out busy the backend came up one port higher while
+ * Playwright waited on the original until its 180s `webServer` timeout
+ * (measured: this file's second red).
  */
-const smokePort = (): number => 41_000 + Math.floor(Math.random() * 4_000);
+function freePort(): number {
+  const probe = spawnSync(
+    'node',
+    ['-e', "const s=require('node:net').createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close();});"],
+    { encoding: 'utf8' },
+  );
+  const port = Number(probe.stdout);
+  if (probe.status !== 0 || !Number.isInteger(port) || port <= 0) {
+    throw new Error(`could not get a free port from the OS (exit ${probe.status}): ${probe.stderr ?? ''}`);
+  }
+  return port;
+}
 
 /**
  * What a vitest worker adds to `process.env` beyond the `VITEST*` names, read
@@ -126,7 +143,7 @@ describe('showcase browser smoke (live tier)', () => {
       // server already on the port. Set explicitly because turbo's strict env
       // mode does not pass the runner's own `CI` through to a test task.
       env.CI = '1';
-      env.SMOKE_API_URL = env.SMOKE_API_URL || `http://localhost:${smokePort()}`;
+      env.SMOKE_API_URL = env.SMOKE_API_URL || `http://localhost:${freePort()}`;
       env.PLAYWRIGHT_JSON_OUTPUT_NAME = reportFile;
 
       try {
