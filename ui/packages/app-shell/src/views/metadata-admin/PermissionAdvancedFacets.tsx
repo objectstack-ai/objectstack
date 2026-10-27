@@ -677,6 +677,7 @@ export function PermissionAdvancedFacets({
                   objectName={pol.object}
                   fieldNames={fieldsFor(pol.object)}
                   clause="using"
+                  verdictPath={`rowLevelSecurity.${i}.using`}
                   onLintChange={(issues) => reportClause(`${i}:using`, issues)}
                   onChange={(v) => {
                     const next = [...policies];
@@ -693,6 +694,7 @@ export function PermissionAdvancedFacets({
                   objectName={pol.object}
                   fieldNames={fieldsFor(pol.object)}
                   clause="check"
+                  verdictPath={`rowLevelSecurity.${i}.check`}
                   onLintChange={(issues) => reportClause(`${i}:check`, issues)}
                   onChange={(v) => {
                     const next = [...policies];

@@ -93,6 +93,13 @@ import { HistoryPanel } from './ResourceHistoryPage.js';
 import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from './useMetadata.js';
 // objectui#11773 — the package door's draft save sends the version it was built on.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+// objectstack#26858 — the served verdict the RLS clause editors read at their paths.
+import {
+  DraftVerdictContext,
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  type ServerDiagnostics,
+} from './draftVerdict.js';
 // objectui#11787 — the package door autosaves through the pillars' own autosave.
 import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoSave.js';
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
@@ -727,6 +734,11 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const [fieldsByObject, setFieldsByObject] = React.useState<Record<string, FieldSummary[]>>({});
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState(true);
+  // objectstack#26858 — the server's verdict on the set on screen: the pending
+  // draft's while the package door holds one (what its publish will refuse),
+  // else the layered read's. Taken off each read, never computed here.
+  const [servedVerdict, setServedVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const verdictReadSeq = React.useRef(0);
   const [saving, setSaving] = React.useState(false);
   // objectui#11787 — when the package door's last draft save landed, for the
   // status line that replaces its Save button ("Saved 10:42").
@@ -849,6 +861,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ]);
         if (cancelled) return;
         const pendingDraft = pendingRead?.answer ?? null;
+        verdictReadSeq.current += 1;
+        setServedVerdict(
+          editedItemDiagnostics({
+            hasDraft: !!pendingDraft,
+            draftDiagnostics: draftEnvelopeDiagnostics(pendingDraft),
+            layered: lay,
+          }),
+        );
         // ARTIFACT tier input (objectui#4518) — the `code` layer, and its
         // `provenance` (objectui#4526), of the SAME envelope the display
         // baseline comes from, so the writability verdict and the body on
@@ -1326,6 +1346,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           // baseline hasn't moved. Show what we just staged.
           resetDraftBaseline(toDisplayDraft(toSave));
         }
+        // objectstack#26858 — the draft this save stored carries its own publish
+        // verdict on its next read; the one held described the body before it.
+        // Read off the save's path, so a later read (or a load) wins.
+        const seq = ++verdictReadSeq.current;
+        void readDraftForSave(client, type, payload.name, packageId).then((read) => {
+          if (seq === verdictReadSeq.current) setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+        });
         // Let the surface count it.
         onDraftSaved?.();
       } else {
@@ -1356,6 +1383,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // fallback this line already spelled for the resolved-but-empty
         // (404-shaped) envelope.
         resetDraftBaseline(toDisplayDraft((lay?.effective ?? toSave) as PermissionSetDraft));
+        verdictReadSeq.current += 1;
+        setServedVerdict(editedItemDiagnostics({ hasDraft: false, draftDiagnostics: undefined, layered: lay }));
         setPostSaveRereadFailed(rereadFailed);
         // The write landed, so the server holds the set now whatever the
         // confirming read said (objectui#7611: its holders can be listed). Only
@@ -2050,17 +2079,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               {capabilitiesEl}
             </div>
             <div hidden={facetTab === null} data-testid="perm-tabpanel-facets" className="min-h-0 flex-1 overflow-auto">
-              <PermissionAdvancedFacets
-                draft={draft}
-                setDraft={setDraft}
-                writable={writable}
-                allSetNames={allSetNames}
-                loadObjectFields={loadObjectFields}
-                onCelErrorsChange={setCelErrorCount}
-                t={t}
-                only={facetTab}
-                packageBound={!!packageId}
-              />
+              <DraftVerdictContext.Provider value={servedVerdict}>
+                <PermissionAdvancedFacets
+                  draft={draft}
+                  setDraft={setDraft}
+                  writable={writable}
+                  allSetNames={allSetNames}
+                  loadObjectFields={loadObjectFields}
+                  onCelErrorsChange={setCelErrorCount}
+                  t={t}
+                  only={facetTab}
+                  packageBound={!!packageId}
+                />
+              </DraftVerdictContext.Provider>
             </div>
           </div>
         )}
@@ -2222,16 +2253,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           {/* Advanced facets (ADR-0056 P3) — RLS / tab visibility / delegated
               admin scope, structured editors instead of raw JSON. Collapsed by
               default so they don't crowd the object matrix. */}
-          <PermissionAdvancedFacets
-            draft={draft}
-            setDraft={setDraft}
-            writable={writable}
-            allSetNames={allSetNames}
-            loadObjectFields={loadObjectFields}
-            onCelErrorsChange={setCelErrorCount}
-            t={t}
-            packageBound={!!packageId}
-          />
+          <DraftVerdictContext.Provider value={servedVerdict}>
+            <PermissionAdvancedFacets
+              draft={draft}
+              setDraft={setDraft}
+              writable={writable}
+              allSetNames={allSetNames}
+              loadObjectFields={loadObjectFields}
+              onCelErrorsChange={setCelErrorCount}
+              t={t}
+              packageBound={!!packageId}
+            />
+          </DraftVerdictContext.Provider>
         </div>
         {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
             (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
