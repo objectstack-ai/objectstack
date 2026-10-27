@@ -21,7 +21,10 @@
 import type { HierarchyScope } from '@objectstack/spec/contracts';
 import { objectPermissionGrants, type ObjectAccessScope } from '@objectstack/spec/security';
 
-export interface ObjectPerm {
+// A type alias, not an interface: a row is handed to the spec's
+// `objectPermissionGrants` (objectstack#26597), whose input is an open record,
+// and only an alias carries the implicit index signature that accepts.
+export type ObjectPerm = {
   allowCreate?: boolean;
   allowRead?: boolean;
   allowEdit?: boolean;
@@ -60,7 +63,7 @@ export interface ObjectPerm {
    */
   readScope?: ObjectAccessScope;
   writeScope?: ObjectAccessScope;
-}
+};
 
 /** The boolean columns of a row — every {@link ObjectPerm} key but the two scopes. */
 export type ObjectPermFlag = Exclude<keyof ObjectPerm, 'readScope' | 'writeScope'>;
