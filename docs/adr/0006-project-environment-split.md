@@ -1,6 +1,7 @@
 # ADR-0006: Environment & Project as Independent Siblings — v3
 
 **Status**: Superseded by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20
+**Versions of this number**: [v2](./0006-project-environment-split.v2.md) · [v3](./0006-project-environment-split.md) · [v4, current](./0006-project-environment-split.v4.md) — one decision revised twice; the number is shared only by its own revisions (AGENTS.md Prime Directive 13). A version is cited as `ADR-0006 v4` in prose or, stem-qualified, as `ADR-0006-project-environment-split.v4`.
 **Date**: 2026-05-20 (v3)
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: v1 (strict tree), v2 (siblings + sys_deployment join)

@@ -271,7 +271,7 @@ jobs:
           persist-credentials: false
 
       # Restore-only: scheduled runs read main's store cache; the per-push
-      # workflows own saving it. Same shape as coverage-nightly.yml.
+      # workflows own saving it. Same shape as test-nightly-tiers.yml.
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:

@@ -221,6 +221,10 @@ describe('the keys RecordFormPage passes bare are defined in every pack (#3469)'
     'form.editTitle',
     'form.createSuccess',
     'form.updateSuccess',
+    // The named save toasts (objectstack-ai/objectstack#26461), the keys the
+    // dialog paths use since objectstack-ai/objectstack#26172.
+    'form.createdNamed',
+    'form.updatedNamed',
     'form.saveRecord',
     // Joined this list in #3517. It was the file's one exception — defined in
     // NO pack, not even `en` — until the backfill; the describe below pins the

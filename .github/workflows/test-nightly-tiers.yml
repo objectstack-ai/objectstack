@@ -13,7 +13,7 @@ name: Nightly Tiers
 #
 # ## Shape
 #
-# `coverage-nightly.yml`'s: `schedule` + `workflow_dispatch`, node 22, pnpm,
+# The house nightly shape: `schedule` + `workflow_dispatch`, node 22, pnpm,
 # RESTORE-ONLY caches (a scheduled run reads main's pnpm store and Build Core's
 # turbo seeds; the per-push workflows own saving them, and a nightly that saved
 # would churn the rationed 10 GB pool the way PR-side saves once did — see
@@ -40,6 +40,14 @@ name: Nightly Tiers
 # Raise the matrix (three places below: `matrix.shard`, the job `name:`, and
 # `--shard k/N`) only when a second tier-owning package arrives heavy enough
 # for the partitioner's own balance line to say so.
+#
+# The second tier-owning package is `@objectstack/example-showcase`, and it is
+# not that heavy: one `*.live.test.ts` file (#26445), the showcase browser
+# smoke, which used to be its own scheduled workflow (Showcase Smoke) and
+# filed nothing when red. The partitioner keeps it whole ("not the run's
+# floor") and places it on one shard; that shard also builds the Console SPA
+# and installs Chromium for it (≈ 5 min, the "Prepare the showcase browser
+# smoke" step), which no other shard pays.
 #
 # ## What lands where — the house idiom of `platform-checklist-watchdog.yml`
 #
@@ -75,9 +83,7 @@ on:
   schedule:
     # Nightly. The minute is offset off the top of the hour ON PURPOSE (scheduled
     # workflows queue behind everyone else's `:00` cron) and off every sibling
-    # patrol's minute, so two of them never contend for the same runner minute;
-    # 05:29 sits after `coverage-nightly` (05:00) has started and well before
-    # `showcase-smoke` (07:00).
+    # patrol's minute, so two of them never contend for the same runner minute.
     #
     # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
     # the `env:` block below, where the report step computes the deadline the
@@ -205,6 +211,31 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # The showcase browser smoke (`examples/app-showcase/test/showcase-smoke.live.test.ts`)
+      # drives the Console against a real backend through Playwright, and needs
+      # two things `turbo run test` does not produce: the Console SPA the backend
+      # serves at /_console (`packages/console/dist`, built by the `build:dist`
+      # task — `pnpm console:build`), and a Chromium this `@playwright/test` can
+      # launch. Only the shard the partitioner gave that package pays for them.
+      # The test's own `^build` closure is the `test` task's, as for every
+      # package here.
+      #
+      # `continue-on-error`, on purpose: the same shard carries a slice of the
+      # CLI's e2e tier, and a Console build that fails one night must not take
+      # that slice down with it. The night is still red, and still names the
+      # file — the smoke then fails every test at once, and its failure text
+      # says to read a whole-run red as the environment first; this step's red
+      # in the log is the environment.
+      - name: Prepare the showcase browser smoke
+        continue-on-error: true
+        run: |
+          if ! grep -qE '^@objectstack/example-showcase( |$)' "$RUNNER_TEMP/shard-packages.txt"; then
+            echo "@objectstack/example-showcase is not on this shard — nothing to prepare."
+            exit 0
+          fi
+          pnpm console:build
+          pnpm --filter @objectstack/example-showcase exec playwright install --with-deps chromium
+
       # The same leg loop as ci.yml's "Run this shard's tests", under the
       # nightly setting, with vitest's JSON reporter added beside the default
       # one: `--outputFile.json` is RELATIVE so each package writes its own
@@ -220,6 +251,13 @@ jobs:
       # ⛔ A failing leg STOPS the remaining ones, as in ci.yml: a second full
       # leg on a job that is already red only risks turning an informative red
       # into a killed job with no report at all.
+      #
+      # One deliberate difference from ci.yml: the file-level SLICES run first
+      # and the whole-package leg last. The whole packages here are the cheap
+      # ones (the partitioner keeps a package whole when it is not the run's
+      # floor) — today the showcase browser smoke — and a red in one of them
+      # must not stop the shard's slice of the CLI's e2e tier from running.
+      # The other way round, a red slice skips a few minutes of smoke.
       - name: Run this shard's nightly tiers
         env:
           OS_TEST_TIERS: nightly
@@ -246,7 +284,7 @@ jobs:
           REPORTER="--reporter=default --reporter=json --outputFile.json=.nightly-tiers/vitest-report.json"
           STATUS=0
           LOGS=""
-          for LEG in __whole__ $SLICES; do
+          for LEG in $SLICES __whole__; do
             if [ "$LEG" = __whole__ ]; then
               [ -n "$FILTERS" ] || continue
               LOG="$RUNNER_TEMP/nightly-tiers-packages.log"
@@ -298,6 +336,21 @@ jobs:
           path: ${{ runner.temp }}/nightly-reports/
           if-no-files-found: ignore
           retention-days: 14
+
+      # The showcase smoke's screenshots, traces and error context, which
+      # Playwright writes under its default `outputDir` beside its config.
+      # `always()` and `ignore`: a red smoke leaves them, and so does a green
+      # one that passed only on its retry (`retries: 1` under CI) — the flaky
+      # first attempt is the evidence a time-dependent red needs. A clean green,
+      # and every shard without the showcase, leave nothing and upload nothing.
+      - name: Publish the showcase smoke's Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-smoke-diagnostics-${{ matrix.shard }}
+          path: examples/app-showcase/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The same two questions ci.yml's guard answers about a red suite — was
       # every test vitest COUNTED actually run, and did every scheduled package

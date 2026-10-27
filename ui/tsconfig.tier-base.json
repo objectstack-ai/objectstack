@@ -20,14 +20,16 @@
 // cb725e78f. Re-derive it rather than trusting this block if it matters — the
 // numbers below are a reading with a date on it, not a contract.
 //
-//   THIS FILE is extended by 3 files and by nothing else:
+//   THIS FILE is extended by 2 files and by nothing else:
 //     tsconfig.node.json                         editor / reference only; NO script
 //                                                runs it (see its own header)
 //     tsconfig.react.json                        no in-repo extender at all; named as
 //                                                a template for plugin authors in
 //                                                skills/objectui/guides/plugin-development.md
-//     examples/byo-backend-console/tsconfig.json the one real compile that reaches
-//                                                here (`tsc --noEmit`, `tsc && vite build`)
+//
+//   No package's build or type-check program reaches this file since
+//   `examples/byo-backend-console`, the one real compile that did, was deleted
+//   (#25922); turbo's task inputs no longer name it for that reason.
 //
 //   The root `tsconfig.json` is extended by 75 of the 94, every one of them
 //   under `packages/`: 38 of the 40 `packages/*/tsconfig.json`, 36 of the 37

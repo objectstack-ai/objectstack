@@ -123,7 +123,7 @@ interface CensusEntry {
 /**
  * [#23050 slice 3] Each registrar file's floor, its own measured `querySlots`
  * count: a file the split adds to the list needs a floor here before this
- * census reads it. The §1 controls pin the list's length and the census's sum
+ * census reads it. The §1 controls pin the census's sum
  * over it (4 = 1 + 3 + 0 + 0; the batch and approval bodies build no `query:`
  * literal).
  *
@@ -403,7 +403,7 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         expect(wireKeysAnywhere('const a = { where: filter, limit: 2 };')).toEqual([]);
     });
 
-    it('[#23050 slice 3] censuses every file on the registrar list — its length and the slot sum are pinned', () => {
+    it('[#23050 slice 3] censuses every file on the registrar list — the slot sum is pinned', () => {
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. [#23050 slice 4] Length 4 → 5, the sum unchanged.
         // [#23050 slice 5] Length 5 → 6, the sum unchanged.
@@ -425,7 +425,7 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // carries no slot).
         // [#23050 slice 13e] Length 17 → 18, the sum unchanged (neither the object
         // state-machine read nor the published read carries a slot).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        // [#26433] The list's length is no longer pinned: the list is the authority.
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

@@ -88,7 +88,7 @@ const renderMenuItems = (items: MenuItem[] | undefined) => {
 // example, doc page or README authors one, so `modal={schema.modal}` rode
 // `BaseSchema`'s index signature alone and was retired.
 ComponentRegistry.register('dropdown-menu', 
-  ({ schema, className, ...props }: { schema: DropdownMenuSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: DropdownMenuSchema; className?: string; [key: string]: unknown }) => {
     // Read-time resolution against the display locale (objectui#4580 revised
     // Q1-A). `BaseSchema.label` accepts `string | I18nLabel`; rendering the map
     // straight into a text node THREW "Objects are not valid as a React child"

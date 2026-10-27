@@ -76,7 +76,7 @@ function SidebarNode({
 }: {
   schema: SidebarSchema;
   collapsible?: unknown;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   const hostSidebar = useOptionalSidebar();
   const shadcnCollapsible = toShadcnCollapsible(collapsible);
