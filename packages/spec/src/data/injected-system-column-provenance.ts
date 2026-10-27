@@ -163,6 +163,32 @@ export const OWNING_BUSINESS_UNIT_FIELD_DEF: Readonly<Record<string, unknown>> =
 };
 
 /**
+ * [ADR-0142 D3] `queue` — the ownership queue a record sits in while its
+ * `owner_id` is empty, and its home queue once an owner takes it. A text
+ * column holding a queue MACHINE NAME, not a lookup: a declared queue is a
+ * catalog item with no row to point at, and an organization's `sys_queue` row
+ * is referenced by the same name.
+ *
+ * Shaped after `owner_id`, not after `organization_id`: `readonly: false`,
+ * because claim, release and move are ordinary writes the ownership gate
+ * adjudicates (and an assignment rule stamps it as the platform). `hidden:
+ * true`, because a free-text box for a machine name on every user-owned
+ * object's default layout would invite exactly the typo the gate refuses with
+ * `QUEUE_NOT_FOUND`; a Console renders the queue through its own picker.
+ */
+export const QUEUE_FIELD_DEF: Readonly<Record<string, unknown>> = {
+  type: 'text',
+  label: 'Queue',
+  required: false,
+  hidden: true,
+  readonly: false,
+  system: true,
+  description:
+    'Ownership queue (a queue machine name). With no owner the record sits in this queue for its members to ' +
+    'claim; with an owner it is the home queue a release returns the record to.',
+};
+
+/**
  * The injected columns THIS object carries, as `name -> definition`.
  *
  * Gated entirely by {@link resolveInjectedSystemColumns} — every opt-out row
@@ -183,6 +209,7 @@ export function injectedSystemColumnDefs(def: unknown): Record<string, Readonly<
   if (plan.audit) for (const name of AUDIT_PROVENANCE_FIELDS) defs[name] = AUDIT_FIELD_DEFS[name];
   if (plan.owner) defs[SystemFieldName.OWNER_ID] = OWNER_FIELD_DEF;
   if (plan.owningBusinessUnit) defs[SystemFieldName.OWNING_BUSINESS_UNIT_ID] = OWNING_BUSINESS_UNIT_FIELD_DEF;
+  if (plan.queue) defs[SystemFieldName.QUEUE] = QUEUE_FIELD_DEF;
   return defs;
 }
 

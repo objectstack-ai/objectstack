@@ -9,7 +9,14 @@
  * authenticated execution context.
  */
 
-export { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
+export {
+  SysRecordShare,
+  SysSharingRule,
+  SysShareLink,
+  SysQueue,
+  SysQueueMember,
+  SysAssignmentCursor,
+} from './objects/index.js';
 export { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 export {
   SharingService,
@@ -109,6 +116,27 @@ export {
   type DeclaredSharingRuleSkip,
 } from './declared-sharing-rules.js';
 export {
+  // [ADR-0142 D1/D2] The ownership-queue service, registered under
+  // `OWNERSHIP_QUEUE_SERVICE` (never `queue` — that name is the job queue's).
+  OwnershipQueueService,
+  specsReadBusinessUnits,
+  QUEUE_OBJECT,
+  QUEUE_MEMBER_OBJECT,
+  QUEUE_ACTIVATION_TYPE,
+  type OwnershipQueueServiceOptions,
+  type OwnershipQueueEngine,
+} from './ownership-queue-service.js';
+export {
+  bindQueueGuards,
+  bindQueueRecipientRecompute,
+  reportShadowedAuthoredQueues,
+  recomputeQueueRecipientRules,
+  pendingQueueRecipientRegrants,
+  QueueValidationError,
+  QUEUE_GUARD_PACKAGE,
+  QUEUE_RECIPIENT_RECOMPUTE_PACKAGE,
+} from './queue-hooks.js';
+export {
   SharingServicePlugin,
   buildSharingMiddleware,
   backfillRuleGrants,
@@ -145,4 +173,5 @@ export type {
   ShareLinkPermission,
   ShareLinkAudience,
 } from '@objectstack/spec/contracts';
-export { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+export type { IOwnershipQueueService, ResolvedQueue, QueueMemberSpec } from '@objectstack/spec/contracts';
+export { SHARE_LINK_SERVICE, OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';

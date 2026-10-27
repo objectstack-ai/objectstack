@@ -1,0 +1,88 @@
+{
+  "type": "assignment_rule",
+  "_note": "AssignmentRuleSchema (packages/spec/src/automation/assignment-rule.zod.ts) — declared routing of an inserted row to a queue or a user, the stack's `assignmentRules` (ADR-0142 D5). Seeded 2026-10-26 with the type itself (#25769): registered governed, not opened as a PENDING_GOVERNANCE debt. Declared only — organization-authored rules are deferred (ADR-0142 merge question 11) — and never copied into a row: the one consumer is the engine's insert seam, packages/objectql/src/assignment-rules.ts#AssignmentRuleEvaluator, which reads the registry items on every insert of an object that has rules (packages/objectql/src/engine.ts#assignment wires `listRules` to `registry.listItems('assignment_rule')`). Every row's `producer` is therefore the registry thread, packages/objectql/src/engine.ts#registerMetadataCollections, which loads the stack's `assignmentRules` array (METADATA_ARRAY_KEYS) under type `assignment_rule`. `kernel:ready` refuses to boot a stack that declares rules (or queues) with no `ownership-queue` service registered (packages/objectql/src/assignment-rules.ts#describeMissingOwnershipQueueService), so no row below can be inert by a missing service. PREVIEW READ POINTS: no metadata-admin preview is registered for `assignment_rule`; the Studio metadata list falls through to its default columns (ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns — objectui merged in-tree under ui/, not a REPO_ROOT, so the resolver does not check the path).",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/objectql/src/assignment-rules.ts#ruleOf drops an item with no `name`; packages/objectql/src/assignment-rules.ts#roundRobin keys the `sys_assignment_cursor` row by `rule` (this name), `entry` and `organization_id`, so a rename restarts the rotation; packages/objectql/src/assignment-rules.ts#switchedOn reads the activation ledger (`metadata_type: 'assignment_rule'`) by it.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidenceScope": "cross-repo",
+      "evidence": "Shown in the Studio metadata list's default `label` column — ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (objectui, merged in-tree under ui/), the `webhook.label` / `email_template.label` precedent; served on `GET /api/v1/meta/assignment_rule` by packages/rest/src/meta-item-read-gate.ts#createMetaListAnswer with no metadata-type redactor.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+      "note": "Display-shaped (#7131); the evaluator never reads it."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidenceScope": "cross-repo",
+      "evidence": "Shown in the Studio metadata list's default `description` column — ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (objectui, merged in-tree under ui/); served on `GET /api/v1/meta/assignment_rule` by packages/rest/src/meta-item-read-gate.ts#createMetaListAnswer.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+      "note": "Administrative notes; not `authorWarn`ed."
+    },
+    "object": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/objectql/src/assignment-rules.ts#rulesFor — a rule is evaluated only for inserts into the object it names (`rule.object === object`), and only when that object carries the platform `queue` column with storage behind it (packages/objectql/src/assignment-rules.ts#carriesQueueColumn); otherwise the rules route nothing and that is warned once, naming the object.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+      "note": "An object without the column is one whose records have no user owner (`ownership` other than `user`) or a federated one; routing into it would write an owner the access path never reads."
+    },
+    "active": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/objectql/src/assignment-rules.ts#ruleOf — `if (item.active === false) return null`: an inactive rule is never evaluated. The activation ledger is the second switch, read by packages/objectql/src/assignment-rules.ts#switchedOn.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+    },
+    "entries": {
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/objectql/src/assignment-rules.ts#roundRobin — the round-robin cursor is kept per `(rule, entry, organization_id)`, so the entry name decides which rotation a row advances; packages/objectql/src/assignment-rules.ts#ruleOf drops an entry with no name. The schema refuses two entries of one rule sharing a name for exactly that reason.",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+        },
+        "criteria": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/objectql/src/assignment-rules.ts#matches — the CEL is evaluated against the row in flight (`{ record: row }`); the first matching entry of the first matching rule decides (packages/objectql/src/assignment-rules.ts#assignOne). A criteria that cannot be evaluated does not match, warned once per entry.",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+          "note": "Absent = every row: the empty state is `open` by declaration, and harmless here — the row it admits is routed, never granted access."
+        },
+        "assignTo": {
+          "children": {
+            "type": {
+              "status": "live",
+              "verifiedAt": "2026-10-26",
+              "evidence": "packages/objectql/src/assignment-rules.ts#route — `type: 'user'` writes `owner_id` to the named id and stops; `type: 'queue'` resolves the queue in the row's organization through the `ownership-queue` service and writes the `queue` column; packages/objectql/src/assignment-rules.ts#ruleOf drops an entry whose target type is neither.",
+              "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+            },
+            "value": {
+              "status": "live",
+              "verifiedAt": "2026-10-26",
+              "evidence": "packages/objectql/src/assignment-rules.ts#route — the user id written as `owner_id`, or the queue machine name the `ownership-queue` service resolves (`resolveQueue(value, organization)`); a queue name that resolves nowhere in the row's organization leaves the row ownerless and is warned once, never refused; packages/objectql/src/assignment-rules.ts#ruleOf drops an entry with an empty value.",
+              "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+              "note": "Two grammars behind one key, split by `type`: the schema holds a queue target's value to the snake_case machine-name grammar, so a queue id or label is refused at authoring rather than resolving nowhere at insert."
+            }
+          }
+        },
+        "strategy": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/objectql/src/assignment-rules.ts#route — absent PARKS the row in the queue for a member to claim; `round_robin` picks the member after the cursor's last (packages/objectql/src/assignment-rules.ts#roundRobin, advancing the cursor under a `{version}` precondition with retry); `least_loaded` counts each member's matching rows in the organization and takes the smallest (packages/objectql/src/assignment-rules.ts#leastLoaded, tie to the earlier member by user id).",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+        },
+        "load": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/objectql/src/assignment-rules.ts#leastLoaded — the CEL is lowered through `compileCelToFilter` and ANDed with `owner_id` and `organization_id` into each member's count, so it decides what counts as open work.",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+          "note": "Required with `least_loaded` and refused otherwise by the schema, so there is no platform default to drift from."
+        }
+      }
+    }
+  }
+}

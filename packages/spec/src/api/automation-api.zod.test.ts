@@ -397,6 +397,31 @@ describe('TriggerFlowResponseSchema', () => {
     expect(result.data.screen?.idVariable).toBe('customerId');
   });
 
+  // #26657 — the screen's place among the run's screens, which the engine reads
+  // off the flow graph so a runner can say Next or Submit and count steps.
+  it('should preserve the screen progress the engine read off the graph', () => {
+    const paused = (progress: unknown) => TriggerFlowResponseSchema.safeParse({
+      success: true,
+      data: { success: true, status: 'paused', runId: 'run_wizard', screen: { nodeId: 's1', fields: [], progress } },
+    });
+    const exact = paused({ nextScreen: 'certain', step: 1, stepCount: 3 });
+    expect(exact.success && exact.data.data.screen?.progress).toEqual({ nextScreen: 'certain', step: 1, stepCount: 3 });
+    // A branch leaves the counts out; the answer alone is complete.
+    const branched = paused({ nextScreen: 'possible' });
+    expect(branched.success && branched.data.data.screen?.progress).toEqual({ nextScreen: 'possible' });
+  });
+
+  it('should reject a progress answer outside its closed vocabulary or a step below 1', () => {
+    const paused = (progress: unknown) => TriggerFlowResponseSchema.safeParse({
+      success: true,
+      data: { success: true, status: 'paused', runId: 'run_wizard', screen: { nodeId: 's1', fields: [], progress } },
+    });
+    expect(paused({ nextScreen: 'maybe' }).success).toBe(false);
+    expect(paused({}).success).toBe(false);
+    expect(paused({ nextScreen: 'none', step: 0, stepCount: 1 }).success).toBe(false);
+    expect(paused({ nextScreen: 'none', step: 1.5 }).success).toBe(false);
+  });
+
   it('should preserve terminal message and summary on a finished run', () => {
     const result = TriggerFlowResponseSchema.parse({
       success: true,

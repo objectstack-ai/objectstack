@@ -1779,7 +1779,7 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  */
 function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields',
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields' | 'blocks',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -2236,11 +2236,21 @@ export function translatePermissionSet<T extends SecurityCatalogItemLike>(
 // Report metadata resolver (label + description)
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Minimal shape of a joined report block consumed by {@link translateReport}. */
+export interface ReportBlockLike {
+  /** `JoinedReportBlockSchema.name` — the key `reports.<name>.blocks` addresses. */
+  name?: string;
+  label?: unknown;
+  description?: unknown;
+  [key: string]: any;
+}
+
 /** Minimal shape of a report document consumed by {@link translateReport}. */
 export interface ReportLike {
   name: string;
   label?: unknown;
   description?: unknown;
+  blocks?: ReportBlockLike[];
   [key: string]: any;
 }
 
@@ -2258,17 +2268,73 @@ function lookupReportAttr(
   return undefined;
 }
 
+function lookupReportBlockAttr(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  blockName: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.reports?.[name]?.blocks?.[blockName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay `reports.<name>.blocks.<block_name>.{label,description}` onto a
+ * joined report's `blocks[]`, judging each block against its packaged
+ * counterpart (matched by `name`). Returns `undefined` when no block changed,
+ * so {@link translateReport} can keep handing back the input reference.
+ */
+function translateReportBlocks(
+  blocks: unknown,
+  bundle: TranslationBundle,
+  name: string,
+  base: Record<string, unknown> | undefined,
+  opts?: ResolveOptions,
+): ReportBlockLike[] | undefined {
+  if (!Array.isArray(blocks)) return undefined;
+  let changed = false;
+  const rebuilt = blocks.map((block: ReportBlockLike) => {
+    if (!block || typeof block !== 'object') return block;
+    const blockName = block.name;
+    if (typeof blockName !== 'string' || blockName.length === 0) return block;
+    const packagedBlock = packagedPart(base, 'blocks', (candidate) => candidate.name === blockName);
+    const label = valueOverridesPackagedBase(packagedBlock, 'label', block.label)
+      ? undefined
+      : lookupReportBlockAttr(bundle, name, blockName, 'label', opts);
+    const description = valueOverridesPackagedBase(packagedBlock, 'description', block.description)
+      ? undefined
+      : lookupReportBlockAttr(bundle, name, blockName, 'description', opts);
+    if (label === undefined && description === undefined) return block;
+    changed = true;
+    return {
+      ...block,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
+  });
+  return changed ? rebuilt : undefined;
+}
+
 /**
  * Apply the active locale to a report metadata document — its `label` and
- * `description` against `reports.<name>.label` / `.description`. The input
- * document is not mutated, and it comes back as the same reference when the
- * bundle carries neither key (or the served value overrides both).
+ * `description` against `reports.<name>.label` / `.description`, and each
+ * joined block's against `reports.<name>.blocks.<block_name>.label` /
+ * `.description`. The input document is not mutated, and it comes back as
+ * the same reference when the bundle carries none of those keys (or the
+ * served values override them).
  *
  * These are the two strings the console lists a report by on the app's report
  * index, and the report page's heading. Registered in
  * {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary localizes every
  * served report (`GET /meta/report`, list and item) with nothing else to
- * remember.
+ * remember. A joined report's block `label` / `description` are the heading
+ * and caption its renderer draws above each block, read off the served
+ * document as is — so serving them translated here is the whole wiring.
  *
  * ## The catalog loses to an explicit override — ADR-0029 D9.2a
  *
@@ -2302,11 +2368,13 @@ export function translateReport<T extends ReportLike>(
   const description = valueOverridesPackagedBase(base, 'description', doc.description)
     ? undefined
     : lookupReportAttr(bundle, name, 'description', opts);
-  if (label === undefined && description === undefined) return doc;
+  const blocks = translateReportBlocks(doc.blocks, bundle, name, base, opts);
+  if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(blocks !== undefined ? { blocks } : {}),
   };
 }
 
@@ -3243,6 +3311,8 @@ export interface ObjectFieldLike {
   name?: string;
   label?: string;
   description?: string;
+  /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
+  inlineTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
   [key: string]: any;
 }
@@ -3266,7 +3336,7 @@ function lookupObjectFieldAttr(
   bundle: TranslationBundle | undefined,
   objectName: string,
   fieldName: string,
-  attr: 'label' | 'help' | 'description',
+  attr: 'label' | 'help' | 'description' | 'inlineTitle',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -3566,7 +3636,8 @@ function lookupObjectFieldOption(
  * `injectedSystemColumnDefs` (`../data/injected-system-column-provenance`)
  * spreads onto every eligible object with English labels: the tenant scope
  * anchor `organization_id`, the audit family `created_*` / `updated_*`,
- * `owner_id` and `owning_business_unit_id`. Custom objects carry no
+ * `owner_id`, `owning_business_unit_id` and the ownership `queue` (ADR-0142
+ * D3). Custom objects carry no
  * per-object translation entries for these, so without a fallback every
  * localized surface — list headers, export files, import templates, the
  * `/meta` read exits — leaks the English default (e.g. an otherwise
@@ -3603,6 +3674,7 @@ const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
     'ja-JP': '所属ビジネスユニット',
     'es-ES': 'Unidad de negocio propietaria',
   },
+  queue: { en: 'Queue', 'zh-CN': '队列', 'ja-JP': 'キュー', 'es-ES': 'Cola' },
 };
 
 /**
@@ -3843,6 +3915,15 @@ function translateObjectListViews(
  * the base does not declare was authored after the fact, and its description
  * counts as diverged; no base supplied means nothing is inferred and the
  * catalog applies.
+ *
+ * ## A field's `inlineTitle` — the inline child grid's heading
+ *
+ * `objects.<child>.fields.<field>.inlineTitle` overlays the field's own
+ * `inlineTitle` under that same rule. The field sits on the CHILD object, but
+ * its heading is drawn on the PARENT's form: the console's inline-subform pass
+ * copies the served child field's `inlineTitle` as is, so serving it
+ * translated here is the whole wiring. An authored heading with no entry keeps
+ * its text; the child's plural label is never swapped in for it.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -3883,6 +3964,14 @@ export function translateObject<T extends ObjectLike>(
     if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'description', def.description)) {
       const translatedDescription = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
       if (translatedDescription) next.description = translatedDescription;
+    }
+    // The inline child grid's heading, under the same divergence rule. The
+    // console's inline-subform pass copies the served value onto the parent's
+    // form, so this is the one place it is localized. An untranslated heading
+    // keeps its authored text — never the child's plural label in its place.
+    if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'inlineTitle', def.inlineTitle)) {
+      const translatedInlineTitle = lookupObjectFieldAttr(bundle, objectName, name, 'inlineTitle', opts);
+      if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
     }
     if (Array.isArray(def.options)) {
       // A picklist-bound field is served with its list's options resolved

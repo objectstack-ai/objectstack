@@ -1392,6 +1392,9 @@ export function collectExpectedEntries(
           { objectName },
         );
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
+        // The inline child grid's heading, drawn on the PARENT's form but
+        // addressed by the child field that declares it (`translateObject`).
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'inlineTitle'], field.inlineTitle, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
         //
@@ -1878,8 +1881,9 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
  * Emit the report copy surface:
  *
  *   reports.<name>.label / .description
+ *   reports.<name>.blocks.<block_name>.label / .description
  *
- * Read off the stack's `reports[]`. Served through `translateReport`,
+ * Read off the stack's `reports[]` and each joined report's `blocks[]`. Served through `translateReport`,
  * registered in `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary
  * localizes `GET /meta/report` (the list the console's report index and report
  * page read); this pass is the half that writes the skeleton and lets
@@ -1888,8 +1892,9 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
  * `pushOptional` for both keys: a report's `description` is optional at the
  * authoring site, so a string nobody wrote is recorded without an `inline` and
  * never demanded as a translation. A report's `label` is required, so it is
- * always authored text. A joined report's block labels and the embedded
- * chart's copy are not on this face.
+ * always authored text. A block's `label` is optional (the renderer falls back
+ * to the block's machine `name`), so a block without one is recorded the same
+ * way and never demanded. The embedded chart's copy is not on this face.
  */
 function walkReports(config: any, out: ExpectedEntry[]): void {
   const reports: any[] = Array.isArray(config?.reports) ? config.reports : [];
@@ -1899,6 +1904,14 @@ function walkReports(config: any, out: ExpectedEntry[]): void {
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['reports', name, 'label'], report.label, 'report');
     pushOptional(out, ['reports', name, 'description'], report.description, 'report');
+    const blocks: any[] = Array.isArray(report.blocks) ? report.blocks : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+      const blockName = block.name;
+      if (typeof blockName !== 'string' || blockName.length === 0) continue;
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'label'], block.label, 'report');
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'description'], block.description, 'report');
+    }
   }
 }
 

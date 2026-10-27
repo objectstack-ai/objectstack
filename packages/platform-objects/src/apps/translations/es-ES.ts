@@ -66,6 +66,8 @@ export const esES: TranslationData = {
         nav_sharing_rules: { label: 'Reglas de Compartición' },
         nav_declared_sharing_rules: { label: 'Reglas de Compartición Declaradas' },
         nav_record_shares: { label: 'Registros Compartidos' },
+        nav_queues: { label: 'Colas' },
+        nav_queue_members: { label: 'Miembros de Colas' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's

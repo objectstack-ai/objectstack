@@ -2445,6 +2445,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     label: "Sharing Rule",
     description: "A rule a package declares to share records; organizations author their own in Setup"
   },
+  queue: {
+    label: "Queue",
+    description: "A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup"
+  },
+  assignment_rule: {
+    label: "Assignment Rule",
+    description: "A rule a package declares to route new records to a queue or a person"
+  },
   agent: {
     label: "AI Agent",
     sections: {

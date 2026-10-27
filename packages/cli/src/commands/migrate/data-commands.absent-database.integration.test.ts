@@ -76,6 +76,11 @@
  * it reads `sys_audit_log` and `sys_activity` through the view
  * `audit-metadata-bodies` reads them through. Its control rows are an 18.0
  * writer's copies of a mail-log row, planted below the writer.
+ *
+ * `os migrate audit-key-material`, its twin over the same two tables, joined it
+ * born with the answer too. Its control rows are an older writer's copies of a
+ * secret-store row and a settings row, each carrying its key-material column,
+ * planted below the writer.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -456,6 +461,18 @@ await k(shard.name).insert({
   changed_fields: '[]',
   metadata: JSON.stringify({ old: null, new: { id: 'em_24693', subject: 's', body_text: 'mail-body-sentinel-24693', body_html: null } }),
 });
+// An older writer's copies of a secret-store row and a settings row, each still
+// carrying its key-material column (a sentinel). The activity row carries its
+// read-rule stamp, so it is no row of work for \`activity-changed-fields\`.
+await k('sys_audit_log').insert({
+  id: 'aud_26687', object_name: 'sys_secret', record_id: 'sec_26687', action: 'create',
+  new_value: JSON.stringify({ id: 'sec_26687', namespace: 'os26687', key: 'k', version: 1, ciphertext: 'key-material-sentinel-26687' }),
+});
+await k(shard.name).insert({
+  organization_id: 'org_fixture', id: 'act_26687', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_setting', record_id: 'set_26687',
+  changed_fields: '[]',
+  metadata: JSON.stringify({ old: null, new: { id: 'set_26687', namespace: 'os26687', key: 'k', encrypted: true, value_enc: 'key-material-sentinel-26687' } }),
+});
 await k('sys_comment').insert({
   organization_id: 'org_fixture', id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
   created_at: new Date().toISOString(),
@@ -529,6 +546,21 @@ const DOORS: readonly Door[] = [
     tables: ['sys_audit_log', 'sys_activity'],
     work: (doc) => {
       // The seeded clear mail-log copy is the one row to mask on each table;
+      // the rotation-managed table's rows are READ, as for audit-metadata-bodies.
+      expect(doc.report).toMatchObject({ failures: 0, byObject: { sys_audit_log: { rewritten: 1 }, sys_activity: { rewritten: 1 } } });
+    },
+  },
+  {
+    name: 'migrate audit-key-material',
+    argv: ['migrate', 'audit-key-material'],
+    empty: (doc) => {
+      expect(doc).toMatchObject({ apply: false, report: { scanned: 0, rewritten: 0, failures: 0 } });
+      expect(Object.keys(doc.report.byObject).sort()).toEqual(['sys_activity', 'sys_audit_log']);
+    },
+    humanEmpty: /Nothing to remove/,
+    tables: ['sys_audit_log', 'sys_activity'],
+    work: (doc) => {
+      // The seeded key-material copy is the one row to rewrite on each table;
       // the rotation-managed table's rows are READ, as for audit-metadata-bodies.
       expect(doc.report).toMatchObject({ failures: 0, byObject: { sys_audit_log: { rewritten: 1 }, sys_activity: { rewritten: 1 } } });
     },
