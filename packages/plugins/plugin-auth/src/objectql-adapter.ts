@@ -924,6 +924,14 @@ export function createObjectQLAdapterFactory(
         // of the cleartext JSON blob into the `secret`-typed column so the
         // ENGINE encrypts it; `oidc_config` keeps everything else.
         liftClientSecretForWrite(objectName, row);
+        // [#26638] A session is born with `last_activity_at` = `created_at`,
+        // so the #25343 heartbeat has a first value and Setup › Sessions
+        // never reads 「—」 for a live session. Here because better-auth's
+        // session model does not declare the column: a field set in its
+        // `session.create.before` hook is dropped before this write.
+        if (objectName === SystemObjectName.SESSION && row.last_activity_at == null && row.created_at != null) {
+          (row as Record<string, unknown>).last_activity_at = row.created_at;
+        }
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
