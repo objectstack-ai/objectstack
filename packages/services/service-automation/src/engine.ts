@@ -3046,6 +3046,29 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#25235] How many missed due times one detection may record for one
+     * flow, or `null` when it may record none.
+     *
+     * `null` without a persisted dispatch ledger: "no claim for this window"
+     * is then not evidence that nothing ran, so the detection is skipped
+     * rather than inferred (the trigger says so, naming the flow).
+     *
+     * Otherwise the run history's own per-flow cap
+     * ({@link SuspendedRunStore.maxTerminalRunsPerFlow}): the store keeps only
+     * that many newest terminal rows per flow and deletes the rest in the same
+     * write, so recording more would be writing rows it removes at once. A
+     * store that declares no cap (or `0`, cap disabled) leaves the engine's
+     * own run buffer (`maxLogSize`) as the history bound, and that is read
+     * instead — never a number of this method's own.
+     */
+    missedRunLimit(): number | null {
+        const ledger = this.flowDispatchStore;
+        if (!ledger || typeof ledger.read !== 'function') return null;
+        const cap = this.store?.maxTerminalRunsPerFlow;
+        return typeof cap === 'number' && cap > 0 ? cap : this.maxLogSize;
+    }
+
+    /**
      * Record one scheduled due time that passed while the kernel was not
      * ticking as a `missed` entry in the flow's run history — and run nothing
      * for it. Record only, no replay: the ruling this implements is
@@ -3070,29 +3093,6 @@ export class AutomationEngine implements IAutomationService {
      * documents that reading of the two for `missed`; no step ran, so `steps`
      * is empty.
      */
-    /**
-     * [#25235] How many missed due times one detection may record for one
-     * flow, or `null` when it may record none.
-     *
-     * `null` without a persisted dispatch ledger: "no claim for this window"
-     * is then not evidence that nothing ran, so the detection is skipped
-     * rather than inferred (the trigger says so, naming the flow).
-     *
-     * Otherwise the run history's own per-flow cap
-     * ({@link SuspendedRunStore.maxTerminalRunsPerFlow}): the store keeps only
-     * that many newest terminal rows per flow and deletes the rest in the same
-     * write, so recording more would be writing rows it removes at once. A
-     * store that declares no cap (or `0`, cap disabled) leaves the engine's
-     * own run buffer (`maxLogSize`) as the history bound, and that is read
-     * instead — never a number of this method's own.
-     */
-    missedRunLimit(): number | null {
-        const ledger = this.flowDispatchStore;
-        if (!ledger || typeof ledger.read !== 'function') return null;
-        const cap = this.store?.maxTerminalRunsPerFlow;
-        return typeof cap === 'number' && cap > 0 ? cap : this.maxLogSize;
-    }
-
     async recordMissedRun(missed: MissedScheduledRun): Promise<MissedRunOutcome> {
         const store = this.flowDispatchStore;
         if (!store || typeof store.read !== 'function') return 'unverifiable';

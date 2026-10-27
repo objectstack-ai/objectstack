@@ -956,7 +956,12 @@ export class ScheduleTrigger implements FlowTrigger {
      * flow's first bind in this kernel and only when the job service can
      * answer. The read is CALLED here, synchronously, which is what orders it
      * ahead of the `schedule()` call that follows; its failure is said once and
-     * answers `null` — no reading, so no silence is claimed.
+     * answers `null` — no reading, so no silence is claimed. Should a pooled
+     * driver still answer the read after that call rewrote the row, the row
+     * reads as touched just now and no silence is found: the order can only
+     * lose a `missed` entry, never invent one. (`schedule()` is not made to
+     * wait for the read: a `stop()` in between would then be overtaken by a
+     * late re-arm.)
      */
     private readPriorArming(
         jobService: JobServiceSurface,
