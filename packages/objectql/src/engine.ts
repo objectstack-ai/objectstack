@@ -235,7 +235,6 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectstack/metadata-core';
 // [#6806] The ONE shared "is this driver error a unique-constraint violation?"
 // predicate, and its narrower companion "which column conflicted" (#6250 /
 // #6544, both landed in `@objectstack/types`). The engine's autonumber
@@ -298,7 +297,7 @@ import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
+import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
@@ -393,6 +392,12 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
+// [#25522 cut 17] The registration door's forward conversion, the
+// nested-plugin registration and its navigation resolution; the methods of the
+// same names below hand each body the members it reads
+// (`PackageRegistrationHost`). Imported after every module those bodies
+// import, so the engine's module evaluation order is what it was.
+import { convertPackageBodyForward, registerPlugin, resolveNavObjectNames } from './engine-package-registration.js';
 import {
   applyHaving,
   aggregatedRowColumns,
@@ -4570,7 +4575,7 @@ interface CascadeIssuedDelete {
  * stamped here is the one the item keeps. With no version this does nothing:
  * the registry stamps the id, exactly as before.
  */
-function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
+export function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
   if (packageVersion !== undefined) applyProtection(item as any, { packageId, packageVersion });
   return item;
 }
@@ -4619,7 +4624,7 @@ function permissionSetOwnerRegistrationRefusal(
  * shows the same objects both times. `applyProtection` writes top-level keys
  * only, so a shallow copy holds every key it touches.
  */
-function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
+export function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
   return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
 }
 
@@ -8480,34 +8485,14 @@ export class ObjectQL implements IObjectQLEngine {
    * structured `OS_METADATA_CONVERTED` record every conversion emits.
    */
   convertPackageBodyForward(body: any): any {
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
-      if (resolveDeclaredRange(body) === null) return body;
-      const result = applyArtifactForwardConversions(body);
-      if (result.notices.length === 0) return result.definition;
-
-      const id = String(body.id || body.name || '(unnamed)');
-      const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
-      for (const n of result.notices) {
-          const existing = byConversion.get(n.conversionId);
-          if (existing) existing.count += 1;
-          else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
-      }
-      const retiredAfter = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
-      for (const [conversionId, agg] of byConversion) {
-          const key = `${id}|${conversionId}`;
-          if (this.registrationConversionWarned.has(key)) continue;
-          this.registrationConversionWarned.add(key);
-          const pastFloor = retiredAfter.get(conversionId);
-          this.logger.warn(
-              `[ObjectQL] package '${id}' registered with declared protocol floor ${result.authoredFloor ?? '(unreadable)'} `
-              + `on @objectstack/spec ${result.runtimeSpecVersion ?? '(unknown)'} (${result.verdict}) — ADR-0087 conversion `
-              + `'${conversionId}'${pastFloor !== undefined ? ` (a retirement this runtime enforces past the body's floor; the shape was last accepted by @objectstack/spec ${pastFloor})` : ''} `
-              + `converted ${agg.count} site(s) forward (first at ${agg.firstPath}). ${agg.message} `
-              + `The installed body itself is unchanged, so it converts again at every registration until the package `
-              + `is rebuilt ('os build') and re-published with tooling from a release that ships this retirement.`,
-          );
-      }
-      return result.definition;
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts` (see `PackageRegistrationHost`).
+    const readRegistrationConversionWarned = () => this.registrationConversionWarned;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof convertPackageBodyForward> = {
+      get registrationConversionWarned() { return readRegistrationConversionWarned(); },
+      get logger() { return readLogger(); },
+    };
+    return convertPackageBodyForward.call(host, body);
   }
 
   /**
@@ -8715,21 +8700,8 @@ export class ObjectQL implements IObjectQLEngine {
    * expansion is applied.
    */
   private resolveNavObjectNames(app: any, namespace: string): any {
-      if (!app.navigation) return app;
-
-      const resolveItems = (items: any[]): any[] =>
-          items.map((item: any) => {
-              const resolved = { ...item };
-              if (resolved.objectName && !resolved.objectName.includes('__')) {
-                  resolved.objectName = computeFQN(namespace, resolved.objectName);
-              }
-              if (Array.isArray(resolved.children)) {
-                  resolved.children = resolveItems(resolved.children);
-              }
-              return resolved;
-          });
-
-      return { ...app, navigation: resolveItems(app.navigation) };
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts`; it reads no member of the class.
+    return resolveNavObjectNames(app, namespace);
   }
 
   /**
@@ -8744,61 +8716,16 @@ export class ObjectQL implements IObjectQLEngine {
    * @param parentNamespace - The parent package's namespace (for FQN resolution)
    */
   private registerPlugin(plugin: any, parentId: string, parentNamespace?: string, parentVersion?: string) {
-      // `parentVersion` is the owning package's version, stamped like `parentId`.
-      const pluginName = plugin.name || plugin.id || 'unnamed';
-      const pluginNamespace = plugin.namespace || parentNamespace;
-
-      // Use parentId as the owning package for namespace consistency.
-      // The parent package already claimed the namespace — nested plugins
-      // contribute objects UNDER the parent's ownership.
-      const ownerId = parentId;
-
-      // Register objects (supports both Array and Map formats)
-      if (plugin.objects) {
-          try {
-              if (Array.isArray(plugin.objects)) {
-                  this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
-                  for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
-                      this.logger.debug('Registered Object', { fqn, from: pluginName });
-                  }
-              } else {
-                  // Same contract statement as the manifest map branch above —
-                  // authored `ServiceObject`s (INPUT shape, ADR-0122 phase 2).
-                  const entries = Object.entries(plugin.objects) as [string, ServiceObject][];
-                  this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
-                  for (const [name, objDef] of entries) {
-                      objDef.name = name;
-                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
-                      this.logger.debug('Registered Object', { fqn, from: pluginName });
-                  }
-              }
-          } catch (err: any) {
-              this.logger.warn('Failed to register plugin objects', { pluginName, error: err.message });
-          }
-      }
-
-      // Register plugin as app if it has navigation (for sidebar display)
-      if (plugin.name && plugin.navigation) {
-          try {
-              const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-              this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
-              this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
-          } catch (err: any) {
-              this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });
-          }
-      }
-
-      // Register metadata arrays (actions, views, triggers, etc.) through the
-      // SAME seam the manifest path uses — same stamping seam, one level down: a
-      // nested plugin's declarations must carry the parent package's ADR-0010
-      // provenance too, or the declared-≠-enforced hole reopens for packages
-      // that ship a collection from a nested plugin (`capabilities` #5870;
-      // `jobs` / `emailTemplates` / `tools` / `skills` #7049, which is why the
-      // list is no longer copied here to be patched one name at a time; the
-      // aggregated-view expansion, #7163, for why the loop BODY is no longer
-      // copied here either).
-      this.registerMetadataCollections(plugin, ownerId, 'nested plugin', parentVersion);
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts` (see `PackageRegistrationHost`).
+    const readLogger = () => this.logger;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof registerPlugin> = {
+      get logger() { return readLogger(); },
+      get _registry() { return readRegistry(); },
+      resolveNavObjectNames: (...a) => this.resolveNavObjectNames(...a),
+      registerMetadataCollections: (...a) => this.registerMetadataCollections(...a),
+    };
+    return registerPlugin.call(host, plugin, parentId, parentNamespace, parentVersion);
   }
 
   /**
