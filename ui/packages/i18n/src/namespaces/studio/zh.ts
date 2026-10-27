@@ -17,6 +17,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.action.read': '读取',
   'perm.action.edit': '编辑',
   'perm.action.delete': '删除',
+  'perm.action.export': '导出记录',
   'perm.action.transfer': '转移所有者',
   'perm.action.viewAll': '查看所有记录（绕过共享规则）',
   'perm.action.modifyAll': '修改所有记录（绕过共享规则）',
@@ -35,6 +36,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.bulk.crud': '增改删',
   'perm.bulk.all': '全选',
   'perm.bulk.none': '清空',
+  'perm.bulk.allTip': '授予除导出外的所有列;导出只能单独勾选',
   // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
   'perm.scope.unset': '未设置',
   'perm.scope.value.own': '本人',
@@ -2106,6 +2108,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.legend.read': '读取',
   'engine.studio.access.legend.edit': '编辑',
   'engine.studio.access.legend.delete': '删除',
+  'engine.studio.access.legend.export': '导出',
   'engine.studio.access.legend.transfer': '转移',
   'engine.studio.access.legend.viewAll': '查看全部',
   'engine.studio.access.legend.modifyAll': '修改全部',

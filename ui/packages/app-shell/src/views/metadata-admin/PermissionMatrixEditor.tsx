@@ -388,14 +388,23 @@ function ScopePicker({
   );
 }
 
+/**
+ * The boolean columns, in column order (the position summary's order,
+ * `previews/PermissionPreview`'s `CAPS`). `optIn` marks an axis no bulk
+ * button touches: Export is a deliberate, high-privilege grant
+ * (`@objectstack/spec` `security/high-privilege.ts`, the opt-in export axis),
+ * so only its own checkbox grants or clears it — "None" excepted, which
+ * empties the whole row.
+ */
 function getObjectActions(
   locale: string,
-): Array<{ key: ObjectPermFlag; short: string; tip: string }> {
+): Array<{ key: ObjectPermFlag; short: string; tip: string; optIn?: true }> {
   return [
     { key: 'allowCreate', short: 'C', tip: translate('perm.action.create', locale) },
     { key: 'allowRead', short: 'R', tip: translate('perm.action.read', locale) },
     { key: 'allowEdit', short: 'U', tip: translate('perm.action.edit', locale) },
     { key: 'allowDelete', short: 'D', tip: translate('perm.action.delete', locale) },
+    { key: 'allowExport', short: 'E', tip: translate('perm.action.export', locale), optIn: true },
     { key: 'allowTransfer', short: 'Tr', tip: translate('perm.action.transfer', locale) },
     // No `Re` (allowRestore) / `Pu` (allowPurge) columns: both keys are retired
     // (objectui#6595 — see the tombstone on `ObjectPerm` in `permission-slice`
@@ -1128,21 +1137,25 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         return { ...prev, objects: { ...prev.objects, [objectName]: {} } };
       }
       // The granting arms MERGE (#6605): start from the current row, reset the
-      // boolean columns this matrix authors (`OBJECT_ACTIONS`), then set the
-      // granted ones. Keys the matrix does not model — `allowExport`, anything
-      // an older or newer editor wrote — ride through exactly as they do on
-      // the per-checkbox path (`updateObjectPerm`'s spread), and so do the
-      // scopes on "CRUD" and "R". Replacing the row wholesale is what silently
+      // boolean columns the bulk buttons author (`OBJECT_ACTIONS` less the
+      // `optIn` Export column), then set the granted ones. Export keeps its
+      // value on every granting arm, "All" included (objectstack#26885): it is
+      // a deliberate grant, made or withdrawn only by its own checkbox. Keys
+      // the matrix does not model — anything an older or newer editor wrote —
+      // ride through exactly as they do on the per-checkbox path
+      // (`updateObjectPerm`'s spread), and so do the scopes on "CRUD" and "R".
+      // Replacing the row wholesale is what silently
       // deleted them, and both save doors persist the row as-is: the
       // environment door writes the whole record, and at package scope
       // `mergePermissionSlice` takes in-scope rows entirely from `edited`
       // (ADR-0086 P0), so `base` cannot restore what a bulk click dropped.
       const cur = prev.objects[objectName] ?? {};
       const next: ObjectPerm = { ...cur };
-      for (const a of OBJECT_ACTIONS) delete next[a.key];
+      const bulkKeys = OBJECT_ACTIONS.filter((a) => !a.optIn).map((a) => a.key);
+      for (const key of bulkKeys) delete next[key];
       const grants: ObjectPermFlag[] =
         action === 'all'
-          ? OBJECT_ACTIONS.map((a) => a.key)
+          ? bulkKeys
           : action === 'crud'
           ? ['allowCreate', 'allowRead', 'allowEdit', 'allowDelete']
           : ['allowRead'];
@@ -2166,13 +2179,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 
         {capabilitiesEl}
 
-        {/* Filter bar */}
-        <div className="px-6 py-3 border-b flex items-center gap-3">
+        {/* Filter bar — wraps on a phone (objectstack#26885), where the
+            fixed-width input pushed "Only granted" off the right edge. */}
+        <div className="px-6 py-3 border-b flex flex-wrap items-center gap-3">
           <Input
             placeholder={t('perm.filter.placeholder')}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="h-8 w-72"
+            className="h-8 w-full sm:w-72"
           />
           <div className="flex items-center gap-2">
             <Switch
@@ -2232,16 +2246,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             t={t}
             packageBound={!!packageId}
           />
+          {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
+              (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
+              IS this editor in the environment scope (ADR-0131 D3), so there the
+              set's holders render under its definition, by name.
+              objectstack#26885 — in the matrix's own scroll, after the grid: a
+              strip pinned beneath it took up to 35vh off the grid's height, so
+              a laptop showed about five object rows and a phone none. */}
+          {showAssignments && (
+            <div className="mx-4 my-4 rounded-md border" data-testid="perm-assignments">
+              <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
+            </div>
+          )}
         </div>
-        {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
-            (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
-            IS this editor in the environment scope (ADR-0131 D3), so there the
-            set's holders render under its definition, by name. */}
-        {showAssignments && (
-          <div className="mx-4 mb-4 shrink-0 max-h-[35vh] overflow-y-auto rounded-md border" data-testid="perm-assignments">
-            <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
-          </div>
-        )}
       </div>
 
       {dialogsEl}
@@ -2301,8 +2318,9 @@ function PermissionTable({
     // squishing the CRUD grid and clipping the Bulk column off the right edge.
     // The min-width is deliberately unchanged by the two columns objectui#6595
     // retired: it is a floor, so the grid simply has more room to breathe.
-    // objectstack#26187 adds the two scope pickers (~2 × 9rem) to the floor.
-    <table className="w-full min-w-[1248px] text-sm">
+    // objectstack#26187 adds the two scope pickers (~2 × 9rem) to the floor,
+    // objectstack#26885 the Export column (one more w-14).
+    <table className="w-full min-w-[1304px] text-sm">
       <thead className="sticky top-0 bg-background border-b z-10">
         <tr>
           <th className="text-left px-4 py-2 font-medium w-72">{t('perm.col.object')}</th>
@@ -2429,6 +2447,7 @@ function PermissionTable({
                     className="h-6 px-1.5 text-xs"
                     disabled={!writable}
                     onClick={() => onBulkSet(o.name, 'all')}
+                    title={t('perm.bulk.allTip')}
                   >
                     {t('perm.bulk.all')}
                   </Button>
@@ -2478,6 +2497,7 @@ const STUDIO_LEGEND_KEYS: Partial<Record<keyof ObjectPerm, string>> = {
   allowRead: 'engine.studio.access.legend.read',
   allowEdit: 'engine.studio.access.legend.edit',
   allowDelete: 'engine.studio.access.legend.delete',
+  allowExport: 'engine.studio.access.legend.export',
   allowTransfer: 'engine.studio.access.legend.transfer',
   viewAllRecords: 'engine.studio.access.legend.viewAll',
   modifyAllRecords: 'engine.studio.access.legend.modifyAll',
@@ -2573,7 +2593,7 @@ function StudioObjectMatrix({
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
   const divider = (i: number) => (i === 0 || i === sharingStart ? 'border-l' : '');
   return (
-    <table className="w-full min-w-[1248px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
+    <table className="w-full min-w-[1304px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
           <th className="pl-6 pr-3 text-left font-medium">{t('perm.col.object')}</th>
@@ -2771,6 +2791,7 @@ function StudioObjectRow({
                   type="button"
                   disabled={!writable}
                   onClick={() => onBulkSet(o.name, b.action)}
+                  title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
                   className="inline-flex h-6 items-center rounded border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t(b.key)}

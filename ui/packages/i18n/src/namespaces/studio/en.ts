@@ -25,6 +25,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.action.read': 'Read',
   'perm.action.edit': 'Edit',
   'perm.action.delete': 'Delete',
+  'perm.action.export': 'Export records',
   'perm.action.transfer': 'Transfer ownership',
   'perm.action.viewAll': 'View All Records (bypass sharing)',
   'perm.action.modifyAll': 'Modify All Records (bypass sharing)',
@@ -43,6 +44,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.bulk.crud': 'CRUD',
   'perm.bulk.all': 'All',
   'perm.bulk.none': 'None',
+  'perm.bulk.allTip': 'Grant every column except Export, which is granted only by its own checkbox',
   // objectstack#26187 — the record-scope pickers (ADR-0057 D1 access depth).
   'perm.scope.unset': 'Not set',
   'perm.scope.value.own': 'Own',
@@ -2344,6 +2346,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.legend.read': 'Read',
   'engine.studio.access.legend.edit': 'Edit',
   'engine.studio.access.legend.delete': 'Delete',
+  'engine.studio.access.legend.export': 'Export',
   'engine.studio.access.legend.transfer': 'Transfer',
   'engine.studio.access.legend.viewAll': 'View all',
   'engine.studio.access.legend.modifyAll': 'Modify all',
