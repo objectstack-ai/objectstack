@@ -323,5 +323,6 @@ describe('unknown-key warning', () => {
       unknown: ['targt'],
       retired: ['execute'],
     });
+    expect(classifyActionKeys({ type: 'script', disabledReason: 'Closed deals are locked' })).toEqual({ unknown: [], retired: [] });
   });
 });

@@ -246,6 +246,13 @@ export const SPEC_ACTION_KEYS = [
   // key, which is the only thing the inventory is consulted for.
   'description',
   'disabled',
+  // Added to `ActionSchema` by objectstack#26786: the display-only sentence a
+  // greyed action shows to say why. Listed for the reason `description` is —
+  // this array restates the spec's declared keys, so an action carrying it is
+  // not reported as having an unknown key. `ActionDef` does NOT declare it and
+  // nothing here reads it: its readers ship with the console half of
+  // objectstack#26619.
+  'disabledReason',
   'errorMessage',
   // No `execute`: its spec-17 tombstone (`retiredKey()`, objectstack#3855) aged
   // out of `ActionSchema` at objectstack#25767 — the spec now refuses it as an
