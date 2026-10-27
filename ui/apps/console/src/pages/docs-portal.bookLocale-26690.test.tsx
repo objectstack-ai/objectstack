@@ -25,6 +25,7 @@ import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 // Paid at collection, not inside the adapter's clocked `getItems` call.
 import '@objectstack/spec/system';
+import type { TranslationBundle } from '@objectstack/spec/system';
 
 const { ADAPTER, REQUEST } = vi.hoisted(() => {
   const REQUEST = { locale: 'en-US' };
@@ -42,7 +43,7 @@ const { ADAPTER, REQUEST } = vi.hoisted(() => {
       { key: 'pipeline', label: 'Pipeline', include: 'crm_pipe_*' },
     ],
   };
-  const BUNDLE = {
+  const BUNDLE: TranslationBundle = {
     'zh-CN': {
       books: { crm_manual: { label: '使用手册', groups: { start: { label: '快速上手' }, pipeline: { label: '销售管道' } } } },
     },
@@ -56,7 +57,7 @@ const { ADAPTER, REQUEST } = vi.hoisted(() => {
           // What `GET /meta/book` answers: every book through the translator
           // table, for the request's locale.
           const { translateMetadataDocument } = await import('@objectstack/spec/system');
-          return [translateMetadataDocument('book', BOOK, BUNDLE as any, { locale: REQUEST.locale })];
+          return [translateMetadataDocument('book', BOOK, BUNDLE, { locale: REQUEST.locale })];
         },
         getItem: async (_type: string, name: string) => ({ item: { name, content: `BODY ${name}` } }),
       },
