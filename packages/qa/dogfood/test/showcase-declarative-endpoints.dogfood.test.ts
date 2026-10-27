@@ -313,8 +313,12 @@ describe('[#5112] object_operation endpoint: same pipeline, same answer', () => 
     // The security semantic #4936 found parsing green and enforcing nothing.
     const res = await stack.api(TASKS, { method: 'GET' });
     expect(res.status, await res.clone().text()).toBe(401);
-    const body = (await res.json()) as { success?: boolean; error?: unknown };
+    const body = (await res.json()) as { success?: boolean; error?: { code?: string } };
     expect(body.success).toBe(false);
+    // [#26572] The clause is `401 UNAUTHENTICATED`: the code is read off the
+    // wire, not only the status — a 401 carrying another code is a different
+    // refusal.
+    expect(body.error?.code).toBe('UNAUTHENTICATED');
   });
 
   it('never lets an error answer carry a cache directive', async () => {
@@ -347,6 +351,7 @@ describe('[#5112] flow endpoint: invokes the real flow over HTTP', () => {
       body: '{}',
     });
     expect(res.status, await res.clone().text()).toBe(401);
+    expect(((await res.json()) as { error?: { code?: string } }).error?.code).toBe('UNAUTHENTICATED');
   });
 
   it('does not answer a flow endpoint on the wrong method', async () => {
