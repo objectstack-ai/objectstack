@@ -58,17 +58,17 @@ import {
 
 /** The four findings, by the fact the author acts on. */
 export type DependencyRangeCode =
-  | 'dependency_range_unreadable'
-  | 'dependency_declaration_unreadable'
-  | 'dependency_range_unmet_in_artifact'
-  | 'dependency_version_unreadable_in_artifact';
+  | 'DEPENDENCY_RANGE_UNREADABLE'
+  | 'DEPENDENCY_DECLARATION_UNREADABLE'
+  | 'DEPENDENCY_RANGE_UNMET_IN_ARTIFACT'
+  | 'DEPENDENCY_VERSION_UNREADABLE_IN_ARTIFACT';
 
 export interface DependencyRangeDiagnostic {
   readonly code: DependencyRangeCode;
   readonly severity: 'error' | 'warning';
   /** The delivered package that declares the entry. */
   readonly packageId: string;
-  /** The declared dependency id; absent for `dependency_declaration_unreadable`. */
+  /** The declared dependency id; absent for `DEPENDENCY_DECLARATION_UNREADABLE`. */
   readonly dependency?: string;
   /** The declared range, as written. */
   readonly range?: string;
@@ -112,7 +112,7 @@ function diagnosticOf(
 ): DependencyRangeDiagnostic | null {
   if (entry.found === 'unreadable-declaration') {
     return {
-      code: 'dependency_declaration_unreadable',
+      code: 'DEPENDENCY_DECLARATION_UNREADABLE',
       severity: 'error',
       packageId: entry.packageId,
       path: `${at}.dependencies`,
@@ -134,7 +134,7 @@ function diagnosticOf(
   if (entry.found === 'unreadable-range') {
     return {
       ...base,
-      code: 'dependency_range_unreadable',
+      code: 'DEPENDENCY_RANGE_UNREADABLE',
       severity: inArtifact ? 'warning' : 'error',
       ...(siblingVersion === undefined ? {} : { siblingVersion }),
       message: inArtifact
@@ -149,7 +149,7 @@ function diagnosticOf(
   if (entry.found === 'out-of-range') {
     return {
       ...base,
-      code: 'dependency_range_unmet_in_artifact',
+      code: 'DEPENDENCY_RANGE_UNMET_IN_ARTIFACT',
       severity: 'warning',
       ...(siblingVersion === undefined ? {} : { siblingVersion }),
       message:
@@ -161,7 +161,7 @@ function diagnosticOf(
   }
   return {
     ...base,
-    code: 'dependency_version_unreadable_in_artifact',
+    code: 'DEPENDENCY_VERSION_UNREADABLE_IN_ARTIFACT',
     severity: 'warning',
     ...(siblingVersion === undefined ? {} : { siblingVersion }),
     message:
