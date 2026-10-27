@@ -498,15 +498,16 @@ export const RelatedToolbarButton: React.FC<{
  * No sentence in the body leaves `message` empty: the status alone is no
  * sentence, and the line then says the generic one.
  */
+type ErrorEnvelope = { error?: unknown; code?: unknown; message?: unknown; userMessage?: unknown };
 async function rawUrlReadFailure(res: Response): Promise<Error> {
-  let body: any = null;
+  let body: ErrorEnvelope | null = null;
   try {
-    body = await res.json();
+    body = (await res.json()) as ErrorEnvelope | null;
   } catch {
     // Not JSON: the status is all the server said.
   }
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
-  const wrapped = body && typeof body.error === 'object' ? body.error : null;
+  const wrapped = body && typeof body.error === 'object' && body.error !== null ? (body.error as ErrorEnvelope) : null;
   return Object.assign(new Error(text(wrapped?.message) ?? text(body?.error) ?? text(body?.message) ?? ''), {
     httpStatus: res.status,
     code: text(body?.code) ?? text(wrapped?.code),
