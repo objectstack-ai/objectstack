@@ -231,6 +231,17 @@ export default defineStack({
 
 const dirs = { multi: '', single: '' };
 
+/** A cold `tsx` spawn of the CLI source entry, the per-case allowance this file always gave one. */
+const SPAWN_TIMEOUT_MS = 180_000;
+
+/**
+ * One run per distinct (command, flags, fixture) triple. The cases below used
+ * to spawn `os build --json` on the multi-package fixture three times and `os
+ * validate --json` on it twice; every case now reads the one run of its
+ * triple, spawned in sequence in the `beforeAll` below.
+ */
+const runs = {} as Record<'buildMulti' | 'validateMulti' | 'buildSingle' | 'validateSingle', Run>;
+
 function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-ppparity-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
@@ -245,20 +256,24 @@ function plant(config: string): string {
 }
 
 describe('#18677 — `os validate` and `os build` report the same per-package advisory set', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     dirs.multi = plant(CONFIG_MULTI);
     dirs.single = plant(CONFIG_SINGLE);
-  });
+    runs.buildMulti = await runCli(['build', '--json'], dirs.multi);
+    runs.validateMulti = await runCli(['validate', '--json'], dirs.multi);
+    runs.buildSingle = await runCli(['build', '--json'], dirs.single);
+    runs.validateSingle = await runCli(['validate', '--json'], dirs.single);
+  }, 4 * SPAWN_TIMEOUT_MS);
 
   afterAll(() => {
     for (const dir of Object.values(dirs)) if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('the multi-package fixture reaches the pass at all — and its survivor is NOT an echo', async () => {
+  it('the multi-package fixture reaches the pass at all — and its survivor is NOT an echo', () => {
     // Asserted BEFORE any claim about parity: a fixture that never reaches the
     // per-package pass makes every comparison below vacuous, which is the exact
     // way this defect stayed invisible.
-    const build = await runCli(['build', '--json'], dirs.multi);
+    const build = runs.buildMulti;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     const warnings = payloadOf(build, 'os build --json').warnings as unknown[];
     expect(perPackageWarnings(warnings).length).toBeGreaterThan(0);
@@ -277,12 +292,12 @@ describe('#18677 — `os validate` and `os build` report the same per-package ad
       PER_PACKAGE_WHERE.test(named(industryWarnings[0])),
       'the `industry` finding is being raised by the UNION run — the survivor would be an echo',
     ).toBe(true);
-  }, 180_000);
+  });
 
-  it('`os validate` reports every per-package advisory `os build` does', async () => {
+  it('`os validate` reports every per-package advisory `os build` does', () => {
     // The pin. On `origin/main` 09e16a574 this read `build: 1, validate: 0`.
-    const build = await runCli(['build', '--json'], dirs.multi);
-    const validate = await runCli(['validate', '--json'], dirs.multi);
+    const build = runs.buildMulti;
+    const validate = runs.validateMulti;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     expect(validate.code, `os validate --json failed:\n${validate.stdout}${validate.stderr}`).toBe(0);
 
@@ -295,29 +310,29 @@ describe('#18677 — `os validate` and `os build` report the same per-package ad
       missingFromValidate,
       'these per-package findings ride `os build` and `os validate` cannot see them — the #18677 false-clean set',
     ).toEqual([]);
-  }, 180_000);
+  });
 
-  it('…and nothing per-package rides `os validate` that `os build` does not report either', async () => {
+  it('…and nothing per-package rides `os validate` that `os build` does not report either', () => {
     // The reverse end. Parity is an equality, and a validate that over-reports
     // is its own defect — an author fixing a finding the command that SHIPS
     // never raises.
-    const build = await runCli(['build', '--json'], dirs.multi);
-    const validate = await runCli(['validate', '--json'], dirs.multi);
+    const build = runs.buildMulti;
+    const validate = runs.validateMulti;
     const bw = payloadOf(build, 'os build --json').warnings as unknown[];
     const vw = payloadOf(validate, 'os validate --json').warnings as unknown[];
 
     const inBuild = new Set(perPackageWarnings(bw));
     expect(perPackageWarnings(vw).filter((w) => !inBuild.has(w))).toEqual([]);
-  }, 180_000);
+  });
 
-  it('CONTROL — a single-package project raises NO per-package finding on either door', async () => {
+  it('CONTROL — a single-package project raises NO per-package finding on either door', () => {
     // "Present" must be distinguishable from "always present": the prefix this
     // file matches on is not something either command emits unconditionally.
-    const build = await runCli(['build', '--json'], dirs.single);
-    const validate = await runCli(['validate', '--json'], dirs.single);
+    const build = runs.buildSingle;
+    const validate = runs.validateSingle;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     expect(validate.code, `os validate --json failed:\n${validate.stdout}${validate.stderr}`).toBe(0);
     expect(perPackageWarnings(payloadOf(build, 'os build --json').warnings as unknown[])).toEqual([]);
     expect(perPackageWarnings(payloadOf(validate, 'os validate --json').warnings as unknown[])).toEqual([]);
-  }, 180_000);
+  });
 });
