@@ -88,7 +88,7 @@ import {
   SharedViewLink, // share-link control, mounted directly (its node key is retired)
   ViewTabBar, // horizontal strip of saved-view tabs
   ManageViewsDialog, // sortable dialog over every saved view
-  deriveRecordSurface, // record schema -> drawer / modal / page surface
+  deriveRecordSurface, // record schema -> drawer / page surface (the console's record-form default)
   deriveRecordFlowSurface,
   deriveOverlaySize,
   overlayWidthFor,
@@ -419,12 +419,13 @@ const schema: ObjectViewSchema = {
 };
 ```
 
-When `layout` is omitted, the surface is derived from how heavy the object is
-(`deriveRecordSurface`): a field-heavy object opens as a page, a light one as a
-drawer, and mobile always pages. A page is handed to `onNavigate`; with none to
-hand it to, as on the registered `object-view` renderer, whose JSON schema
-cannot carry a function, the page falls back to the drawer for create, edit and
-read.
+When `layout` is omitted, a record opens in the drawer, which expands to the
+full page, and a mobile viewport pages. The object's field count does not pick
+the surface: a full page is declared (`layout: 'page'`, or the view's
+`navigation.mode: 'page'`), never guessed. A page is handed to `onNavigate`;
+with none to hand it to, as on the registered `object-view` renderer, whose JSON
+schema cannot carry a function, the page falls back to the drawer for create,
+edit and read.
 
 ### Opening a record
 

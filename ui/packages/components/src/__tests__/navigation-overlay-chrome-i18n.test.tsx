@@ -20,8 +20,9 @@
  *     and it feeds both `aria-label` and `title` of an icon-only button.
  *   - `resolvedTitle`'s fallback, `'Record Detail'`. This one is **visible**
  *     copy, not just an accessible name.
- *   - the sr-only `SheetDescription`/`DialogDescription` prose, which existed
- *     in three copies (drawer / modal / popover) and interpolates the title.
+ *   - the sr-only `SheetDescription` prose, which interpolates the title. It
+ *     existed in three copies (drawer / modal / popover) until objectstack#26677
+ *     retired the modal and popover faces; the drawer's is the one left.
  *
  * Addressing convention, inherited from `navigation-overlay-close-i18n.test.tsx`:
  * the shadcn `Sheet` primitive auto-renders a close button whose only name is a
@@ -185,25 +186,5 @@ describe('NavigationOverlay sr-only description (objectstack#5506)', () => {
     renderDrawer('zh');
 
     expect(screen.getByText('记录详情 的记录详情浮层。')).toBeTruthy();
-  });
-
-  it('is rendered in modal mode too', () => {
-    render(
-      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
-        <NavigationOverlay
-          isOpen
-          isOverlay
-          selectedRecord={record}
-          mode="modal"
-          close={() => {}}
-          setIsOpen={() => {}}
-          title="Acme Corp"
-        >
-          {() => <div>BODY CONTENT</div>}
-        </NavigationOverlay>
-      </I18nProvider>,
-    );
-
-    expect(screen.getByText('Acme Corp 的记录详情浮层。')).toBeTruthy();
   });
 });

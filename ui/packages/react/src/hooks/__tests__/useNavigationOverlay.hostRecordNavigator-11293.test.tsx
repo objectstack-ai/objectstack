@@ -10,8 +10,9 @@
  * `useNavigationOverlay` hands an authored `page` click with no `onNavigate`
  * to the record navigator the HOST publishes (objectui#11293).
  *
- * `page` is the spec's default `mode`, so `{ mode: 'page' }` and a block
- * written without `mode` both resolve to it. The branch used to call
+ * `{ mode: 'page' }` resolves to `page`. (A block written without `mode` did
+ * too until objectstack#26677 moved the spec's default to `drawer`; that row
+ * is flipped below, not deleted.) The branch used to call
  * `onNavigate` and nothing else, so a block a host rendered without wiring one
  * (a standalone board, calendar or grid) opened nothing on click. The hook now
  * falls back to `RelatedRecordActionsContext.openRecord`, the seam the grid's
@@ -19,7 +20,8 @@
  *
  * Every row mounts the hook under a host that publishes `openRecord`, so each
  * "not called" below is measured against a navigator that was there to call.
- * The rows pin, in order: the two spellings that resolve to `page` navigate;
+ * The rows pin, in order: `mode: 'page'` navigates, and a block written
+ * without `mode` now opens the drawer and navigates nowhere;
  * a supplied `onNavigate` and an `onRowClick` each keep the click (the grid's
  * explicit wiring and a parent list view are unchanged); an overlay mode is
  * the lit control; an ABSENT `navigation` stays the host's call (see the
@@ -75,11 +77,13 @@ describe('useNavigationOverlay: `page` with no `onNavigate` goes to the host\'s 
     expect(result.current.isOpen).toBe(false);
   });
 
-  it('a block written without `mode` resolves to `page` and navigates the same way', () => {
+  it('a block written without `mode` takes the spec\'s `drawer` default: it opens the drawer, not the navigator (objectstack#26677)', () => {
     const { openRecord, wrapper } = host();
     const result = click({ navigation: { size: 'lg' }, objectName: 'contacts' }, wrapper);
-    expect(result.current.mode).toBe('page');
-    expect(openRecord).toHaveBeenCalledWith('contacts', 'r1');
+    expect(result.current.mode).toBe('drawer');
+    expect(result.current.isOpen).toBe(true);
+    expect(result.current.selectedRecord).toEqual(RECORD);
+    expect(openRecord).not.toHaveBeenCalled();
   });
 
   it('a supplied `onNavigate` WINS over the published navigator (the grid\'s explicit wiring)', () => {

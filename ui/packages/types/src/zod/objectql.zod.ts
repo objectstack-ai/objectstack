@@ -3164,7 +3164,7 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
   // objectui#9256 (E3 residual, ruling Q2 A on objectui#8284): the renderer reads NEITHER content
   // channel, so both are refused by name here as on the TypeScript twin, each kept a MEMBER.
   body: retirementTombstone(OBJECT_CALENDAR_NEITHER_CHANNEL),
@@ -3528,7 +3528,7 @@ export const ObjectKanbanSchema = BaseSchema.extend({
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
   // ── `5a41ce733` — the three handler keys `KanbanRenderer` reads off the
   // document this arm judges, MEASURED one at a time (director seat ruling of
   // 2026-09-07, decision batch #69: the arm a `type` selects is the contract

@@ -27,7 +27,6 @@ import {
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   toast,
-  useOverlayAnchor,
 } from '@object-ui/components';
 import { createSafeTranslation } from '@object-ui/i18n';
 import {
@@ -1624,17 +1623,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // a second, plugin-local drawer alongside the parent's, creating the
   // "two styles of detail view" inconsistency users complained about.
   const externalClick = onRowClick ?? onCardClick;
-  const navIsOverlay = !externalClick && (navConfig.mode === 'drawer' || navConfig.mode === 'modal' || navConfig.mode === 'split' || navConfig.mode === 'popover');
+  // `drawer` is the one overlay mode the spec keeps (objectstack#26677), and
+  // the hook's own default for a block written without `mode`.
+  const navIsOverlay = !externalClick && (navConfig.mode ?? 'drawer') === 'drawer';
   const navigation = useNavigationOverlay({
     navigation: navConfig,
     objectName: schema.objectName,
     onRowClick: externalClick,
   });
-
-  // objectui#9299 item 3 — `popover` anchors to the CARD the user clicked.
-  // `SortableCard` already hands its click event down, so this site captures
-  // the anchor directly rather than through a container-level listener.
-  const { anchorRef, captureAnchor } = useOverlayAnchor();
 
   // Fallback heading of the record-detail drawer opened on card click, used
   // when the board declares no card-title field (or the record's is empty).
@@ -1906,20 +1902,16 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   }
 
   /**
-   * The record overlay — ONE payload in whichever shell the author declared.
+   * The record overlay — the drawer.
    *
    * ⭐ objectui#9299. This used to be `<RecordDetailDrawer>`, which brought its
-   * own `Sheet` and had no `mode` parameter, so an authored `modal`, `split` or
-   * `popover` silently rendered the drawer (measured on PR objectui#9296). The
-   * payload now mounts through the shared `NavigationOverlay` — the same shell
-   * `ObjectGrid` and `ObjectTree` use — so the four declared modes mean the
-   * same thing on every view type.
-   *
-   * `mainContent` is what `split` needs: the board itself goes in the left
-   * panel beside the record panel (item 2). `popoverAnchorRef` is what
-   * `popover` needs: the card the user clicked (item 3).
+   * own `Sheet`; the payload mounts through the shared `NavigationOverlay` — the
+   * same shell `ObjectGrid` and `ObjectTree` use. The `modal`, `split` and
+   * `popover` shells it also drew here were retired with their spec values
+   * (objectstack#26677): the drawer, which expands to the full page, is the
+   * one overlay an authored `navigation` opens.
    */
-  const renderRecordOverlay = (mainContent?: React.ReactNode): React.ReactNode => {
+  const renderRecordOverlay = (): React.ReactNode => {
     if (!navigation.isOverlay || !navigation.isOpen || !navigation.selectedRecord) return null;
     const objectName = schema.objectName;
     const rec = navigation.selectedRecord as Record<string, any>;
@@ -1938,8 +1930,6 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       <NavigationOverlay
         {...navigation}
         title={titleText}
-        mainContent={mainContent}
-        popoverAnchorRef={anchorRef}
         // One drag-resize implementation, one key, and a width the user had
         // already chosen under the retired `objectui.drawerWidth.OBJECT`
         // carries over rather than resetting (item 4).
@@ -2055,9 +2045,6 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           // authored one. `ObjectGallery` has written exactly this shape, with
           // no second call, all along.
           onCardClick: (card: any, event?: any) => {
-            // Record the clicked card BEFORE opening, so `popover` mode has an
-            // anchor by the time it renders (objectui#9299 item 3).
-            captureAnchor(event);
             navigation.handleClick(card, event);
           },
         }}
@@ -2095,23 +2082,6 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       )}
     </>
   );
-
-  // `split` (item 2): the board IS the main content — it moves into the
-  // overlay's left panel with the record panel beside it, rather than being
-  // covered by a drawer. Guarded on an OPEN overlay because the split shell
-  // renders nothing when closed; with nothing open the board renders alone,
-  // exactly as before.
-  if (
-    navigation.isOverlay
-    && navigation.mode === 'split'
-    && navigation.isOpen
-    && navigation.selectedRecord
-  ) {
-    const splitOverlay = renderRecordOverlay(boardView);
-    // `null` means this record has no overlay at all (no object name / no id)
-    // — the board still has to render.
-    if (splitOverlay) return <>{splitOverlay}</>;
-  }
 
   return (
     <>
