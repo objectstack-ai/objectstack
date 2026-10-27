@@ -66,7 +66,7 @@ describe('the extractor emits action-level `disabledReason` (#26619)', () => {
     expect(at(`${root}.disabledReason`)?.sourceValue).toBeUndefined();
 
     const { bundles } = extractTranslations(config, { defaultLocale: 'en', fill: 'default' });
-    expect(bundles.en.objects.clm_contract._actions.archive).not.toHaveProperty('disabledReason');
+    expect(bundles.en.objects?.clm_contract?._actions?.archive).not.toHaveProperty('disabledReason');
     expect(computeI18nCoverage({ ...config, translations: [{ 'zh-CN': {} }] }).issues.map((i) => i.key))
       .not.toContain(`${root}.disabledReason`);
   });
@@ -91,7 +91,7 @@ describe('the extractor emits action-level `disabledReason` (#26619)', () => {
     expect(entry?.inline).toBe(REASON);
 
     const { bundles } = extractTranslations(config, { defaultLocale: 'en', fill: 'default' });
-    expect(bundles.en.objects.clm_contract._actions.submit_for_approval.disabledReason).toBe(REASON);
+    expect(bundles.en.objects?.clm_contract?._actions?.submit_for_approval.disabledReason).toBe(REASON);
 
     expect(computeI18nCoverage(config).issues.map((i) => i.key)).toContain(key);
     config.translations[0]['zh-CN'].objects.clm_contract._actions.submit_for_approval.disabledReason =
