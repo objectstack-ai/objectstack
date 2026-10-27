@@ -142,7 +142,7 @@ describe('objectstack#25872 — a `type: \'record_link\'` screen field links the
     ]));
     await screen.findByText('Opportunity created');
     expect(document.querySelector('[data-screen-record-link="account"]')).toBeNull();
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(await screen.findByRole('checkbox'));
     await waitFor(() => within(linkCell('account')).getByRole('link', { name: 'Acme Corp' }));
   });
 
