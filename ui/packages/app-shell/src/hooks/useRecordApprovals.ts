@@ -33,13 +33,16 @@
  * override actor), so for anyone else an answered empty read cannot tell "no
  * approval is running" from "one is running that you may not see". When the
  * list finds no pending request, the hook also asks the server whether the
- * record is held by a locking approval (`client.approvals.getRecordLock`,
+ * record is held by a locking approval (`GET /approvals/records/:object/:recordId/lock`,
  * answered to every caller who can read the record — objectstack#25934 ruling
- * A) and hands the answer back as `recordLock`.
+ * A) and hands the answer back as `recordLock`. That door has no empty answer:
+ * a composition without the approvals service answers it 501, the designed
+ * "no lock service", which is read silently and never asked again
+ * (objectstack#26632); any other failure still logs.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useAdapter } from '../providers/AdapterProvider.js';
+import { createQuietHttpLogger } from '@object-ui/data-objectstack';
 import { bearerAuthHeaders } from '../utils/authToken.js';
 import type { DecisionOutputDef } from '../utils/decisionOutputParams.js';
 
@@ -302,10 +305,10 @@ interface UseRecordApprovalsResult {
    * `{ locked: true }` means a pending approval whose node locks the record is
    * running, though this viewer cannot see its request. `null` when there is
    * no answer to give: a pending request was found (it decides, with its own
-   * `lock_record`), no adapter is mounted, or the read has never answered — a
-   * composition without the approvals service answers it 501, so there the
-   * record is not locked by this signal. A later failed read keeps the last
-   * answer, as the list read does.
+   * `lock_record`), or the read has never answered — a composition without
+   * the approvals service answers it 501, so there the record is not locked
+   * by this signal, and the read is not sent again. A later failed read keeps
+   * the last answer, as the list read does.
    */
   recordLock: { locked: boolean } | null;
   refresh: () => Promise<void>;
@@ -317,6 +320,7 @@ export function __resetRecordApprovalsStore(): void {
   inFlight.clear();
   listeners.clear();
   latestSeq.clear();
+  recordLockAbsent = false;
 }
 
 function apiBase() {
@@ -500,16 +504,50 @@ function holdEntry(key: string): () => void {
   };
 }
 
-/** Reads the server's record lock for the record a read is for. */
-type RecordLockReader = () => Promise<{ locked: boolean }>;
+/**
+ * Set once the record-lock read answered 501: this deployment has no approvals
+ * service, so no record is held by a locking approval and the read is not sent
+ * again (objectstack#26632). Module-scoped, not per record: the answer is the
+ * deployment's, and the read goes to the one base every read here goes to.
+ */
+let recordLockAbsent = false;
+
+/** Logs a failed lock read exactly as the console's SDK client logs one. */
+const lockReadLogger = createQuietHttpLogger();
+
+/**
+ * The server's record lock (`IApprovalService.getRecordLock`, objectstack#25934).
+ *
+ * Read through `fetchJson`, not `client.approvals.getRecordLock`: the client
+ * logs every non-2xx as an error before its caller sees the answer, and the
+ * 501 of a composition without the approvals service is this read's designed
+ * answer, not a failure (objectstack#26632). So the 501 is read silently and
+ * latched, and every other failure is logged here, through the same logger
+ * the client would have used.
+ */
+async function readRecordLock(objectName: string, recordId: string): Promise<{ locked: boolean }> {
+  const path = `/approvals/records/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}/lock`;
+  try {
+    const body = await fetchJson<any>(path);
+    // `{ success: true, data: { locked } }`, the declared envelope.
+    return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
+  } catch (err: any) {
+    if (err?.status === 501) {
+      recordLockAbsent = true;
+    } else {
+      lockReadLogger.error('HTTP request failed', undefined, {
+        method: 'GET',
+        url: `${apiBase()}${path}`,
+        status: err?.status,
+        error: { code: err?.code, message: err?.message },
+      });
+    }
+    throw err;
+  }
+}
 
 /** Send the record's read and publish its answer to every consumer of the key. */
-function startRead(
-  key: string,
-  objectName: string,
-  recordId: string,
-  readLock: RecordLockReader | null,
-): Promise<void> {
+function startRead(key: string, objectName: string, recordId: string): Promise<void> {
   const seq = ++readSeq;
   latestSeq.set(key, seq);
   const entry = entries.get(key);
@@ -529,10 +567,10 @@ function startRead(
       // `lock_record`. Without one, ask the record itself (objectstack#25934):
       // the list hides a request from a non-participant, the lock does not.
       let recordLock: { locked: boolean } | null = null;
-      if (!pending && readLock) {
+      if (!pending && !recordLockAbsent) {
         recordLock = entries.get(key)?.snapshot.recordLock ?? null;
         try {
-          const lock = await readLock();
+          const lock = await readRecordLock(objectName, recordId);
           recordLock = { locked: lock?.locked === true };
         } catch {
           // A read that never answered (501 without the approvals service)
@@ -599,15 +637,6 @@ export function useRecordApprovals(
   // for the render, mirrored into a ref the mount effect and `refresh` read.
   const [unavailable, setUnavailable] = useState(false);
   const unavailableRef = useRef(false);
-  // The record-lock read goes through the SDK (`client.approvals.getRecordLock`),
-  // so it needs the adapter's client; with no adapter mounted it is skipped.
-  const adapter = useAdapter();
-  const lockReader = useCallback(
-    (object: string, id: string): RecordLockReader | null =>
-      adapter ? () => adapter.getClient().approvals.getRecordLock(object, id) : null,
-    [adapter],
-  );
-
   const subscribe = useCallback((l: () => void) => subscribeKey(readKey, l), [readKey]);
   const getSnapshot = useCallback(
     () => (readKey === null ? INITIAL_SNAPSHOT : entries.get(readKey)?.snapshot ?? INITIAL_SNAPSHOT),
@@ -629,19 +658,19 @@ export function useRecordApprovals(
     // read only when neither exists. The entry may be new while a read is in
     // flight (StrictMode's replayed mount): that read publishes into it.
     if (entry && !entry.read && !inFlight.has(readKey) && !unavailableRef.current) {
-      void startRead(readKey, objectName, recordId, lockReader(objectName, recordId));
+      void startRead(readKey, objectName, recordId);
     } else if (entry && inFlight.has(readKey)) {
       entry.read = true;
       if (!entry.snapshot.loading) publish(readKey, { loading: true });
     }
     return release;
-  }, [readKey, objectName, recordId, lockReader]);
+  }, [readKey, objectName, recordId]);
 
   const refresh = useCallback(async () => {
     if (!objectName || !recordId || !readKey) return;
     if (unavailableRef.current) return;
-    await startRead(readKey, objectName, recordId, lockReader(objectName, recordId));
-  }, [objectName, recordId, readKey, lockReader]);
+    await startRead(readKey, objectName, recordId);
+  }, [objectName, recordId, readKey]);
 
   const requests = readKey === null ? EMPTY_ROWS : snapshot.rows;
   const loading = snapshot.loading;
