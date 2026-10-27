@@ -73,6 +73,7 @@ export interface CoverageIssue {
     | 'flow'
     | 'position'
     | 'permission'
+    | 'book'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -385,6 +386,10 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // `i18n/missing-position` / `i18n/missing-permission`.
   position: 'position',
   permission: 'permission',
+  // Doc-book spine copy (`books.<b>.label` / `.description`,
+  // `books.<b>.groups.<key>.label`) — the title and section titles of a docs
+  // sidebar, reported as `i18n/missing-book` (#26690).
+  book: 'book',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -409,6 +414,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   flow: 'Flow',
   position: 'Position',
   permission: 'Permission set',
+  book: 'Book',
   metadataForm: 'Metadata form',
 };
 
@@ -454,6 +460,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   flow: 'flow screens, approval steps, toasts and refusals',
   position: 'positions',
   permission: 'permission sets',
+  book: 'doc books',
   metadataForm: 'metadata forms',
 };
 

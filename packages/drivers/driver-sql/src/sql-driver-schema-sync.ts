@@ -104,6 +104,21 @@
  * parsers from `@objectstack/spec/data` and `@objectstack/core`.
  * `sql-driver.ts` no longer reads `formatAttribute` or `UndeliveredAttribute`.
  *
+ * [#25521 cut 18] The deferred-DDL previews joined them the same way:
+ * `previewDeferredSchemaWork`, which renders what the deferred schema sync
+ * would do into the `os migrate` plan, with `previewDatetimeConvergence` and
+ * `previewTimeConvergence`, which it calls to measure the datetime and time
+ * storage-convergence work. The class keeps all three methods, and
+ * `SchemaSyncHost` grew by exactly the members these bodies read that it did
+ * not list yet; the fields among them go as getters too. `setDeferredDdl`,
+ * `getSchemaSyncStats`, `flushDeferredSchemaDdl` and the
+ * `deferredSchemaObjectCount` accessor of that sub-banner stay in the class.
+ * The module-level declarations these bodies read are imported
+ * from where they are declared: `fieldHasColumn` and the type
+ * `PendingSchemaWork` from `schema-drift.ts`, and the two `SQLITE_*`
+ * reference counts from `sql-driver.ts`, as before. `sql-driver.ts` no longer
+ * reads `fieldHasColumn` as a value.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same dialect statements, the same rebuild procedure, the same
@@ -135,7 +150,7 @@
 
 import { isUniqueViolationError } from '@objectstack/types';
 import { StorageNameMapping } from '@objectstack/spec/system';
-import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PhysicalColumn } from './schema-drift.js';
+import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, fieldHasColumn, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PendingSchemaWork, type PhysicalColumn } from './schema-drift.js';
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
@@ -174,6 +189,7 @@ export interface SchemaSyncHost {
   createNullSafeUniqueIndex: SqlDriver['createNullSafeUniqueIndex'];
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
+  readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
   detectTableDrift: SqlDriver['detectTableDrift'];
   detectTableIndexDrift: SqlDriver['detectTableIndexDrift'];
   readonly dialectName: SqlDriver['dialectName'];
@@ -197,6 +213,8 @@ export interface SchemaSyncHost {
   isTenantKeyCertified: SqlDriver['isTenantKeyCertified'];
   readonly jsonFields: SqlDriver['jsonFields'];
   readonly knex: SqlDriver['knex'];
+  legacyMysqlTimeColumns: SqlDriver['legacyMysqlTimeColumns'];
+  legacyMysqlTimestampColumns: SqlDriver['legacyMysqlTimestampColumns'];
   logDurabilityFailure: SqlDriver['logDurabilityFailure'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
@@ -208,6 +226,8 @@ export interface SchemaSyncHost {
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
+  previewDatetimeConvergence: SqlDriver['previewDatetimeConvergence'];
+  previewTimeConvergence: SqlDriver['previewTimeConvergence'];
   probeNullSafeUniqueDuplicates: SqlDriver['probeNullSafeUniqueDuplicates'];
   rebuildSqliteTablePatched: SqlDriver['rebuildSqliteTablePatched'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -220,6 +240,7 @@ export interface SchemaSyncHost {
   sqliteCanonicalDatetimeSql: SqlDriver['sqliteCanonicalDatetimeSql'];
   sqliteCanonicalTimeSql: SqlDriver['sqliteCanonicalTimeSql'];
   sqliteNonTemporalTextSql: SqlDriver['sqliteNonTemporalTextSql'];
+  readonly supportsRotation: SqlDriver['supportsRotation'];
   syncDeclaredIndexes: SqlDriver['syncDeclaredIndexes'];
   syncTableIndexes: SqlDriver['syncTableIndexes'];
   readonly tenantFieldByTable: SqlDriver['tenantFieldByTable'];
@@ -1911,4 +1932,135 @@ export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFie
   if (dateCols.length) this.dateFields[key] = new Set(dateCols);
   if (datetimeCols.length) this.datetimeFields[key] = new Set(datetimeCols);
   if (timeCols.length) this.timeFields[key] = new Set(timeCols);
+}
+
+/** The body of `SqlDriver#previewDeferredSchemaWork`; the method's docblock there is its contract. */
+export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'deferredSchemaObjects' | 'knex' | 'previewDatetimeConvergence' | 'previewTimeConvergence' | 'rotationShardKey' | 'supportsRotation'>): Promise<PendingSchemaWork[]> {
+  const out: PendingSchemaWork[] = [];
+  for (const [tableName, obj] of this.deferredSchemaObjects) {
+    const declared = Object.entries<any>(obj.fields ?? {})
+      .filter(([, field]) => fieldHasColumn(field ?? {}))
+      .map(([name]) => name);
+    // [#22506] A rotation-declared object (ADR-0057 P2) is not a table under
+    // its base name: the rotator keeps it as the CURRENT shard
+    // (`<table>__r<key>`) plus a read VIEW under the base name, so the
+    // `hasTable` probe below — false for a view — listed it as `create_table`
+    // on every plan, and the flush (which takes the sync's rotation branch)
+    // then created nothing: a finding no apply could clear. It is answered
+    // from the rotator's own facts instead — its shard key for now, and the
+    // two names in `sqlite_master`: the current shard and the read view
+    // present means nothing is pending. Anything else falls through to the
+    // probes below (no shard yet: `create_table`, which the flush performs).
+    // The deferral stores the whole definition (`{ ...obj, name }`), so its
+    // `lifecycle` is here even though the map's declared value type omits it.
+    const rotation = (obj as { lifecycle?: { storage?: { strategy?: string; unit?: 'day' | 'week' | 'month' } } })
+      .lifecycle?.storage;
+    if (rotation?.strategy === 'rotation' && rotation.unit && this.supportsRotation) {
+      const current = `${tableName}__r${this.rotationShardKey(Date.now(), rotation.unit)}`;
+      const raw: any = await this.knex.raw(
+        'SELECT name, type FROM sqlite_master WHERE name IN (?, ?)',
+        [tableName, current],
+      );
+      const rows: Array<{ name: string; type: string }> = Array.isArray(raw) ? raw : raw?.rows ?? [];
+      const readView = rows.some((r) => r.name === tableName && r.type === 'view');
+      const currentShard = rows.some((r) => r.name === current && r.type === 'table');
+      if (readView && currentShard) continue;
+    }
+    if (!(await this.knex.schema.hasTable(tableName))) {
+      // A table that does not exist yet is created empty, so nothing to converge.
+      out.push({ table: tableName, kind: 'create_table', columns: declared });
+      continue;
+    }
+    const existing = new Set(Object.keys(await this.knex(tableName).columnInfo()));
+    const missing = declared.filter((c) => !existing.has(c));
+    if (missing.length > 0) {
+      out.push({ table: tableName, kind: 'add_columns', columns: missing });
+    }
+    out.push(...(await this.previewDatetimeConvergence(tableName, obj.fields ?? {}, existing)));
+    out.push(...(await this.previewTimeConvergence(tableName, obj.fields ?? {}, existing)));
+  }
+  out.sort((a, b) => a.table.localeCompare(b.table) || a.kind.localeCompare(b.kind));
+  return out;
+}
+
+/** The body of `SqlDriver#previewDatetimeConvergence`; the method's docblock there is its contract. */
+export async function previewDatetimeConvergence(this: Pick<SchemaSyncHost, 'datetimeFields' | 'isMysql' | 'isSqlite' | 'knex' | 'legacyMysqlTimestampColumns' | 'sqliteCanonicalDatetimeSql' | 'sqliteNonTemporalTextSql'>, table: string, fields: Record<string, any>, existingColumns: Set<string>): Promise<PendingSchemaWork[]> {
+  try {
+    if (this.isSqlite) {
+      const declared = [...(this.datetimeFields[table] ?? [])].filter((c) => existingColumns.has(c));
+      if (declared.length === 0) return [];
+      const canonical = this.sqliteCanonicalDatetimeSql('??');
+      const guard = this.sqliteNonTemporalTextSql('??');
+      const columns: string[] = [];
+      let rows = 0;
+      for (const field of declared) {
+        const res: any = await this.knex.raw(
+          `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+          [
+            table, field, field, field, field, field, field,
+            ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
+          ],
+        );
+        const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+        if (n > 0) { columns.push(field); rows += n; }
+      }
+      return columns.length === 0
+        ? []
+        : [{ table, kind: 'normalize_datetime_storage', columns, rows }];
+    }
+
+    if (this.isMysql) {
+      const legacy = await this.legacyMysqlTimestampColumns(table, fields);
+      if (legacy.length === 0) return [];
+      const res: any = await this.knex.raw(`select count(*) as n from ??`, [table]);
+      const counted = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+      const rows = Number((counted[0] as any)?.n ?? (counted as any)?.n ?? 0);
+      return [{ table, kind: 'widen_datetime_columns', columns: legacy.map((c) => c.name), rows }];
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/** The body of `SqlDriver#previewTimeConvergence`; the method's docblock there is its contract. */
+export async function previewTimeConvergence(this: Pick<SchemaSyncHost, 'isMysql' | 'isSqlite' | 'knex' | 'legacyMysqlTimeColumns' | 'sqliteCanonicalTimeSql' | 'sqliteNonTemporalTextSql' | 'timeFields'>, table: string, fields: Record<string, any>, existingColumns: Set<string>): Promise<PendingSchemaWork[]> {
+  try {
+    if (this.isSqlite) {
+      const declared = [...(this.timeFields[table] ?? [])].filter((c) => existingColumns.has(c));
+      if (declared.length === 0) return [];
+      const canonical = this.sqliteCanonicalTimeSql('??');
+      const guard = this.sqliteNonTemporalTextSql('??');
+      const columns: string[] = [];
+      let rows = 0;
+      for (const field of declared) {
+        const res: any = await this.knex.raw(
+          `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+          [
+            table, field, field, ...Array(SQLITE_TIME_EXPR_REFS).fill(field),
+            ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
+          ],
+        );
+        const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+        if (n > 0) { columns.push(field); rows += n; }
+      }
+      return columns.length === 0
+        ? []
+        : [{ table, kind: 'normalize_time_storage', columns, rows }];
+    }
+
+    if (this.isMysql) {
+      const legacy = await this.legacyMysqlTimeColumns(table, fields);
+      if (legacy.length === 0) return [];
+      const res: any = await this.knex.raw(`select count(*) as n from ??`, [table]);
+      const counted = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
+      const rows = Number((counted[0] as any)?.n ?? (counted as any)?.n ?? 0);
+      return [{ table, kind: 'widen_time_columns', columns: legacy.map((c) => c.name), rows }];
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
 }

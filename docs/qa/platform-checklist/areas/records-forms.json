@@ -626,7 +626,7 @@
       "title": "View-type gallery: every ListViewSchema visualization renders seeded records",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -712,7 +712,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts (page-level render for the view surfaces)"
+        "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts (page-level render for the view surfaces; acceptance[5]). packages/qa/dogfood/test/view-type-gallery-data-halves.dogfood.test.ts pins the API halves on the showcase as shipped: acceptance[1] (GET /api/v1/meta/view serves the kanban view grouped by status and summarizing estimate_hours; each of the five status columns holds seeded tasks; POST /data/showcase_task/query grouping by status with sum(estimate_hours) answers one row per column, each equal to the raw rows grouped client-side) and acceptance[2] (the calendar view names due_date, the timeline created_at, the gantt start_date → end_date with progressField progress; the seeded tasks carry those values and no gantt bar ends before it starts). acceptance[0] and negative[0] (each variant's real visualization, not a grid fallback), the on-canvas placement half of acceptance[1] and [2], acceptance[3] with negative[1] (map markers, the chart's plotted marks) and acceptance[4] (the business-unit tree) stay live browser legs: they are judged on screenshots and the rendered DOM, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/spec/src/ui/view.zod.ts#ListViewSchema (ListViewSchema type enum: grid|kanban|gallery|calendar|timeline|gantt|map|chart|tree)",
@@ -733,6 +733,12 @@
           "date": "2026-10-26",
           "change": "acceptance[5].verify says its pin is a Playwright spec needing a built console and a live stack, so it scores only when the run executes it (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin for the API halves of acceptance[1] and [2] (#26573 slice 4), names acceptance[5] as the smoke spec's, and says why the screenshot and dom clauses stay live browser legs. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -855,7 +861,7 @@
       "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -931,7 +937,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker and acceptance[3], on the New Invoice dialog as Status flips: Issued On's required marker, and paid_on mounted, and required, only at paid). Neither pins acceptance[2]'s client lock: on that New dialog the spec asserts the OPPOSITE at paid, tax_rate enabled and no read-only field group, because the server exempts INSERT from readonlyWhen and the create form follows it (objectui#13436); the lock lives on an edit form of a paid invoice, which no pin drives. Both read the DOM through Playwright locators with no screenshot step: their wait for visibility is what stands in for the render-first order acceptance[0] and [3]'s dom oracle asks for, so a run citing them says so. packages/qa/dogfood/test/invoice-conditional-rules-server.dogfood.test.ts, at the REST data door of the showcase as shipped, pins acceptance[1] and negative[0] (a sent invoice with no issued_on is 400 VALIDATION_FAILED with exactly issued_on required and nothing is stored; the draft twin and a dated sent invoice are 201), acceptance[2]'s server half and negative[1] (a tax_rate PATCH on the seeded paid INV-1003 answers 200 and the re-read is unchanged; the same PATCH on a draft persists) and acceptance[5]'s API half. No pin covers acceptance[2]'s client lock, acceptance[4] or negative[2]; the row-action spec cited here until revision 3 was dropped (history, revision 3)"
+        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker and acceptance[3], on the New Invoice dialog as Status flips: Issued On's required marker, and paid_on mounted, and required, only at paid). Neither pins acceptance[2]'s client lock: on that New dialog the spec asserts the OPPOSITE at paid, tax_rate enabled and no read-only field group, because the server exempts INSERT from readonlyWhen and the create form follows it (objectui#13436); the lock lives on an edit form of a paid invoice, which no pin drives. Both read the DOM through Playwright locators with no screenshot step: their wait for visibility is what stands in for the render-first order acceptance[0] and [3]'s dom oracle asks for, so a run citing them says so. packages/qa/dogfood/test/invoice-conditional-rules-server.dogfood.test.ts, at the REST data door of the showcase as shipped, pins acceptance[1] and negative[0] (a sent invoice with no issued_on is 400 VALIDATION_FAILED with exactly issued_on required and nothing is stored; the draft twin and a dated sent invoice are 201), acceptance[2]'s server half and negative[1] (a tax_rate PATCH on the seeded paid INV-1003 answers 200 and the re-read is unchanged; the same PATCH on a draft persists) and acceptance[5]'s API half. acceptance[2]'s client lock (an edit form of a paid invoice), acceptance[4] and negative[2] (the row-action menu) stay live browser legs with no pin, which no HTTP pin reaches; the row-action spec cited here until revision 3 was dropped (history, revision 3)"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts#userActions (the B2 rules + userActions gating, with server-semantics comments)",
@@ -973,6 +979,12 @@
           "revision": 6,
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[1], acceptance[2]'s server half, acceptance[5]'s API half and negative[0]–[1] at the REST data door (#26573 slice 2). The client lock, acceptance[4] and negative[2] stay browser legs. No clause changed",
+          "ref": "#26573"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "automated.ref says acceptance[2]'s client lock, acceptance[4] and negative[2] stay live browser legs, and why (#26573 Done-when). No clause changed",
           "ref": "#26573"
         }
       ]
@@ -1387,7 +1399,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1466,7 +1478,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/detail-related-list.spec.ts — acceptance[2] ONLY (the relationship-derived Projects related list on the Account detail page: Northwind's detail renders a Projects tab whose panel shows the projects' status labels). No pin covers the paging, pager-total, relatedList-config, row-navigation or read-gate clauses (acceptance[0], [1], [3], [4], [5])"
+        "ref": "objectui: e2e/live/detail-related-list.spec.ts — acceptance[2] ONLY (the relationship-derived Projects related list on the Account detail page: Northwind's detail renders a Projects tab whose panel shows the projects' status labels). packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[3] (the Invoices tab's authored title and columns) and the Contacts tab's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
@@ -1523,6 +1535,12 @@
           "date": "2026-10-26",
           "change": "fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "automated.ref names the dogfood pin for the server halves of acceptance[1], [4], [5] and negative[1], [2] (#26573 slice 4), and says why acceptance[0], [3], negative[0] and the rendered halves stay live browser legs. No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -2346,7 +2364,7 @@
       "title": "Dirty forms guard ACCIDENTAL closes: the X / Escape / backdrop prompt on a dirty form, the footer Cancel discards without a prompt by design, save proceeds, nothing is lost silently",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2394,7 +2412,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/plugin-form/src/discardGuard.test.tsx"
+        "ref": "objectui: packages/plugin-form/src/discardGuard.test.tsx (acceptance[2]; the X close, the footer Cancel and the pristine paths, which hold acceptance[0] and negative[0] in part). acceptance[0] and negative[0]'s Escape and backdrop legs, which the suite does not drive, and acceptance[1] (the server re-read after each of the guard's two exits) stay live browser legs: every clause is judged on a close or a save the user makes in the console, so the re-read has nothing to read until a browser drives the exit, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "objectui: packages/plugin-form/src/{ModalForm,DrawerForm}.tsx (beforeunload/guard wiring; handleCancel — the footer Cancel is an intentional discard and closes with no prompt, while the guard rides the Radix onOpenChange close paths)",
@@ -2424,6 +2442,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2].verify, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/discardGuard.test.tsx on main cc378e93. (1) It ran the suite from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout. (2) The '14/14' from QA run #23163 does not match this tree, which holds 11 it() cases; the verify names the count and its tree. (3) The suite covers the X close, Cancel and pristine paths but no Escape or backdrop click, so those legs of acceptance[0] and negative[0] are named as hand-driven. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "automated.ref says what the unit suite holds and why the rest stays a live leg: every clause needs a browser to drive the guard's exit, acceptance[1]'s re-read included (#26573 Done-when). No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -2494,7 +2518,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2566,7 +2590,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and its filter-tabs case, now on the Task Triage interface page, pins the uf__tab half (picking the urgent tab writes uf__tab=urgent, and it survives a reload). Both cases reproduce the filter on page.reload() and read only the URL param and the record-count bar's '2': neither captures the data request acceptance[4]'s network oracle names, nor compares row identity, so the same-request and same-rows half is driven by hand. No pin covers acceptance[0]–[3]; the saved-view spec cited here until revision 5 was dropped (history, revision 5)"
+        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and its filter-tabs case, now on the Task Triage interface page, pins the uf__tab half (picking the urgent tab writes uf__tab=urgent, and it survives a reload). Both cases reproduce the filter on page.reload() and read only the URL param and the record-count bar's '2': neither captures the data request acceptance[4]'s network oracle names, nor compares row identity, so the same-request and same-rows half is driven by hand. No pin covers acceptance[0]–[3]; the saved-view spec cited here until revision 5 was dropped (history, revision 5). acceptance[0]–[3], acceptance[4]'s same-request half and negative[0]–[3] stay live browser legs: each is judged on the console's own data request (its filter and sort params), on the list a reload or an in-app navigation restores, or on what a second account sees in the same browser, which no HTTP-only pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
@@ -2617,6 +2641,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/user-filters.spec.ts on main cc378e93. (1) acceptance[4]'s two user-filters cases reproduce the filter on page.reload() and check the URL param and the record-count bar's '2' only. They never capture the data request the clause's network oracle names, nor compare row identity, so the ref now says that half is driven by hand. (2) The ref no longer names the saved-view spec it dropped at revision 5, which a ref parser read as a pin. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "automated.ref says why the unpinned clauses stay live legs: every one is browser-only, and the card adds no Playwright lane (#26573 Done-when). No clause changed",
+          "ref": "#26573"
         }
       ]
     },
@@ -2851,7 +2881,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2992,7 +3022,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts: its '(f) enable.feeds:false still answers FEEDS_DISABLED' case asserts the 403 and the code, and never reads the thread's zero rows after the refusal, so acceptance[5]'s zero-row half is the run's). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6. acceptance[8]'s fallback oracle, where the milestone channel is unavailable, is objectui packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts (the activity → feed map's superset pin and its UNMAPPED_ACTIVITY_FEED_TYPE fallback), a unit pin the run executes in the objectui tree."
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts: its '(f) enable.feeds:false still answers FEEDS_DISABLED' case asserts the 403 and the code, and never reads the thread's zero rows after the refusal, so acceptance[5]'s zero-row half is the run's). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6. acceptance[8]'s fallback oracle, where the milestone channel is unavailable, is objectui packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts (the activity → feed map's superset pin and its UNMAPPED_ACTIVITY_FEED_TYPE fallback), a unit pin the run executes in the objectui tree. A REST-door pin for acceptance[9] waits on #26625, the walled two-organization recipe: until it lands, acceptance[9]'s cross-organization leg stays a live leg on a walled boot (fixtures.knownGaps)."
       },
       "history": [
         {
@@ -3045,6 +3075,12 @@
         },
         {
           "revision": 9,
+          "date": "2026-10-27",
+          "change": "automated.ref says acceptance[9]'s REST-door pin waits on #26625 and its cross-organization leg stays a live leg until then (#26573 Done-when). No clause changed",
+          "ref": "#26573"
+        },
+        {
+          "revision": 10,
           "date": "2026-10-27",
           "change": "the scratch parent is renamed qa_nofeeds → qafeeds_nofeeds in steps[8], steps[9], acceptance[5], acceptance[6].verify and negative[2] (the thread_id spelling 'qafeeds_nofeeds:<id>' included), because the qa-feeds-disabled recipe now declares manifest.namespace 'qafeeds' (#26876). Replayed on a fresh stock showcase boot at main a51ba639: as written, the install derived namespace 'feeds' and the object save answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no feeds-disabled parent and acceptance[5] and [6] would have scored blocked(fixture). The recipe cannot declare 'qa': qa-scratch-authz owns it, and a second 'qa' package answers 422 NAMESPACE_CONFLICT. With 'qafeeds', steps 1-2 answered 201/200 beside the qa and qamedia packages on one boot, and a comment on a qafeeds_nofeeds record answered 403 FEEDS_DISABLED. Only the object name changed; no clause's assertion, step order or oracle changed",
           "ref": "#26876"
@@ -4883,7 +4919,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4950,7 +4986,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It opens showcase_account's History tab in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true half; it never reads the task detail, so the absence half has no pin and is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's"
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It opens showcase_account's History tab in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true half; it never reads the task detail, so the absence half has no pin and is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no History tab on the task detail) stay live browser legs: they are judged on the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
@@ -5005,6 +5041,12 @@
           "revision": 8,
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[0], [1], [3] and negative[0], [2] over REST (#26573 slice 2). Measured: the untracked edit's row is the #25787 generic frame, which names the changed field's label and never its values, so acceptance[1]'s 'no field-diff summary naming website' holds as 'no old → new for website'. acceptance[2]'s absence half and negative[1] stay browser legs. No clause changed",
+          "ref": "#26573"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "automated.ref says negative[1] and acceptance[2]'s absence half stay live browser legs, and why (#26573 Done-when). No clause changed",
           "ref": "#26573"
         }
       ]
@@ -5701,7 +5743,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5758,7 +5800,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/data/field-autonumber-default-unique.test.ts + packages/spec/src/ui/view.test.ts + packages/spec/src/data/record-surface.test.ts"
+        "ref": "packages/spec/src/data/field-autonumber-default-unique.test.ts + packages/spec/src/ui/view.test.ts + packages/spec/src/data/record-surface.test.ts (acceptance[0], the defaults at the spec layer). acceptance[1]–[3] stay live browser legs: the 50-row first page, the inline-edit switch and the bounded or full-screen create form are judged on the rendered console (dom and screenshot oracles), which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/spec/src/data/record-surface.ts#deriveRecordFlowSurface",
@@ -5784,6 +5826,12 @@
           "date": "2026-10-26",
           "change": "fixtures.knownGaps[0] named the .objectui-sha pin as live; it now records what runs #24558 and #24616 read at that pin and says the console builds from ui/ with pnpm console:build. Carried for #26035. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "automated.ref says the spec pins hold acceptance[0] and that acceptance[1]–[3] stay live browser legs, and why (#26573 Done-when). No clause changed",
+          "ref": "#26573"
         }
       ]
     }

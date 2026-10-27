@@ -18,7 +18,7 @@ import { retiredKey } from '../shared/retired-key';
 // through it, so `api/UpdateAiConversationRequest.json` states it.
 import { requiredOneOf } from '../shared/refinement-projection';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
-import { DroppedFieldsEventSchema, QueryPageWindowParamSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
+import { DroppedFieldsEventSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
   AnalyticsResultResponseSchema, 
@@ -2369,7 +2369,14 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   filter: z.string().optional().describe('JSON-encoded filter expression (canonical, singular).'),
   /** @deprecated Use `filter` (singular). Accepted for backward compatibility. */
   filters: z.string().optional().describe('JSON-encoded filter expression (deprecated plural alias).'),
-  select: z.string().optional().describe('Comma-separated list of fields to retrieve.'),
+  // [#26817] The projection the list door reads: it splits on commas, trims
+  // each member and refuses a value naming no field (blank, whitespace-only,
+  // commas only) with a 400. `[^\s,]` is that rule as a pattern — `\s` is the
+  // set `trim()` strips — so the published JSON Schema states it too.
+  select: z.string().regex(/[^\s,]/, 'Name at least one field').optional().describe(
+    'Comma-separated list of fields to retrieve — at least one field name; a value naming no field '
+    + '(blank, or only commas and spaces) is refused.'
+  ),
   sort: z.string().optional().describe('Sort expression (e.g. "name asc,created_at desc" or "-created_at").'),
   orderBy: z.string().optional().describe('Alias for sort (OData compatibility).'),
   // [#25269] The page window the list door enforces, not `z.coerce.number()`,
@@ -2384,7 +2391,15 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   search: z.string().optional().describe('Full-text search query.'),
   /** `?distinct` — REMOVED (#4286): the querystring spelling of `query.distinct`, same tombstone. */
   distinct: retiredKey(QUERY_DISTINCT_REMOVED),
-  count: z.coerce.boolean().optional().describe('Include total count in response.'),
+  // [#26817] The door's accept set, read from the one declaration the door
+  // parses (`QueryTransportParamsSchema.count`, which `findData` checks) and
+  // lowered to the boolean it means — not `z.coerce.boolean()`, which read
+  // `'false'` as `true` and admitted `'maybe'` that the door refuses with a 400.
+  // A querystring carries no `null`, so the nullable arm is unwrapped.
+  count: QueryTransportParamsSchema.shape.count.unwrap().unwrap()
+    .transform((flag) => flag === true || flag === 'true')
+    .optional()
+    .describe('Include the total count in the response — `true` or `false`; any other value is refused.'),
 }));
 
 /**

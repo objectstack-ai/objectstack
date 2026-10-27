@@ -198,6 +198,7 @@ const ActionButtonRenderer = forwardRef<
     // leg disable the button without one. See `./disabled-reason`.
     const disabledReason = useDisabledReason(
       hasDeclaredVisibilityGate(schema.disabled) && isDisabled,
+      schema.disabledReason,
     );
 
     // Resolve icon
