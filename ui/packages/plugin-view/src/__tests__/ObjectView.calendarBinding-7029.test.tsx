@@ -81,15 +81,27 @@ async function renderCalendarView(view: Record<string, unknown>) {
   return rendered[rendered.length - 1];
 }
 
+/**
+ * The emitted binding. objectstack#25923: it goes out as the node's own
+ * `calendar` block, never flat (the spec refuses the five flat on
+ * `object-calendar`). The guard reds if a flat spelling comes back.
+ */
+const blockOf = (node: any): Record<string, any> => {
+  for (const key of ['startDateField', 'endDateField', 'titleField', 'colorField', 'allDayField']) {
+    expect(node, `flat ${key} on the node`).not.toHaveProperty(key);
+  }
+  return node.calendar ?? {};
+};
+
 describe('ObjectView.generateViewSchema — calendar restates only a DECLARED binding (objectui#7029)', () => {
   it('invents NO binding for a calendar view that declares no config', async () => {
     const schema = await renderCalendarView({});
     expect(schema.type).toBe('object-calendar');
     // All three used to be fabricated here. Absent bindings are the only route
     // to `ObjectCalendar`'s refusal screen.
-    expect(schema.startDateField).toBeUndefined();
-    expect(schema.endDateField).toBeUndefined();
-    expect(schema.titleField).toBeUndefined();
+    expect(blockOf(schema).startDateField).toBeUndefined();
+    expect(blockOf(schema).endDateField).toBeUndefined();
+    expect(blockOf(schema).titleField).toBeUndefined();
   });
 
   it('CONTROL: forwards a declared calendar block unchanged', async () => {
@@ -100,15 +112,15 @@ describe('ObjectView.generateViewSchema — calendar restates only a DECLARED bi
       calendar: { startDateField: 'start_date', endDateField: 'end_date', titleField: 'subject' },
     });
     expect(schema.type).toBe('object-calendar');
-    expect(schema.startDateField).toBe('start_date');
-    expect(schema.endDateField).toBe('end_date');
-    expect(schema.titleField).toBe('subject');
+    expect(blockOf(schema).startDateField).toBe('start_date');
+    expect(blockOf(schema).endDateField).toBe('end_date');
+    expect(blockOf(schema).titleField).toBe('subject');
   });
 
   it('CONTROL: a partially declared block keeps its declared half and only that', async () => {
     const schema = await renderCalendarView({ calendar: { startDateField: 'start_date' } });
-    expect(schema.startDateField).toBe('start_date');
-    expect(schema.endDateField).toBeUndefined();
-    expect(schema.titleField).toBeUndefined();
+    expect(blockOf(schema).startDateField).toBe('start_date');
+    expect(blockOf(schema).endDateField).toBeUndefined();
+    expect(blockOf(schema).titleField).toBeUndefined();
   });
 });

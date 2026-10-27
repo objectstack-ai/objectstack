@@ -137,14 +137,16 @@ export type assertionEveryRowKeyIsOnTheArm = [
 
 /**
  * The TypeScript twin is RE-DECLARED, not retired: still published, still the
- * post-hoist reading with its flat members, still a member of the TypeScript
- * ObjectQL union. A narrowing or a removal here reddens `tsc`.
+ * post-hoist reading, still a member of the TypeScript ObjectQL union. A
+ * narrowing or a removal here reddens `tsc`. (objectstack#25923 moved its flat
+ * `GanttConfig` and search members to `plugin-gantt`'s hand-off type: the
+ * twin carries the `gantt` block, which is what the two rows below now read.)
  */
 export type assertionTwinStaysPublished = [
   Expect<Equal<TsObjectGanttSchema['type'], 'object-gantt'>>,
   Expect<Equal<TsObjectGanttSchema['objectName'], string | undefined>>,
-  Expect<Equal<TsObjectGanttSchema['startDateField'], string | undefined>>,
-  Expect<Equal<TsObjectGanttSchema['search'], string | undefined>>,
+  Expect<Equal<NonNullable<TsObjectGanttSchema['gantt']>['startDateField'], string>>,
+  Expect<Equal<Extract<'startDateField' | 'search', keyof TsObjectGanttSchema>, never>>,
   Expect<Equal<Extract<TsObjectQLComponentSchema, { type: 'object-gantt' }>, TsObjectGanttSchema>>,
 ];
 

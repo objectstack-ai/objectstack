@@ -320,10 +320,13 @@ flat top-level keys are not merged into it. The flat spelling is read only when
 there is no `gantt` block, and then only when `startDateField` and
 `endDateField` are both present. A node carrying both spellings renders the
 block's values and gets a dev-mode warning naming the ignored top-level keys.
-**Author the `gantt` block**: the flat spelling is the runtime handoff
-`ObjectView` and `ListView` write onto the node they compose, and an authored
-node cannot carry it — `objectui validate` refuses each flat key and names
-`properties.gantt.KEY`, and the spec's row refuses it inside the bag too.
+**Author the `gantt` block**: an authored node cannot carry the flat spelling —
+`objectui validate` refuses each flat key and names `properties.gantt.KEY`, and
+the spec's row refuses it inside the bag too. Since objectstack#25923
+`ObjectGanttSchema` does not declare the flat keys either, and `ObjectView` and
+`ListView` write the `gantt` block onto the node they compose. The flat read is
+kept for a host that mounts `<ObjectGantt>` directly, typed on this package's
+own hand-off type, `ObjectGanttHandoff`.
 
 Precedence follows the maintainer ruling on objectui#5018 (2026-08-17), which
 settled the identical two-faces shape for `plugin-map`; objectui#6469 inherited

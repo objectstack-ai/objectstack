@@ -29,6 +29,15 @@
  * renderer READS the flat spelling, not that an author should write it. The
  * README row below pins the new teaching.
  *
+ * ⚠️ Dated note — objectstack#25923. The declarations this file pinned DID move
+ * after all: the five left both published faces of `ObjectCalendarSchema`
+ * (they are `plugin-calendar`'s package-local hand-off type now, where the one
+ * reader lives), because a declared flat key is one the strict authoring face
+ * derives from, so `objectui validate` accepted the very spelling the spec
+ * refuses. The reads, the README, the spec and the `inputs` rows below are
+ * unchanged; the TS and mirror rows are inverted to the new state, and the
+ * strict face's refusal is pinned in the mirror section below.
+ *
  * ## Why BOTH keys, and the measurement that decided the second one
  *
  * The two keys look asymmetric and are not. `colorField` IS a spec key — but
@@ -117,7 +126,7 @@ import { CalendarConfigSchema, ComponentPropsMap } from '@objectstack/spec/ui';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
-import { ObjectCalendarSchema, safeValidateSchema } from '../zod/index.zod';
+import { ObjectCalendarSchema, safeValidateSchema, StrictAnyComponentSchema } from '../zod/index.zod';
 import type { ObjectCalendarSchema as TsObjectCalendarSchema } from '../objectql';
 import type { CalendarViewSchema as TsCalendarViewSchema } from '../complex';
 
@@ -167,16 +176,15 @@ type IsAny<T> = 0 extends (1 & T) ? true : false;
 /** An object with no keys is assignable to `Pick<T, K>` only when `K` is optional on `T`. */
 type IsOptional<T, K extends keyof T> = Record<string, never> extends Pick<T, K> ? true : false;
 
-// `colorField` is DERIVED from the spec's `CalendarConfig`, so it resolves to
-// that member's type. Delete the member and the indexed access fell back to
-// `[key: string]: any`, making `IsAny` true and this `Equal` false; since
-// objectui#8347 it stops compiling instead.
-export type _ColorFieldIsString = Expect<Equal<TsObjectCalendarSchema['colorField'], string | undefined>>;
-export type _ColorFieldIsNotAny = Expect<Equal<IsAny<TsObjectCalendarSchema['colorField']>, false>>;
-export type _ColorFieldIsOptional = Expect<IsOptional<TsObjectCalendarSchema, 'colorField'>>;
-export type _AllDayFieldIsString = Expect<Equal<TsObjectCalendarSchema['allDayField'], string | undefined>>;
-export type _AllDayFieldIsNotAny = Expect<Equal<IsAny<TsObjectCalendarSchema['allDayField']>, false>>;
-export type _AllDayFieldIsOptional = Expect<IsOptional<TsObjectCalendarSchema, 'allDayField'>>;
+// objectstack#25923 — none of the five is a member of the published interface
+// any more: the flat spelling is `plugin-calendar`'s hand-off type. In the
+// `calendar` block, their one spelling, both are typed from the spec's block.
+export type _NoFlatKeyIsAMember = Expect<Equal<Extract<keyof TsObjectCalendarSchema, (typeof FLAT_KEYS)[number]>, never>>;
+type CalendarBlock = NonNullable<TsObjectCalendarSchema['calendar']>;
+export type _BlockColorFieldIsString = Expect<Equal<CalendarBlock['colorField'], string | undefined>>;
+export type _BlockAllDayFieldIsString = Expect<Equal<CalendarBlock['allDayField'], string | undefined>>;
+export type _BlockColorFieldIsNotAny = Expect<Equal<IsAny<CalendarBlock['colorField']>, false>>;
+export type _BlockAllDayFieldIsOptional = Expect<IsOptional<CalendarBlock, 'allDayField'>>;
 // The control key is undeclared, exactly as the two above were before this card.
 // Until objectui#8347 it fell through `BaseSchema`'s index signature and read
 // `any`; that signature is gone, so it is no member at all. `IsAny<any>` is the
@@ -206,21 +214,18 @@ const siblingPins: [
 // read `any` through the index signature until objectui#8347 removed it.
 export type _SiblingControlIsNoMember = Expect<Equal<'swatchField' extends keyof TsCalendarViewSchema ? true : false, false>>;
 
-// The TS face ACCEPTS the flat handoff shape…
+// The TS face ACCEPTS the two in the `calendar` block…
 const calendarLiteral: TsObjectCalendarSchema = {
   ...CALENDAR_NODE,
-  colorField: 'status_colour',
-  allDayField: 'is_all_day',
+  calendar: { startDateField: 'starts_at', colorField: 'status_colour', allDayField: 'is_all_day' },
 };
 
-// …and REFUSES wrong-typed values the index signature used to admit. Each
-// directive goes unused — TS2578, a hard failure — if its member is widened to
-// accept the value. A deletion keeps it used since objectui#8347 (the value is
-// refused as an undeclared key) and is caught by the `Equal` rows above.
-// @ts-expect-error — `colorField` names a FIELD, so it is a string, not the colour itself
-const calendarBadColorField: TsObjectCalendarSchema = { ...CALENDAR_NODE, colorField: 0xff0000 };
-// @ts-expect-error — `allDayField` names a FIELD; a boolean is the VALUE, the confusion this declaration catches
-const calendarBadAllDayField: TsObjectCalendarSchema = { ...CALENDAR_NODE, allDayField: true };
+// …REFUSES them written flat on the node (objectstack#25923). Each directive
+// goes unused — TS2578, a hard failure — if a flat member comes back.
+// @ts-expect-error — the flat `colorField` is no member of the published interface; write `calendar.colorField`
+const calendarBadColorField: TsObjectCalendarSchema = { ...CALENDAR_NODE, colorField: 'status_colour' };
+// @ts-expect-error — the flat `allDayField` is no member of the published interface; write `calendar.allDayField`
+const calendarBadAllDayField: TsObjectCalendarSchema = { ...CALENDAR_NODE, allDayField: 'is_all_day' };
 // …and, since objectui#8347 removed `BaseSchema`'s index signature, the misspelling itself.
 // @ts-expect-error — `colourField` is no member of `ObjectCalendarSchema`; the key is `colorField`
 const calendarMisspelledKey: TsObjectCalendarSchema = { ...CALENDAR_NODE, colourField: 'status_colour' };
@@ -608,72 +613,51 @@ describe('objectui#8466 — the registration `inputs` deliberately declares NO f
 
 /* ── The zod mirror ───────────────────────────────────────────────────────── */
 
-describe('objectui#8466 — the mirror declares what the interface declares', () => {
+describe('objectstack#25923 — the mirror declares none of the five flat, as the interface does not', () => {
   it('membership, read off the mirror shape (acceptance cannot tell declared from admitted)', () => {
     const keys = shapeKeys(ObjectCalendarSchema);
-    for (const key of [...ALREADY_DECLARED, ...NEWLY_DECLARED]) expect(keys).toContain(key);
-    // The control stays out, which keeps the assertions above from being
-    // satisfied by a shape that simply contains everything.
+    for (const key of [...ALREADY_DECLARED, ...NEWLY_DECLARED]) expect(keys).not.toContain(key);
+    // Firing control on the same shape: the block that carries them is declared.
+    expect(keys).toContain('calendar');
     expect(keys).not.toContain(CONTROL_KEY);
-    expect(keys).not.toContain(MISSPELLING);
   });
 
-  it('accepts the flat handoff shape `ObjectView`/`ListView` emit, and the values SURVIVE the parse', () => {
-    const node = { ...CALENDAR_NODE, colorField: 'status_colour', allDayField: 'is_all_day' };
+  it('the TOLERANT face still admits a flat key unexamined — the objectui#7927 ceiling, unchanged', () => {
+    // `.passthrough()`: undeclared is admitted and kept, never value-checked.
+    // That is the tolerant face's deliberate posture; the refusal that matters
+    // is the STRICT face's, below.
+    const node = { ...CALENDAR_NODE, colorField: 0xff0000, allDayField: true, [MISSPELLING]: 'x' };
     const r = ObjectCalendarSchema.safeParse(node);
     expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
-    if (r.success) {
-      expect((r.data as Record<string, unknown>).colorField).toBe('status_colour');
-      expect((r.data as Record<string, unknown>).allDayField).toBe('is_all_day');
-    }
-    // …and through the published union entry point, so the right arm is reached.
     expect(safeValidateSchema(node).success).toBe(true);
   });
 
-  it('both members stay OPTIONAL: the node without them parses green — this adds no requiredness', () => {
-    expect(ObjectCalendarSchema.safeParse(CALENDAR_NODE).success).toBe(true);
-    expect(safeValidateSchema(CALENDAR_NODE).success).toBe(true);
-  });
-
-  it.each([
-    ['colorField', 0xff0000],
-    ['colorField', { hex: '#ff0000' }],
-    // The confusion the declaration catches: the FLAG rather than the FIELD NAME.
-    ['allDayField', true],
-    ['allDayField', ['is_all_day']],
-  ] as const)('refuses a wrong-typed `%s` (%j) AT the key — the verdict declaring MOVES', (key, value) => {
-    // Before this card every one of these rode `.passthrough()` unexamined.
-    const r = ObjectCalendarSchema.safeParse({ ...CALENDAR_NODE, [key]: value });
-    expect(r.success).toBe(false);
+  it.each(FLAT_KEYS)('the STRICT authoring face refuses a flat `%s` by name, as the spec does', (key) => {
+    const r = StrictAnyComponentSchema.safeParse({ ...CALENDAR_NODE, [key]: 'some_field' });
+    expect(r.success, `the strict face accepts a flat ${key} again`).toBe(false);
     if (!r.success) {
-      // The refusal must land ON the key, not merely somewhere in the node —
-      // which is what distinguishes value validation from an unrelated refusal.
-      const paths = r.error.issues.map((i) => (i.path ?? []).join('.'));
-      expect(paths, JSON.stringify(paths)).toContain(key);
+      // The strict face names an undeclared key with `unrecognized_keys` at the
+      // node, carrying the key — the refusal is BY NAME, not a generic misfit.
+      const named = r.error.issues.some(
+        (i) => i.code === 'unrecognized_keys' && (i as { keys?: string[] }).keys?.includes(key),
+      );
+      expect(named, JSON.stringify(r.error.issues)).toBe(true);
     }
-    // …and the same refusal through the path the CLI's `validate` / `check` reach.
-    expect(safeValidateSchema({ ...CALENDAR_NODE, [key]: value }).success).toBe(false);
   });
 
-  it('the objectui#7927 ceiling is UNCHANGED: a misspelled key is still admitted', () => {
-    // This card buys value validation, not misspelling detection. Pinning the
-    // ceiling is what stops the change being read as more than it is — and
-    // turns red if `.passthrough()` is ever tightened, which would be #7927's
-    // job and would need this file revisited.
-    expect(ObjectCalendarSchema.safeParse({ ...CALENDAR_NODE, [MISSPELLING]: 'x' }).success).toBe(true);
-    expect(ObjectCalendarSchema.safeParse({ ...CALENDAR_NODE, [CONTROL_KEY]: 'x' }).success).toBe(true);
-    // Even a wrong-TYPED misspelling rides through, which is the sharp edge:
-    // the value validation above reaches only the spelling that is declared.
-    expect(ObjectCalendarSchema.safeParse({ ...CALENDAR_NODE, [MISSPELLING]: true }).success).toBe(true);
+  it('CONTROL: the strict face accepts the same five inside the `calendar` block', () => {
+    const block = Object.fromEntries(FLAT_KEYS.map((key) => [key, `f_${key}`]));
+    const r = StrictAnyComponentSchema.safeParse({ ...CALENDAR_NODE, calendar: block });
+    expect(r.success, JSON.stringify(r.success ? [] : r.error.issues)).toBe(true);
   });
 });
 
 /* ── Keep the type-level consts referenced (they are the pins) ─────────────── */
 
-describe('objectui#8466 — the TS face accepts the flat handoff node', () => {
+describe('objectstack#25923 — the TS face takes the two in the `calendar` block only', () => {
   it('the accepted literal carries the values it was authored with', () => {
-    expect(calendarLiteral.colorField).toBe('status_colour');
-    expect(calendarLiteral.allDayField).toBe('is_all_day');
+    expect(calendarLiteral.calendar?.colorField).toBe('status_colour');
+    expect(calendarLiteral.calendar?.allDayField).toBe('is_all_day');
     // The refused literals exist only so their `@ts-expect-error` directives do;
     // referencing them keeps `noUnusedLocals` off this file's back.
     expect([calendarBadColorField, calendarBadAllDayField, calendarMisspelledKey]).toHaveLength(3);

@@ -136,19 +136,22 @@ const canonicalBlockCompiles: ListViewInferred = {
 const nodeRefusesBothByTsc: TsObjectCalendarSchema = {
   type: 'object-calendar',
   objectName: 'duly_task',
-  startDateField: 'kickoff',
+  calendar: { startDateField: 'kickoff' },
   // @ts-expect-error objectui#8355 — `dateField?: never` on the node face.
   dateField: 'kickoff',
   // @ts-expect-error objectui#8355 — `endField?: never` on the node face.
   endField: 'wrapup',
 };
 
-/** POSITIVE CONTROL: the canonical flat node compiles. */
+/**
+ * POSITIVE CONTROL: the canonical node compiles. Since objectstack#25923 the
+ * canonical spelling is the `calendar` block: the five flat members left the
+ * published node face (the spec refuses them flat).
+ */
 const canonicalNodeCompiles: TsObjectCalendarSchema = {
   type: 'object-calendar',
   objectName: 'duly_task',
-  startDateField: 'kickoff',
-  endDateField: 'wrapup',
+  calendar: { startDateField: 'kickoff', endDateField: 'wrapup' },
 };
 
 /* ── The RUNTIME face — this is what vitest actually gates ────────────────── */
@@ -165,7 +168,7 @@ const issueAt = (result: ReturnType<typeof listView>, path: string) =>
 describe('objectui#8355 · the compile-time fixtures above are real program inputs', () => {
   it('exists so the fixtures cannot be dropped as unused — `tsc` is their only gate', () => {
     expect(canonicalBlockCompiles.calendar?.startDateField).toBe('kickoff');
-    expect(canonicalNodeCompiles.endDateField).toBe('wrapup');
+    expect(canonicalNodeCompiles.calendar?.endDateField).toBe('wrapup');
     expect((viewBlockRefusesBothByTsc.calendar as Record<string, unknown>).dateField).toBe('kickoff');
     expect((nodeRefusesBothByTsc as unknown as Record<string, unknown>).endField).toBe('wrapup');
   });
