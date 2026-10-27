@@ -1500,9 +1500,10 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
     }
     // [#26170] Every marshalled host error carries the `message` and `code` it
     // crossed with, so the reject handler can tell it leaving unchanged from
-    // an error the body made (see SANDBOX_HOST_ERROR_OF_PROP).
+    // an error the body made (see SANDBOX_HOST_ERROR_OF_PROP). Not enumerable:
+    // the body reads the same keys off a host error as before (#3918's allowlist).
     const hostOf = vm.newString(JSON.stringify([vmMessage, typeof e?.code === 'string' && e.code ? e.code : null]));
-    vm.setProp(errH, SANDBOX_HOST_ERROR_OF_PROP, hostOf);
+    vm.defineProp(errH, SANDBOX_HOST_ERROR_OF_PROP, { value: hostOf, configurable: true, enumerable: false });
     hostOf.dispose();
   } catch {
     /* keep the bare name/message error */

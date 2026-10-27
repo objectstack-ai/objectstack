@@ -46,6 +46,22 @@ export const hookForm = defineForm({
             { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
           ],
         },
+        {
+          field: 'refusals',
+          type: 'record',
+          helpText: 'Refusals the body may throw, by code — the body throws an error carrying the code, and the caller reads this message',
+          keyField: {
+            field: 'code',
+            label: 'Code',
+            placeholder: 'CREDIT_LIMIT',
+            helpText: 'SCREAMING_SNAKE code the body throws',
+            regex: '^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$',
+          },
+          fields: [
+            { field: 'message', type: 'text', required: true, helpText: 'What the user reads (translated per locale)' },
+            { field: 'status', type: 'number', helpText: 'HTTP status, 400–499 (default 400)' },
+          ],
+        },
       ],
     },
     {
