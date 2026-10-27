@@ -23,7 +23,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, expectTypeOf, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { ComponentRegistry } from '@object-ui/core';
 import type { FilterBuilderSchema, FilterGroup } from '@object-ui/types';
@@ -85,37 +85,53 @@ describe('filter-builder renderer hands onChange the declared FilterGroup (#2638
     expect(onChange.mock.calls[0][0].conditions).toHaveLength(2);
   });
 
-  it('refuses loudly, rather than handing on, a row the FilterGroup cannot carry', () => {
+  it('keeps a host-forwarded extraOperators out of the builder, so exists / notExists are never offered', async () => {
+    // `extraOperators` is the builder's only operator-granting prop, and what it
+    // grants is outside the FilterGroup that onChange declares. A host that
+    // forwards it through the node must not widen the dropdown.
+    renderDirect({
+      schema: { type: 'filter-builder', name: 'filters', fields: FIELDS, value: VALUE },
+      extraOperators: ['exists', 'notExists'],
+      onChange: vi.fn<(filter: FilterGroup) => void>(),
+    });
+
+    // The row's controls are Radix comboboxes in field / operator / value
+    // order, so index 1 is the operator.
+    fireEvent.keyDown(screen.getAllByRole('combobox')[1], { key: 'ArrowDown' });
+    const labels = await waitFor(() => {
+      const options = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(options, 'the operator dropdown did not open').toContain('Is empty');
+      return options;
+    });
+    expect(labels).not.toContain('Is set');
+    expect(labels).not.toContain('Is not set');
+  });
+
+  it('skips the emit, and names the operator on the console, for a stored row the FilterGroup cannot carry', () => {
     const onChange = vi.fn<(filter: FilterGroup) => void>();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     // Off contract on purpose: `exists` is the builder's opt-in operator, not
     // a protocol one, and the zod mirror refuses it in an authored `value`.
+    // A stored value that skipped that validation is the one way in left.
     const offContract = {
       ...VALUE,
       conditions: [{ id: 'c1', field: 'name', operator: 'exists' }],
     };
-    renderDirect({
-      schema: { type: 'filter-builder', name: 'filters', fields: FIELDS, value: offContract },
-      onChange,
-    });
-
-    // A throw inside a React event handler does not reach `fireEvent`'s caller:
-    // the DOM reports it as an uncaught error on `window`. Read it there, and
-    // `preventDefault()` so jsdom does not also print it as unhandled.
-    const reported: unknown[] = [];
-    const onError = (event: ErrorEvent) => {
-      reported.push(event.error);
-      event.preventDefault();
-    };
-    window.addEventListener('error', onError);
     try {
-      fireEvent.click(screen.getByRole('button', { name: /add filter/i }));
-    } finally {
-      window.removeEventListener('error', onError);
-    }
+      renderDirect({
+        schema: { type: 'filter-builder', name: 'filters', fields: FIELDS, value: offContract },
+        onChange,
+      });
 
-    expect(reported).toHaveLength(1);
-    expect(String(reported[0])).toMatch(/operator "exists", which is outside the protocol/);
-    expect(onChange).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: /add filter/i }));
+
+      expect(onChange).not.toHaveBeenCalled();
+      const messages = consoleError.mock.calls.map((args) => String(args[0]));
+      expect(messages.filter((m) => m.startsWith('filter-builder: onChange not called'))).toHaveLength(1);
+      expect(messages.join('\n')).toMatch(/operator "exists", which is outside the protocol/);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('pins the declared signature at the type level', () => {
