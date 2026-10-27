@@ -276,13 +276,13 @@ model: opus
 - 红 = 本改动的后果(陈旧 fixture)同 PR 修,余照报;⛔ 永不跳过或收窄;计数记 `dogfood_battery`。
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
+- 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 受管路径全在 `.claude/**` 者 Tier S,达档复核 PASS 在案即由席位入队落地;余皆 Tier H 等人批。
-- 两声明行后 `## 维护者速读` 六行,受管与否都带,中文、业务角度,不写席位意见。
+- 声明行后 `## 维护者速读` 六行,受管与否都带,中文、业务角度,不写席位意见。
 - 六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
 - 先看 ≤3 文件按风险排,点名风险 hunk;两分钟验证 = 一条命令或一次点击,写预期所见。
 - 需要你做的恰一个动作,非受管面写「无,席位落地」;席位定稿成评论。

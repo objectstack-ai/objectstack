@@ -11,6 +11,8 @@ generated metadata to the same bar as hand-authored metadata.
 Dependency direction is one-way — `lint` → `@objectstack/spec` (the contract).
 It never depends on a runtime and is never bundled into a frontend.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## API
 
 - `validateWidgetBindings(stack)` — dashboard widget → dataset → measure/dimension

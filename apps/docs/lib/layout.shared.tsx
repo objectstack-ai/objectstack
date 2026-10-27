@@ -1,4 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { PRODUCT_SITE_ORIGIN } from '@/redirects.mjs';
 
 // The repository was renamed `framework` → `objectstack`. GitHub keeps a permanent
 // rename redirect, so the old name still resolves — but every URL built from it costs a
@@ -12,7 +13,22 @@ export const gitConfig = {
   branch: 'main',
 };
 
-/** The essay's route: the nav's `Why` entry, and the home page's hero link and section 00. */
+/**
+ * The product site. www.objectos.ai is the ObjectOS home — the hero, the three
+ * editions (Community / Cloud / Enterprise), pricing and the one blog; this site
+ * (objectstack.ai) is the developer site — protocol, SDK, CLI, docs. The nav's
+ * `Product` entry, the home page's "Run it" strip and its footer line all read
+ * this constant; the origin itself is declared once, in `redirects.mjs`, where
+ * the blog redirects to that site read the same value.
+ */
+export const PRODUCT_SITE_URL = PRODUCT_SITE_ORIGIN;
+
+/**
+ * The essay's route: the nav's `Why` entry. The post now lives on the product
+ * site's blog; `apps/docs/redirects.mjs` (`blogRedirects`) answers this path
+ * with a permanent redirect there, so the relative spelling keeps working and
+ * the nav stays a site-relative link.
+ */
 export const ESSAY_URL = '/blog/the-ontology-is-the-software';
 
 export function baseOptions(): BaseLayoutProps {
@@ -33,6 +49,8 @@ export function baseOptions(): BaseLayoutProps {
     links: [
       { text: 'Why', url: ESSAY_URL, active: 'url' },
       { text: 'Blog', url: '/blog', active: 'nested-url' },
+      // The product site, by role: ObjectOS (editions, pricing, blog) lives there.
+      { text: 'Product', url: PRODUCT_SITE_URL, external: true, active: 'none' },
     ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
