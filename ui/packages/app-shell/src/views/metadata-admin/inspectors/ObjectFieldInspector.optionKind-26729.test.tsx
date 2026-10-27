@@ -49,21 +49,30 @@ function renderField(
   opts: { stageField?: string; locale?: string } = {},
 ) {
   const onPatch = vi.fn();
-  const draft: Record<string, unknown> = { name: 'probe_widget', fields };
-  if (opts.stageField !== undefined) draft.stageField = opts.stageField;
-  const utils = render(
-    <ObjectFieldInspector
-      type="object"
-      name="probe_widget"
-      draft={draft}
-      selection={{ kind: 'field', id: 'status' }}
-      onPatch={onPatch}
-      onClearSelection={vi.fn()}
-      onSelectionChange={vi.fn()}
-      readOnly={false}
-      locale={opts.locale ?? 'en-US'}
-    />,
-  );
+  const initial: Record<string, unknown> = { name: 'probe_widget', fields };
+  if (opts.stageField !== undefined) initial.stageField = opts.stageField;
+  // A host that feeds each patch back, as Studio's draft does, so what the
+  // inspector derives from the draft (the lifecycle hint) sees the edits.
+  function Host() {
+    const [draft, setDraft] = React.useState(initial);
+    return (
+      <ObjectFieldInspector
+        type="object"
+        name="probe_widget"
+        draft={draft}
+        selection={{ kind: 'field', id: 'status' }}
+        onPatch={(patch: Record<string, unknown>) => {
+          onPatch(patch);
+          setDraft((d) => ({ ...d, ...patch }));
+        }}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        readOnly={false}
+        locale={opts.locale ?? 'en-US'}
+      />
+    );
+  }
+  const utils = render(<Host />);
   /** The fields map the host's Save would persist after the last edit. */
   const savedFields = () => onPatch.mock.calls.at(-1)![0].fields as Record<string, Def>;
   return { ...utils, onPatch, savedFields };
