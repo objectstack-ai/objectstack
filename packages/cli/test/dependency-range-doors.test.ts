@@ -94,7 +94,7 @@ const dependencyCodes = (list: unknown): Array<[string | undefined, string | und
 const dirs = new Map<keyof typeof FIXTURES, string>();
 
 beforeAll(() => {
-  for (const [kind, packages] of Object.entries(FIXTURES) as Array<[keyof typeof FIXTURES, unknown[]]>) {
+  for (const [kind, packages] of Object.entries(FIXTURES) as Array<[keyof typeof FIXTURES, readonly unknown[]]>) {
     const dir = mkdtempSync(join(tmpdir(), `os-dependency-range-door-${kind}-`));
     const stacks = packages.map((p) => `defineStack(${JSON.stringify(p)})`).join(',\n  ');
     writeFileSync(
