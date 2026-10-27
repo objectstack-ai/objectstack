@@ -226,12 +226,12 @@ describe('[#15103] a cross-field comparand on an `include`d relation — the bou
 
   describe('[#26601] the save door refuses the dotted OFFSET; the dotted bare reference still validates', () => {
     it('DatasetSchema refuses the offset arm at its slot, in the SQL read\'s words, and keeps the bare arm', () => {
-      const offset = DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'x', aggregate: 'count', filter: RELATION_OFFSET_ON_TIME }] });
+      const offset = DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'by_duty', aggregate: 'count', filter: RELATION_OFFSET_ON_TIME }] });
       expect(offset.success).toBe(false);
       expect(offset.error?.issues[0]?.path).toEqual(['measures', 0, 'filter', 'completed_on', '$lte']);
       expect(offset.error?.issues[0]?.message).toContain('"duty.grace_days" is a dotted path');
       expect(offset.error?.issues[0]?.message).toContain('same-table column references only');
-      expect(DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'x', aggregate: 'count', filter: RELATION_BARE }] }).success).toBe(true);
+      expect(DatasetSchema.safeParse({ ...PARSED, measures: [{ name: 'by_duty', aggregate: 'count', filter: RELATION_BARE }] }).success).toBe(true);
     });
   });
 
