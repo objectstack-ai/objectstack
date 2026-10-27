@@ -144,7 +144,7 @@ describe('mcp provider — a rejected credential is a configuration fault', () =
 
     async function rejectionOf(clientFactory: () => Promise<McpClientLike>): Promise<unknown> {
         const factory = createMcpProviderFactory({ clientFactory });
-        return factory(ctx({ providerConfig: http })).then(
+        return Promise.resolve(factory(ctx({ providerConfig: http }))).then(
             () => { throw new Error('expected rejection'); },
             (e: unknown) => e,
         );

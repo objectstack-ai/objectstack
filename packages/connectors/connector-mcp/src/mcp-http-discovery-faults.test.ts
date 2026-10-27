@@ -140,13 +140,14 @@ describe('credential rejection — real Streamable-HTTP server', () => {
         async (status) => {
             const server = await startServer({ reject: status });
             const factory = createMcpProviderFactory();
-            const err = await factory({
+            const materialized = factory({
                 name: 'vendor',
                 label: 'Vendor',
                 type: 'api',
                 providerConfig: { transport: { kind: 'http', url: server.url } },
                 auth: { type: 'bearer', token: 'wrong-token' },
-            }).then(
+            });
+            const err = await Promise.resolve(materialized).then(
                 () => { throw new Error('expected rejection'); },
                 (e: unknown) => e,
             );

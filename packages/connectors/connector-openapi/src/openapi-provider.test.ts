@@ -270,8 +270,8 @@ describe('openapi provider — refuses a document that is not OpenAPI 3.x', () =
         },
     };
 
-    async function refusal(promise: Promise<unknown>): Promise<Error> {
-        const err = await promise.then(
+    async function refusal(result: unknown): Promise<Error> {
+        const err = await Promise.resolve(result).then(
             () => { throw new Error('expected rejection'); },
             (e: unknown) => e,
         );
