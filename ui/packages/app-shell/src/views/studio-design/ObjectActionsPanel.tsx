@@ -101,10 +101,17 @@ export function ObjectActionsPanel({
   disabled,
   actionSchema,
   onBlockingIssuesChange,
+  focus,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
   disabled?: boolean;
+  /**
+   * objectstack#26736 — the action the Data pillar's "Show me" asks for, on a
+   * refused save or a held edit. Each new object selects it once; the author's
+   * own picks are free after that.
+   */
+  focus?: { name: string } | null;
   /**
    * Report how many BLOCKING author-time issues the selected action's editor is
    * showing — `visible` / `disabled` predicates whose CEL does not parse
@@ -139,7 +146,14 @@ export function ObjectActionsPanel({
     () => new Map(heldHere.map((a) => [String(a.name ?? ''), heldInputKey(a)])),
     [heldHere],
   );
-  const [selected, setSelected] = React.useState<string | null>(null);
+  // A "Show me" from another view mounts this panel already focused.
+  const [selected, setSelected] = React.useState<string | null>(() => focus?.name ?? null);
+  // Adjusted while rendering, React's own pattern for state that follows a prop.
+  const [focusSeen, setFocusSeen] = React.useState(focus);
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) setSelected(focus.name);
+  }
   // Default-select the first action so the detail pane isn't a dead end when
   // actions exist; fall back when the selection no longer matches.
   const effectiveSelected = listed.some((a) => a.name === selected) ? selected : (listed[0]?.name ?? null);

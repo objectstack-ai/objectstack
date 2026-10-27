@@ -1843,6 +1843,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "禁用",
         helpText: "CEL 表达式：满足条件时禁用"
       },
+      disabledReason: {
+        label: "禁用原因",
+        helpText: "动作置灰的原因，在“禁用”为 true 时悬停显示，并由屏幕阅读器读出（例如“需要一条通过的法务审查后才能送审。”）。仅用于展示：服务端仍按自身规则拒绝调用。留空则显示“对此记录不可用”。"
+      },
       requiresFeature: {
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"

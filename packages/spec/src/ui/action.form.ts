@@ -163,6 +163,9 @@ export const actionForm = defineForm({
         { field: 'component', helpText: 'How to render (button, icon, menu item)' },
         { field: 'visible', widget: 'textarea', helpText: 'CEL expression: show only when condition is true' },
         { field: 'disabled', widget: 'textarea', helpText: 'CEL expression: disable when condition is true' },
+        // #26619 — an I18nLabel, the node `errorMessage` carries, so it copies
+        // that plain row and the renderer derives the same face.
+        { field: 'disabledReason', helpText: 'Why the action is greyed, shown on hover and read by screen readers while Disabled is true (e.g. "An approved legal review is required first."). Display only: the server still refuses the call on its own rules. Leave empty to show "Not available for this record".' },
         // The enum derives: every member IS the public auth feature flag it
         // names, so an inline list would only restate them and could drift from
         // the registry the parse step resolves against.

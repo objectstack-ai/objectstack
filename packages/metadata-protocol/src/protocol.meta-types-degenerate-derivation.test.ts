@@ -253,10 +253,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // major it retired in — at 18 they left the declared set with their
         // tombstones. The declared total shrinks by exactly those three; the
         // live sample below still holds every live key.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(47);
+        // [#26619] 47 → 48: `disabledReason` (why a greyed action is
+        // unavailable) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(48);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
