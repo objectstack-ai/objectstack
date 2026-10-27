@@ -746,10 +746,10 @@ version through upload). It holds per list, whatever the child object's
 host's verdict. A non-empty `actions` list leaves New as it was, and the row
 affordances (View, Edit, Delete) are not governed by this key.
 
-```ts
+```json
 {
-  type: 'record:related_list',
-  properties: { objectName: 'contract', relationshipField: 'renewed_from', actions: [] },
+  "type": "record:related_list",
+  "properties": { "objectName": "contract", "relationshipField": "renewed_from", "actions": [] }
 }
 ```
 
