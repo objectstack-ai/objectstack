@@ -481,6 +481,9 @@ function Section({
       <div className="flex h-11 items-center gap-2 border-b px-4">
         {isDeclared && !readOnly ? (
           <input
+            // No visible label sits beside the inline title: the input names
+            // itself with the group inspector's own name-field label.
+            aria-label={t('engine.studio.designer.group.nameLabel', locale)}
             defaultValue={title}
             onBlur={(e) => e.target.value.trim() && e.target.value !== title && onRename(e.target.value)}
             onKeyDown={(e) => {

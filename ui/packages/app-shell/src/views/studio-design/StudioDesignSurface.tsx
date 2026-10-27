@@ -2614,6 +2614,8 @@ export function StudioNavItemInspector({
   const targetLabel = useNavTargetLabel();
   const typeGroupName = React.useId();
   const iconFieldId = React.useId();
+  const objectFieldId = React.useId();
+  const labelFieldId = React.useId();
   const idx = React.useMemo(() => {
     const m = /^navigation\[(\d+)\]$/.exec(navId);
     return m ? Number(m[1]) : -1;
@@ -2732,8 +2734,11 @@ export function StudioNavItemInspector({
       : inheritedNavEntryText(node as NavEntryLike, targetLabel);
   const labelField = (
     <div>
-      <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.label', locale)}</label>
+      <label htmlFor={labelFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+        {t('engine.studio.nav.label', locale)}
+      </label>
       <input
+        id={labelFieldId}
         value={navItemLabelText(label, locale)}
         onChange={(e) => editLabel(e.target.value)}
         placeholder={placeholderText}
@@ -2772,8 +2777,11 @@ export function StudioNavItemInspector({
       </fieldset>
       {(kind === 'object' || kind === null) && (
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.linkObject', locale)}</label>
+          <label htmlFor={objectFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+            {t('engine.studio.nav.linkObject', locale)}
+          </label>
           <StudioPicker
+            id={objectFieldId}
             value={boundObject}
             options={[
               { value: '', label: t('engine.studio.nav.chooseObject', locale) },
@@ -3044,7 +3052,8 @@ const PICKER_XS = 'h-auto rounded px-2 py-1 text-xs';
  *   opens there.
  * - Each caller keeps the name its native control had: a `<label htmlFor>`
  *   names the trigger by `id`, and a wrapping `<label>` names it as it named
- *   the native control. The object picker had none and still has none.
+ *   the native control. The nav-item inspector's object picker is named by
+ *   its *Link to object* label the same way.
  */
 function StudioPicker({
   id,
