@@ -11,6 +11,10 @@
  *   RELEASE_VERSION=V node scripts/release-verify-npm.mjs --probe [--root DIR]
  *                                                    # one read, no waiting: is
  *                                                    # the whole group on npm?
+ *   node scripts/release-verify-npm.mjs --start-npm-record   # release-publish.sh:
+ *                                                    # empty the record dir, print it
+ *   node scripts/release-verify-npm.mjs --npm-answers        # release-publish.sh:
+ *                                                    # npm's answer per package
  *
  * ## The two defects this replaces (#15321)
  *
@@ -82,6 +86,74 @@
  * (17m23s on 18.0.0, build included), and that 120 was set from the sum of the
  * job's step ceilings, this 35-minute budget among them. Raising the budget
  * means re-checking that sum: a job timeout here kills a publish half done.
+ *
+ * **18.0.0, 18.1.0 and 18.2.0, per package (#26558).** Read off npm's `time`
+ * for every package tag of each version. T0 is the instant `changeset publish`
+ * had every upload back: the tagger date of its annotated tags, which it
+ * creates only after the last `pnpm publish` returns (18.0.0: 12:41:28Z, nine
+ * seconds before this verification's first read at 12:41:37Z). Lag is npm's
+ * `time` minus T0; a negative lag committed while other uploads were still
+ * running.
+ *
+ *     version  pkgs  T0 (tagger)  first   p50     p90     slowest three
+ *     18.0.0    73   12:41:28Z    -0m56s  +1m22s  +3m52s  spec +10m13s, verify +11m09s,
+ *                                                         @objectstack/console +16m31s
+ *     18.1.0    73   09:02:22Z    -0m29s  +0m48s  +2m53s  skills +4m07s,
+ *                                                         @objectstack/console +6m14s, spec +9m34s
+ *     18.2.0   110   06:16:43Z    -0m47s  +1m13s  +3m18s  plugin-ai +5m45s,
+ *                                                         @objectstack/console +8m36s,
+ *                                                         @object-ui/console +54m22s
+ *
+ * (18.0.0's +16m31s is the +16m22s above measured from T0 instead of from the
+ * first read.) The budget stays at 35 minutes, on that table. The p90 of every
+ * release is under 4 minutes, and every package of the three but one is
+ * readable inside 17. The
+ * 18.2.0 tail is one package, 3.3 times the next-worst spread of the three
+ * releases; giving it the 2.11x margin would mean a 115-minute step inside the
+ * job's 120-minute ceiling, which also has to hold the build, and would make
+ * every genuinely lost package cost two hours before it is named. A longer wait
+ * was not the defect. The log said "not on the registry" for a package npm had
+ * accepted, which reads the same as a lost one. The next section fixes that,
+ * and a tail like 18.2.0's now reads as registry lag, still red.
+ *
+ * ## Telling lag from loss: npm's own answer, per package (#26558)
+ *
+ * `changeset publish` (@changesets/cli 3.0.3, `dist/getPublishPlan.mjs`, its
+ * pnpm branch) counts a package as published when `pnpm publish` exits 0 and
+ * keeps none of its output. pnpm 10 hands the upload itself to `npm publish`
+ * (`runNpm(["publish", "--ignore-scripts", TARBALL, …])`), and npm writes a
+ * debug log of every run whatever its console level: the argv naming the
+ * tarball, `http fetch PUT STATUS URL Nms` for the upload, `error code …` and
+ * `verbose exit N`. `release-publish.sh` points npm's `logs-dir` at
+ * `npmRecordDir()` (under `$RUNNER_TEMP`, emptied first by
+ * `--start-npm-record`) and lifts `logs-max` off its default of 10, so every
+ * npm run of the publish leaves its log there. It then prints `--npm-answers`,
+ * one line per package, inside a collapsed group with a count line under it.
+ *
+ * When a package is still unreadable after the budget, the failure text says
+ * what npm answered for it:
+ *
+ *   accepted   PUT 2xx. Registry lag, not loss: still red, nothing to
+ *              republish; re-read with `--probe` and backfill once it answers
+ *              `published`.
+ *   refused    PUT non-2xx, with npm's code and summary. A failed publish.
+ *   not-sent   npm exited before sending the upload. A failed publish.
+ *   no-upload  no publish of it ran in this run.
+ *   (no record) the record is missing or unreadable; the text says lag cannot
+ *              be told from loss.
+ *
+ * Every case except `accepted` keeps the `force: true` repair text. ⛔ The
+ * record never decides the verdict. It is read only after the loop has failed,
+ * and only to say which kind of red this is; the exit code is 1 for all of
+ * them. The record is not the publisher's stdout either (rejected in the next
+ * section): the target set still comes from the workspace, and a record that
+ * yields nothing makes every missing package read "no upload", never green.
+ *
+ * Battery 15 pins the parse on npm's real log. It runs the real `pnpm publish`
+ * (through to `npm publish`, as changesets calls it) against a stub registry
+ * on 127.0.0.1, so if npm changes its log format the self-test goes red and
+ * the release log does not quietly lose this information. Battery 16 runs
+ * `release-publish.sh` itself with a stub `changeset` and `git`.
  *
  * ## ⛔ It still fails CLOSED, and that is the whole point
  *
@@ -191,7 +263,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -240,11 +312,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight': 34,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 13,
   '14. The 18.0.0 publish window: console readable at +16m22s, past the old 900 s': 14,
+  '15. Lag or loss: npm\'s own answer per package, parsed from its real log': 25,
+  '16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -515,6 +589,256 @@ export async function probeVersion(name, version, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// npm's own answer, per package — the publish record (see the header)
+// ---------------------------------------------------------------------------
+
+/** The record directory's name under the job's temp dir. One spelling, read by both scripts. */
+export const NPM_RECORD_DIRNAME = 'objectstack-release-npm-record';
+
+/**
+ * Where `release-publish.sh` keeps npm's debug log of every `npm` run the
+ * publish makes, and where this verifier reads them back.
+ *
+ * `RUNNER_TEMP` is per job and emptied after it, so a record can never be read
+ * by a later run; the shell script asks this function (`--start-npm-record`)
+ * rather than spelling the path a second time.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function npmRecordDir(env = process.env) {
+  return join(env.RUNNER_TEMP || tmpdir(), NPM_RECORD_DIRNAME);
+}
+
+/**
+ * The tarball file name `pnpm pack` and `npm pack` give `name@version`: the
+ * scope's `@` dropped and its `/` turned into `-`. It is how one npm log is
+ * matched to one target — the `publish` argv names the tarball.
+ *
+ * @param {string} name
+ * @param {string} version
+ * @returns {string}
+ */
+export function tarballName(name, version) {
+  return `${name.replace(/^@/, '').replace('/', '-')}-${version}.tgz`;
+}
+
+/** npm's log-file name carries its run's start instant with `:` and `.` turned into `_`. */
+function logStartedAt(file) {
+  const m = /^(\d{4}-\d\d-\d\dT\d\d)_(\d\d)_(\d\d)_(\d{3})Z-debug-\d+\.log$/.exec(file);
+  return m ? `${m[1]}:${m[2]}:${m[3]}.${m[4]}Z` : null;
+}
+
+/**
+ * A text from npm's log that is printed into the Actions log. npm already
+ * strips credentials from what it logs; this drops anything shaped like one
+ * anyway, and bounds the length.
+ */
+function scrubNpmText(text) {
+  return String(text)
+    .replace(/\b(_authToken|_auth|_password|token)=\S+/gi, '$1=(redacted)')
+    .replace(/\/\/[^/\s:@]+:[^/\s@]+@/g, '//(redacted)@')
+    .slice(0, 240);
+}
+
+/**
+ * Parse ONE npm debug log (every part of one run, joined) into what npm
+ * answered. Returns null for a run that is not a `publish` of a tarball.
+ *
+ *   accepted   npm sent the upload and the registry answered 2xx
+ *   refused    npm sent the upload and the registry answered anything else
+ *   not-sent   npm exited without sending it (auth, a bad tarball, …)
+ *   ambiguous  two npm runs wrote into this one file (they started in the same
+ *              millisecond), so its lines cannot be told apart
+ *
+ * @param {string} text
+ * @returns {null | { tarball: string, tarballs?: string[], state: string, status?: number,
+ *                    ms?: number, exit?: number, code?: string, summary?: string }}
+ */
+export function parseNpmPublishLog(text) {
+  const lines = String(text).split('\n');
+  const argvLines = lines.filter((l) => /^\d+ verbose argv /.test(l));
+  // The tarball each `publish` run in this file names (a file holds one run,
+  // unless two npm processes started in the same millisecond).
+  const published = argvLines.flatMap((line) => {
+    const argv = [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => {
+      try {
+        return JSON.parse(`"${m[1]}"`);
+      } catch {
+        return m[1];
+      }
+    });
+    const tarball = argv[0] === 'publish' ? argv.slice(1).find((a) => /\.(tgz|tar\.gz)$/.test(a)) : undefined;
+    return tarball ? [tarball.split(/[\\/]/).pop()] : [];
+  });
+  if (published.length === 0) return null;
+  const base = published[0];
+  if (argvLines.length > 1 || lines.filter((l) => /^0 verbose cli /.test(l)).length > 1) {
+    return { tarball: base, tarballs: published, state: 'ambiguous' };
+  }
+
+  let put = null;
+  let exit;
+  let code;
+  let summary;
+  for (const line of lines) {
+    const p = /^\d+ http fetch PUT (\d{3}) \S+ (\d+)ms/.exec(line);
+    if (p) put = { status: Number(p[1]), ms: Number(p[2]) };
+    const e = /^\d+ verbose exit (-?\d+)/.exec(line);
+    if (e) exit = Number(e[1]);
+    const c = /^\d+ error code (\S+)/.exec(line);
+    if (c && code === undefined) code = c[1];
+    const s = /^\d+ error (.+)$/.exec(line);
+    if (s && summary === undefined && !/^code /.test(s[1]) && !/^A complete log/.test(s[1])) summary = scrubNpmText(s[1]);
+  }
+  const extra = { ...(exit === undefined ? {} : { exit }), ...(code ? { code } : {}), ...(summary ? { summary } : {}) };
+  if (put) return { tarball: base, state: put.status >= 200 && put.status < 300 ? 'accepted' : 'refused', ...put, ...extra };
+  return { tarball: base, state: 'not-sent', ...extra };
+}
+
+/**
+ * Read the publish record: npm's answer for every target, keyed `name@version`.
+ *
+ * Never throws. A record that is absent or unreadable is reported as such
+ * (`recorded: false` and why), because "npm's answer was not kept" is itself
+ * the thing the failure text must say — it is what makes lag and loss look
+ * alike.
+ *
+ * A target with no publish run in the record was not uploaded in this run
+ * (`no-upload`): `changeset publish` read it as already published, or stopped
+ * before it. When one tarball was published more than once, an acceptance wins
+ * over a later refusal (a second upload of a version npm already took is
+ * refused by design); otherwise the latest run speaks.
+ *
+ * @param {string} dir
+ * @param {{ name: string, version: string }[]} targets
+ * @param {{ readDir?: (dir: string) => string[], readFile?: (file: string) => string }} [io]
+ * @returns {{ recorded: boolean, why?: string, dir: string, uploads: number,
+ *             answers: Map<string, { state: string, status?: number, ms?: number, exit?: number,
+ *                                    code?: string, summary?: string, startedAt?: string | null }> }}
+ */
+export function readNpmRecord(dir, targets, io = {}) {
+  const { readDir = (d) => readdirSync(d), readFile = (f) => readFileSync(f, 'utf8') } = io;
+  const answers = new Map();
+  let files;
+  try {
+    files = readDir(dir);
+  } catch (err) {
+    const why = err && err.code === 'ENOENT'
+      ? `no publish record at ${dir} — the publish did not go through scripts/release-publish.sh, which starts it`
+      : `the publish record at ${dir} could not be read (${err instanceof Error ? err.message : String(err)})`;
+    return { recorded: false, why, dir, uploads: 0, answers };
+  }
+
+  // One npm run may span several numbered parts; join them in order.
+  const runs = new Map();
+  for (const file of files.filter((f) => /-debug-\d+\.log$/.test(f)).sort()) {
+    const runId = file.replace(/-debug-\d+\.log$/, '');
+    let text;
+    try {
+      text = readFile(join(dir, file));
+    } catch (err) {
+      return { recorded: false, why: `${file} in the publish record could not be read (${err instanceof Error ? err.message : String(err)})`, dir, uploads: 0, answers };
+    }
+    runs.set(runId, `${runs.get(runId) ?? ''}${text}\n`);
+  }
+
+  const byTarball = new Map(targets.map((t) => [tarballName(t.name, t.version), `${t.name}@${t.version}`]));
+  let uploads = 0;
+  for (const [runId, text] of [...runs].sort(([a], [b]) => a.localeCompare(b))) {
+    const parsed = parseNpmPublishLog(text);
+    if (!parsed) continue;
+    const { tarball, tarballs = [tarball], ...answer } = parsed;
+    const next = { ...answer, startedAt: logStartedAt(`${runId}-debug-0.log`) };
+    for (const name of tarballs) {
+      const key = byTarball.get(name);
+      if (!key) continue;
+      uploads += 1;
+      const prev = answers.get(key);
+      if (prev && prev.state === 'accepted' && next.state !== 'accepted') continue;
+      answers.set(key, next);
+    }
+  }
+  for (const t of targets) {
+    const key = `${t.name}@${t.version}`;
+    if (!answers.has(key)) answers.set(key, { state: 'no-upload' });
+  }
+  return { recorded: true, dir, uploads, answers };
+}
+
+/**
+ * npm's answer for one package, as a phrase.
+ *
+ * @param {{ state: string, status?: number, ms?: number, exit?: number, code?: string,
+ *           summary?: string, startedAt?: string | null } | undefined} a
+ * @param {{ recorded: boolean, why?: string }} [record]
+ * @returns {string}
+ */
+export function describeNpmAnswer(a, record) {
+  if (record && !record.recorded) return `npm's answer was not recorded: ${record.why}`;
+  if (!a) return "npm's answer was not recorded";
+  const when = a.startedAt ? ` (npm started ${a.startedAt})` : '';
+  const why = [a.code, a.summary].filter(Boolean).join(': ');
+  switch (a.state) {
+    case 'accepted':
+      return `npm ACCEPTED the upload: PUT ${a.status} in ${a.ms} ms${when}`;
+    case 'refused':
+      return `npm REFUSED the upload: PUT ${a.status}${why ? `, ${why}` : ''}${when}`;
+    case 'not-sent':
+      return `npm never sent the upload: it exited ${a.exit ?? '(unknown)'}${why ? `, ${why}` : ''}${when}`;
+    case 'ambiguous':
+      return "npm's answer is in a log two npm runs wrote at once, so it cannot be read";
+    case 'no-upload':
+      return 'no upload of it was made in this run';
+    default:
+      return `npm's answer reads "${a.state}"`;
+  }
+}
+
+/** The short tag a missing package carries on the one-line `::error::` annotation. */
+function npmAnswerTag(m) {
+  if (!m.npm) return '';
+  switch (m.npm.state) {
+    case 'accepted': return ' (npm accepted it: registry lag)';
+    case 'refused': return ` (npm refused it${m.npm.code ? `: ${m.npm.code}` : ''})`;
+    case 'not-sent': return ' (npm never sent it)';
+    case 'no-upload': return ' (not uploaded in this run)';
+    default: return " (npm's answer not recorded)";
+  }
+}
+
+/**
+ * The publish log's per-package report: npm's answer for every target, right
+ * after `changeset publish` returns (it prints none of it). Printed, never a
+ * verdict — the verifier reads the record again and fails closed on its own.
+ *
+ * @param {{ recorded: boolean, why?: string, dir: string, uploads: number, answers: Map<string, object> }} record
+ * @param {{ name: string, version: string }[]} targets
+ * @returns {string}
+ */
+export function formatNpmAnswers(record, targets) {
+  if (!record.recorded) {
+    return `::warning::npm's per-package answers are not available: ${record.why}. If a package is not readable later, this log cannot tell lag from loss.`;
+  }
+  const counts = { accepted: 0, refused: 0, 'not-sent': 0, 'no-upload': 0, ambiguous: 0 };
+  const lines = [`::group::npm's answer per package (${record.uploads} upload(s) recorded)`];
+  for (const t of targets) {
+    const key = `${t.name}@${t.version}`;
+    const a = record.answers.get(key);
+    counts[a.state] = (counts[a.state] ?? 0) + 1;
+    lines.push(`  ${key} — ${describeNpmAnswer(a)}`);
+  }
+  lines.push('::endgroup::');
+  const failed = counts.refused + counts['not-sent'];
+  lines.push(
+    `${failed ? '::warning::' : ''}npm's answers: ${counts.accepted} of ${targets.length} package(s) accepted (PUT 2xx), `
+      + `${counts.refused} refused, ${counts['not-sent']} never sent, ${counts['no-upload']} not uploaded in this run`
+      + `${counts.ambiguous ? `, ${counts.ambiguous} unreadable` : ''}.`,
+  );
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // The verification loop
 // ---------------------------------------------------------------------------
 
@@ -682,13 +1006,21 @@ export function formatProbe(version, answer) {
  * escaping that makes the text unreadable in the log. The detail block below it
  * is ordinary output.
  *
- * @param {{ ok: boolean, missing: { name: string, version: string, reason: string }[],
- *           rounds: number, waitedMs: number, checked: number }} result
+ * Each missing package may carry `npm`, npm's own answer from the publish
+ * record (`readNpmRecord`), with `record` saying whether the record could be
+ * read at all. That answer splits the next step in two, and both halves stay
+ * red: a package npm ACCEPTED and cannot serve yet is registry lag (wait, then
+ * backfill — nothing to republish); every other package is the repair
+ * dispatch's to republish.
+ *
+ * @param {{ ok: boolean, missing: { name: string, version: string, reason: string, npm?: { state: string } }[],
+ *           rounds: number, waitedMs: number, checked: number,
+ *           record?: { recorded: boolean, why?: string } }} result
  * @returns {string}
  */
 export function formatFailure(result) {
-  const { missing, rounds, waitedMs, checked } = result;
-  const names = missing.map((m) => `${m.name}@${m.version}`);
+  const { missing, rounds, waitedMs, checked, record } = result;
+  const names = missing.map((m) => `${m.name}@${m.version}${npmAnswerTag(m)}`);
   const waitedS = Math.round(waitedMs / 1000);
   const lines = [];
   lines.push(
@@ -697,17 +1029,49 @@ export function formatFailure(result) {
   );
   lines.push('');
   lines.push(`Not readable after the full retry budget (${waitedS}s, ${rounds} rounds):`);
-  for (const m of missing) lines.push(`  - ${m.name}@${m.version} — ${m.reason}`);
+  for (const m of missing) {
+    lines.push(`  - ${m.name}@${m.version} — ${m.reason}`);
+    if (m.npm || record) lines.push(`      ${describeNpmAnswer(m.npm, record)}`);
+  }
   lines.push('');
   lines.push(
     'The other '
       + String(checked - missing.length)
       + ' package(s) ARE readable, so this is a partial publish, not a failed one.',
   );
-  lines.push(
-    'Repair: re-run Release via workflow_dispatch with `force: true`. `changeset publish` skips versions '
-      + 'the registry already has, so it republishes only what is listed above — a repair, never a duplicate.',
-  );
+
+  const lagged = missing.filter((m) => m.npm && m.npm.state === 'accepted');
+  const lost = missing.filter((m) => !lagged.includes(m));
+  if (lagged.length > 0) {
+    const version = lagged[0].version;
+    lines.push('');
+    lines.push(
+      `Registry lag, not loss: npm ACCEPTED the upload of ${lagged.map((m) => `${m.name}@${m.version}`).join(', ')} `
+        + `and still did not serve it after ${waitedS}s. This step stays red, because a package nobody can `
+        + 'install is not published yet, but there is nothing to republish.',
+    );
+    lines.push(
+      `Next: re-read later with \`RELEASE_VERSION=${version} node scripts/release-verify-npm.mjs --probe\` `
+        + '(one read, no waiting). Once it answers `published`, backfill what this run skipped: re-run Release '
+        + 'via workflow_dispatch with `force: true`, which republishes nothing npm already serves and runs the '
+        + 'GitHub Releases, ADR-0087 D4 asset, dist-tag and image steps.',
+    );
+  }
+  if (lost.length > 0) {
+    if (lagged.length > 0) {
+      lines.push('');
+      lines.push(`NOT accepted by npm: ${lost.map((m) => `${m.name}@${m.version}`).join(', ')}.`);
+    }
+    if (record && !record.recorded) {
+      lines.push(`npm's answer for this run was not kept (${record.why}), so this log cannot tell lag from loss.`);
+    }
+    lines.push(
+      'Repair: re-run Release via workflow_dispatch with `force: true`. `changeset publish` skips versions '
+        + 'the registry already has, so it republishes only '
+        + (lagged.length > 0 ? 'what npm does not serve yet' : 'what is listed above')
+        + ' — a repair, never a duplicate.',
+    );
+  }
   return lines.join('\n');
 }
 
@@ -736,6 +1100,9 @@ export function formatSuccess(result) {
  * self-test pins THIS function's exit code and its `::error::` naming on a
  * replayed clock — no network, no real wait — under the production budget.
  *
+ * The publish record is read from `npmRecordDir(env)`, so a case points it at
+ * a fixture by handing `env.RUNNER_TEMP`.
+ *
  * @param {{ argv?: string[], env?: NodeJS.ProcessEnv,
  *           probe?: (name: string, version: string) => Promise<boolean>,
  *           sleep?: (ms: number) => Promise<void> }} [options]
@@ -747,6 +1114,22 @@ export async function main({
   probe = (name, version) => probeVersion(name, version),
   sleep = realSleep,
 } = {}) {
+  // `release-publish.sh`, before `changeset publish`: an EMPTY record
+  // directory, printed for the script to hand npm as its logs dir. Failing
+  // here stops the publish while stopping it is still free.
+  if (argv.includes('--start-npm-record')) {
+    const dir = npmRecordDir(env);
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      console.error(`::error::cannot start the publish record at ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+    process.stdout.write(`${dir}\n`);
+    return 0;
+  }
+
   const probeMode = argv.includes('--probe');
   const what = probeMode ? 'probe the fixed group' : 'verify the publish';
   if (probeMode && argv.includes('--dry-run')) {
@@ -792,6 +1175,13 @@ export async function main({
     return 0;
   }
 
+  // `release-publish.sh`, after `changeset publish`: the log line per package
+  // that changesets does not print. A report, never a verdict.
+  if (argv.includes('--npm-answers')) {
+    console.log(formatNpmAnswers(readNpmRecord(npmRecordDir(env), targets), targets));
+    return 0;
+  }
+
   console.log(
     `Verifying ${targets.length} published package(s) on npm, with up to `
       + `${Math.round(RETRY_BUDGET_MS / 1000)}s of bounded backoff for the registry's read path to settle.`,
@@ -805,14 +1195,18 @@ export async function main({
   });
 
   if (!result.ok) {
-    console.error(formatFailure(result));
+    // ⛔ Read only to SAY which kind of red this is. Nothing below can turn a
+    // missing package green: the exit code is 1 whatever npm answered.
+    const record = readNpmRecord(npmRecordDir(env), targets);
+    const missing = result.missing.map((m) => ({ ...m, npm: record.answers.get(`${m.name}@${m.version}`) }));
+    console.error(formatFailure({ ...result, missing, record }));
     appendStepSummary(env, [
       '### npm publish verification: FAILED',
       '',
       `${result.missing.length} of ${result.checked} package(s) not readable after `
         + `${Math.round(result.waitedMs / 1000)}s:`,
       '',
-      ...result.missing.map((m) => `- \`${m.name}@${m.version}\` — ${m.reason}`),
+      ...missing.map((m) => `- \`${m.name}@${m.version}\` — ${m.reason}; ${describeNpmAnswer(m.npm, record)}`),
     ]);
     return 1;
   }
@@ -2394,6 +2788,266 @@ export async function selfTest() {
     }
   }
 
+  // ── 15. npm's own answer ──────────────────────────────────────────────────
+  battery('15. Lag or loss: npm\'s own answer per package, parsed from its real log');
+  {
+    // npm 10's debug-log lines, in the shape a publish writes them (battery
+    // 15's real-npm cases below pin that this IS the shape).
+    const logOf = ({ tarball, put, exit = put && put < 300 ? 0 : 1, code, summary, argv0 = 'publish' }) => [
+      '0 verbose cli /usr/bin/node /usr/lib/node_modules/npm/bin/npm-cli.js',
+      `8 verbose argv "${argv0}" "--ignore-scripts" "${tarball}" "--json" "--access" "public" "--tag" "latest"`,
+      '16 notice Publishing to https://registry.npmjs.org/ with tag latest and public access',
+      ...(put ? [`17 http fetch PUT ${put} https://registry.npmjs.org/@object-ui%2fconsole 41873ms`] : []),
+      ...(code ? [`19 error code ${code}`] : []),
+      ...(summary ? [`20 error ${summary}`] : []),
+      `26 verbose exit ${exit}`,
+      '28 error A complete log of this run can be found in: /tmp/x-debug-0.log',
+    ].join('\n');
+    const CONSOLE_UI = { name: '@object-ui/console', version: '18.2.0' };
+    const TGZ = tarballName(CONSOLE_UI.name, CONSOLE_UI.version);
+    t('the tarball name is the one pnpm and npm pack', TGZ === 'object-ui-console-18.2.0.tgz', TGZ);
+
+    const ok = parseNpmPublishLog(logOf({ tarball: TGZ, put: 200 }));
+    t('a PUT 200 reads as ACCEPTED, with its status and time', ok && ok.state === 'accepted' && ok.status === 200 && ok.ms === 41873, JSON.stringify(ok));
+    const no = parseNpmPublishLog(logOf({ tarball: TGZ, put: 403, code: 'E403', summary: '403 Forbidden - PUT https://registry.npmjs.org/@object-ui%2fconsole - You do not have permission' }));
+    t('a PUT 403 reads as REFUSED, with npm\'s code and summary', no && no.state === 'refused' && no.code === 'E403' && no.summary.startsWith('403 Forbidden'), JSON.stringify(no));
+    const unsent = parseNpmPublishLog(logOf({ tarball: TGZ, code: 'ENEEDAUTH', summary: 'This command requires you to be logged in' }));
+    t('no PUT and a non-zero exit reads as NOT SENT', unsent && unsent.state === 'not-sent' && unsent.exit === 1 && unsent.code === 'ENEEDAUTH', JSON.stringify(unsent));
+    t('an npm run that is not a publish is not an answer', parseNpmPublishLog(logOf({ tarball: TGZ, put: 200, argv0: 'view' })) === null);
+    const twoRuns = parseNpmPublishLog(`${logOf({ tarball: TGZ, put: 200 })}\n${logOf({ tarball: 'objectstack-cli-18.2.0.tgz', put: 200 })}`);
+    t('two npm runs in one file are AMBIGUOUS for both tarballs, never one of them', twoRuns && twoRuns.state === 'ambiguous' && twoRuns.tarballs.length === 2, JSON.stringify(twoRuns));
+    const leaky = parseNpmPublishLog(logOf({ tarball: TGZ, put: 401, code: 'E401', summary: 'Unauthorized //bot:hunter2@registry.example _authToken=abc123' }));
+    t('a credential-shaped text in npm\'s summary is redacted before it is printed', leaky && !leaky.summary.includes('hunter2') && !leaky.summary.includes('abc123'), leaky && leaky.summary);
+
+    const files = {
+      '2026-10-27T06_16_20_123Z-debug-0.log': logOf({ tarball: TGZ, put: 200 }),
+      '2026-10-27T06_40_00_000Z-debug-0.log': logOf({ tarball: TGZ, put: 403, code: 'E403', summary: 'cannot publish over the previously published versions' }),
+      '2026-10-27T06_16_01_000Z-debug-0.log': logOf({ tarball: 'objectstack-spec-18.2.0.tgz', put: 403, code: 'E403', summary: '403 Forbidden' }),
+      'not-a-log.txt': 'x',
+    };
+    const io = { readDir: () => Object.keys(files), readFile: (f) => files[f.split('/').pop()] };
+    const GROUP = [CONSOLE_UI, { name: '@objectstack/spec', version: '18.2.0' }, { name: '@objectstack/cli', version: '18.2.0' }];
+    const record = readNpmRecord('/record', GROUP, io);
+    const a = record.answers.get('@object-ui/console@18.2.0');
+    t('an acceptance wins over a later refusal of the same tarball', a.state === 'accepted' && a.startedAt === '2026-10-27T06:16:20.123Z', JSON.stringify(a));
+    t('a package with no publish run in the record reads "no upload"', record.answers.get('@objectstack/cli@18.2.0').state === 'no-upload', JSON.stringify([...record.answers]));
+    t('a refused package reads refused', record.answers.get('@objectstack/spec@18.2.0').state === 'refused', JSON.stringify(record.answers.get('@objectstack/spec@18.2.0')));
+    const enoent = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    const none = readNpmRecord('/nowhere', GROUP, { readDir: () => { throw enoent; } });
+    t('an absent record is reported as not recorded, and says where it looked', none.recorded === false && none.why.includes('/nowhere'), none.why);
+    const report = formatNpmAnswers(record, GROUP);
+    t(
+      'the publish-log report has one line per package and a count line',
+      report.includes('::group::') && report.includes('@object-ui/console@18.2.0 — npm ACCEPTED the upload: PUT 200')
+        && /1 of 3 package\(s\) accepted .*1 refused, 0 never sent, 1 not uploaded in this run/.test(report),
+      report.split('\n').slice(-1)[0],
+    );
+
+    // main(), on the 18.2.0 shape: every package readable but @object-ui/console.
+    const ws = mkdtempSync(join(tmpdir(), 'release-verify-npm-record-'));
+    const runMain = async ({ record: recordFiles, never }) => {
+      const runnerTemp = mkdtempSync(join(ws, 'runner-temp-'));
+      if (recordFiles) {
+        mkdirSync(npmRecordDir({ RUNNER_TEMP: runnerTemp }), { recursive: true });
+        for (const [f, text] of Object.entries(recordFiles)) writeFileSync(join(npmRecordDir({ RUNNER_TEMP: runnerTemp }), f), text);
+      }
+      const summary = join(runnerTemp, 'summary.md');
+      const reg = stubRegistry({ never });
+      const err = [];
+      const { log, error } = console;
+      console.log = () => {};
+      console.error = (...x) => { err.push(x.join(' ')); };
+      let code;
+      try {
+        code = await main({
+          argv: ['--root', join(ws, 'tree')],
+          env: { RELEASE_VERSION: '18.2.0', RUNNER_TEMP: runnerTemp, GITHUB_STEP_SUMMARY: summary },
+          probe: reg.probe,
+          sleep: stubSleep().sleep,
+        });
+      } catch (e) {
+        code = `threw: ${e instanceof Error ? e.message : String(e)}`;
+      } finally {
+        console.log = log;
+        console.error = error;
+      }
+      return { code, err: err.join('\n'), summary: existsSync(summary) ? readFileSync(summary, 'utf8') : '' };
+    };
+    try {
+      writeFileSync(join(ws, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+      mkdirSync(join(ws, 'tree'), { recursive: true });
+      writeFileSync(join(ws, 'tree', 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+      for (const { name, version } of [CONSOLE_UI, { name: '@objectstack/cli', version: '18.2.0' }]) {
+        const dir = join(ws, 'tree', 'packages', name.split('/')[1] + (name.startsWith('@object-ui') ? '-ui' : ''));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name, version }, null, 2)}\n`);
+      }
+
+      const lag = await runMain({ record: { '2026-10-27T06_16_20_123Z-debug-0.log': logOf({ tarball: TGZ, put: 200 }) }, never: [CONSOLE_UI.name] });
+      const lagNote = lag.err.split('\n')[0];
+      t('LAG: npm accepted it and it never became readable: main() still exits 1 — fail closed', lag.code === 1, `code=${lag.code}`);
+      t('LAG: the ::error:: line names it and says registry lag', lagNote.startsWith('::error::') && lagNote.includes('@object-ui/console@18.2.0 (npm accepted it: registry lag)'), lagNote.slice(0, 200));
+      t(
+        'LAG: the text says nothing needs republishing and gives the --probe re-read, then the backfill',
+        lag.err.includes('Registry lag, not loss') && lag.err.includes('RELEASE_VERSION=18.2.0 node scripts/release-verify-npm.mjs --probe')
+          && lag.err.includes('force: true'),
+        lag.err.split('\n').filter((l) => l.startsWith('Next') || l.startsWith('Registry')).join(' | ').slice(0, 200),
+      );
+      t('LAG: it does not offer the republish repair for an accepted upload', !lag.err.includes('Repair:'), 'no Repair: line');
+      t('LAG: the job summary carries npm\'s answer', lag.summary.includes('npm ACCEPTED the upload: PUT 200'), lag.summary.split('\n').slice(-2).join(' | '));
+
+      const refused = await runMain({
+        record: { '2026-10-27T06_16_20_123Z-debug-0.log': logOf({ tarball: TGZ, put: 403, code: 'E403', summary: '403 Forbidden - PUT https://registry.npmjs.org/@object-ui%2fconsole' }) },
+        never: [CONSOLE_UI.name],
+      });
+      t('LOSS: npm refused it: main() exits 1', refused.code === 1, `code=${refused.code}`);
+      t(
+        'LOSS: the ::error:: line says refused with npm\'s code, and the text keeps the force repair',
+        refused.err.split('\n')[0].includes('(npm refused it: E403)') && refused.err.includes('Repair: re-run Release via workflow_dispatch with `force: true`')
+          && !refused.err.includes('Registry lag'),
+        refused.err.split('\n')[0].slice(0, 200),
+      );
+
+      const unrecorded = await runMain({ record: null, never: [CONSOLE_UI.name] });
+      t(
+        'NO RECORD: exit 1, and the text says this log cannot tell lag from loss',
+        unrecorded.code === 1 && unrecorded.err.includes('cannot tell lag from loss') && unrecorded.err.includes('force: true'),
+        unrecorded.err.split('\n').filter((l) => l.includes('lag')).join(' | ').slice(0, 200),
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+
+    // npm's REAL log: `pnpm publish` exactly as changesets 3.0.3 calls it, which
+    // pnpm 10 hands to `npm publish`, against a registry on 127.0.0.1 that takes
+    // one upload and refuses the other. Async spawn, because the stub registry
+    // answers from this same event loop.
+    const real = mkdtempSync(join(tmpdir(), 'release-verify-npm-real-'));
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        if (req.method === 'PUT' && String(req.url).includes('refused')) {
+          res.writeHead(403, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'You cannot publish over the previously published versions: 1.0.0.' }));
+          return;
+        }
+        res.writeHead(req.method === 'PUT' ? 200 : 404, { 'content-type': 'application/json' });
+        res.end(req.method === 'PUT' ? '{"ok":true}' : '{"error":"not found"}');
+      });
+    });
+    try {
+      await new Promise((resolve_) => { server.listen(0, '127.0.0.1', resolve_); });
+      const url = `http://127.0.0.1:${server.address().port}/`;
+      const home = join(real, 'home');
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, '.npmrc'), `//127.0.0.1:${server.address().port}/:_authToken=stub-not-a-secret\nregistry=${url}\n`);
+      const recordDir = npmRecordDir({ RUNNER_TEMP: real });
+      mkdirSync(recordDir, { recursive: true });
+      const publishOne = (name) => new Promise((resolve_) => {
+        const dir = join(real, name.replace('/', '-'));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name, version: '1.0.0' })}\n`);
+        // A sealed environment: no inherited registry, token or npm config.
+        const child = spawn('pnpm', ['publish', '--json', '--access', 'public', '--tag', 'latest', '--no-git-checks'], {
+          cwd: dir,
+          env: { PATH: process.env.PATH, HOME: home, npm_config_logs_dir: recordDir, npm_config_logs_max: '100000', npm_config_update_notifier: 'false' },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let out = '';
+        child.stdout.on('data', (d) => { out += d; });
+        child.stderr.on('data', (d) => { out += d; });
+        child.on('error', (e) => resolve_({ status: `spawn failed: ${e.message}`, out }));
+        child.on('close', (status) => resolve_({ status, out }));
+      });
+      const took = await publishOne('@stub/accepted');
+      const refusedRun = await publishOne('@stub/refused');
+      const realRecord = readNpmRecord(recordDir, [{ name: '@stub/accepted', version: '1.0.0' }, { name: '@stub/refused', version: '1.0.0' }]);
+      const realOk = realRecord.answers.get('@stub/accepted@1.0.0');
+      const realNo = realRecord.answers.get('@stub/refused@1.0.0');
+      t('REAL npm: pnpm publish exits 0 on the 200 and non-zero on the 403', took.status === 0 && refusedRun.status !== 0, `${took.status}/${refusedRun.status} ${took.out.slice(0, 120)}`);
+      t('REAL npm: the record holds npm\'s answer for the accepted upload, PUT 200', realOk && realOk.state === 'accepted' && realOk.status === 200, JSON.stringify(realOk));
+      t('REAL npm: and the refusal, PUT 403 with npm\'s E403', realNo && realNo.state === 'refused' && realNo.status === 403 && realNo.code === 'E403', JSON.stringify(realNo));
+      t('REAL npm: the log names the start instant', Boolean(realOk && realOk.startedAt && !Number.isNaN(Date.parse(realOk.startedAt))), realOk && realOk.startedAt);
+      t('REAL npm: the stub token never reaches the parsed answer', !JSON.stringify([...realRecord.answers]).includes('stub-not-a-secret'), 'not in the answers');
+    } finally {
+      await new Promise((resolve_) => { server.close(resolve_); });
+      rmSync(real, { recursive: true, force: true });
+    }
+  }
+
+  // ── 16. release-publish.sh ────────────────────────────────────────────────
+  battery('16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish');
+  {
+    // The script runs from this repository's root (it calls this file by its
+    // repo path), with `changeset` and `git` stubbed on PATH. The stub
+    // changeset records what npm would see and writes one npm log, for the
+    // anchor, into the logs dir it was handed.
+    const box = mkdtempSync(join(tmpdir(), 'release-verify-npm-publish-sh-'));
+    try {
+      const bin = join(box, 'bin');
+      mkdirSync(bin, { recursive: true });
+      const cli = resolveVerificationTargets(listWorkspacePackages()).find((x) => x.name === ANCHOR_PACKAGE);
+      writeFileSync(join(bin, 'changeset'), [
+        '#!/bin/sh',
+        'printf \'logs_dir=%s\\nlogs_max=%s\\nglobalconfig=%s\\n\' "$npm_config_logs_dir" "$npm_config_logs_max" "${npm_config_globalconfig-unset}" > "$STUB_SEEN"',
+        `printf '%s\\n' '0 verbose cli node npm' '8 verbose argv "publish" "--ignore-scripts" "${tarballName(cli.name, cli.version)}" "--json"' '17 http fetch PUT 200 https://registry.npmjs.org/@objectstack%2fcli 812ms' '26 verbose exit 0' > "$npm_config_logs_dir/2026-10-27T06_16_20_123Z-debug-0.log"`,
+        'echo changeset >> "$STUB_LOG"',
+        'exit "${STUB_CHANGESET_EXIT:-0}"',
+      ].join('\n'));
+      writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "git $*" >> "$STUB_LOG"\n');
+      chmodSync(join(bin, 'changeset'), 0o755);
+      chmodSync(join(bin, 'git'), 0o755);
+
+      const run = (exitCode) => {
+        const runnerTemp = mkdtempSync(join(box, 'runner-'));
+        const recordDir = npmRecordDir({ RUNNER_TEMP: runnerTemp });
+        mkdirSync(recordDir, { recursive: true });
+        writeFileSync(join(recordDir, '2026-01-01T00_00_00_000Z-debug-0.log'), 'a stale record from another run');
+        const seen = join(runnerTemp, 'seen');
+        const stubLog = join(runnerTemp, 'log');
+        const r = spawnSync('bash', [join(SCRIPTS_DIR, 'release-publish.sh')], {
+          cwd: resolve(SCRIPTS_DIR, '..'),
+          env: {
+            PATH: `${bin}:${process.env.PATH}`,
+            HOME: box,
+            RUNNER_TEMP: runnerTemp,
+            STUB_SEEN: seen,
+            STUB_LOG: stubLog,
+            STUB_CHANGESET_EXIT: String(exitCode),
+            npm_config_globalconfig: '/home/runner/.config/pnpm/rc',
+          },
+          encoding: 'utf8',
+        });
+        return {
+          status: r.status,
+          out: `${r.stdout}${r.stderr}`,
+          seen: existsSync(seen) ? readFileSync(seen, 'utf8') : '',
+          calls: existsSync(stubLog) ? readFileSync(stubLog, 'utf8').trim().split('\n') : [],
+          stale: existsSync(join(recordDir, '2026-01-01T00_00_00_000Z-debug-0.log')),
+          recordDir,
+        };
+      };
+
+      const good = run(0);
+      t('a clean publish exits 0', good.status === 0, `status=${good.status} ${good.out.slice(-200)}`);
+      t('npm is handed the record dir this file names, with its 10-file cap lifted', good.seen.includes(`logs_dir=${good.recordDir}\n`) && good.seen.includes('logs_max=100000'), good.seen);
+      t('the record is emptied first: a stale log from another run is gone', good.stale === false, 'stale log removed');
+      t('the inherited npm_config_globalconfig is still dropped before the publish', good.seen.includes('globalconfig=unset'), good.seen);
+      t(
+        'the publish log carries npm\'s answer for the package, and the count line',
+        good.out.includes(`${ANCHOR_PACKAGE}@${cli.version} — npm ACCEPTED the upload: PUT 200 in 812 ms`) && /npm's answers: 1 of \d+ package\(s\) accepted/.test(good.out),
+        good.out.split('\n').filter((l) => l.includes('npm\'s answers')).join(' | '),
+      );
+      t('tags are pushed after the publish, in one push', good.calls.join(' ; ') === 'changeset ; git push origin --tags', good.calls.join(' ; '));
+
+      const bad = run(1);
+      t('a failed publish still fails the script, with npm\'s answers printed first', bad.status === 1 && bad.out.includes('npm\'s answer per package'), `status=${bad.status}`);
+      t('and pushes no tag', !bad.calls.some((c) => c.startsWith('git')), bad.calls.join(' ; '));
+    } finally {
+      rmSync(box, { recursive: true, force: true });
+    }
+  }
+
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
   for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
@@ -2410,7 +3064,7 @@ export async function selfTest() {
       + '16m22s spread red under the old 900 s and green under the production budget, '
       + 'the masked partial publish caught, absence still fatal, the release audit backfilling '
       + 'only a version whose whole group is on npm and whose publish and image build are not in flight, and that backfill built '
-      + 'from the version commit\'s tree).',
+      + 'from the version commit\'s tree, and npm\'s own answer per package telling registry lag from a refused upload).',
   );
   selfTestReachedVerdict = true;
   return 0;
