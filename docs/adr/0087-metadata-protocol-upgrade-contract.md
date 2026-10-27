@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A, scoped by ruling 6434038284 of 2026-10-27 — a retirement kit (the `retiredKey()` tombstone and its D2 conversion with fixtures) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide; the kit ages out, the chain's step stays, and the support floor stays 16; see the 2026-10-26 addendum, which also amends the "never deleted" wording in D2 and the conversion "forever" in the 2026-07-31 and 2026-09-13 addenda)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-27, #26220, ruling A on PR #26365, comment `6439038287` — D9 gains a whole-package operand, `<package>#*`, for a published package deleted at HEAD; see the second 2026-10-27 amendment note under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A, scoped by ruling 6434038284 of 2026-10-27 — a retirement kit (the `retiredKey()` tombstone and its D2 conversion with fixtures) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide; the kit ages out, the chain's step stays, and the support floor stays 16; see the 2026-10-26 addendum, which also amends the "never deleted" wording in D2 and the conversion "forever" in the 2026-07-31 and 2026-09-13 addenda)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -1138,6 +1138,43 @@ package's root entry is followed through the same mapping.
 > read the same way. The build tool is never asked: the source file's name is the
 > fact the gate reads, and a build that generates `dist/index.d.ts` from some other file
 > stays unmappable.
+
+> **Amended 2026-10-27 (#26220) — a published package deleted at HEAD is retired whole:
+> `<package>#*`.** Provenance: the maintainer's 「同意」 to letter A, recorded by the
+> director seat as the ruling on PR #26365, comment `6439038287` (2026-10-27T10:07Z).
+> Predicate 1 reads an export's absence from the package's entry at HEAD, and a deleted
+> package has no entry there, so every operand on it was refused as "no workspace manifest
+> at HEAD". The deletion of `@object-ui/plugin-ai` (PR #26365) is the first such case.
+> Neither `registered` (it names a conversion `objectstack migrate meta` would apply, and
+> nothing here is converted) nor `not-required (unpublished)` (it reads `private: true` at
+> HEAD, which a deleted package cannot carry) is the true answer.
+>
+> A third operand kind names the package itself:
+>
+> ```text
+> <!-- adr-0087: not-required (runtime-export-retired <package>#*) <why> -->
+> ```
+>
+> For that operand the three predicates read:
+>
+> 1. **retired-from-entry** is proven about the package. At the merge base it is in the
+>    workspace with a published entry: a workspace member, not `private`, whose entry maps
+>    as above (an unmappable entry is refused, as for any operand). At HEAD it is absent
+>    from the workspace: no `package.json` (its base manifest is gone, and no workspace
+>    manifest carries its name, so a package that moved or was renamed is not deleted),
+>    not in `pnpm-workspace.yaml` (no glob names its directory literally), and not in the
+>    changesets fixed group (no `fixed` group in `.changeset/config.json` lists it; a
+>    missing or unreadable config is refused, never read as an empty group).
+> 2. **no-metadata-surface** asks the package what it asks an export, at the merge base:
+>    none of the package's files is a metadata surface, and no metadata surface outside it
+>    imports it in code, by its root or a subpath.
+> 3. **from-operands-named**: the FROM → TO block names the package on **one** line, by its
+>    package name (`` - FROM `<package>` TO … ``). Its exports take no line of their own,
+>    and a FROM line naming one is out of range, as any operand the marker does not name is.
+>
+> An export or member operand on a package deleted at HEAD stays refused at predicate 1,
+> and the refusal names the `<package>#*` spelling. Nothing else about the category
+> changes: the operands named are judged, and the claim's completeness is not.
 
 **The deviation accepted with the ruling.** A merge base has no build output (`dist/`
 is gitignored), so predicate 1 compiles the **source** entry that generates the

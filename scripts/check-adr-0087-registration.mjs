@@ -463,6 +463,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'REX-L: the compiler is loaded only when a marker names the category': 6,
   'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
+  'WP (#26220): a deleted published package is retired whole, `<package>#*`': 50,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -495,7 +496,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 57;
+const SELF_TEST_BATTERY_FLOOR = 58;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4361,6 +4362,13 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
 //   <package>#<Export>           a retired export of the package's published entry
 //   <package>#<Type>.<member>    a retired member of an exported type -- the dotted
 //                                spelling `type-surface-only` already uses
+//   <package>#*                  a published package DELETED at HEAD, retired whole
+//                                (D9, amended 2026-10-27: ruling A on PR #26365,
+//                                comment 6439038287)
+//
+// A deleted package has no entry at HEAD to read an absence from, so the operand
+// is the package itself and predicate 1 is proven about the package (see
+// `verifyWholePackageRetired`); its FROM -> TO block names the package on one line.
 //
 // The PACKAGE is named, never a file: "reachable from the published entry" is a
 // fact about the package, and a declaration can move between files without the
@@ -4448,10 +4456,14 @@ const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const EXPORT_SPELLING_RE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/;
 
 /**
- * `<package>#<Export>` / `<package>#<Type>.<member>` -> its parts, or a refusal.
+ * `<package>#<Export>` / `<package>#<Type>.<member>` / `<package>#*` -> its parts,
+ * or a refusal.
+ *
+ * `<package>#*` is a WHOLE package (D9, amended 2026-10-27): its `spelling` is the
+ * package name, because that is what its one FROM line names.
  *
  * @param {string} ref
- * @returns {{ pkg: string, spelling: string, exportName: string, member: string|null } | { refusal: string }}
+ * @returns {{ pkg: string, spelling: string, exportName: string|null, member: string|null, whole: boolean } | { refusal: string }}
  */
 export function parseExportOperand(ref) {
   const at = ref.lastIndexOf('#');
@@ -4462,9 +4474,10 @@ export function parseExportOperand(ref) {
       refusal: /[\\/][^#]*\.[cm]?tsx?(?:#|$)/.test(ref)
         ? `names a FILE (${pkg || ref}). This category names the PACKAGE whose published entry exported the operand,\n` +
           '      because "reachable from the published entry" is a fact about the package, not about a file'
-        : 'is not a `<package>#<Export>` or `<package>#<Type>.<member>` reference',
+        : 'is not a `<package>#<Export>`, `<package>#<Type>.<member>` or `<package>#*` reference',
     };
   }
+  if (spelling === '*') return { pkg, spelling: pkg, exportName: null, member: null, whole: true };
   if (!EXPORT_SPELLING_RE.test(spelling)) {
     return {
       refusal: /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){2,}$/.test(spelling)
@@ -4474,7 +4487,7 @@ export function parseExportOperand(ref) {
     };
   }
   const [exportName, member = null] = spelling.split('.');
-  return { pkg, spelling, exportName, member };
+  return { pkg, spelling, exportName, member, whole: false };
 }
 
 /**
@@ -4718,6 +4731,95 @@ function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
   return { entry: present[0], dir };
 }
 
+/** The changesets config whose `fixed` group a deleted package must have left. */
+const CHANGESET_CONFIG = '.changeset/config.json';
+
+/**
+ * Predicate 1 for a WHOLE package, `<package>#*` (D9, amended 2026-10-27: ruling A
+ * on PR #26365, comment 6439038287). A deleted package has no HEAD entry to read an
+ * absence from, so the proof is about the package itself, in the ruling's words:
+ * "in the workspace with a published entry at the merge base; absent from the
+ * workspace at HEAD (no `package.json`, not in `pnpm-workspace.yaml`, not in the
+ * changesets fixed group)".
+ *
+ * At the base the package is a workspace member, not private, and its published
+ * entry maps (`sourceEntryAt`): an entry this gate cannot map is refused here as it
+ * is for any operand. At HEAD all four must hold, and every one that fails is named:
+ * its base manifest is gone, no workspace manifest carries its name (a package that
+ * moved or was renamed was not deleted), no `pnpm-workspace.yaml` glob names its
+ * directory literally, and no `fixed` group in `.changeset/config.json` lists it
+ * (a glob entry names no package). A missing or unreadable config is refused,
+ * never read as an empty group.
+ *
+ * @returns {{ refusal: string } | { file: string, dir: string }}
+ */
+function verifyWholePackageRetired(pkg, { base, head, cwd, packagesAt, kit }) {
+  const atBase = packagesAt(base).get(pkg);
+  if (!atBase) {
+    return { refusal: `\`${pkg}\` is not in the workspace at the merge base: no workspace manifest at ${base.slice(0, 12)} is named it,\n      so nothing this workspace published is retired` };
+  }
+  if (atBase.private) {
+    return {
+      refusal: `\`${pkg}\` was never published: it is PRIVATE (\`private: true\` in ${atBase.file}) at the merge base, so it\n` +
+        '      has no published entry to retire, and deleting it breaks no consumer outside the workspace',
+    };
+  }
+  const mapped = sourceEntryAt(base, cwd, pkg, packagesAt(base), kit);
+  if (mapped.refusal) return { refusal: `\`${pkg}\` has no published entry this gate can read at the merge base:\n      ${mapped.refusal}` };
+  const dir = mapped.dir.replace(/\/$/, '');
+  const present = [];
+  if (showOrNull(head, atBase.file, cwd) !== null) present.push(`${atBase.file} still exists`);
+  const atHead = packagesAt(head).get(pkg);
+  if (atHead && atHead.file !== atBase.file) {
+    present.push(`a workspace manifest at HEAD is still named it (${atHead.file}): a package that moved or was renamed\n` +
+      '          was not deleted -- retire its exports by name');
+  }
+  if (workspaceGlobsAt(head, cwd).includes(dir)) present.push(`${WORKSPACE_FILE} still names its directory, \`${dir}\``);
+  const config = showOrNull(head, CHANGESET_CONFIG, cwd);
+  let fixed;
+  try { fixed = config === null ? undefined : JSON.parse(config).fixed ?? []; } catch { fixed = undefined; }
+  if (!Array.isArray(fixed)) {
+    present.push(`${CHANGESET_CONFIG} is ${config === null ? 'missing' : 'unreadable (no parseable `fixed` array)'} at HEAD, so the fixed group\n` +
+      '          cannot be read -- refused, never read as an empty group');
+  } else if (fixed.some((group) => Array.isArray(group) && group.includes(pkg))) {
+    present.push(`${CHANGESET_CONFIG} still lists it in a \`fixed\` group`);
+  }
+  if (present.length > 0) {
+    return {
+      refusal: `\`${pkg}\` is not absent from the workspace at HEAD -- the proof is no \`package.json\`, not in\n` +
+        `      ${WORKSPACE_FILE}, not in the changesets fixed group, and here:\n` +
+        present.map((p) => `        - ${p}`).join('\n'),
+    };
+  }
+  return { file: atBase.file, dir };
+}
+
+/**
+ * Predicate 2 for a whole package: the first metadata surface OUTSIDE `pkgDir` whose
+ * code imports `pkg` (its root or a subpath) -- `from '…'`, a bare `import '…'`,
+ * `import('…')` or `require('…')` -- or null. Read with comment spans blanked, as
+ * `metadataSurfaceReference` reads: a docblock naming the package reaches nothing.
+ *
+ * @param {string} pkg
+ * @param {string} pkgDir the package's directory, no trailing slash
+ * @param {Map<string, string>} surfaceTexts path -> text of every metadata surface
+ * @returns {{ hitPath: string, line: string } | null}
+ */
+export function packageImporter(pkg, pkgDir, surfaceTexts) {
+  const name = pkg.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const spec = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|^\\s*import\\s+)(['"])${name}(?:/[^'"\\n]*)?\\1`, 'm');
+  for (const [hitPath, rawText] of surfaceTexts) {
+    if (hitPath.startsWith(`${pkgDir}/`) || !rawText.includes(pkg)) continue;
+    const code = maskComments(rawText);
+    const m = spec.exec(code);
+    if (!m) continue;
+    // `maskComments` blanks in place, so an offset in `code` is the same offset in the file.
+    const end = code.indexOf('\n', m.index);
+    return { hitPath, line: rawText.slice(code.lastIndexOf('\n', m.index) + 1, end < 0 ? undefined : end).trim() };
+  }
+  return null;
+}
+
 /**
  * What a package's published entry exports at a rev, read by the compiler.
  *
@@ -4932,10 +5034,24 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     '      which this reader cannot follow -- a name could sit behind it.';
   const retired = [];
   for (const op of operands) {
+    if (op.whole) {
+      const proof = verifyWholePackageRetired(op.pkg, { base, head, cwd, packagesAt, kit });
+      if (proof.refusal) { problems.push(`${tag(op)} is not proven:\n      ${proof.refusal}.`); continue; }
+      retired.push({ op, at: null, symbol: null, member: null, pkgFile: proof.file, pkgDir: proof.dir });
+      continue;
+    }
     const at = surfaceAt(base, op.pkg);
     if (at.refusal) { problems.push(`${tag(op)} cannot be read at the merge base:\n      ${at.refusal}.`); continue; }
     const now = surfaceAt(head, op.pkg);
-    if (now.refusal) { problems.push(`${tag(op)} cannot be read at HEAD:\n      ${now.refusal}.`); continue; }
+    if (now.refusal) {
+      const deleted = !packagesAt(head).has(op.pkg);
+      problems.push(
+        `${tag(op)} cannot be read at HEAD:\n      ${now.refusal}.` +
+        (deleted ? `\n      A published package DELETED at HEAD is retired whole, on one operand: \`${op.pkg}#*\`\n` +
+          '      (ADR-0087 D9, amended 2026-10-27), with one FROM line naming the package.' : ''),
+      );
+      continue;
+    }
     if (op.member === null) {
       if (!at.names.has(op.exportName)) {
         problems.push(
@@ -5006,8 +5122,36 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
       '      base, so the scan that would refuse this claim has nothing to read (#4690).',
     );
   }
-  for (const { op, at, symbol, member } of surfacePaths.length > 0 ? retired : []) {
+  for (const r of surfacePaths.length > 0 ? retired : []) {
+    const { op, at, symbol, member } = r;
     const t = `\`runtime-export-retired ${op.ref}\` [predicate 2: no-metadata-surface]`;
+    if (op.whole) {
+      // The same question, asked of the PACKAGE: none of its files is a metadata
+      // surface, and no metadata surface outside it imports it.
+      let own = [];
+      try { own = git(['ls-tree', '-r', '--name-only', base, '--', `${r.pkgDir}/`], cwd).split('\n').map((s) => s.trim()).filter(Boolean); } catch { /* listed below as none */ }
+      const site = own.find((f) => metadataSurfaceKind(f) !== null);
+      if (site) {
+        problems.push(
+          `${t} is false: \`${op.pkg}\` carries ${site} (${metadataSurfaceKind(site)}) at the merge base.\n` +
+          '      A metadata surface is what `objectstack migrate meta` reaches, so the ledger IS a channel here.\n' +
+          '      fix: register the migration.',
+        );
+        continue;
+      }
+      metadataTexts ??= showManyOrNull(base, surfacePaths, cwd);
+      const importer = packageImporter(op.pkg, r.pkgDir, metadataTexts);
+      if (importer) {
+        problems.push(
+          `${t} is false: ${importer.hitPath} (${metadataSurfaceKind(importer.hitPath)}) IMPORTS \`${op.pkg}\`:\n` +
+          `        ${importer.line.slice(0, 140)}\n` +
+          '      A package a metadata surface reaches HAS a metadata surface (comment spans are already excluded).',
+        );
+        continue;
+      }
+      verified.push({ ref: op.ref, kind: 'package', declared: r.pkgFile });
+      continue;
+    }
     const files = declarationFiles(at, symbol);
     if (files.length === 0) {
       problems.push(`${t} cannot be verified: the declaration of \`${op.exportName}\` cannot be located at the merge base.`);
@@ -5053,9 +5197,17 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
   for (const u of block.unread) {
     problems.push(`${t3}: the body carries ${u.shape}, which this category does not read:\n        ${u.text.slice(0, 160)}\n${FROM_BLOCK_READS}`);
   }
+  // A whole package's FROM side is the package name, which is no identifier: read
+  // it as that operand's spelling exactly when the marker names it with `#*`.
+  const wholeNames = new Set(operands.filter((o) => o.whole).map((o) => o.pkg));
+  const wholeNote = wholeNames.size === 0 ? '' :
+    '\n      A package retired whole (`<package>#*`) is named on ONE FROM line, by the package name; its\n' +
+    '      exports take no line of their own.';
   const seen = new Set();
   const reported = new Set();
-  for (const side of block.sides) {
+  for (const raw of block.sides) {
+    const bare = stripTicks(raw.operand).trim();
+    const side = raw.spelling === null && wholeNames.has(bare) ? { ...raw, spelling: bare } : raw;
     if (side.spelling === null) {
       if (reported.has(side.operand)) continue;
       reported.add(side.operand);
@@ -5074,7 +5226,8 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
       `${t3}: the FROM operand ${side.operand} names \`${side.spelling}\`, which the marker does not name -- out of range:\n` +
       `        ${side.text.slice(0, 160)}\n` +
       '      A prescription for anything but the named operands keeps the `no-migration-prescription` refusal.\n' +
-      '      A retired MEMBER is named `<Type>.<member>` in the marker and written the same way on the FROM side.',
+      '      A retired MEMBER is named `<Type>.<member>` in the marker and written the same way on the FROM side.' +
+      wholeNote,
     );
   }
   for (const op of operands) {
@@ -7985,6 +8138,108 @@ function selfTest() {
       { [txPath('src/main.tsx')]: TX_BASE[txPath('src/index.tsx')] },
       { [txPath('src/index.tsx')]: null, [txPath('src/main.tsx')]: `${TX_INDEX_HEAD}export const Root = () => <div />;\n` },
     ), [/cannot be mapped to its source/, /neither ui\/packages\/plugin-x\/src\/index\.ts nor ui\/packages\/plugin-x\/src\/index\.tsx exists there/]);
+  }
+
+  // ---- WP (#26220): a deleted published package is retired WHOLE ------------
+  //
+  // D9, amended 2026-10-27 (ruling A on PR #26365, comment 6439038287): when a
+  // published package is deleted at HEAD the operand is the package itself,
+  // `<package>#*`. Predicate 1 is proven about the package -- a published member at
+  // the merge base, absent from the workspace at HEAD (no `package.json`, not in
+  // `pnpm-workspace.yaml`, not in the changesets fixed group) -- predicate 2 asks the
+  // package, and the FROM -> TO block names it on one line. Every red differs from
+  // WP-G1 in the one thing the clause must not admit.
+  battery('WP (#26220): a deleted published package is retired whole, `<package>#*`');
+  {
+    const WP_PKG = '@object-ui/plugin-x';
+    const wpPath = (rel) => `ui/packages/plugin-x/${rel}`;
+    const WP_MANIFEST = (over = {}) => JSON.stringify({
+      name: WP_PKG, version: '1.0.0', types: 'dist/index.d.ts',
+      exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } }, ...over,
+    });
+    const WP_CONFIG = (names) => `${JSON.stringify({ fixed: [['@objectstack/spec', ...names]] }, null, 2)}\n`;
+    const WP_BASE = {
+      [wpPath('package.json')]: WP_MANIFEST(),
+      [wpPath('src/index.tsx')]: "export { Widget } from './Widget.js';\n",
+      [wpPath('src/Widget.tsx')]: 'export const Widget = () => <span />;\n',
+      '.changeset/config.json': WP_CONFIG([WP_PKG]),
+      'packages/platform-objects/src/audit/sys-email-template.object.ts': "export const SysEmailTemplate = { name: 'sys_email_template' };\n",
+    };
+    // Deleted the way PR #26365 deletes `@object-ui/plugin-ai`: the directory goes,
+    // and the name leaves the fixed group.
+    const WP_GONE = {
+      [wpPath('package.json')]: null, [wpPath('src/index.tsx')]: null, [wpPath('src/Widget.tsx')]: null,
+      '.changeset/config.json': WP_CONFIG([]),
+    };
+    const WP_LINE = `- FROM \`${WP_PKG}\` TO nothing: the package is deleted; drop the dependency and its imports.`;
+    const WP_CS = (lines = WP_LINE, operands = `${WP_PKG}#*`) => CS({
+      bumps: [['@objectstack/spec', 'minor']],
+      body: `refactor(ui)!: retire \`${WP_PKG}\`\n\n**BREAKING**: the package is deleted.\n\n${lines}\n\n` +
+        `<!-- adr-0087: not-required (runtime-export-retired ${operands}) a deleted ui package; the compiler reports it at its importer, and no stored shape names it -->\n`,
+    });
+    const wp = ({ base = {}, head = {}, cs = WP_CS(), workspace = WORKSPACE_YAML } = {}) => run(mk({
+      pkgs: { '@objectstack/spec': { dir: 'packages/spec', private: false } },
+      baseFiles: { ...WP_BASE, ...base },
+      files: { ...WP_GONE, ...head, '.changeset/x.md': cs },
+      workspace,
+    }));
+    const P1 = /`runtime-export-retired @object-ui\/plugin-x#\*` \[predicate 1: retired-from-entry\] is not proven/;
+    const P2 = /`runtime-export-retired @object-ui\/plugin-x#\*` \[predicate 2: no-metadata-surface\] is false/;
+
+    const g1 = wp();
+    green('WP-G1 THE #26365 SHAPE: a published `ui/packages/*` package deleted at HEAD, out of the fixed group, one FROM line', g1);
+    assert(/@object-ui\/plugin-x#\* \(package, ui\/packages\/plugin-x\/package\.json\)/.test(g1.judged[0]?.detail ?? ''),
+      `WP-G1b: the verdict names the package operand and the manifest it was proven from. Got: ${g1.judged[0]?.detail}`);
+    green('WP-G2 the one line written as an arrow removal', wp({ cs: WP_CS(`- \`${WP_PKG}\` → delete the dependency and its imports`) }));
+    green('WP-G3 a metadata surface that names the package only in a COMMENT does not import it', wp({
+      base: { 'packages/spec/src/ui/widget.zod.ts': `// once rendered by '${WP_PKG}'\n/** import { Widget } from '${WP_PKG}'; */\nexport const W = 1;\n` },
+    }));
+
+    red('WP-R1 deleted, but STILL in the changesets fixed group', wp({ head: { '.changeset/config.json': WP_CONFIG([WP_PKG]) } }),
+      [P1, /\.changeset\/config\.json still lists it in a `fixed` group/]);
+    red('WP-R2 never PUBLISHED at the merge base (`private: true`)', wp({ base: { [wpPath('package.json')]: WP_MANIFEST({ private: true }) } }),
+      [P1, /was never published: it is PRIVATE \(`private: true` in ui\/packages\/plugin-x\/package\.json\)/]);
+    red('WP-R3 not a workspace member at the merge base', wp({ workspace: WORKSPACE_YAML.replace('  - ui/packages/*\n', '') }),
+      [P1, /is not in the workspace at the merge base/]);
+    red('WP-R4 NOT deleted: the manifest is still there at HEAD', wp({ head: { ...WP_BASE } }),
+      [P1, /ui\/packages\/plugin-x\/package\.json still exists/, /still lists it in a `fixed` group/]);
+    red('WP-R5 MOVED, not deleted: another directory carries the name at HEAD', wp({ head: { 'ui/packages/plugin-y/package.json': WP_MANIFEST() } }),
+      [P1, /a workspace manifest at HEAD is still named it \(ui\/packages\/plugin-y\/package\.json\)/]);
+    red('WP-R6 `pnpm-workspace.yaml` still names the directory at HEAD', wp({ head: { [WORKSPACE_FILE]: `${WORKSPACE_YAML}  - ui/packages/plugin-x\n` } }),
+      [P1, /pnpm-workspace\.yaml still names its directory, `ui\/packages\/plugin-x`/]);
+    red('WP-R7 no changesets config at HEAD: the fixed group is unreadable, never read as empty', wp({ head: { '.changeset/config.json': null } }),
+      [P1, /\.changeset\/config\.json is missing at HEAD/]);
+    red('WP-R8 a package with no mappable published entry at the merge base', wp({ base: { [wpPath('package.json')]: JSON.stringify({ name: WP_PKG, version: '1.0.0' }) } }),
+      [P1, /has no published entry this gate can read at the merge base/, /cannot be mapped to its source/]);
+    red('WP-R9 the package carries a metadata surface at the merge base', wp({
+      base: { [wpPath('src/widget.zod.ts')]: 'export const WidgetSchema = {};\n' }, head: { [wpPath('src/widget.zod.ts')]: null },
+    }), [P2, /carries ui\/packages\/plugin-x\/src\/widget\.zod\.ts \(a Zod schema\)/]);
+    red('WP-R10 a metadata surface OUTSIDE the package imports it at the merge base', wp({
+      base: { 'packages/spec/src/ui/widget.zod.ts': `import { Widget } from '${WP_PKG}';\nexport const W = Widget;\n` },
+    }), [P2, /packages\/spec\/src\/ui\/widget\.zod\.ts \(a Zod schema\) IMPORTS `@object-ui\/plugin-x`/]);
+    red('WP-R11 no FROM line names the package', wp({ cs: WP_CS('Nothing else to do.') }),
+      [/the named operand `@object-ui\/plugin-x#\*` has no FROM side/, /- FROM `@object-ui\/plugin-x` TO/]);
+    red('WP-R12 one FROM line per EXPORT instead of the package line', wp({ cs: WP_CS('- FROM `Widget` TO nothing: delete the import.') }),
+      [/names `Widget`, which the marker does not name -- out of range/, /named on ONE FROM line, by the package name/,
+        /`@object-ui\/plugin-x#\*` has no FROM side/]);
+    red('WP-R13 an EXPORT operand on the deleted package points at the whole-package spelling', wp({
+      cs: WP_CS('- FROM `Widget` TO nothing: delete the import.', `${WP_PKG}#Widget`),
+    }), [/cannot be read at HEAD/, /retired whole, on one operand: `@object-ui\/plugin-x#\*`/]);
+
+    const whole = parseExportOperand(`${WP_PKG}#*`);
+    assert(whole.whole === true && whole.pkg === WP_PKG && whole.spelling === WP_PKG && whole.exportName === null,
+      `WP-U1: \`<package>#*\` parses as a WHOLE package whose spelling is the package name (${JSON.stringify(whole)})`);
+    assert(parseExportOperand('#*').refusal !== undefined && parseExportOperand(`${WP_PKG}#**`).refusal !== undefined,
+      'WP-U2: `#*` with no package, and `**`, are refused');
+    const texts = new Map([
+      ['packages/spec/src/a.zod.ts', `export { X } from '${WP_PKG}/sub';\n`],
+      ['packages/spec/src/b.zod.ts', "import { X } from '@object-ui/plugin-xy';\n"],
+      ['ui/packages/plugin-x/src/c.zod.ts', `import '${WP_PKG}';\n`],
+    ]);
+    assert(packageImporter(WP_PKG, 'ui/packages/plugin-x', texts)?.hitPath === 'packages/spec/src/a.zod.ts',
+      'WP-U3: a SUBPATH import is an import of the package; the package\'s own files are skipped');
+    assert(packageImporter(WP_PKG, 'ui/packages/plugin-x', new Map([...texts].slice(1))) === null,
+      'WP-U4: a package whose name merely STARTS with the name (`plugin-xy`) is not the package');
   }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
