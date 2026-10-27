@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@object-ui/types': minor
 '@object-ui/plugin-calendar': minor
 '@object-ui/plugin-gantt': minor
