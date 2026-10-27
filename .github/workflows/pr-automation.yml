@@ -42,6 +42,16 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. `labeled` / `unlabeled` /
+# `edited` runs (Check Changeset only) and push runs (all three jobs) are kept in
+# separate groups: a label written at PR creation fires right behind `opened` and must
+# not cancel that run's size and label jobs.
+concurrency:
+  group: pr-automation-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}-${{ contains(fromJSON('["labeled","unlabeled","edited"]'), github.event.action) && 'meta' || 'code' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ===========================================================================
   # LABEL WRITES IN THIS FILE ARE ADDITIVE. Nothing here may issue
@@ -143,6 +153,9 @@ jobs:
       && github.event.action != 'unlabeled'
       && github.event.action != 'edited'
     runs-on: ubuntu-latest
+    # Run wall (all three jobs) over the 100 most recent completed runs to 2026-10-27: p99
+    # 2.4 min, max 2.5.
+    timeout-minutes: 10
     permissions:
       # `contents: read` is for the checkout the label writer needs. Declaring
       # any `permissions:` block drops every scope not listed, so it has to be
@@ -214,6 +227,9 @@ jobs:
       && github.event.action != 'unlabeled'
       && github.event.action != 'edited'
     runs-on: ubuntu-latest
+    # Run wall (all three jobs) over the 100 most recent completed runs to 2026-10-27: p99
+    # 2.4 min, max 2.5.
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
@@ -243,6 +259,9 @@ jobs:
   changeset-check:
     name: Check Changeset
     runs-on: ubuntu-latest
+    # Run wall (all three jobs) over the 100 most recent completed runs to 2026-10-27: p99
+    # 2.4 min, max 2.5.
+    timeout-minutes: 10
     # Two exemptions, both meaning "this PR declares no release of its own":
     #   - the `skip-changeset` label — the author's explicit opt-out;
     #   - the Changesets release PR (`changeset-release/main`, pushed by

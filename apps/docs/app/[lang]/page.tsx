@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, Check } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
-import { baseOptions, ESSAY_URL, gitConfig } from '@/lib/layout.shared';
-import { absoluteUrl, HERO_COVER } from '@/lib/site';
+import { baseOptions, gitConfig, PRODUCT_SITE_URL } from '@/lib/layout.shared';
+import { absoluteUrl, HERO_COVER, SITE_ORIGIN } from '@/lib/site';
 import {
   APACHE_2_0_URL,
   GITHUB_REPO_URL,
@@ -12,14 +12,8 @@ import {
   ORGANIZATION,
   ORGANIZATION_REF,
   SOFTWARE_ID,
-  YOUTUBE_CHANNEL_URL,
   type JsonLdNode,
 } from '@/lib/structured-data';
-import { YouTubeEmbed } from '@/components/youtube-embed';
-import { OntologyRunsFigure } from '@/components/figures';
-
-/** The 90-second overview — the same video the README's hero cover links to. */
-const OVERVIEW_VIDEO_ID = 'CX_FlOoOtr0';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -32,24 +26,29 @@ const mono = IBM_Plex_Mono({
   variable: '--font-l-mono',
 });
 
-const HOME_TITLE = 'The ontology is the software';
-const HOME_DESCRIPTION =
-  'One executable business ontology. AI writes it, the runtime runs it, agents operate it, you own it. The whole app — data model, UI, workflows, permissions — is typed metadata small enough for AI to hold whole.';
+/**
+ * This is the developer site. The product site (`PRODUCT_SITE_URL`) carries the
+ * hero, the editions, pricing and the one blog; this page carries one line of
+ * positioning, the start command, the docs entry points, the "Run it" strip and
+ * the GitHub link — nothing that sells. The slogan stays as the kicker above the
+ * positioning line: it is the project's one sentence, not a marketing hero.
+ */
+const KICKER = 'The ontology is the software.';
+const POSITIONING =
+  'ObjectStack is the open protocol and SDK that ObjectOS is built on: one typed business ontology, and the database, API, Console and MCP tools derive from it.';
+
+const HOME_TITLE = 'The open protocol and SDK ObjectOS is built on';
+const HOME_DESCRIPTION = POSITIONING;
 
 /**
  * The homepage's metadata. Its social card is the shared hero cover,
- * `HERO_COVER` from `lib/site.ts` — the same image the video poster below uses.
+ * `HERO_COVER` from `lib/site.ts`.
  *
  * ⚠️ Deliberately NOT the docs card generator. `app/og/docs/[...slug]/route.tsx`
  * renders from a `source.getPage()` result, and the homepage has no MDX file
  * behind it — there is no slug to hand it. It reuses the hero cover instead,
- * which is already shipped and already the video poster on this page, so the
- * shared card costs no extra bytes and no extra route.
- *
- * The path used to be spelled as a literal here, again in the blog's card, and a
- * third time as the `poster` further down this file — with a note asking whoever
- * added a third consumer to hoist it. That happened; it lives in `lib/site.ts`
- * now, and the reasons a re-encode has to be careful live with it.
+ * which is already shipped, so the shared card costs no extra bytes and no
+ * extra route. The reasons a re-encode has to be careful live in `lib/site.ts`.
  *
  * Left site-relative: `metadataBase` in `app/layout.tsx` absolutises it.
  */
@@ -97,8 +96,8 @@ export const metadata: Metadata = {
  *
  * Every field is drawn from something already on this page or in `lib/`: the
  * title and description are the same constants `metadata` uses, the image is
- * `HERO_COVER`, the licence is the repo's own, and the two `sameAs` links are the
- * GitHub organisation and the YouTube channel this page links to in its hero.
+ * `HERO_COVER`, the licence is the repo's own, and the `sameAs` links are the
+ * organisation's.
  */
 function homeGraph(): JsonLdNode[] {
   return [
@@ -123,66 +122,67 @@ function homeGraph(): JsonLdNode[] {
   ];
 }
 
-/** Section 00's three sentences, verbatim from the maintainer's ruling. */
-const IDEA: string[] = [
-  'An enterprise is definition plus execution. When execution is nearly free, it is its definition.',
-  'What the model lacks is not intelligence: a world, hands, and a fence.',
-  'An ontology written clearly enough is software. Models change; the ontology stays.',
+/** The start command, as `content/docs/getting-started` teaches it. */
+const START_COMMANDS: string[] = [
+  'npm create objectstack@latest my-app',
+  'cd my-app',
+  'npx os dev --ui',
 ];
 
-const VOCABULARY: { tag: string; title: string; copy: string }[] = [
-  { tag: 'object', title: 'Objects & fields', copy: 'Typed schemas with relations, validation, formulas, and files.' },
-  { tag: 'permission', title: 'Permissions', copy: 'RBAC plus row- and field-level security, enforced by the runtime.' },
-  { tag: 'flow', title: 'Automation', copy: 'DAG flows, record triggers, scheduled jobs, and webhooks.' },
-  { tag: 'approval', title: 'Approvals', copy: 'Multi-step approval chains with queues and a full audit trail.' },
-  { tag: 'view', title: 'Views', copy: 'Lists, kanban boards, calendars, gantt, galleries — declared, not coded.' },
-  { tag: 'dashboard', title: 'Dashboards & reports', copy: 'Charts, aggregations, and KPIs bound to live data.' },
-  { tag: 'action', title: 'Actions', copy: 'Permission-checked buttons and server operations.' },
-  { tag: 'api', title: 'APIs & SDK', copy: 'Generated REST and realtime endpoints with a typed client SDK.' },
-  { tag: 'mcp', title: 'AI tools', copy: 'Every object and action doubles as a governed MCP tool.' },
-  { tag: 'i18n', title: 'Translations', copy: 'Labels and UI text as metadata, per locale.' },
-  { tag: 'seed', title: 'Seed data', copy: 'Fixtures and demo datasets that ship with the app.' },
-  { tag: 'driver', title: 'Datasources', copy: 'Postgres, MySQL, SQLite, MongoDB, or in-memory.' },
+/** The docs entry points, in reading order. Every route exists under `content/docs`. */
+const DOCS_ENTRY_POINTS: { title: string; href: string; copy: string }[] = [
+  { title: 'Getting started', href: '/docs/getting-started', copy: 'What ObjectStack is, your first project, the anatomy of an app.' },
+  { title: 'Concepts', href: '/docs/concepts', copy: 'The business ontology, the runtime, and the principles behind both.' },
+  { title: 'Spec', href: '/docs/protocol', copy: 'The protocol: how Data, UI and System layers describe an application.' },
+  { title: 'CLI', href: '/docs/deployment/cli', copy: 'The os command — validate, dev, build, start, package.' },
+  { title: 'Build with Claude Code', href: '/docs/getting-started/build-with-claude-code', copy: 'The main workflow: an agent writes the app, you verify it in the Console.' },
 ];
 
-const GATES: { title: string; copy: string }[] = [
-  { title: 'Typed', copy: 'Strict TypeScript + Zod — shape errors die in the editor, seconds after the agent writes them.' },
-  { title: 'Validated', copy: 'os validate rejects metadata that would fail silently at runtime — before it ships.' },
-  { title: 'Reviewed', copy: 'You approve a small readable diff in the Console — not a pile of generated glue.' },
-  { title: 'Governed', copy: 'Permissions and audit are enforced by the runtime on every call. Even a wrong app stays inside the fence.' },
+/**
+ * The four sections the previous landing carried in full — the idea, the loop,
+ * the gates, the vocabulary — now one row of links into the docs pages that
+ * already carry that content. Nothing here is a second copy of a docs page.
+ */
+const DOCS_THEMES: { label: string; title: string; href: string }[] = [
+  { label: 'The idea', title: 'Business ontology — the executable definition the runtime runs', href: '/docs/concepts/ontology' },
+  { label: 'The loop', title: 'Describe · the agent writes metadata · os validate · you verify in the Console', href: '/docs/getting-started/build-with-claude-code' },
+  { label: 'The gates', title: 'Why AI-written app development is safe — the guardrails between the agent and production', href: '/docs/getting-started/how-ai-development-works' },
+  { label: 'The vocabulary', title: 'What can it build? — the capabilities, in business language', href: '/docs/capabilities' },
 ];
 
-const STEPS: { num: string; title: string; cmd: string; copy: string }[] = [
+/**
+ * "Run it": ObjectOS is one product in three editions, and ObjectStack is the
+ * protocol and SDK every edition runs on. Community is this repository's own
+ * runtime image, so it links into these docs; the hosted and enterprise editions
+ * are the product site's to describe.
+ */
+const EDITIONS: { name: string; copy: string; href: string; cta: string; external: boolean }[] = [
   {
-    num: '01',
-    title: 'Create a project',
-    cmd: 'npx create-objectstack my-app',
-    copy: 'A typed project skeleton — spec, seed data, and the Console already wired.',
+    name: 'ObjectOS Community',
+    copy: 'This repository’s runtime image, self-hosted and free: os start, or the container image.',
+    href: '/docs/deployment/self-hosting',
+    cta: 'Self-hosting guide',
+    external: false,
   },
   {
-    num: '02',
-    title: 'Describe the requirement',
-    cmd: 'claude · os validate ✓',
-    copy: 'Tell Claude Code what the business needs. It writes compact typed metadata, and the validation gate rejects anything that would fail silently.',
+    name: 'ObjectOS Cloud',
+    copy: 'Hosted by ObjectOS — nothing to install, build and ask in the browser.',
+    href: PRODUCT_SITE_URL,
+    cta: 'objectos.ai',
+    external: true,
   },
   {
-    num: '03',
-    title: 'Preview in the browser',
-    cmd: 'os dev',
-    copy: 'The Console renders it live — records, boards, dashboards. Requirement changed? Same loop: describe, validate, preview.',
+    name: 'ObjectOS Enterprise',
+    copy: 'Your infrastructure, your identity provider, with support from the team.',
+    href: PRODUCT_SITE_URL,
+    cta: 'objectos.ai',
+    external: true,
   },
 ];
 
-function DiffLine({ children, plain }: { children: React.ReactNode; plain?: boolean }) {
-  return (
-    <div className="flex gap-3 whitespace-pre">
-      <span className={plain ? 'select-none text-fd-muted-foreground/40' : 'select-none text-emerald-500'}>
-        {plain ? ' ' : '+'}
-      </span>
-      <span className={plain ? 'text-fd-muted-foreground' : ''}>{children}</span>
-    </div>
-  );
-}
+/** The two hosts, read from the constants that own them — never spelled twice. */
+const THIS_SITE_HOST = new URL(SITE_ORIGIN).host;
+const PRODUCT_SITE_HOST = new URL(PRODUCT_SITE_URL).host;
 
 export default function HomePage() {
   return (
@@ -205,54 +205,47 @@ export default function HomePage() {
             backgroundSize: '56px 56px',
           }}
         />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-40 left-1/2 h-[480px] w-[880px] -translate-x-1/2 rounded-full opacity-25 blur-3xl dark:opacity-20"
-          style={{ background: 'radial-gradient(closest-side, #818cf8, transparent 70%)' }}
-        />
 
-        {/* ── hero ─────────────────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-5xl px-6 pt-16 text-center md:pt-20">
+        {/* ── positioning ──────────────────────────────────────── */}
+        <section className="relative mx-auto w-full max-w-5xl px-6 pt-16 md:pt-20">
           <p className="text-xs font-medium tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
             Open protocol &amp; runtime · Apache-2.0
           </p>
+          <p className="mt-5 text-lg font-semibold tracking-tight text-fd-muted-foreground" style={{ fontFamily: 'var(--l-display)' }}>
+            {KICKER}
+          </p>
           <h1
-            className="mx-auto mt-5 max-w-3xl text-[2.6rem]/[1.06] font-bold tracking-tight text-balance md:text-6xl/[1.04]"
+            className="mt-3 max-w-4xl text-[1.75rem]/[1.25] font-bold tracking-tight text-balance md:text-4xl/[1.2]"
             style={{ fontFamily: 'var(--l-display)' }}
           >
-            The ontology{' '}
-            <span className="block bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent dark:from-indigo-400 dark:to-purple-400">
-              is the software.
-            </span>
+            {POSITIONING}
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-fd-muted-foreground text-pretty">
-            One executable business ontology. AI writes it, the runtime runs it, agents operate
-            it, you own it. The whole app — data model, UI, workflows, permissions — is typed
-            metadata small enough for AI to hold whole: agents read it whole, reason it whole,
-            refactor it whole.
-          </p>
-          <p className="mt-5">
-            <Link
-              href={ESSAY_URL}
-              className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
-            >
-              Why the ontology is the software
-              <ArrowRight className="size-4" />
-            </Link>
-          </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+
+          {/* ── start command ────────────────────────────────── */}
+          <div className="mt-8 max-w-2xl overflow-hidden rounded-xl border border-fd-border bg-fd-card shadow-[0_24px_60px_-24px_rgb(0_0_0/0.35)]">
+            <div className="border-b border-fd-border px-4 py-2 text-[11px] tracking-wider text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+              Start here
+            </div>
+            <div className="overflow-x-auto px-4 py-3 text-[13px]/[1.8]" style={{ fontFamily: 'var(--l-mono)' }}>
+              {START_COMMANDS.map((cmd) => (
+                <div key={cmd} className="flex gap-3 whitespace-pre">
+                  <span aria-hidden className="select-none text-fd-muted-foreground/60">$</span>
+                  <code>{cmd}</code>
+                </div>
+              ))}
+            </div>
+            <p className="border-t border-fd-border bg-fd-muted/50 px-4 py-2 text-[12px] text-fd-muted-foreground" style={{ fontFamily: 'var(--l-mono)' }}>
+              then open http://localhost:3000/_console/ — the Console renders the app the metadata describes
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <Link
               href="/docs/getting-started"
               className="inline-flex items-center gap-2 rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/90"
             >
               Get started
               <ArrowRight className="size-4" />
-            </Link>
-            <Link
-              href="/docs"
-              className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-            >
-              Documentation
             </Link>
             <a
               href={`https://github.com/${gitConfig.user}/${gitConfig.repo}`}
@@ -262,263 +255,95 @@ export default function HomePage() {
             >
               GitHub
             </a>
-            <a
-              href={YOUTUBE_CHANNEL_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center rounded-lg border border-fd-border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-            >
-              YouTube
-            </a>
           </div>
+        </section>
+
+        {/* ── docs entry points ────────────────────────────────── */}
+        <section className="relative mx-auto w-full max-w-6xl px-6 pt-16 md:pt-20">
+          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
+            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+              Docs
+            </span>
+          </div>
+          <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-5">
+            {DOCS_ENTRY_POINTS.map((d) => (
+              <Link key={d.href} href={d.href} className="group bg-fd-card p-5 transition-colors hover:bg-fd-accent/60">
+                <h2 className="inline-flex items-center gap-1.5 font-semibold" style={{ fontFamily: 'var(--l-display)' }}>
+                  {d.title}
+                  <ArrowRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+                </h2>
+                <p className="mt-2 text-sm text-fd-muted-foreground text-pretty">{d.copy}</p>
+              </Link>
+            ))}
+          </div>
+
+          {/* The idea / the loop / the gates / the vocabulary — one row into the docs. */}
+          <div className="mt-6 grid gap-x-10 sm:grid-cols-2">
+            {DOCS_THEMES.map((t) => (
+              <Link key={t.href} href={t.href} className="group flex items-baseline gap-4 border-b border-fd-border py-3.5">
+                <span
+                  className="w-28 shrink-0 text-[12px] text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
+                  style={{ fontFamily: 'var(--l-mono)' }}
+                >
+                  {t.label}
+                </span>
+                <span className="text-sm text-fd-muted-foreground transition-colors group-hover:text-fd-foreground">{t.title}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        {/* ── run it: the three editions ───────────────────────── */}
+        <section className="relative mx-auto w-full max-w-6xl px-6 pt-16 md:pt-20">
+          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
+            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+              Run it
+            </span>
+          </div>
+          <p className="mt-4 max-w-3xl text-sm text-fd-muted-foreground text-pretty">
+            ObjectOS is the product built on this protocol, in three editions. Every edition runs the
+            same ObjectStack metadata.
+          </p>
+          <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-fd-border bg-fd-border md:grid-cols-3">
+            {EDITIONS.map((e) => (
+              <div key={e.name} className="bg-fd-card p-5">
+                <h2 className="font-semibold" style={{ fontFamily: 'var(--l-display)' }}>{e.name}</h2>
+                <p className="mt-2 text-sm text-fd-muted-foreground text-pretty">{e.copy}</p>
+                {e.external ? (
+                  <a
+                    href={e.href}
+                    className="mt-4 inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4 transition-colors hover:text-fd-primary"
+                  >
+                    {e.cta}
+                    <ArrowRight className="size-3.5" />
+                  </a>
+                ) : (
+                  <Link
+                    href={e.href}
+                    className="mt-4 inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4 transition-colors hover:text-fd-primary"
+                  >
+                    {e.cta}
+                    <ArrowRight className="size-3.5" />
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── the two sites, by role ───────────────────────────── */}
+        <section className="relative mx-auto w-full max-w-6xl px-6 pt-16 pb-20 md:pb-28">
           <div
-            className="mt-8 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
+            className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 border-t border-fd-border pt-8 text-[12px] text-fd-muted-foreground"
             style={{ fontFamily: 'var(--l-mono)' }}
           >
-            <span>Executable</span>
+            <span>
+              <span className="text-fd-foreground">{THIS_SITE_HOST}</span> — Developer docs &amp; protocol
+            </span>
             <span aria-hidden className="text-fd-border">|</span>
-            <span>AI-writable</span>
-            <span aria-hidden className="text-fd-border">|</span>
-            <span>Agent-operable</span>
-            <span aria-hidden className="text-fd-border">|</span>
-            <span>You own it</span>
-          </div>
-        </section>
-
-        {/* ── the 90-second overview — the page's first visual ──── */}
-        <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
-          <figure className="relative">
-            <YouTubeEmbed
-              videoId={OVERVIEW_VIDEO_ID}
-              title="ObjectStack in 90 Seconds"
-              poster={HERO_COVER.url}
-            />
-            <figcaption
-              className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-fd-muted-foreground"
-              style={{ fontFamily: 'var(--l-mono)' }}
-            >
-              <span>▶ ObjectStack in 90 Seconds</span>
-              <a
-                href={YOUTUBE_CHANNEL_URL}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
-              >
-                More videos on YouTube
-                <ArrowRight className="size-3" />
-              </a>
-            </figcaption>
-          </figure>
-        </section>
-
-        {/* ── what that metadata is, in prose ──────────────────── */}
-        <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
-          <p className="text-base text-fd-muted-foreground text-pretty">
-            That metadata is your business ontology — an open, versioned definition of your
-            objects, relations, actions, permissions, flows, and agent and tool definitions that
-            you own. It is executable, not a knowledge-representation ontology: no inheritance,
-            no axioms, no reasoner. Strict TypeScript, Zod schemas, and a validation gate catch
-            the agent&apos;s mistakes at authoring time, and the runtime derives the database,
-            REST API, UI, and MCP server — permissions and audit enforced on every call.
-          </p>
-        </section>
-
-        {/* ── 00 · the idea ────────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
-            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              00 · The idea
-            </span>
-          </div>
-          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            An ontology written clearly enough runs directly
-          </h2>
-          {/* The figure's caption takes its spacing and colour from the blog's prose
-              styles there; this page has no prose wrapper, so the wrapper sets them. */}
-          <div className="mx-auto mt-10 max-w-4xl [&_figcaption]:mt-3 [&_figcaption]:text-sm [&_figcaption]:text-fd-muted-foreground">
-            <OntologyRunsFigure caption="The ontology is not the design document for the software; the runtime runs it directly." />
-          </div>
-          <div className="mt-10 grid gap-8 md:grid-cols-3">
-            {IDEA.map((line) => (
-              <div key={line}>
-                <div className="h-px bg-fd-border" aria-hidden />
-                <p className="mt-4 text-lg font-semibold text-pretty" style={{ fontFamily: 'var(--l-display)' }}>
-                  {line}
-                </p>
-              </div>
-            ))}
-          </div>
-          <Link
-            href={ESSAY_URL}
-            className="mt-8 inline-flex items-center gap-2 text-sm font-medium underline underline-offset-4 transition-colors hover:text-fd-primary"
-          >
-            Read the essay
-            <ArrowRight className="size-4" />
-          </Link>
-        </section>
-
-        {/* ── 01 · the loop ────────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
-            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              01 · The loop
-            </span>
-          </div>
-          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            From requirement to running app
-          </h2>
-          <div className="mt-10 grid gap-8 md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div key={s.num} className="group relative">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-fd-muted-foreground" style={{ fontFamily: 'var(--l-mono)' }}>{s.num}</span>
-                  <div className="h-px flex-1 bg-fd-border" aria-hidden />
-                </div>
-                <h3 className="mt-4 text-lg font-semibold" style={{ fontFamily: 'var(--l-display)' }}>{s.title}</h3>
-                <p
-                  className="mt-2 inline-block rounded-md border border-fd-border bg-fd-muted/50 px-2.5 py-1 text-[12.5px] text-fd-muted-foreground"
-                  style={{ fontFamily: 'var(--l-mono)' }}
-                >
-                  {s.cmd}
-                </p>
-                <p className="mt-3 text-[15px] text-fd-muted-foreground text-pretty">{s.copy}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* the artifact card — requirement → metadata → gate → preview */}
-          <figure className="relative mx-auto mt-12 max-w-2xl">
-            <div className="overflow-hidden rounded-xl border border-fd-border bg-fd-card shadow-[0_24px_60px_-24px_rgb(0_0_0/0.35)]">
-              <div className="border-b border-fd-border px-4 py-3" style={{ fontFamily: 'var(--l-mono)' }}>
-                <p className="text-[11px] tracking-wider text-fd-muted-foreground uppercase">you → claude code</p>
-                <p className="mt-1.5 text-[13px]">
-                  “Build an expense approval app for a 50-person team.”
-                </p>
-              </div>
-              <div className="px-4 py-3 text-[12.5px]/[1.7]" style={{ fontFamily: 'var(--l-mono)' }}>
-                <p className="mb-2 text-[11px] tracking-wider text-fd-muted-foreground uppercase">expense.object.ts</p>
-                <DiffLine>{`export const Expense = ObjectSchema.create({`}</DiffLine>
-                <DiffLine>{`  name: 'expense_request',`}</DiffLine>
-                <DiffLine>{`  fields: {`}</DiffLine>
-                <DiffLine>{`    amount: Field.currency({ required: true }),`}</DiffLine>
-                <DiffLine>{`    status: Field.select({ options: [...] }),`}</DiffLine>
-                <DiffLine>{`    approver: Field.lookup('sys_user'),`}</DiffLine>
-                <DiffLine>{`  },`}</DiffLine>
-                <DiffLine>{`});`}</DiffLine>
-              </div>
-              <div
-                className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-fd-border bg-fd-muted/50 px-4 py-2.5 text-[12px] text-fd-muted-foreground"
-                style={{ fontFamily: 'var(--l-mono)' }}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="size-3.5 text-emerald-500" />
-                  os validate
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="size-3.5 text-emerald-500" />
-                  types · permissions · flows
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  os dev
-                  <ArrowRight className="size-3.5" />
-                  Console preview
-                </span>
-              </div>
-            </div>
-            <figcaption
-              className="mt-3 text-center text-[12px] text-fd-muted-foreground"
-              style={{ fontFamily: 'var(--l-mono)' }}
-            >
-              one definition → tables · REST API · Console UI · MCP tools
-            </figcaption>
-          </figure>
-        </section>
-
-        {/* ── 02 · four gates ──────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
-            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              02 · The gates
-            </span>
-          </div>
-          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            Four gates between the agent and production
-          </h2>
-          <div className="mt-10 grid gap-px overflow-hidden rounded-xl border border-fd-border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
-            {GATES.map((g, i) => (
-              <div key={g.title} className="bg-fd-card p-5 transition-colors hover:bg-fd-accent/60">
-                <p className="text-xs text-fd-muted-foreground" style={{ fontFamily: 'var(--l-mono)' }}>
-                  {String(i + 1).padStart(2, '0')}
-                </p>
-                <h3 className="mt-2 font-semibold" style={{ fontFamily: 'var(--l-display)' }}>{g.title}</h3>
-                <p className="mt-2 text-sm text-fd-muted-foreground text-pretty">{g.copy}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ── 03 · the vocabulary ──────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
-            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
-              03 · The vocabulary
-            </span>
-          </div>
-          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            What can it actually build?
-          </h2>
-          <p className="mt-4 max-w-3xl text-fd-muted-foreground text-pretty">
-            Point an agent at an empty repo and you get a one-off codebase — every screen
-            hand-invented, every mistake yours to find at runtime. ObjectStack gives the agent
-            a <em>vocabulary</em> instead: typed, validated primitives for everything enterprise
-            software needs. The agent composes the definition; the runtime already knows how to
-            run it.
-          </p>
-          <div className="mt-10 grid gap-x-10 md:grid-cols-2">
-            {VOCABULARY.map((v) => (
-              <div key={v.tag} className="group flex items-baseline gap-4 border-b border-fd-border py-3.5">
-                <span
-                  className="w-24 shrink-0 text-[12px] text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
-                  style={{ fontFamily: 'var(--l-mono)' }}
-                >
-                  {v.tag}
-                </span>
-                <div>
-                  <span className="font-medium">{v.title}</span>
-                  <span className="text-fd-muted-foreground"> — {v.copy}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <Link
-            href="/docs"
-            className="mt-8 inline-flex items-center gap-2 text-sm font-medium underline underline-offset-4 transition-colors hover:text-fd-primary"
-          >
-            Browse the full vocabulary in the docs
-            <ArrowRight className="size-4" />
-          </Link>
-        </section>
-
-        {/* ── closing ──────────────────────────────────────────── */}
-        <section className="relative mx-auto w-full max-w-6xl px-6 pt-8 pb-20 md:pb-28">
-          <div className="rounded-xl border border-fd-border bg-fd-card/60 px-6 py-8 text-center md:px-10">
-            <p className="mx-auto max-w-2xl text-sm text-fd-muted-foreground text-pretty">
-              The ontology is the software. Your objects, relations, actions, permissions, and
-              flows are your business ontology — views, dashboards, apps, and translations are
-              projections of it, and the definition layer of the AI era should be an open
-              protocol you own.
-            </p>
-            <p className="mt-3 text-sm text-fd-muted-foreground">
-              ObjectStack is build &amp; ask with Claude Code. Rather build &amp; ask online —
-              in the browser, nothing to install?{' '}
-              <a
-                href="https://www.objectos.ai"
-                className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
-              >
-                Try ObjectOS
-                <ArrowRight className="size-3.5" />
-              </a>
-            </p>
+            <a href={PRODUCT_SITE_URL} className="underline underline-offset-4 transition-colors hover:text-fd-primary">
+              <span className="text-fd-foreground">{PRODUCT_SITE_HOST}</span> — Product, editions &amp; blog
+            </a>
           </div>
         </section>
       </div>

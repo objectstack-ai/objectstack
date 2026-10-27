@@ -29,7 +29,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 // [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
 // envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -148,6 +148,10 @@ import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engin
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#25522 cut 12] The driver options every driver call receives, and the tenancy
+// posture and Layer 0 verdict they are scoped by; the methods of the same names
+// below hand each body the members it reads (`DriverOptionsHost`).
+import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -177,9 +181,6 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
-  // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
-  // Layer 0 — see {@link buildDriverOptions}.
-  computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
   // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
@@ -260,11 +261,8 @@ import {
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
-import { resolveTenancyPosture } from '@objectstack/types';
 import {
-  normalizeTenancyPosture,
   postureEnforcesWall,
-  TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
   postureUsesUnionScope,
@@ -4404,16 +4402,6 @@ function staticReadonlyStoredView(
 }
 
 /**
- * [ADR-0105 D2] The context's organization access set
- * (`ExecutionContext.accessible_org_ids`), stringified — `undefined` when
- * absent or empty, which the verdict reads as "no membership" under `group`.
- */
-function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
-  const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
-  return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
-}
-
-/**
  * What the engine knows about the transaction it opened, beyond the handle
  * itself (#4619, ADR-0119 D1 follow-up).
  *
@@ -7225,117 +7213,19 @@ export class ObjectQL implements IObjectQLEngine {
     base?: any,
     scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
   ): any {
-    // The open transaction may arrive explicitly via the context, or ambiently
-    // via txStore when an internal query runs during a transactional write
-    // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
-    // whose unit has closed is no handle: work the unit started and did not
-    // await runs unenrolled (`runOpenedUnit`).
-    const explicit = execCtx?.transaction;
-    const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
-      ? explicit
-      : this.txStore.getStore()?.transaction;
-    // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
-    // driver's connection; handing it to a different driver does not put that
-    // driver's statement inside the transaction, it executes the statement on
-    // the WRONG CONNECTION — measured on knex/SQLite as `no such table` against
-    // a database that never held the object. The write path's
-    // `enforceTransactionOrigin` has already refused a business write by the
-    // time we get here (and let a system ledger through by decision), so this
-    // is the structural half: whatever survives to here, the handle only ever
-    // reaches the driver that owns it. It covers READS too, which have no gate
-    // of their own and were riding the same wrong connection.
-    const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
-    const objectSchema = this._registry.getObject(object) as any;
-    // `isFederatedObject` is the same predicate every schema-sync seam routes a
-    // federated object by — one spelling of "this schema is the remote's",
-    // not a second reading of it.
-    const isFederated = isFederatedObject(objectSchema);
-    const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
-    const tenantScope = tenantObject
-      ? scope.writeTarget
-        ? this.driverWriteTarget(execCtx)
-        : this.driverReadScope(execCtx, scope.recordedVerdict)
-      : undefined;
-    const hasTenant = tenantScope !== undefined;
-    const hasTz = execCtx?.timezone !== undefined;
-    const isSystem = execCtx?.isSystem === true;
-    // [ADR-0131 D9/D13] The tenant-audit's scope is the object's SCHEMA: a
-    // tenant column (the registered schema's, as `resolveTenantFieldName`
-    // reads it) on an object that is not federated. That is the same reading
-    // the system-insert rule takes, and there is no second, per-table one —
-    // the #13491 ledger that used to narrow this by name retired with D13. An
-    // object is outside the audit only by declaring itself outside the
-    // machinery (`tenancy.enabled: false`, `systemFields.tenant: false`, no
-    // tenant field, `external`), which `scripts/platform-object-tenancy-census.json`
-    // enumerates for the platform namespaces.
-    const isTenantAuditInScope =
-      resolveTenantFieldName(objectSchema) !== null &&
-      !isFederated;
-    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
-    // exempt platform admin's predicate write reaches the driver with no
-    // `tenantId` because the wall lifted the scope on purpose, and the
-    // driver's `[tenant-audit]` line tells such a write to declare
-    // `bypassTenantAudit: true` — an option no REST caller can set. The
-    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
-    // here as the recorded verdict; this reads it, it does not re-decide it
-    // (see {@link wallExemptedOperation}).
-    const wallExempt =
-      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
-      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
-    const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
-    const opts: any = base && typeof base === 'object' ? { ...base } : {};
-    if (hasTx && opts.transaction === undefined) {
-      opts.transaction = tx;
-    }
-    if (hasTenant && opts.tenantId === undefined) {
-      opts.tenantId = tenantScope.tenantId;
-    }
-    if (hasTenant && opts.tenantIds === undefined && tenantScope.tenantIds !== undefined) {
-      opts.tenantIds = tenantScope.tenantIds;
-    }
-    if (hasTz && opts.timezone === undefined) {
-      // Thread the business timezone so date-dependent driver generation
-      // (autonumber `{YYYYMMDD}` tokens) resolves the calendar day correctly.
-      opts.timezone = execCtx!.timezone;
-    }
-    if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
-      // [#13491 → ADR-0131 D13] The isSystem mute, cut by the object's
-      // schema alone (2026-08-31 ruling, execution point 1: the OBJECT decides,
-      // never the caller's flag).
-      //
-      // It used to mute EVERY elevated write, whatever the object was. The
-      // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
-      // (77%) were silenced here — at the control's LARGEST gate, sitting
-      // ahead of the condition the control is about — and the control has
-      // never produced a finding, while all five known instances of the defect
-      // were found by a person reading call sites.
-      //
-      // What still mutes: an object with no tenant field at all (nothing to be
-      // unscoped from — the driver would exit at `resolveTenantField` anyway)
-      // and a federated one. What does not: any object with a tenant column,
-      // platform namespace or not — a name prefix, or a hand-kept list of
-      // names, decides nothing here. A caller that means it still passes
-      // `bypassTenantAudit: true` explicitly and is honoured above — this
-      // branch only fills in a value nobody supplied.
-      //
-      // ⚠️ Direction, per execution point 3: what this ADDS is a driver WARN
-      // line. It changes nothing about what any write touches.
-      opts.bypassTenantAudit = true;
-    }
-    if (wallExempt && opts.bypassTenantAudit === undefined) {
-      // The same fill-in-only rule as the isSystem mute above: a caller's own
-      // value wins. Diagnostics only — the driver's scope is already the
-      // verdict's (no `tenantId`), and this option silences a warning and
-      // touches nothing else; on a read it is inert.
-      opts.bypassTenantAudit = true;
-    }
-    if (preserveAudit && opts.preserveAudit === undefined) {
-      // Historical import (#3493): let the driver keep a supplied `updated_at`
-      // instead of force-stamping now on the update path.
-      opts.preserveAudit = true;
-    }
-    return opts;
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTxStore = () => this.txStore;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof buildDriverOptions> = {
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      get txStore() { return readTxStore(); },
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+      get _registry() { return readRegistry(); },
+      driverWriteTarget: (...a) => this.driverWriteTarget(...a),
+      driverReadScope: (...a) => this.driverReadScope(...a),
+      wallExemptedOperation: (...a) => this.wallExemptedOperation(...a),
+    };
+    return buildDriverOptions.call(host, object, execCtx, base, scope);
   }
 
   /**
@@ -7352,22 +7242,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     recordedVerdict: unknown,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
-    switch (verdict.kind) {
-      case 'none':
-        return undefined;
-      case 'organization':
-        return { tenantId: verdict.organizationId };
-      case 'organizations':
-        return { tenantId: activeOrganization ?? verdict.organizationIds[0], tenantIds: [...verdict.organizationIds] };
-      case 'deny':
-        return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverReadScope> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return driverReadScope.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7379,21 +7258,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     activeOrganization: string | undefined,
   ): TenantLayer0Verdict {
-    return computeTenantLayer0Verdict({
-      tenancyPosture: this.resolveEnginePosture(),
-      organizationId: activeOrganization,
-      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-      // Left to the driver, which resolves the tenant column from the
-      // table it actually built (`resolveTenantField`): an object with no
-      // such column is unscoped there whatever this says. `undefined` is
-      // the verdict's "assume a tenant object", as Layer 0 reads an
-      // unresolved field set.
-      objectHasOrgIdField: undefined,
-      tenancyDisabled: false,
-      // The engine holds no permission sets: no exemption is ITS to grant.
-      posturePermitsCrossTenant: false,
-      isPlatformAdmin: false,
-    });
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof engineLayer0Verdict> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return engineLayer0Verdict.call(host, execCtx, activeOrganization);
   }
 
   /**
@@ -7413,14 +7282,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that does not parse answers false too — junk never lifts anything.
    */
   private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
-    if (recordedVerdict === undefined) return false;
-    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    if (!recorded.success || recorded.data.kind !== 'none') return false;
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof wallExemptedOperation> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return wallExemptedOperation.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7432,10 +7298,11 @@ export class ObjectQL implements IObjectQLEngine {
   private driverWriteTarget(
     execCtx: ExecutionContext | undefined,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    if (execCtx?.tenantId === undefined) return undefined;
-    const tenantIds =
-      this.resolveEnginePosture() === 'group' ? accessibleOrganizationsOf(execCtx) : undefined;
-    return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverWriteTarget> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return driverWriteTarget.call(host, execCtx);
   }
 
   /**
@@ -7460,13 +7327,12 @@ export class ObjectQL implements IObjectQLEngine {
    * be worst, so it degrades to the walled reading and the write is refused.
    */
   private resolveEnginePosture(): TenancyPosture {
-    const injected = normalizeTenancyPosture(this.tenancyPostureProvider?.());
-    if (injected) return injected;
-    try {
-      return resolveTenancyPosture();
-    } catch {
-      return 'isolated';
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTenancyPostureProvider = () => this.tenancyPostureProvider;
+    const host: ThisParameterType<typeof resolveEnginePosture> = {
+      get tenancyPostureProvider() { return readTenancyPostureProvider(); },
+    };
+    return resolveEnginePosture.call(host);
   }
 
   /**
