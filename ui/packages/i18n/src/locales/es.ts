@@ -813,6 +813,10 @@ const es = {
     addRecord: "Agregar registro",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Ver todo",
+    viewAllCount: "Ver los {{count}} registros",
+    viewAllCount_one: "Ver {{count}} registro",
+    viewAllCount_many: "Ver los {{count}} de registros",
+    viewAllCount_other: "Ver los {{count}} registros",
     tabs: "Pestañas",
     allRecords: "Todos los registros",
     userFilters: {
@@ -2942,6 +2946,7 @@ const es = {
     build: {
       title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
+      inStudio: "Nuevo en Studio",
     },
     template: {
       title: "Empezar con una plantilla",

@@ -11,7 +11,7 @@
  */
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthGuard, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SchemaRendererProvider, ActionProvider, NotificationProvider, HostMapStyleProvider } from '@object-ui/react';
@@ -31,6 +31,7 @@ import { appRouteSegment } from '../utils/appRoute.js';
 import { SETUP_APP_PACKAGE_ID, SETUP_APP_NAME } from './setupApp.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { AiUnavailable } from './ai/AiUnavailable.js';
 import { PreviewModeProvider } from '../preview/PreviewModeContext.js';
 import { NavigationProvider } from '../context/NavigationContext.js';
 import { FavoritesProvider } from '../context/FavoritesProvider.js';
@@ -457,38 +458,50 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
  * RequireAiSurface — gate for the `/ai*` routes. The console is edition-agnostic
  * (MIT, runtime-gated): a Community Edition runtime serves no AI agent, so a
  * stale `/ai` bookmark or external link must not land on a broken/empty chat.
- * When the server serves no agent it redirects to `redirectTo` (home) instead.
+ * When the server serves no agent it shows `AiUnavailable` in place of the
+ * chat: one line saying this deployment has no AI assistant enabled, the way
+ * home, and Studio's new-package flow for a session that may author.
+ *
+ * It used to redirect home there (objectstack#26614), which read exactly like
+ * a broken link: the visitor arrived on Home with no word of why. Saying so in
+ * place is the posture `RequireStudioAccess` took for the same reason
+ * (objectui#12035), and the URL stays.
  *
  * Availability is the live agent catalog (see {@link useAiSurfaceEnabled}) — the
  * same signal every other AI entry point now gates on, so the route is reachable
- * from exactly the entry points that are visible (no shown CTA that bounces back
- * to home, no hidden FAB to a working route). Waits for the catalog to resolve
- * before deciding so the redirect never flashes on first paint.
+ * from exactly the entry points that are visible (no hidden FAB to a working
+ * route). Waits for the catalog to resolve before deciding, so the screen never
+ * flashes on first paint.
  *
- * WHICH home it bounces to is the DECLARED landing (objectui#7373), resolved by
- * `useHomePath()` — the default is no longer the launcher literal. A caller that
- * passes `redirectTo` still wins, and on a deployment that declares no landing
- * the hook answers the launcher, so every ordinary environment is unchanged.
+ * WHERE the screen's way home leads is the DECLARED landing (objectui#7373),
+ * resolved by `useHomePath()`; a caller that passes `redirectTo` still wins.
+ * The prop keeps the name it had while this gate redirected there, because
+ * renaming a published prop breaks every host that passes it.
  */
 export function RequireAiSurface({
   children,
   redirectTo,
 }: {
   children: ReactNode;
-  /** Overrides the declared-home default. */
+  /** Where the no-assistant screen's way home leads; overrides the declared home. */
   redirectTo?: string;
 }) {
   const homePath = useHomePath();
+  const navigate = useNavigate();
+  const { t } = useObjectTranslation();
   const { enabled, isLoading } = useAiSurfaceEnabled();
   if (isLoading) return <LoadingFallback />;
-  // Splash-preserving handoff (objectui#6507). This is a BOOT-path redirect
-  // even though `/ai` is reachable from inside the console: every in-app entry
-  // point gates on this same `useAiSurfaceEnabled` signal (`AppHeader`'s
-  // assistant button, `ConsoleLayout`'s dock, `HomeLayout`/`HomePage`), so on a
-  // runtime where this branch fires none of them is rendered. What reaches it
-  // is a stale bookmark or an external link — a first navigation, with the
-  // splash still up and no layout underneath.
-  if (!enabled) return <RedirectWithSplash to={redirectTo ?? homePath} replace />;
+  // The full-viewport frame the boot splash hands off to: what reaches this
+  // branch is a first navigation (every in-app entry point gates on this same
+  // signal, so none is rendered on such a runtime), with no layout underneath
+  // (objectui#6507).
+  if (!enabled) {
+    return (
+      <div className="flex h-screen flex-col bg-background" data-testid="ai-surface-unavailable">
+        <AiUnavailable hasError={false} onHome={() => navigate(redirectTo ?? homePath)} t={t} />
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 
