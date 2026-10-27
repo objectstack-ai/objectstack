@@ -1380,6 +1380,7 @@ This schema accepts one of the following structures:
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
 | **packageId** | `string` | optional | Optional package ID — scopes the `code` layer so a same-name collision resolves to the requested package's artifact (ADR-0048). |
+| **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
 
 
 ---
