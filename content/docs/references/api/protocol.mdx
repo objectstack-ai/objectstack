@@ -1380,6 +1380,7 @@ This schema accepts one of the following structures:
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
 | **packageId** | `string` | optional | Optional package ID — scopes the `code` layer so a same-name collision resolves to the requested package's artifact (ADR-0048). |
+| **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
 
 
 ---
@@ -2043,7 +2044,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | :--- | :--- | :--- | :--- |
 | **filter** | `string` | optional | JSON-encoded filter expression (canonical, singular). |
 | **filters** | `string` | optional | JSON-encoded filter expression (deprecated plural alias). |
-| **select** | `string` | optional | Comma-separated list of fields to retrieve. |
+| **select** | `string` | optional | Comma-separated list of fields to retrieve — at least one field name; a value naming no field (blank, or only commas and spaces) is refused. |
 | **sort** | `string` | optional | Sort expression (e.g. "name asc,created_at desc" or "-created_at"). |
 | **orderBy** | `string` | optional | Alias for sort (OData compatibility). |
 | **top** | `integer \| string` | optional | Max records to return (limit) — a non-negative integer. |
@@ -2051,7 +2052,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **expand** | `string` | optional | Comma-separated list of lookup/master_detail field names to expand. Resolved to populate array and passed to the engine for batch $in expansion. |
 | **search** | `string` | optional | Full-text search query. |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **count** | `boolean` | optional | Include total count in response. |
+| **count** | `boolean \| Enum<'true' \| 'false'>` | optional | Include the total count in the response — `true` or `false`; any other value is refused. |
 
 
 ---

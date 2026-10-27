@@ -21,6 +21,7 @@ import {
 import { classifiedRefusalAnswer, nestedRefusalEnvelope, sandboxFaultAnswer } from './error-response.js';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 import { logError } from './log.js';
+import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
@@ -371,6 +372,13 @@ export interface PackageRoutesOptions {
 }
 
 /**
+ * [#26857] The closed query set of `POST /packages/publish`. **Measured**:
+ * EMPTY — the handler reads the session and the body (`manifest`,
+ * `metadata`), never the query string.
+ */
+const PACKAGE_PUBLISH_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
  * Register the REST package management route.
  *
  * Returns the routes it mounted, so the caller can record them on the
@@ -486,6 +494,16 @@ export function registerPackageRoutes(
     handler: async (req, res) => {
     try {
       if (await refusePackageRequest(options, req, res)) return;
+      // [#26857] Recognition next, over the measured closed set, before the
+      // package service is resolved or asked: an unknown name is refused
+      // `400`, never ignored. The repo's one recognition sentence, written
+      // through this surface's own `sendError` envelope (the module answers
+      // every body through it), not `refuseUnknownQueryParams`' bare body.
+      const unknownQuery = unknownQueryParamRefusalMessage(req?.query, PACKAGE_PUBLISH_PARAMS);
+      if (unknownQuery !== undefined) {
+        sendError(res, 400, 'VALIDATION_ERROR', unknownQuery);
+        return;
+      }
       // Resolved HERE, not at composition (#7563). Authorization runs first so
       // an anonymous prober cannot read a deployment's capability composition
       // off this seam.

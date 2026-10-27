@@ -754,6 +754,7 @@
     "api/GetMetaItemCachedResponse:notModified",
     "api/GetMetaItemCachedResponse:registration",
     "api/GetMetaItemCachedResponse:version",
+    "api/GetMetaItemLayeredRequest:member",
     "api/GetMetaItemLayeredRequest:name",
     "api/GetMetaItemLayeredRequest:packageId",
     "api/GetMetaItemLayeredRequest:type",

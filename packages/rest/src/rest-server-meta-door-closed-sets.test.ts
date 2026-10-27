@@ -19,6 +19,13 @@
  *    called (for `PUT`: nothing saved);
  *  - PRESERVATION: every name the door reads still reaches the protocol, and
  *    the request it received is asserted whole — never merely "still 200".
+ *
+ * [#26699] `/layers` left this list: the option-A ruling on #26649 extended
+ * ruling 6116165299's door list to the layered read, so it reads `member` and
+ * only its other refusal (an unrecognised name) is pinned here. Its member
+ * pins live with both transports in `@objectstack/runtime`'s
+ * `domains/meta-item-query-decision.test.ts`, and on the real engine in
+ * `@objectstack/objectql`'s `environment-overlay-email-locale-restart.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -108,24 +115,27 @@ function boot() {
 const DOORS = [
     { door: 'PUT item (save)', method: 'PUT', path: ITEM, set: META_ITEM_SAVE_PARAMS, call: 'saveMetaItem', body: EN },
     { door: 'GET /references', method: 'GET', path: `${ITEM}/references`, set: META_ITEM_REFERENCES_PARAMS, call: 'findReferencesToMeta', body: {} },
-    { door: 'GET /layers', method: 'GET', path: `${ITEM}/layers`, set: META_ITEM_LAYERS_PARAMS, call: 'getMetaItemLayered', body: {} },
+    { door: 'GET /layers', method: 'GET', path: `${ITEM}/layers`, set: META_ITEM_LAYERS_PARAMS, call: 'getMetaItemLayered', body: {}, readsMember: true },
     { door: 'GET /audit', method: 'GET', path: `${ITEM}/audit`, set: META_ITEM_AUDIT_PARAMS, call: 'auditMetaItem', body: {} },
     { door: 'GET /diff', method: 'GET', path: `${ITEM}/diff`, set: META_ITEM_DIFF_PARAMS, call: 'diffMetaItem', body: {} },
     { door: 'GET /published', method: 'GET', path: `${ITEM}/published`, set: META_ITEM_PUBLISHED_PARAMS, call: 'getMetaItemLayered', body: {} },
 ] as const;
 
 describe('[#23072] each by-name /meta door outside the ruling\'s list declares a closed query set', () => {
-    it('the measured sets — none carries the member selector', () => {
+    it('the measured sets — none carries the member selector but [#26699] `/layers`', () => {
         expect([...META_ITEM_SAVE_PARAMS].sort()).toEqual(['force', 'mode', 'package', 'surface']);
         expect([...META_ITEM_REFERENCES_PARAMS]).toEqual([]);
-        expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package']);
+        expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package', 'member']);
         expect([...META_ITEM_AUDIT_PARAMS]).toEqual(['limit']);
         expect([...META_ITEM_DIFF_PARAMS].sort()).toEqual(['from', 'fromVersion', 'to', 'toVersion']);
         expect([...META_ITEM_PUBLISHED_PARAMS]).toEqual([]);
-        for (const { set } of DOORS) expect(set).not.toContain('member');
+        for (const entry of DOORS) {
+            if ('readsMember' in entry) expect(entry.set).toContain('member');
+            else expect(entry.set).not.toContain('member');
+        }
     });
 
-    for (const { door, method, path, set, call, body } of DOORS) {
+    for (const { door, method, path, set, call, body } of DOORS.filter((d) => !('readsMember' in d))) {
         it(`${door}: REFUSAL — \`?member=\` is a located 400 naming it, and the protocol is never called`, async () => {
             const { protocol, drive } = boot();
             const answer = await drive(method, path, { member: 'zh-CN' }, body);
@@ -134,7 +144,9 @@ describe('[#23072] each by-name /meta door outside the ruling\'s list declares a
             expect(answer.body?.error?.message).toBe(unknownQueryParamMessage(['member'], [...set].sort()));
             expect(protocol[call], 'the door answered before the protocol').not.toHaveBeenCalled();
         });
+    }
 
+    for (const { door, method, path, set, call, body } of DOORS) {
         it(`${door}: REFUSAL — an unrecognised name is refused the same way`, async () => {
             const { protocol, drive } = boot();
             const answer = await drive(method, path, { memeber: 'zh-CN' }, body);

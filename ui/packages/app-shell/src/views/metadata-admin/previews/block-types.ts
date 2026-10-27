@@ -44,12 +44,14 @@ import {
   Gauge,
   Columns3,
   LayoutGrid,
+  LayoutList,
   type LucideIcon,
 } from 'lucide-react';
 
 export type BlockTypeId =
   // data — object-bound views & layout grid (the high-traffic app-page blocks)
   | 'grid' | 'object-grid' | 'object-form' | 'object-metric' | 'object-kanban'
+  | 'list-view'
   // page:*
   | 'page:header' | 'page:footer' | 'page:sidebar' | 'page:tabs'
   | 'page:accordion' | 'page:card' | 'page:section'
@@ -91,6 +93,11 @@ export const BLOCK_TYPE_META: Record<BlockTypeId, Omit<BlockTypeMeta, 'id'>> = {
   'object-form': { label: 'Form', labelKey: 'engine.pageBlockCanvas.type.objectForm', category: 'data', Icon: FormInput },
   'object-metric': { label: 'Metric', labelKey: 'engine.pageBlockCanvas.type.objectMetric', category: 'data', Icon: Gauge },
   'object-kanban': { label: 'Kanban', labelKey: 'engine.pageBlockCanvas.type.objectKanban', category: 'data', Icon: Columns3 },
+  // A public block (`core/src/registry/public-blocks.ts`) whose panel sets its
+  // object, view and row cap (`BLOCK_CONFIG['list-view']`). A fresh one carries
+  // no `dataSource`: the list draws a hint asking for its object until the
+  // panel's Object control writes `dataSource.object` (objectstack#26794).
+  'list-view': { label: 'List view', labelKey: 'engine.pageBlockCanvas.type.listView', category: 'data', Icon: LayoutList },
 
   // Page layout
   'page:header': { label: 'Header', labelKey: 'engine.pageBlockCanvas.type.pageHeader', category: 'layout', Icon: PanelTop },

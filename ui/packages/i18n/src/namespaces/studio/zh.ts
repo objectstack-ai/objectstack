@@ -624,6 +624,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.pageBlock.field.list-view.object': '对象',
   'engine.inspector.pageBlock.field.list-view.view': '视图',
   'engine.inspector.pageBlock.field.list-view.limit': '条数上限',
+  // The add-block picker's name for the block whose panel the three rows above
+  // label; its sibling `engine.pageBlockCanvas.type.*` rows are still in the
+  // designer table, app-shell `views/metadata-admin/i18n.ts` (objectstack#26794).
+  'engine.pageBlockCanvas.type.listView': '列表视图',
   'engine.inspector.pageBlock.field.grid.columns': '列数',
   'engine.inspector.pageBlock.field.grid.gap': '间距',
   'engine.inspector.pageBlock.field.element:text.content': '内容',
