@@ -52,7 +52,7 @@ import { actingAddresses } from './approver-address.js';
  * `sys_approval_request` read per object. The override holder pays one
  * `sys_approval_request` read per object. Never a read per row.
  *
- * A failed read is not memoized and is rethrown: the caller (plugin-sharing)
+ * A failed read is never held and is rethrown: the caller (plugin-sharing)
  * fails closed and grants nothing.
  */
 
@@ -81,11 +81,12 @@ export const PENDING_APPROVER_READ_CAP = 10_000;
 
 const NONE: PendingApproverReadGrants = new Map();
 
+/** One request context's answers at one write epoch. Only an answer that was read is held. */
 interface MemoEntry {
   epoch: number;
   /** The pending request ids naming the caller as a person; `null` for the override holder. */
-  slate?: Promise<readonly string[] | null>;
-  byObject: Map<string, Promise<PendingApproverReadGrants>>;
+  slate?: readonly string[] | null;
+  byObject: Map<string, PendingApproverReadGrants>;
 }
 
 /** The caller's active organization, read as the service reads it everywhere else. */
@@ -112,20 +113,17 @@ export class PendingApproverReadGrantSource {
 
   /** The record ids of `object` the caller may read through a pending approval step. */
   async forObject(object: string, context: ExecutionContext): Promise<PendingApproverReadGrants> {
-    if (!object || !context || context.isSystem) return NONE;
+    // A system context never reaches here: the sharing filter bypasses it.
+    if (!object || !context) return NONE;
     const userId = context.userId != null ? String(context.userId) : '';
     if (!userId) return NONE;
     const entry = this.entryFor(context);
-    if (!entry) return this.compute(object, context, undefined);
-    const cached = entry.byObject.get(object);
+    const cached = entry?.byObject.get(object);
     if (cached) return cached;
-    const pending = this.compute(object, context, entry);
-    entry.byObject.set(object, pending);
-    // A failed read is never reused: the next read asks again.
-    pending.catch(() => {
-      if (entry.byObject.get(object) === pending) entry.byObject.delete(object);
-    });
-    return pending;
+    // A failed read rejects before anything is held: the next read asks again.
+    const grants = await this.compute(object, context, entry);
+    entry?.byObject.set(object, grants);
+    return grants;
   }
 
   /** The memo entry for this context at the current epoch, or `undefined` when nothing may be reused. */
@@ -145,18 +143,10 @@ export class PendingApproverReadGrantSource {
     entry: MemoEntry | undefined,
   ): Promise<PendingApproverReadGrants> {
     const org = activeOrganization(context);
-    let slate: readonly string[] | null;
-    if (entry) {
-      if (!entry.slate) {
-        entry.slate = this.slateRequestIds(context, org);
-        const held = entry.slate;
-        held.catch(() => {
-          if (entry.slate === held) entry.slate = undefined;
-        });
-      }
-      slate = await entry.slate;
-    } else {
+    let slate = entry?.slate;
+    if (slate === undefined) {
       slate = await this.slateRequestIds(context, org);
+      if (entry) entry.slate = slate;
     }
     if (slate !== null && slate.length === 0) return NONE;
 
