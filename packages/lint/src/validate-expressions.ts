@@ -934,6 +934,12 @@ export const FIELD_RULE_JUDGED_ROOTS: readonly string[] = [
  */
 const FIELD_RULE_USER_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const;
 /**
+ * [#26646] The slot name an object's `fieldGroups[].visibleWhen` is judged
+ * under: the field `visibleWhen` slot's root verdict, located on the group
+ * and worded for it ({@link FIELD_RULE_SLOT_CONSEQUENCE}, {@link fieldRuleRootIssue}).
+ */
+const FIELD_GROUP_VISIBLE_WHEN_SLOT = 'field group visibleWhen';
+/**
  * The slot-agnostic clause — provably true for any slot, specific to none.
  * Used where the honest answer is "not measured for this slot", never as a
  * softening of a cell that WAS measured.
@@ -981,6 +987,16 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   // the honest cell until it does; re-measure and write the slot's own cell
   // then, as #6716 did for the other three.
   settledWhen: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
+  // [#26646] A field group's section predicate takes the field `visibleWhen`
+  // slot's verdict, with its own fault direction: the form renderer's
+  // section gate (`sectionGateVisible`) evaluates it with the same engine,
+  // record assembly and host scope as a field's own `visibleWhen`, and
+  // resolves a fault to HIDDEN, not visible.
+  [FIELD_GROUP_VISIBLE_WHEN_SLOT]:
+    'the predicate faults wherever no host publishes that root, and a field group\'s gate fails ' +
+    'CLOSED: the whole group, header included, is hidden for everyone on that form or record page. ' +
+    'Where a host does publish it, the renderer resolves it and the group hides in that one form ' +
+    'only, while every other reader still returns the fields in it: a SILENT enforcement gap',
 };
 
 /**
@@ -1084,7 +1100,9 @@ export function fieldRuleRootIssue(
   return {
     root,
     message:
-      `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only ` +
+      (slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+        ? `\`visibleWhen\` reads \`${root}\`, but a field group's section predicate binds only `
+        : `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only `) +
       `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
       `\`${root}\` is unbound here, so ` +
       `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
@@ -3318,6 +3336,32 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
       judgeFieldFormula(fname, f);
+    }
+
+    // [#26646] A field group's section predicate — `fieldGroups[].visibleWhen`
+    // (ADR-0085 §5). The form renderer evaluates it with the same engine,
+    // record assembly and scope as a field's own `visibleWhen` and gates the
+    // WHOLE group fail-closed, so a predicate that faults (a bare reference,
+    // an unknown field) hides the group, header included, on every form and
+    // record page. It takes the field `visibleWhen` slot's verdict exactly:
+    // the `record`-scoped `check` and the root verdict over
+    // FIELD_RULE_BOUND_ROOTS, worded for the group. Display only, like
+    // `visibleWhen`, so none of the write-path gates above (the `parent` gate,
+    // the null guard, the traversal refusal) applies. Not fenced on an object
+    // write: the object save door runs this pass too, at this position.
+    // Located at the group's `key`, the name a field's `group` points back to.
+    //
+    // `fieldGroup.visibleWhen` is read LITERALLY so #5017's source scan checks
+    // it against `ObjectFieldGroupSchema`.
+    for (const fieldGroup of recordsOf(obj.fieldGroups)) {
+      const groupKey = typeof fieldGroup.key === 'string' ? fieldGroup.key : '?';
+      const where = `object '${objectName}' · field group '${groupKey}' visibleWhen`;
+      const raw: unknown = fieldGroup.visibleWhen;
+      const verdict = fieldRuleRootVerdict(FIELD_GROUP_VISIBLE_WHEN_SLOT, raw);
+      check(where, raw, objectName, 'record', verdict !== null);
+      if (verdict) {
+        issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+      }
     }
   }
 
