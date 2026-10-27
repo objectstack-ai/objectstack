@@ -185,11 +185,11 @@ const READERS: Record<string, Row> = {
   },
 
   // ── Readers that already asked whether the object is federated ──────────
-  'engine.ts#buildDriverOptions :: isFederatedObject()': {
+  'engine-driver-options.ts#buildDriverOptions :: isFederatedObject()': {
     disposition: 'exempt',
     why: 'the organization wall a read carries is withheld from a federated object',
   },
-  'engine.ts#buildDriverOptions :: resolveTenantFieldName()': {
+  'engine-driver-options.ts#buildDriverOptions :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'resolves the wall column only after the federated exemption',
   },

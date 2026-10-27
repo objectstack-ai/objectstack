@@ -1,0 +1,8 @@
+{
+  "file": "packages/objectql/src/engine-driver-options.ts",
+  "adrs": [
+    "ADR-0067",
+    "ADR-0119"
+  ],
+  "invariant": "The transaction seam is same-origin by construction (#5351/#5696, 2026-08-06 ruling). `buildDriverOptions` threads the ambient handle ONLY to the driver that owns it, compared by instance identity via `TransactionScope` — handing it to another driver does not put that driver inside the transaction, it runs the statement on the wrong connection. Never restore the unconditional handle lift."
+}
