@@ -6179,11 +6179,10 @@ export function DataPillar({
   const objHeld = objLoaded ? objIncomplete : null;
   // objectstack#26917 — the refusal's way out: the object holding the
   // identifier is on this rail, so it opens instead of a second one being
-  // made. Asked as a rail row asks (objectstack#26705).
+  // made. The New button already asked about a held edit (objectstack#26845).
   const openTakenObject = (name: string) => {
     const object = objects.find((o) => o.name === name);
     if (!object) return;
-    if (current?.name !== name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
     setCreating(false);
     setCreateTaken(null);
     setCurrent(object);
@@ -7850,12 +7849,11 @@ export function AutomationsPillar({
         }
       : undefined;
   // objectstack#26917 — the refusal's way out: the flow holding the identifier
-  // is on this rail, so it opens instead of a second one being made. Asked as
-  // a rail row asks (objectstack#26705): its load replaces the open buffer.
+  // is on this rail, so it opens instead of a second one being made. The New
+  // button already asked about a held step (objectstack#26845).
   const openTakenFlow = (name: string) => {
     const flow = flows.find((f) => f.name === name);
     if (!flow) return;
-    if (current?.name !== name && !confirmDropUnsavedWork(flowHeld !== null, locale)) return;
     setCreating(false);
     setCreateTaken(null);
     setCurrent(flow);
