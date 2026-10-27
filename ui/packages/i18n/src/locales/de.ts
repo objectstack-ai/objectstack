@@ -786,7 +786,9 @@ const de = {
     addRecord: "Datensatz hinzufügen",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Alle anzeigen",
-    viewAllCount: "Alle {{count}} anzeigen",
+    viewAllCount: "Alle {{count}} Datensätze anzeigen",
+    viewAllCount_one: "{{count}} Datensatz anzeigen",
+    viewAllCount_other: "Alle {{count}} Datensätze anzeigen",
     tabs: "Tabs",
     allRecords: "Alle Datensätze",
     userFilters: {

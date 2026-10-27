@@ -786,7 +786,9 @@ const ko = {
     addRecord: "레코드 추가",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "모두 보기",
-    viewAllCount: "전체 보기 ({{count}})",
+    viewAllCount: "전체 {{count}}개 보기",
+    viewAllCount_one: "전체 {{count}}개 보기",
+    viewAllCount_other: "전체 {{count}}개 보기",
     tabs: "탭",
     allRecords: "전체 레코드",
     userFilters: {

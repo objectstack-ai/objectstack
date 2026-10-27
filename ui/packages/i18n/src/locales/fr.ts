@@ -808,7 +808,10 @@ const fr = {
     addRecord: "Ajouter un enregistrement",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Tout afficher",
-    viewAllCount: "Tout afficher ({{count}})",
+    viewAllCount: "Voir les {{count}} enregistrements",
+    viewAllCount_one: "Voir {{count}} enregistrement",
+    viewAllCount_many: "Voir les {{count}} d'enregistrements",
+    viewAllCount_other: "Voir les {{count}} enregistrements",
     tabs: "Onglets",
     allRecords: "Tous les enregistrements",
     userFilters: {

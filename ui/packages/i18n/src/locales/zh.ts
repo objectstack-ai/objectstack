@@ -762,6 +762,8 @@ const zh = {
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: '查看全部',
     viewAllCount: '查看全部 {{count}} 条',
+    viewAllCount_one: '查看全部 {{count}} 条',
+    viewAllCount_other: '查看全部 {{count}} 条',
     tabs: '标签页',
     allRecords: '全部记录',
     userFilters: {

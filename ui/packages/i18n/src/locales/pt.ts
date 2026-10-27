@@ -808,7 +808,10 @@ const pt = {
     addRecord: "Adicionar registro",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Ver tudo",
-    viewAllCount: "Ver tudo ({{count}})",
+    viewAllCount: "Ver os {{count}} registros",
+    viewAllCount_one: "Ver {{count}} registro",
+    viewAllCount_many: "Ver os {{count}} de registros",
+    viewAllCount_other: "Ver os {{count}} registros",
     tabs: "Abas",
     allRecords: "Todos os registros",
     userFilters: {
