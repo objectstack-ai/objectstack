@@ -18,6 +18,8 @@
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
+- 派发席达档调用被配额拒(HTTP 429)⇒ ⛔ 不降档审;PR 落交接行、留等复核标记,交分诊席。
+- `Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项(申报面外三面加 ④)、
   独立性对、PASS/FAIL。
@@ -32,8 +34,6 @@
   被引代码读而不审;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。
 - 实质 head 各欠一轮完整复核;只落发现的 commit 由同一复核者 delta 复核;无 must-fix 即止。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
-- 复核形状:只读 diff 与卡片,check 结论取 head 的 check-runs,⛔ 永不本地重跑派生门禁族。
-- 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
 - 简报从 `node scripts/pm/record-recognisers.mjs --brief-template` 起稿:
   只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
@@ -51,5 +51,5 @@
 - 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
 - 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
 - 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
-- 读者 = 维护者过滤 `is:pr is:open label:needs:contract-review` 与席位巡查、交接。
+- 只带标记无交接行者仍归本席,分诊 ⛔ 不碰;交接后 head 再动 ⇒ 新交接行或本席自审。
 - ⛔ 无 check、workflow、队列守卫或巡查脚本读它;入队只认同形记录,标记有无不改判。

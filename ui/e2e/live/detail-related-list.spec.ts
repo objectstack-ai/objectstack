@@ -11,6 +11,16 @@ import { test, expect } from '@playwright/test';
  * the relationship. We open an Account record and assert the Projects related
  * list is present.
  */
+/**
+ * The synthesized record page lays itself out by the width of the view it
+ * occupies (objectstack#26678): the tab strip this spec opens exists only
+ * below the two-column floor (`RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` in
+ * `@object-ui/plugin-detail`). The Desktop Chrome viewport leaves the record
+ * view right at that floor once the console sidebar takes its share, so the
+ * spec pins a viewport that keeps the page in its tabbed tier.
+ */
+test.use({ viewport: { width: 1200, height: 800 } });
+
 test('Account detail page auto-renders a relationship-derived Projects related list', async ({ page }) => {
   // 1) Open the Accounts list and drill into Northwind, a seeded account that
   //    owns projects (the status assertion below needs rows to read).

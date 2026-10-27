@@ -12,7 +12,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
+import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -327,8 +327,8 @@ function bareColumn(raw: string): string {
 }
 
 /**
- * The sentence used when the row conflicts but no column is determinable
- * (#6544). Deliberately the same wording `mapDataError` puts in the 409
+ * The sentence used when the row conflicts and no field LABEL is in hand
+ * (#6544, #26867). Deliberately the same wording `mapDataError` puts in the 409
  * `UNIQUE_VIOLATION` body, so the importer and the API say one thing about one
  * condition rather than two.
  */
@@ -357,18 +357,21 @@ const UNNAMED_CONFLICT = 'A record with this value already exists.';
  *    index name, so **MySQL rows no longer name a column** — they used to name
  *    the index (`for key 'idx_email_unique'`) as if it were one, pointing the
  *    user at a field that does not exist. See that function's doc comment.
+ *
+ * [#26867] A unique conflict no longer names the column here at all. What the
+ * driver's text names is the column — the field's API KEY — and this function
+ * holds only that text, never the object's schema, so it has no label to name
+ * the field by; the end user's sentence names a field only by its label (the
+ * create door's, adopted whole by {@link toFailedResult} from the engine's
+ * envelope). The row's `field` keeps the API key for programs.
  */
 export function sanitizeRowError(raw: unknown): string {
   const msg = typeof raw === 'string' ? raw.trim() : '';
   if (!msg) return 'Row failed';
 
-  // UNIQUE — surface the offending column when the dialect determinably named
-  // one (it maps to a user-facing import column, so naming it is helpful, not a
-  // schema leak); otherwise say so generically rather than guess.
-  if (isUniqueViolationError(msg)) {
-    const column = uniqueViolationColumn(msg);
-    return column ? `A record with this ${column} already exists.` : UNNAMED_CONFLICT;
-  }
+  // UNIQUE — the generic sentence: the column the driver names is an API key,
+  // not a label, so it is not the end user's word for the field.
+  if (isUniqueViolationError(msg)) return UNNAMED_CONFLICT;
 
   // NOT NULL — a required value is missing.
   const notNull = /not null constraint failed:\s*([^\s,)]+)/i.exec(msg);

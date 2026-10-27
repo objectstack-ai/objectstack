@@ -360,6 +360,18 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
     expect((await readAs('contract', 'c_open')).annexes[4]).toEqual(refused(F_PUBLIC));
   });
 
+  it('[#26672] a projection that leaves out id gets the same verdict, and no id it did not name', async () => {
+    const [contract] = await engine.find('contract', { where: { id: 'c_open' }, fields: ['signed_pdf'], context: READER_CTX });
+    expect(contract).toEqual({ signed_pdf: hydrated(F_OWNED, 'owned.pdf') });
+    expect(await engine.findOne('decision', { where: { id: 'dec_allow' }, fields: ['proof'], context: READER_CTX }))
+      .toEqual({ proof: hydrated(F_DEC_ALLOW, 'allow.pdf') });
+    // The refusals do not move: the delegate's deny, and a copied-in id.
+    expect(await engine.findOne('decision', { where: { id: 'dec_deny' }, fields: ['proof'], context: READER_CTX }))
+      .toEqual({ proof: refused(F_DEC_DENY) });
+    const [annexes] = await engine.find('contract', { where: { id: 'c_open' }, fields: ['annexes'], context: READER_CTX });
+    expect(annexes.annexes[2]).toEqual(refused(F_VAULT));
+  });
+
   it('one read, every case: each element of the multi-value field is judged on its own', async () => {
     const contract = await readAs('contract', 'c_open');
     expect(contract.annexes).toEqual([
