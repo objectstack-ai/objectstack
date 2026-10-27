@@ -255,6 +255,24 @@ describe('[#8073] /security/explain — every refusal arm answers the ADR-0112 D
         expectNestedEnvelope(await api.explainGet(), 404, 'OBJECT_NOT_FOUND');
     });
 
+    /**
+     * [#26641] Explaining ANOTHER user by an id no `sys_user` row has: the
+     * engine REFUSES (`ExplainUserNotFoundError`, plugin-security `errors.ts`)
+     * instead of explaining the baseline principal the resolver synthesises
+     * for any id. `RECORD_NOT_FOUND` at 404 is the standard catalog's pair,
+     * declared with its status, so it reaches the classified-refusal arm
+     * (#20603) and needs no arm of its own.
+     */
+    it('404 RECORD_NOT_FOUND — the user named does not exist', async () => {
+        const unknown = Object.assign(
+            new Error("[Security] Unknown user: explain was asked about user 'no_such_user', but no sys_user record has that id."),
+            { code: 'RECORD_NOT_FOUND', status: 404, statusCode: 404, name: 'ExplainUserNotFoundError', userId: 'no_such_user' },
+        );
+        const api = boot(throwingExplain(unknown));
+        expectNestedEnvelope(await api.explainPost(), 404, 'RECORD_NOT_FOUND');
+        expectNestedEnvelope(await api.explainGet(), 404, 'RECORD_NOT_FOUND');
+    });
+
     it('404 is matched on the DECLARED code alone — no name, still not a 500', async () => {
         // The door does not import plugin-security (it is not a dependency), so
         // the thrown SHAPE is the contract (#8016). A producer that declares

@@ -75,8 +75,6 @@
 - ①② 的拼写与边界住 `platform-readings.md` 队列段,本条只归拢判据。
 - 队列 required 集按 job 与 check-run 名匹配,workflow 名从不作为 check context 出现,搜也搜不到。
 - 改任一 job 名或 test 分片矩阵的形状,必须同一笔更新队列 required 集,否则队列静默挂起。
-- 姊妹仓 objectui 配置为 9 个:`Lint` · `Type Check` · `Test (shard 1/4 … 4/4)`。
-- 其余三个:`Build & E2E` · `Build Docs` · `Changeset Declaration`。
 - ⛔ required 选择只 gate 等待、不 gate 触发:未列入的检查照跑、算力相同,红了不再挡队列。
 - 配 required 集先排掉 push-only job:`if: github.event_name == 'push'` 的 job 在 `merge_group` 上不报到。
 - 列为 required 即挂死队列;未展开的矩阵名(带字面 `${{ }}` 的串)是占位符,不是真 context。

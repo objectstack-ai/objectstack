@@ -80,6 +80,11 @@ import { registerDefaultMetadataSchemas } from '../default-schemas';
 import { registerBuiltinPreviews } from '../previews';
 import { registerBuiltinInspectors } from '.';
 import { DatasetDefaultInspector, objectChangePatch } from './DatasetDefaultInspector';
+// The inspector's `engine.inspector.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const DATASET_JSON_SCHEMA = z.toJSONSchema(getMetadataTypeSchema('dataset') as z.ZodType, {
   io: 'input',

@@ -39,17 +39,19 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
   let draftInvoiceId: string;
   let paidLineId: string;
   let draftLineId: string;
+  let ql: any;
+  let product: string;
 
   beforeAll(async () => {
     stack = await getSharedShowcase();
     token = await stack.signIn(); // the issue's own principal: admin@objectos.ai
 
-    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
     const sys = { context: { isSystem: true } };
 
     // Own fixtures (uniquely named — the stack is shared across files).
     const account = idOf(await ql.insert('showcase_account', { name: 'Frozen Lines Co #4889', status: 'prospect' }, sys));
-    const product = idOf(await ql.insert('showcase_product', { name: 'Frozen Widget #4889', unit_price: 49.99 }, sys));
+    product = idOf(await ql.insert('showcase_product', { name: 'Frozen Widget #4889', unit_price: 49.99 }, sys));
 
     // A SETTLED invoice — the INV-1003 shape from the issue. `issued_on` /
     // `paid_on` satisfy the header's own `requiredWhen` rules for `paid`.
@@ -122,5 +124,89 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
     const open = await stack.apiAs(token, 'PATCH', `${INVOICES}/${draftInvoiceId}`, { tax_rate: 12 });
     expect(open.status).toBe(200);
     expect((await readInvoice(draftInvoiceId)).tax_rate, 'draft ⇒ tax rate editable').toBe(12);
+  });
+
+  // ── access-security.write-path-guards acceptance[5] and [6] (#26571) ────────
+
+  const storedLine = async (id: string) =>
+    ql.findOne('showcase_invoice_line', { where: { id }, context: { isSystem: true } });
+  const resultFor = (body: any, id: string) => (body?.results ?? []).find((r: any) => r.id === id);
+  const draftLine = async (description: string, quantity: number) =>
+    idOf(await ql.insert('showcase_invoice_line', {
+      invoice: draftInvoiceId, product, description, quantity, unit_price: 49.99,
+    }, { context: { isSystem: true } }));
+
+  it("the paid invoice's line keeps its product too — the third locked field", async () => {
+    const other = idOf(await ql.insert('showcase_product', { name: 'Swap Widget #26571', unit_price: 1 }, { context: { isSystem: true } }));
+    const res = await stack.apiAs(token, 'PATCH', `${LINES}/${paidLineId}`, { product: other });
+    expect(res.status, 'the strip is silent').toBe(200);
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields') ?? '').toContain('product;reason=readonly_when');
+    expect((await storedLine(paidLineId)).product, 'frozen product must survive the PATCH').toBe(product);
+  });
+
+  it('a mixed updateMany is judged PER ROW: the locked row reports droppedFields, the open row in the same batch lands', async () => {
+    const res = await stack.apiAs(token, 'POST', `${LINES}/updateMany`, {
+      records: [
+        { id: paidLineId, data: { quantity: 77 } },
+        { id: draftLineId, data: { quantity: 77 } },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    const locked = resultFor(body, paidLineId);
+    const open = resultFor(body, draftLineId);
+    expect(locked?.success, `the locked row still succeeds — got ${JSON.stringify(body)}`).toBe(true);
+    expect(locked?.droppedFields, 'the locked row names the field it dropped').toEqual(
+      expect.arrayContaining([expect.objectContaining({ fields: ['quantity'], reason: 'readonly_when' })]),
+    );
+    expect(open?.success).toBe(true);
+    expect(open?.droppedFields, 'the open row dropped nothing').toBeUndefined();
+    expect((await storedLine(paidLineId)).quantity, 'locked row unchanged').toBe(6);
+    expect((await storedLine(draftLineId)).quantity, 'open row changed').toBe(77);
+  });
+
+  it('updateMany evaluates validation PER ROW under continueOnError: the violating row fails alone', async () => {
+    const before = await draftLine('validation row before', 3);
+    const bad = await draftLine('validation row violating', 3);
+    const after = await draftLine('validation row after', 3);
+    const res = await stack.apiAs(token, 'POST', `${LINES}/updateMany`, {
+      records: [
+        { id: before, data: { quantity: 5 } },
+        { id: bad, data: { quantity: -1 } }, // below the field's min: 0
+        { id: after, data: { quantity: 7 } },
+      ],
+      options: { continueOnError: true },
+    });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect([body.total, body.succeeded, body.failed], JSON.stringify(body)).toEqual([3, 2, 1]);
+    expect(resultFor(body, before)?.success).toBe(true);
+    expect(resultFor(body, after)?.success, 'the row AFTER the violation is still applied').toBe(true);
+    const failed = (body.results ?? []).find((r: any) => r.success === false);
+    expect(failed?.errors?.[0]?.code, 'the violating row carries its own validation error').toBe('VALIDATION_FAILED');
+    expect((await storedLine(before)).quantity).toBe(5);
+    expect((await storedLine(bad)).quantity, 'the violating row is unchanged').toBe(3);
+    expect((await storedLine(after)).quantity).toBe(7);
+  });
+
+  it('CONTRAST: without continueOnError the run stops at the first failure and reports the tail NOT_ATTEMPTED', async () => {
+    const before = await draftLine('stop row before', 3);
+    const bad = await draftLine('stop row violating', 3);
+    const after = await draftLine('stop row after', 3);
+    const res = await stack.apiAs(token, 'POST', `${LINES}/updateMany`, {
+      records: [
+        { id: before, data: { quantity: 5 } },
+        { id: bad, data: { quantity: -1 } },
+        { id: after, data: { quantity: 7 } },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(resultFor(body, before)?.success, JSON.stringify(body)).toBe(true);
+    const tail = (body.results ?? [])[2];
+    expect(tail?.errors?.[0]?.code, 'the row after the failure is reported, not omitted').toBe('NOT_ATTEMPTED');
+    expect((await storedLine(before)).quantity, 'rows before the failure stay written').toBe(5);
+    expect((await storedLine(bad)).quantity).toBe(3);
+    expect((await storedLine(after)).quantity, 'the un-attempted row is unchanged').toBe(3);
   });
 });
