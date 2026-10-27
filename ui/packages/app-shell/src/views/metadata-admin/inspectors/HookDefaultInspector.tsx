@@ -23,10 +23,10 @@
  * was not granted, and `body.capabilities` was reachable from no control here,
  * so a Studio-authored hook that read data could only be fixed through the
  * API. The grant list is a checkbox per `HookBodyCapability` token, read from
- * the spec enum, shown for a `js` body only: an expression body is strict and
- * refuses `capabilities` by name, so switching to `expression` drops the grant
- * rather than carrying a key the save would refuse. Nothing is inferred from
- * the source text.
+ * the spec enum, shown for a `js` body only. An expression body is strict and
+ * refuses every L2-only key by name (`capabilities`, `timeoutMs`, `memoryMb`),
+ * so a switch away from `js` drops them rather than carrying keys the save
+ * would refuse. Nothing is inferred from the source text.
  *
  * `object` is spec `string | string[]` (or `'*'` for every object). The picker
  * normalises to/from that: `'*'` ⇒ all, one selection ⇒ a string, many ⇒ an
@@ -58,7 +58,7 @@ import {
   flagUnknownValue,
   rosterFrom,
 } from './_shared.js';
-import { HookBodyCapability } from '@objectstack/spec/data';
+import { ExpressionBodySchema, HookBodyCapability, ScriptBodySchema } from '@objectstack/spec/data';
 import { useObjectOptions } from '../previews/useObjectOptions.js';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
@@ -92,15 +92,21 @@ const ALL_OBJECTS = '*';
 /** The grantable tokens, in the spec's order — the order a grant is written in. */
 const CAPABILITY_TOKENS: readonly string[] = HookBodyCapability.options;
 
-/** The `ctx` call each token unlocks, shown under its checkbox. Code, so it
- *  reads the same in every locale; a token with no entry shows none. */
+/** The `ctx` call each token unlocks, shown under its checkbox: the methods
+ *  the sandbox runner gates on that token. Code, so it reads the same in every
+ *  locale; a token with no entry shows none. */
 const CAPABILITY_CALLS: Partial<Record<HookBodyCapability, string>> = {
   'api.read': 'ctx.api.object(…).find / findOne / count / aggregate',
-  'api.write': 'ctx.api.object(…).insert / update / delete',
+  'api.write': 'ctx.api.object(…).insert / update / delete / updateMany / deleteMany / upsert',
   'api.transaction': 'ctx.api.transaction(async () => { … })',
   'crypto.uuid': 'ctx.crypto.randomUUID()',
-  log: 'ctx.log.info / warn / error',
+  log: 'ctx.log.debug / info / warn / error',
 };
+
+/** The keys only a `js` body admits, read off the spec's two body shapes. */
+const L2_ONLY_BODY_KEYS: readonly string[] = Object.keys(ScriptBodySchema.shape).filter(
+  (k) => !(k in ExpressionBodySchema.shape),
+);
 
 /**
  * objectui#11820 — what the host knows about where the hook is authored: the
@@ -253,7 +259,7 @@ export function HookDefaultInspector({
   };
   const setLanguage = (v: string) => {
     const next: Record<string, unknown> = { ...body, language: v };
-    if (v !== 'js') delete next.capabilities;
+    if (v !== 'js') for (const key of L2_ONLY_BODY_KEYS) delete next[key];
     onPatch({ body: next });
   };
 

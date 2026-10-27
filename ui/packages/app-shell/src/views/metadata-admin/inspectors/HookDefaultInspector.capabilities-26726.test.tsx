@@ -88,6 +88,7 @@ describe('HookDefaultInspector — body capabilities (objectstack#26726)', () =>
     expect(names).toEqual([...HookBodyCapability.options]);
     // Each token names the ctx call it unlocks.
     expect(within(control).getByText('ctx.api.object(…).find / findOne / count / aggregate')).toBeInTheDocument();
+    expect(within(control).getByText('ctx.log.debug / info / warn / error')).toBeInTheDocument();
   });
 
   it('picking api.read writes body.capabilities ["api.read"], and the saved hook parses', () => {
@@ -153,6 +154,19 @@ describe('HookDefaultInspector — body capabilities (objectstack#26726)', () =>
     const body = writtenBody(onPatch);
     expect(body).toEqual({ language: 'expression', source: 'true' });
     expect(() => savedHook(draft, body)).not.toThrow();
+  });
+
+  it('switching a js body with limits to expression drops every L2-only key, so the save still parses', async () => {
+    const draft = hookDraft({ language: 'js', source: 'true', capabilities: ['log'], timeoutMs: 250, memoryMb: 64 });
+    const onPatch = renderInspector(draft);
+
+    const language = screen.getAllByRole('combobox').find((el) => el.tagName === 'BUTTON')!;
+    fireEvent.click(language);
+    fireEvent.click(await screen.findByRole('option', { name: t('engine.inspector.hook.bodyLang.expression', 'en-US') }));
+
+    const body = writtenBody(onPatch);
+    expect(body).toEqual({ language: 'expression', source: 'true' });
+    expect(savedHook(draft, body).body).toEqual({ language: 'expression', source: 'true' });
   });
 
   it('a stored token the spec does not list stays visible, flagged, and is kept on the next write', () => {
