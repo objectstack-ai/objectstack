@@ -4929,11 +4929,11 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   // pinned in `./content-channel-public-blocks-9256.test.ts`; each entry below
   // names them where they apply.
   'public-blocks.zod.ts#PageHeaderBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `page:header` literal + `properties`, which IS `ComponentPropsMap['page:header']`, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `page:header` literal + `properties`, which IS `ComponentPropsMap['page:header']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `icon` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageTabsBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:tabs` literal + `properties`, which IS `ComponentPropsMap['page:tabs']`, + the `onTabChange` runtime-slot refusal (objectui#6124) its renderer's read requires, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageCardBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `page:card` literal + `properties`, which IS `ComponentPropsMap['page:card']`, + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `page:card` literal + `properties`, which IS `ComponentPropsMap['page:card']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `actions` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageAccordionBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:accordion` literal + `properties`, which IS `ComponentPropsMap['page:accordion']`, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageSectionBlockSchema':
@@ -4943,7 +4943,7 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   'public-blocks.zod.ts#PageSidebarBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:sidebar` literal + `properties`, which IS `ComponentPropsMap['page:sidebar']`, + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordDetailsBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `record:details` literal + `properties`, which IS `ComponentPropsMap['record:details']`, + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `record:details` literal + `properties`, which IS `ComponentPropsMap['record:details']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `layout` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordHighlightsBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `record:highlights` literal + `properties`, which IS `ComponentPropsMap['record:highlights']`, + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordRelatedListBlockSchema':
