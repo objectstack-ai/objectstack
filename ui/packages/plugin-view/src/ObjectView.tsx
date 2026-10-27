@@ -76,7 +76,7 @@ import { useObjectTranslation, createSafeTranslation, useDisplayLocale, pickLoca
 // objectui#7928 — a named view's `label` is the protocol's `I18nLabel` (a plain
 // string or an inline locale map) since `ObjectViewSchema.listViews` became its
 // record by reference. Resolved the way `ListView` resolves its own `label`.
-import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, GanttConfigSchema } from '@objectstack/spec/ui';
 import type { ListView as SpecListView } from '@objectstack/spec/ui';
 import {
   buildExpandFields,
@@ -2405,7 +2405,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           titleField: viewOptions.timeline?.titleField || 'name',
         };
       }
-      case 'gantt':
+      case 'gantt': {
         // `5f4514f7b`: only ever restate a binding the view actually DECLARED
         // — the same correction objectui#7029 made to the calendar branch above.
         // `startDateField` / `endDateField` used to be floored at 'start_date' /
@@ -2438,21 +2438,30 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         // them flat. Handed on under the two conditions the renderer's flat
         // branch applied: only once BOTH date fields are declared, and with
         // `titleField` floored at `'name'`, which the block requires.
+        //
+        // ⚠️ A block the spec's `GanttConfigSchema` refuses goes out FLAT, the
+        // spelling this case wrote before objectstack#25923: `getGanttConfig`
+        // shows its refusal screen for a bad `gantt` block but never validated
+        // the flat branch, so a stored named view whose legacy `options.gantt`
+        // carries a value the spec now refuses kept drawing, and still does.
+        const ganttBlock =
+          viewOptions.gantt?.startDateField && viewOptions.gantt?.endDateField
+            ? {
+                // The block's DECLARED keys, where a raw spread of the whole
+                // block stood until objectui#6152 round 14. See
+                // `GANTT_CONFIG_SPELLING`.
+                ...pickFlatMapConfig(viewOptions.gantt, GANTT_CONFIG_SPELLING),
+                titleField: viewOptions.gantt.titleField || 'name',
+              }
+            : undefined;
         return {
           type: 'object-gantt',
           ...baseProps,
-          ...(viewOptions.gantt?.startDateField && viewOptions.gantt?.endDateField
-            ? {
-                gantt: {
-                  // The block's DECLARED keys, where a raw spread of the whole
-                  // block stood until objectui#6152 round 14. See
-                  // `GANTT_CONFIG_SPELLING`.
-                  ...pickFlatMapConfig(viewOptions.gantt, GANTT_CONFIG_SPELLING),
-                  titleField: viewOptions.gantt.titleField || 'name',
-                },
-              }
+          ...(ganttBlock
+            ? GanttConfigSchema.safeParse(ganttBlock).success ? { gantt: ganttBlock } : ganttBlock
             : {}),
         };
+      }
       case 'map':
         // Whitelisted flatten (objectui#5177) — see `FLAT_MAP_CONFIG_SPELLING`,
         // which also carries `style` out as `mapStyle` (objectui#9950).

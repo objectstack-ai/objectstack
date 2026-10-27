@@ -245,15 +245,21 @@ describe('objectui#8355 · surface 2 — the legacy `options.calendar` nesting',
 });
 
 describe('objectui#8355 · surfaces 3 and 4 — the `object-calendar` node', () => {
-  it.each(RETIRED)('refuses a FLAT `%s` on the node, naming `%s`', (alias, canonical) => {
-    const result = calendarNode({ startDateField: 'kickoff', [alias]: 'kickoff' });
+  it.each(RETIRED)('refuses a FLAT `%s` on the node, naming `calendar.%s` (objectstack#25923)', (alias, canonical) => {
+    const result = calendarNode({ calendar: { startDateField: 'kickoff' }, [alias]: 'kickoff' });
     expect(result.success, `a flat ${alias} still parses green on the node`).toBe(false);
     const issue = result.success
       ? undefined
       : result.error.issues.find((i) => i.path.join('.') === alias);
     expect(issue?.code).toBe('invalid_type');
     expect(issue?.message).toContain(`Unrecognized key(s) on this object-calendar node: \`${alias}\``);
-    expect(issue?.message).toContain(`Did you mean \`${alias}\` → \`${canonical}\`?`);
+    // The canonical key is no flat member of the node since objectstack#25923,
+    // so the pointer and the clause both name the `calendar` block.
+    expect(issue?.message).toContain(`Did you mean \`${alias}\` → \`calendar.${canonical}\`?`);
+    expect(issue?.message).toContain(`Write \`calendar.${canonical}\``);
+    // CONTROL: the bare canonical key is prescribed nowhere in the node's message.
+    expect(issue?.message).not.toContain(`→ \`${canonical}\``);
+    expect(issue?.message).not.toContain(`Write \`${canonical}\``);
   });
 
   it.each(RETIRED)('refuses `%s` inside the element\'s own `calendar` container, naming `%s`', (alias, canonical) => {
@@ -267,6 +273,8 @@ describe('objectui#8355 · surfaces 3 and 4 — the `object-calendar` node', () 
   });
 
   it('DARK CONTROL: the canonical node parses GREEN on both nestings', () => {
+    // The flat node still parses on the TOLERANT mirror (`.passthrough()`), though
+    // since objectstack#25923 it declares none of the three: the strict face refuses them.
     const flat = calendarNode({ startDateField: 'kickoff', endDateField: 'wrapup', titleField: 'nickname' });
     expect(flat.success, JSON.stringify(flat.error?.issues)).toBe(true);
     const nested = calendarNode({ calendar: { startDateField: 'kickoff', endDateField: 'wrapup' } });

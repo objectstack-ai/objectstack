@@ -254,6 +254,35 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
   });
 });
 
+describe('ListView gantt branch — a block the spec refuses goes out flat, as before (objectstack#25923)', () => {
+  /** The emitted node itself: these rows read the spelling, so no flat-key guard here. */
+  const ganttNode = async (schema: Record<string, any>) => {
+    const dataSource = makeDataSource();
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView schema={{ ...WIDE_TOOLBAR, ...schema } as never} dataSource={dataSource} />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(captured.length).toBeGreaterThan(0));
+    return captured[captured.length - 1].schema;
+  };
+
+  it('a legacy `options.gantt` carrying a refused value is handed flat, so the renderer still draws it', async () => {
+    // `getGanttConfig` validates a `gantt` block (objectui#13459) and never
+    // validated the flat branch: nested, this view would move from drawing to the
+    // refusal screen (`plugin-gantt`'s `ObjectGantt.legacyFlatDraws-25923`).
+    const node = await ganttNode({ ...BASE, options: { gantt: { ...AXIS, viewMode: 'hour' } } });
+    expect(node).not.toHaveProperty('gantt');
+    expect([node.startDateField, node.endDateField, node.titleField, node.viewMode]).toEqual(['start_date', 'end_date', 'name', 'hour']);
+  });
+
+  it('CONTROL: the same view with a valid value goes out nested', async () => {
+    const node = await ganttNode({ ...BASE, options: { gantt: { ...AXIS, viewMode: 'week' } } });
+    expect(node.gantt).toEqual({ ...AXIS, titleField: 'name', viewMode: 'week' });
+    expect(node).not.toHaveProperty('startDateField');
+  });
+});
+
 describe('ListView capability gate — the Gantt toggle follows the binding (objectui#7070)', () => {
   const GRID = { ...BASE, viewType: 'grid' } as const;
 

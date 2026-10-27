@@ -42,7 +42,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, GanttConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -4434,7 +4434,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // block (`object` / `value`) must reach ObjectGantt, whose
           // getDataConfig prefers schema.data over the objectName fallback.
           ...(schema.data ? { data: schema.data } : {}),
-          ...(ganttBlock ? { gantt: ganttBlock } : {}),
+          // ⚠️ A block the spec's `GanttConfigSchema` refuses goes out FLAT, the
+          // spelling this branch wrote before objectstack#25923. `getGanttConfig`
+          // validates a `gantt` block and shows its refusal screen on a bad one,
+          // but its flat branch never validated anything, so a stored view whose
+          // legacy `options.gantt` (or an older `gantt` block) carries a value the
+          // spec now refuses kept drawing. Handing that one block flat keeps it
+          // drawing exactly as before; every valid block goes out nested.
+          ...(ganttBlock
+            ? GanttConfigSchema.safeParse(ganttBlock).success ? { gantt: ganttBlock } : ganttBlock
+            : {}),
         };
       }
       case 'map': {

@@ -154,7 +154,6 @@ import type {
   // of `NamedListView` indexes it; see that member for why it cannot take its
   // type from this package's mirror like the other sixteen.
   ListView as SpecListView,
-  CalendarConfig as SpecCalendarConfig,
   // objectui#11168 slice 3 — the `object-tree` element's `tree` block, so
   // `ObjectTreeSchema.tree` below takes the protocol's own type. Aliased for
   // the reason `SpecGanttConfig` above is.

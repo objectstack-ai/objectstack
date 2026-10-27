@@ -602,9 +602,7 @@ const interactiveChart = <ObjectGantt
   schema={{
     type: 'object-gantt',
     objectName: 'project_tasks',
-    startDateField: 'start_date',
-    endDateField: 'end_date',
-    titleField: 'name',
+    gantt: { startDateField: 'start_date', endDateField: 'end_date', titleField: 'name' },
   }}
   dataSource={dataSource}
   onTaskClick={(record) => console.log('Task clicked:', record)}
@@ -834,7 +832,9 @@ be a CSV string (`"task1, task2"`), an array of ids, or an array of objects —
 The adapter is **not** a schema key — it reaches the renderer through the
 renderer context (or as an explicit `dataSource` prop), while the schema names
 the object and the fields. Mounted directly as below, `ObjectGantt` takes the
-node as it reads it, typed `ObjectGanttSchema`, with its props on the node;
+node as it reads it, typed `ObjectGanttSchema`, with its props on the node and
+the field mapping in its `gantt` block (the flat spelling is no member of that
+type since objectstack#25923);
 through `SchemaRenderer` the same props go in the authored node's `properties`
 bag:
 
@@ -851,10 +851,12 @@ const dataSource = createObjectStackAdapter({
 const schema: ObjectGanttSchema = {
   type: 'object-gantt',
   objectName: 'tasks',
-  titleField: 'task_name',
-  startDateField: 'start_date',
-  endDateField: 'end_date',
-  progressField: 'progress_percent'
+  gantt: {
+    titleField: 'task_name',
+    startDateField: 'start_date',
+    endDateField: 'end_date',
+    progressField: 'progress_percent'
+  }
 };
 
 const ganttWithAdapter = <ObjectGantt schema={schema} dataSource={dataSource} />;

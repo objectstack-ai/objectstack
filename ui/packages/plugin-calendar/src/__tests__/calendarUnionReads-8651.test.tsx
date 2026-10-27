@@ -478,8 +478,10 @@ describe('objectui#8355 — the `dateField` / `endField` rungs are RETIRED at bo
   });
 
   it('…and an authored alias is refused BY NAME, at its own path, naming the canonical key', () => {
-    const node = { type: 'object-calendar', objectName: 'duly_task', titleField: 'nickname' };
-    for (const [alias, canonical] of [['dateField', 'startDateField'], ['endField', 'endDateField']] as const) {
+    const node = { type: 'object-calendar', objectName: 'duly_task', calendar: { titleField: 'nickname' } };
+    // The canonical key lives in the `calendar` block since objectstack#25923,
+    // so the refusal names the block path.
+    for (const [alias, canonical] of [['dateField', 'calendar.startDateField'], ['endField', 'calendar.endDateField']] as const) {
       const r = ObjectCalendarMirror.safeParse({ ...node, [alias]: 'kickoff' });
       expect(r.success, `${alias} still parses green on the node face`).toBe(false);
       const issue = r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === alias);

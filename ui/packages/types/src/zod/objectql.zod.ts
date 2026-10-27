@@ -1967,12 +1967,22 @@ const CalendarContainerDateAliasRefusals = {
 /**
  * The same two arms as the `object-calendar` NODE wears them. This is the FLAT
  * spelling `ListView` used to flatten the block into, and where the retired
- * ladder actually read — a binding surface, so it takes the binding clause; only
- * the surface noun differs from the view-level group.
+ * ladder actually read — a binding surface, so it takes the binding clause.
+ *
+ * ⏱ objectstack#25923: the canonical keys are no flat members of this node any
+ * more (the spec and the strict face refuse `startDateField` written flat), so
+ * the prescription names the `calendar` block — `calendar.startDateField` /
+ * `calendar.endDateField` — in both the pointer and the clause. Pointing at the
+ * bare key would send an author from one refusal straight into the next.
  */
+const calendarNodeAliasDetail = (alias: 'dateField' | 'endField') =>
+  calendarAliasDetail(alias, 'binding').replace(
+    alias === 'dateField' ? 'Write `startDateField`' : 'Write `endDateField`',
+    alias === 'dateField' ? 'Write `calendar.startDateField`' : 'Write `calendar.endDateField`',
+  );
 const CalendarNodeDateAliasRefusals = {
-  dateField: aliasKeyRefusal('dateField', 'startDateField', 'this object-calendar node', calendarAliasDetail('dateField', 'binding')),
-  endField: aliasKeyRefusal('endField', 'endDateField', 'this object-calendar node', calendarAliasDetail('endField', 'binding')),
+  dateField: aliasKeyRefusal('dateField', 'calendar.startDateField', 'this object-calendar node', calendarNodeAliasDetail('dateField')),
+  endField: aliasKeyRefusal('endField', 'calendar.endDateField', 'this object-calendar node', calendarNodeAliasDetail('endField')),
 };
 
 /**

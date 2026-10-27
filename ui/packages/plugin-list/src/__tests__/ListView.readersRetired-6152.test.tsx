@@ -193,10 +193,13 @@ describe('2 · the declared keys keep their route (objectui#6152 round 14)', () 
     const block = Object.fromEntries(declared.map((k) => [k, `BLOCK_${k}`]));
     const bag = Object.fromEntries(declared.map((k) => [k, `BAG_${k}`]));
     const node = await generatedNode('object-gantt', { gantt: block, options: { gantt: { ...bag, onlyInTheBag: 'x' } } });
-    // objectstack#25923 — they reach it as the node's own `gantt` block, never flat.
-    for (const k of declared) expect(node.gantt?.[k], k).toBe(`BLOCK_${k}`);
-    for (const k of declared) expect(k in node, `flat ${k}`).toBe(false);
-    expect('onlyInTheBag' in node.gantt).toBe(false);
+    // objectstack#25923 — the placeholder strings are values the spec's
+    // `GanttConfigSchema` refuses (e.g. `capacity`), so the producer hands this
+    // binding FLAT, as before, rather than as a `gantt` block the renderer would
+    // refuse; a valid binding goes out nested (`ListView.gantt-binding-7070`).
+    // Either way every declared key reaches the gantt, the block winning.
+    expect('gantt' in node).toBe(false);
+    for (const k of declared) expect(node[k], k).toBe(`BLOCK_${k}`);
     expect('onlyInTheBag' in node).toBe(false);
   });
 });
