@@ -22,6 +22,10 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
+// Module scope, per AGENTS.md 测试纪律: the boolean arm reaches `BooleanField`
+// through a `React.lazy` factory inside `@object-ui/fields`; importing the
+// barrel here resolves that factory before any test's `findBy` budget starts.
+import '@object-ui/fields';
 import { ScreenView, type ScreenSpec } from './ScreenView';
 
 afterEach(cleanup);
@@ -48,7 +52,7 @@ describe('objectui#10367 — ScreenView keeps the required `*` out of the access
     expect(marker).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('every other control arm carries aria-required and a name without `*`', () => {
+  it('every other control arm carries aria-required and a name without `*`', async () => {
     renderScreen([
       { name: 'note', label: 'Note', type: 'textarea', required: true },
       { name: 'agree', label: 'Agree', type: 'boolean', required: true },
@@ -59,7 +63,7 @@ describe('objectui#10367 — ScreenView keeps the required `*` out of the access
     expect(note).toHaveAttribute('aria-required', 'true');
     expect(note).not.toHaveAttribute('required');
 
-    const agree = screen.getByRole('checkbox', { name: 'Agree' });
+    const agree = await screen.findByRole('checkbox', { name: 'Agree' });
     expect(agree).toHaveAttribute('aria-required', 'true');
     expect(agree).not.toHaveAttribute('required');
 
@@ -67,7 +71,7 @@ describe('objectui#10367 — ScreenView keeps the required `*` out of the access
     expect(kind).toHaveAttribute('aria-required', 'true');
   });
 
-  it('CONTROL — an optional field shows no marker and carries no aria-required', () => {
+  it('CONTROL — an optional field shows no marker and carries no aria-required', async () => {
     const { container } = renderScreen([
       { name: 'title', label: 'Title', type: 'text' },
       { name: 'agree', label: 'Agree', type: 'boolean' },
@@ -77,6 +81,6 @@ describe('objectui#10367 — ScreenView keeps the required `*` out of the access
     const input = screen.getByRole('textbox', { name: 'Title' });
     expect(input).not.toBeRequired();
     expect(input).not.toHaveAttribute('aria-required');
-    expect(screen.getByRole('checkbox', { name: 'Agree' })).not.toHaveAttribute('aria-required');
+    expect(await screen.findByRole('checkbox', { name: 'Agree' })).not.toHaveAttribute('aria-required');
   });
 });

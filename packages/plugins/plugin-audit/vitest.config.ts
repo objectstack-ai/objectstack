@@ -66,6 +66,14 @@ export default defineConfig({
         find: /^@objectstack\/platform-objects\/identity$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/identity/index.ts'),
       },
+      // The settings and secret-store definitions the key-material census in
+      // `audit-internal-field-omission.test.ts` judges the mirror against, and
+      // that `key-material-copy.ts` takes its object names from — to source,
+      // for the reason the `identity` entry above gives.
+      {
+        find: /^@objectstack\/platform-objects\/system$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts'),
+      },
       // [#12642] The i18n provenance seam. This package's translation barrel
       // passes its committed `<locale>.source-hashes.generated.ts` companions
       // through `withSourceFallback`, whose home is this subpath — so without
