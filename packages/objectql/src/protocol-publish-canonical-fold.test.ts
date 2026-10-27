@@ -265,8 +265,8 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<{ code?: string; s
 
 /**
  * A `translation` body. `TranslationItemSchema` requires `locale`; `name` is
- * declared and optional, and is deliberately NOT snake_case-constrained for
- * this type (translation items are conventionally named after their locale).
+ * declared and optional; like every metadata item it is named in snake_case
+ * (`zh_cn`), with the BCP-47 tag in `locale`.
  */
 const translationBody = (label: string) => ({ locale: 'zh-CN', name: 'zh_cn', label });
 

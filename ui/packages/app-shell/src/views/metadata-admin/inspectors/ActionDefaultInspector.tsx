@@ -23,9 +23,11 @@
  * collapsed "More fields" SchemaForm fed the live server schema, with the
  * curated keys hidden so nothing is double-edited and nothing is lost.
  *
- * AI exposure uses the flattened `aiExposed` / `aiDescription` keys (the
- * objectui/server convention that ActionPreview reads), not the nested `ai`
- * block, so the curated control and the runtime/preview agree.
+ * AI exposure writes the spec's nested `ai` block (`ai.exposed`,
+ * `ai.description`, ADR-0011). It used to write flat `aiExposed` /
+ * `aiDescription` keys, which the spec refuses by name, so one tick refused
+ * every later save of the object (objectstack#26728). The two flat keys are
+ * cleared by the AI control's next write, and never read.
  */
 
 import * as React from 'react';
@@ -359,6 +361,46 @@ const UPDATE_OPERATION_REFUSES = [
  */
 const UPDATE_OPERATION_REFUSED_LOCATION = 'list_toolbar';
 
+/**
+ * objectstack#26736 — the keys `@objectstack/spec` refuses on an action whose
+ * `type` is not one of the listed ones, so a Type switch clears them. Without
+ * this, typing a script body and then switching to API kept the `body`, the
+ * spec refused it ("`body` only runs for `type: 'script'`"), and every later
+ * save of the object was refused with it.
+ *
+ * `undoable` is refused only as `true`, so only `true` is cleared. A key the
+ * new type still admits is kept, `target` included: it is the input every
+ * non-script type shows, and the spec judges its value on the new type.
+ *
+ * Written out rather than read off `ActionSchema` at runtime, for the reason
+ * {@link BODY_KEYS_BY_LANGUAGE} gives. `ActionDefaultInspector.typeSwitch-26736.test.tsx`
+ * parses each key on every `ActionType` with the spec, both ways.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- see above
+export const TYPE_SCOPED_KEYS: ReadonlyArray<{ key: string; types: ReadonlySet<string>; refused: (value: unknown) => boolean }> = [
+  { key: 'body', types: new Set(['script']), refused: (v) => v !== undefined },
+  { key: 'onSuccess', types: new Set(['api', 'script', 'flow']), refused: (v) => v !== undefined },
+  { key: 'outcomeMessages', types: new Set(['api', 'script']), refused: (v) => v !== undefined },
+  { key: 'undoable', types: new Set(['api']), refused: (v) => v === true },
+];
+
+/**
+ * The shortest `ai.description` the spec accepts (`ActionAiSchema`, ADR-0011).
+ * The inspector's "too short" line and the untick below read it; the AI test
+ * pins it against the spec.
+ */
+export const AI_DESCRIPTION_MIN = 40;
+
+/**
+ * objectstack#26736 — the two shapes the spec's `bodyShape` union takes:
+ * `'flat'`, or `{ wrap: KEY }`. The control offers exactly these, so a stored
+ * `{ wrap }` reads back as Wrap with its key, and nothing else can be written.
+ */
+const BODY_SHAPE_OPTS: KeyedOption[] = [
+  { value: 'flat', labelKey: 'engine.inspector.action.bodyShape.flat' },
+  { value: 'wrap', labelKey: 'engine.inspector.action.bodyShape.wrap' },
+];
+
 /** What a script action DOES — `operation` is authored beside `type`, not in it. */
 const SCRIPT_OPERATIONS: KeyedOption[] = [
   { value: '', labelKey: 'engine.inspector.action.scriptOp.run' },
@@ -368,7 +410,7 @@ const SCRIPT_OPERATIONS: KeyedOption[] = [
 /** Keys this inspector edits with its own controls — hidden from the fallback. */
 const CURATED_FIELDS = [
   'name', 'label', 'objectName', 'icon', 'variant', 'component',
-  'type', 'target', 'execute', 'body', 'method',
+  'type', 'target', 'execute', 'body', 'method', 'bodyShape',
   // The declarative single-record write, edited by the Behavior section's
   // "What it does" control and its field-value editor. Curated — and therefore
   // hidden from the fallback form — because the spec's refusal set around
@@ -378,7 +420,7 @@ const CURATED_FIELDS = [
   'operation', 'patch',
   'params', 'locations',
   'confirmText', 'successMessage', 'errorMessage', 'refreshAfter', 'undoable', 'mode',
-  'visible', 'disabled', 'aiExposed', 'aiDescription',
+  'visible', 'disabled',
 ];
 
 /**
@@ -672,9 +714,72 @@ export function ActionDefaultInspector({
     ? requiredPermissions.filter((c) => !heldCapabilities.includes(c))
     : [];
 
-  // AI exposure — flattened keys (objectui/server convention, read by ActionPreview).
-  const aiExposed = draft.aiExposed === true;
-  const aiDescription = typeof draft.aiDescription === 'string' ? (draft.aiDescription as string) : '';
+  /* ─── objectstack#26728 — AI exposure is the spec's nested `ai` block ─────
+   *
+   * Every write goes through `patchAi`: it merges into the block the draft
+   * holds (the other `ai` keys, edited under "More fields", are kept) and
+   * clears the flat `aiExposed` / `aiDescription` an older draft may carry,
+   * which the spec refuses by name. Unticking drops a description the spec
+   * would refuse as too short: the box that edits it is hidden while
+   * unexposed, so the author could not fix it there. */
+  const ai = (draft.ai && typeof draft.ai === 'object' && !Array.isArray(draft.ai) ? draft.ai : {}) as Record<string, unknown>;
+  const aiExposed = ai.exposed === true;
+  const aiDescription = typeof ai.description === 'string' ? ai.description : '';
+  const patchAi = (change: Record<string, unknown>) => {
+    const next: Record<string, unknown> = { ...ai, ...change };
+    for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+    const out: Record<string, unknown> = { ai: next };
+    for (const flat of ['aiExposed', 'aiDescription']) if (flat in draft) out[flat] = undefined;
+    onPatch(out);
+  };
+  const commitAiExposed = (exposed: boolean) =>
+    patchAi(exposed || aiDescription.length >= AI_DESCRIPTION_MIN ? { exposed } : { exposed, description: undefined });
+
+  /**
+   * objectstack#26736 — a Type switch clears what the new type refuses
+   * ({@link TYPE_SCOPED_KEYS}). Only keys the draft holds are written, so a
+   * switch with nothing to clear writes the type alone.
+   */
+  const commitType = (next: string) => {
+    const change: Record<string, unknown> = { type: next };
+    for (const { key, types, refused } of TYPE_SCOPED_KEYS) {
+      if (!types.has(next) && refused(draft[key])) change[key] = undefined;
+    }
+    onPatch(change);
+  };
+
+  /**
+   * objectstack#26736 — Body Shape as the spec's union: Flat, or Wrap under a
+   * key. Wrap is written only once it has a key: the spec accepts an empty
+   * one, which would nest the params under `""`. Until then the choice is
+   * held here, and the draft keeps what it had.
+   */
+  const bodyShape = draft.bodyShape;
+  const storedWrap =
+    bodyShape && typeof bodyShape === 'object' && typeof (bodyShape as Record<string, unknown>).wrap === 'string'
+      ? ((bodyShape as Record<string, unknown>).wrap as string)
+      : undefined;
+  // Stamped with the action it was picked on: one inspector serves the
+  // actions a host lists in turn.
+  const [wrapPickedFor, setWrapPickedFor] = React.useState<string | null>(null);
+  const bodyShapeMode = storedWrap !== undefined || wrapPickedFor === str('name') ? 'wrap' : 'flat';
+  const commitBodyShapeMode = (mode: string) => {
+    if (mode === 'wrap') {
+      setWrapPickedFor(str('name'));
+      return;
+    }
+    setWrapPickedFor(null);
+    onPatch({ bodyShape: 'flat' });
+  };
+  const commitWrapKey = (key: string) => {
+    const trimmed = key.trim();
+    if (trimmed === '') {
+      setWrapPickedFor(str('name'));
+      if (storedWrap !== undefined) onPatch({ bodyShape: undefined });
+      return;
+    }
+    onPatch({ bodyShape: { wrap: trimmed } });
+  };
 
   /* ─── Blocking CEL verdicts → the host's Save gate (objectui#4527) ─────
    *
@@ -764,7 +869,7 @@ export function ActionDefaultInspector({
       {/* 2 ─ Behavior (type-first) */}
       <div className="border-t pt-3 space-y-3">
         <SectionHeader title={tr('engine.inspector.action.behavior')} hint={tr('engine.inspector.action.behaviorHint')} />
-        <InspectorSelectField label={tr('engine.inspector.action.type')} value={type} options={localizeOptions(ACTION_TYPES, locale)} onCommit={(v) => onPatch({ type: v })} disabled={readOnly || isUpdateOperation} />
+        <InspectorSelectField label={tr('engine.inspector.action.type')} value={type} options={localizeOptions(ACTION_TYPES, locale)} onCommit={commitType} disabled={readOnly || isUpdateOperation} />
         {isUpdateOperation && (
           <div className="text-[11px] text-muted-foreground/70">
             {withSlots(tr('engine.inspector.action.pinnedScript'), { script: <code>script</code> })}
@@ -880,6 +985,30 @@ export function ActionDefaultInspector({
               />
             )}
           </>
+        )}
+        {/* Shown on an api action, and on any other that holds one, so a
+            stored shape is never edited out of sight. */}
+        {(type === 'api' || bodyShape !== undefined) && !isUpdateOperation && (
+          <div className="space-y-1">
+            <InspectorSelectField
+              label={tr('engine.inspector.action.bodyShape')}
+              value={bodyShapeMode}
+              options={localizeOptions(BODY_SHAPE_OPTS, locale)}
+              onCommit={commitBodyShapeMode}
+              disabled={readOnly}
+            />
+            {bodyShapeMode === 'wrap' && (
+              <InspectorTextField
+                label={tr('engine.inspector.action.bodyShapeKey')}
+                value={storedWrap ?? ''}
+                onCommit={commitWrapKey}
+                placeholder="data"
+                disabled={readOnly}
+                mono
+              />
+            )}
+            <div className="text-[11px] text-muted-foreground/70">{tr('engine.inspector.action.bodyShapeHint')}</div>
+          </div>
         )}
       </div>
 
@@ -1043,19 +1172,19 @@ export function ActionDefaultInspector({
       {/* 7 ─ AI exposure */}
       <div className="border-t pt-3 space-y-2">
         <SectionHeader title={tr('engine.inspector.action.ai')} hint={tr('engine.inspector.action.aiHint')} />
-        <InspectorCheckboxField label={tr('engine.inspector.action.aiExposed')} value={aiExposed} onCommit={(v) => onPatch({ aiExposed: v })} disabled={readOnly} />
+        <InspectorCheckboxField label={tr('engine.inspector.action.aiExposed')} value={aiExposed} onCommit={commitAiExposed} disabled={readOnly} />
         {aiExposed ? (
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">{tr('engine.inspector.action.aiDescription')}</Label>
             <Textarea
               value={aiDescription}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onPatch({ aiDescription: e.target.value })}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => patchAi({ description: e.target.value === '' ? undefined : e.target.value })}
               disabled={readOnly}
               rows={3}
               placeholder={tr('engine.inspector.action.aiDescriptionPlaceholder')}
               className="text-xs"
             />
-            {aiDescription.length < 40 && (
+            {aiDescription.length < AI_DESCRIPTION_MIN && (
               <div className="text-[11px] text-destructive">{tr('engine.inspector.action.aiDescriptionTooShort')}</div>
             )}
           </div>
