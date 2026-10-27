@@ -406,9 +406,10 @@ export interface PermissionAdvancedFacetsProps {
    * rows on platform objects — belong on an environment set: the scope block
    * lists them without marking them and without the one-click grant.
    *
-   * Omitted: read from `only`. The Studio Access pillar is the one host that
-   * sets `only`, and it always edits under a `packageId` (`AccessPillar`'s
-   * `packageId` is required); Setup's permission page sets neither.
+   * The host passes it from its own binding (`PermissionMatrixEditPage` passes
+   * `!!packageId` at both of its mounts). It is independent of `only`: that
+   * prop picks a presentation, not a binding. Omitted: `false`, the
+   * environment set, with marks and the one-click grant.
    */
   packageBound?: boolean;
 }
@@ -422,7 +423,7 @@ export function PermissionAdvancedFacets({
   onCelErrorsChange,
   t,
   only,
-  packageBound = only !== undefined,
+  packageBound = false,
 }: PermissionAdvancedFacetsProps) {
   const flatFor = (section: 'rls' | 'tabs' | 'admin') =>
     only === undefined ? undefined : { shown: only === section, testId: `perm-facet-${section}` };

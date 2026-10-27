@@ -312,14 +312,16 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    *   - AUTHORED → the authored list is what renders, in authored order:
    *     each id resolves against the RELATED object's registered `actions`
    *     and is placed by its own `locations` (see `relatedListActions.ts`).
-   *     `[]` is the author's choice of no actions.
+   *   - AUTHORED `[]` → the author's choice of NO actions on this list, the
+   *     built-in New included (#26182): see `createWithheldByAuthor` below.
    *
    * The bridge offers no per-list channel of its own — `resolve` is keyed on
    * the child OBJECT (`objectName`, `relationshipField`, `parentId`), so two
    * lists of one object get one set — which is why this key is the per-list
    * one rather than a duplicate of it. Built-in New / Edit / Delete / View are
-   * NOT action ids (the runtime ships no built-in action names) and stay the
-   * host's either way. Running an authored action stays the host's too: it is
+   * NOT action ids (the runtime ships no built-in action names): a non-empty
+   * list leaves all four the host's, and `[]` withdraws New alone. Running an
+   * authored action stays the host's too: it is
    * handed to the bridge's `onToolbarAction` / `onRowAction`, the executor
    * that already runs the child object's actions against the clicked row, so
    * with no host the list stays read-only exactly as it always has.
@@ -332,6 +334,18 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    */
   const authoredActions: unknown = schema.actions;
   const actionsAuthored = authoredActions !== undefined;
+  /**
+   * `actions: []` withholds the built-in New on THIS list (#26182). A related
+   * list often shows children that may only be created through a process (a
+   * renewal through its flow, a version through upload), and the empty list is
+   * how the page author says the list offers nothing — so the generic create
+   * form, which would bypass that process, is not offered either. Per list,
+   * and independent of the child object's `userActions.create`: the host's
+   * object-wide verdict still decides every list that does not say `[]`.
+   * Edit / Delete / View are row affordances on records that already exist and
+   * stay the host's. Absent, or a non-empty list, leaves New exactly as before.
+   */
+  const createWithheldByAuthor = Array.isArray(authoredActions) && authoredActions.length === 0;
   const needsActionLookup = !!objectName && relatedListActionsNeedLookup(authoredActions);
   /**
    * The FALLBACK remove (below, `onRowDelete`): offered with an `add` config
@@ -661,8 +675,9 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
         toolbarActions={toolbarActions}
         onToolbarAction={handlers?.onToolbarAction}
         // Create a new child, pre-linked to this parent (增). Host omits when
-        // create is denied by lifecycle/permissions, hiding the "New" button.
-        onNew={handlers?.onCreate}
+        // create is denied by lifecycle/permissions, hiding the "New" button;
+        // an authored `actions: []` omits it on this list alone (#26182).
+        onNew={createWithheldByAuthor ? undefined : handlers?.onCreate}
         // [#4646] …and greys it — without hiding it — when the child object's
         // `userActions.create.disabledWhen` holds for THIS parent record. The
         // host owns both verdicts (it is the side that has the parent record

@@ -10,6 +10,8 @@ pull request.
 alike.** It holds naming, the Zod-first and contract-first rules, the documentation
 guardrails and the changeset rules. This file does not restate them. Where a rule
 matters, it points you to AGENTS.md, and if the two ever disagree, AGENTS.md wins.
+[Human Minimum](#human-minimum) lists the rules a first pull request most often breaks,
+each with its pointer.
 
 ## 📋 Table of Contents
 
@@ -17,6 +19,7 @@ matters, it points you to AGENTS.md, and if the two ever disagree, AGENTS.md win
 - [Getting Started](#getting-started)
 - [Build and Test Cost](#build-and-test-cost)
 - [Making a Change](#making-a-change)
+- [Human Minimum](#human-minimum)
 - [Where Things Live](#where-things-live)
 - [Package Directory](#package-directory)
 - [Pull Request Process](#pull-request-process)
@@ -121,7 +124,8 @@ Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
    `git worktree` instead of switching branches in a shared tree. AGENTS.md
    (Prime Directive #11 and *Multi-agent working discipline*) explains why, and what
    a worktree does not isolate.
-3. **Make the change, following AGENTS.md.** Read its *Prime Directives* before a
+3. **Make the change, following AGENTS.md.** Start with the
+   [Human Minimum](#human-minimum). Read its *Prime Directives* before a
    structural change, and its *Context Routing* table for the rules of the path you
    are editing.
 4. **Test what your change reaches**, not only the file you edited:
@@ -138,8 +142,50 @@ Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 5. **Add a changeset when the change publishes.** Run `pnpm changeset` and commit the
    `.changeset/*.md` file it writes. A bug fix in a released package takes a `patch`
    changeset. AGENTS.md's *Post-Task Checklist* (step 3) states the whole rule: which
-   bump a change takes, the `Clause-②` declaration, and the migration a breaking
-   change must carry.
+   bump a change takes, the `Clause-②` and `Metadata-protocol` declarations (what they
+   mean: [Human Minimum](#human-minimum), item 5), and the migration a breaking change
+   must carry.
+
+## Human Minimum
+
+The rules a first pull request most often breaks. Each item names the rule in one
+sentence and links the AGENTS.md text that states it; that text is the rule, so read it
+before you rely on the summary. The
+[pull request template](./.github/PULL_REQUEST_TEMPLATE.md) asks you to confirm the
+same list.
+
+1. **Schemas start as Zod, and `packages/spec` holds no runtime logic.** AGENTS.md,
+   [Prime Directives 1 and 2](./AGENTS.md#prime-directives).
+2. **Each kind of name has one casing**: config keys, machine names, error codes,
+   metadata type names, REST paths and `OS_` environment variables. AGENTS.md,
+   [Prime Directives 3 and 9](./AGENTS.md#prime-directives).
+3. **No formatter: `pnpm lint` is the only style authority, and Prettier is never run on
+   a file you touch.** AGENTS.md, [Build & Test](./AGENTS.md#build--test).
+4. **One issue, one branch off an up-to-date `main`, one pull request; in a checkout that
+   coding agents also use, one `git worktree` per task.** AGENTS.md,
+   [Prime Directive 11](./AGENTS.md#prime-directives) and
+   [Multi-agent working discipline](./AGENTS.md#multi-agent-working-discipline) item 2.
+5. **A change that publishes carries a changeset, and the PR body and the changeset body
+   each declare a `Clause-②:` line and a `Metadata-protocol:` line.** AGENTS.md,
+   [Post-Task Checklist](./AGENTS.md#post-task-checklist) step 3, which has the exact
+   values and what each one requires.
+   - `Clause-②` answers one question: does this change widen or narrow what a published
+     package accepts or exposes (its accept set or public surface)? `Clause-②: no` when
+     it does neither; `Clause-②: yes` when it does.
+   - `Metadata-protocol` answers another: what changed in what a metadata author can
+     write? `added`, `narrowed`, `semantic`, or `none` for everything else.
+   - Each is a line of its own, starting with the key, so the `Check Changeset` gate can
+     read it.
+6. **Touched `packages/spec`? Regenerate and commit its generated artifacts before you
+   push.** AGENTS.md,
+   [Touched `packages/spec`?](./AGENTS.md#touched-packagesspec-regenerate-its-artifacts-before-pushing).
+7. **Generated and release-owned files are never hand-edited in your pull request**
+   (`content/docs/references/`, `packages/*/CHANGELOG.md`, `content/docs/releases/`),
+   and only the maintainer cuts a release. AGENTS.md,
+   [Documentation Guardrails](./AGENTS.md#documentation-guardrails) and
+   [Prime Directive 15](./AGENTS.md#prime-directives).
+8. **Issue and pull request titles, bodies and comments are written in English.**
+   AGENTS.md, [Communication](./AGENTS.md#communication).
 
 ## Where Things Live
 
@@ -302,7 +348,8 @@ new page needs before it shows up in the navigation.
 
 Push your branch to your fork and open a pull request against `main`. Its first line
 names the issue it fixes (`Fixes #1234`). The body says what changed, why, and how you
-verified it.
+verified it. The [pull request template](./.github/PULL_REQUEST_TEMPLATE.md) lays out
+that body, the two declaration lines and the [Human Minimum](#human-minimum) checklist.
 
 ### Review Process
 
