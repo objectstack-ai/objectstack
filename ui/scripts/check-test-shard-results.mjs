@@ -201,8 +201,8 @@
  * ## The shard COUNT is passed in, and pinned against the matrix
  *
  * `--shards` is the one number this file does not derive. Deriving it from the
- * workflow would mean a second YAML parser answering a question
- * `scripts/__tests__/workflow-checks.ts` already answers; instead
+ * workflow would mean a YAML parser here answering a question the workflow's
+ * own matrix already answers; instead
  * `scripts/__tests__/check-test-shard-results.test.ts` pins the argument
  * written in `ci.yml` against that same file's `shard: [...]` matrix, so the
  * two declarations cannot drift apart silently.

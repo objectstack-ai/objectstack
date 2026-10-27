@@ -4033,6 +4033,18 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
  *   stack's OWN declarations (top level and every assembled package body) is
  *   also the boundary: a demo account can hold only what its application
  *   declares, never a platform set such as `admin_full_access`.
+ *
+ * And three about `manager`, which the provisioning resolves within this same
+ * list once every entry has its account:
+ *
+ * - **A manager that names no entry.** The boot has no account to link, so
+ *   the approval rung it was declared for would reach nobody.
+ * - **An entry that names itself.** The set-manager write refuses it, so the
+ *   link would never land, and an approval routed to the submitter is the
+ *   approval the manager rung exists to prevent.
+ * - **A chain that loops back on itself.** The set-manager write refuses the
+ *   link that closes the loop, so one entry of the loop would silently keep
+ *   no manager, and which one would depend on the order the boot walked them.
  */
 function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4103,6 +4115,75 @@ function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
         'one account, so every entry after the first would never be applied. Give each demo account its own ' +
         'address.',
     );
+  }
+  errors.push(...collectDemoStaffManagerErrors(staff, indicesByEmail));
+  return errors;
+}
+
+/**
+ * The `manager` half of {@link collectDemoStaffErrors}: every `manager` must
+ * name another entry's address, and following the links from any entry must
+ * reach an entry with no manager. A repeated address resolves to its first
+ * entry here; the repeat itself is already refused above.
+ */
+function collectDemoStaffManagerErrors(
+  staff: readonly unknown[],
+  indicesByEmail: ReadonlyMap<string, number[]>,
+): string[] {
+  const errors: string[] = [];
+  // Entry index -> the entry index its `manager` resolves to.
+  const managerOf = new Map<number, number>();
+
+  for (const [i, entry] of staff.entries()) {
+    if (!isRecord(entry) || typeof entry.manager !== 'string' || !entry.manager) continue;
+    const where = `stack.demoStaff[${i}]`;
+    const address = entry.manager.trim().toLowerCase();
+    const target = indicesByEmail.get(address)?.[0];
+    if (target === i) {
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) names itself as its manager ('${entry.manager}'). An ` +
+          'approval routed to the manager rung would reach the person who submitted it, so the link is never ' +
+          'written. Name another demo account, or leave manager out.',
+      );
+      continue;
+    }
+    if (target === undefined) {
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) names manager '${entry.manager}', which is the address ` +
+          'of no demoStaff entry. A manager must be another demo account of this stack; declare that person in ' +
+          'demoStaff, or correct the address.',
+      );
+      continue;
+    }
+    managerOf.set(i, target);
+  }
+
+  // Walk each chain upward. An entry already known to reach a top (or to sit
+  // in a reported loop) ends the walk, so every link is followed once.
+  const settled = new Set<number>();
+  for (const start of managerOf.keys()) {
+    const path: number[] = [];
+    const onPath = new Set<number>();
+    let cursor: number | undefined = start;
+    while (cursor !== undefined && !settled.has(cursor) && !onPath.has(cursor)) {
+      path.push(cursor);
+      onPath.add(cursor);
+      cursor = managerOf.get(cursor);
+    }
+    if (cursor !== undefined && onPath.has(cursor)) {
+      const loop = path.slice(path.indexOf(cursor));
+      const names = [...loop, cursor].map((i) => {
+        const entry = staff[i];
+        return `'${isRecord(entry) ? String(entry.name) : `#${i}`}'`;
+      });
+      errors.push(
+        `The managers declared in \`demoStaff\` form a loop: ${names.join(' → ')} ` +
+          `(${joinDeclarationOrigins(loop.map((i) => `stack.demoStaff[${i}]`))}). A reporting chain must reach ` +
+          'someone with no manager; the link that closes the loop would be refused at the boot, leaving one of ' +
+          'these accounts with no manager. Remove manager from one of these entries.',
+      );
+    }
+    for (const i of path) settled.add(i);
   }
   return errors;
 }

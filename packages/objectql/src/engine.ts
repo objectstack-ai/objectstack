@@ -301,7 +301,8 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
+import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -2915,6 +2916,13 @@ function applyFormulaPlan(
   permissions?: EvalPermissions,
   onFault?: FormulaFaultSink,
   related?: FormulaRelated,
+  /**
+   * [#26608] What `label(record.<field>)` reads: the object's option labels,
+   * built once per call by {@link readerOptionLabels} (a read, in the reader's
+   * locale) or {@link declaredOptionLabels} (a stored expression). `undefined`
+   * when no formula of the plan calls `label()`.
+   */
+  optionLabels?: EvalOptionLabels,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2943,7 +2951,7 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: scope });
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -3015,6 +3023,8 @@ async function hydrateWriteFormulas(
   onFault?: FormulaFaultSink,
   /** [#24197] The hops the plan reads, resolved over `records` as a read resolves them. */
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
+  /** [#26608] The option labels `label()` reads, in the writer's locale — the reader of this response. */
+  optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -3022,7 +3032,10 @@ async function hydrateWriteFormulas(
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records));
+  applyFormulaPlan(
+    plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records),
+    optionLabelsFor?.(plan),
+  );
 }
 
 /**
@@ -3114,6 +3127,12 @@ interface StoredExpressionServing {
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>;
   onFault?: FormulaFaultSink;
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>;
+  /**
+   * [#26608] The option labels `label()` reads — always the DECLARED ones
+   * ({@link declaredOptionLabels}): a stored value is computed once and read by
+   * every later reader and by search, so it never depends on the writer's locale.
+   */
+  optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined;
 }
 
 /**
@@ -3135,7 +3154,7 @@ async function computeStoredExpressions(
   const scratch = images.map((image) => ({ ...image }));
   applyFormulaPlan(
     plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
-    await serving.relatedFor?.(plan, scratch),
+    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan),
   );
   return scratch.map((row) => {
     const values: Record<string, unknown> = {};
@@ -3313,6 +3332,9 @@ function replacedStoredExpressionFields(
  * above. [#24197] For the same reason it preloads no relationship hop, so a
  * formula reading `record.<reference>.<field>` yields `null` here too. The read and write paths resolve the map first
  * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
+ * [#26608] And it holds no i18n service, so `label(record.<field>)` reads the
+ * DECLARED option labels here ({@link declaredOptionLabels}), whatever
+ * `execCtx.locale` says.
  * A caller that holds a read channel and wants the read's answer calls
  * {@link ObjectQL.serveFormulaField} (through `ScopedContext.serveFormulaField`).
  *
@@ -3333,7 +3355,7 @@ export function evaluateFormulaField(
   const scratch: Record<string, unknown> = { ...record };
   // [#24197] Synchronous, so it preloads no hop: a formula reading through a
   // reference yields `null` here, as a `can()` formula does above.
-  applyFormulaPlan(plan, [scratch], execCtx);
+  applyFormulaPlan(plan, [scratch], execCtx, undefined, undefined, undefined, declaredOptionLabels(schema, plan));
   return scratch[field];
 }
 
@@ -4848,6 +4870,12 @@ export class ObjectQL implements IObjectQLEngine {
     // the same reason `t` is — the setter accepts any partial shim, and a shim
     // that cannot say what it holds is simply not negotiated against.
     getLocales?: () => string[];
+    // [#26608] What a formula's `label()` is translated through: the bundle
+    // and the declared locale chain, read as the metadata route reads them
+    // (`formula-option-labels.ts`). Optional for the same reason.
+    getTranslations?: (locale: string) => Record<string, unknown>;
+    getFallbackLocale?: () => string | undefined;
+    getDefaultLocale?: () => string | undefined;
   };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
@@ -6599,8 +6627,25 @@ export class ObjectQL implements IObjectQLEngine {
     const scratch: Record<string, unknown> = { ...record };
     applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
       objectName, plan, [scratch], context, this.permissionResolution(context),
-    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context));
+    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
+    this.formulaOptionLabels(schema, plan, context));
     return scratch[field];
+  }
+
+  /**
+   * [#26608] The option labels `label(record.<field>)` reads on a read or a
+   * write response of `schema`'s object: in the reader's locale
+   * (`ExecutionContext.locale`, which the request's `Accept-Language` sets),
+   * translated through the bridged i18n service as `GET /meta/object/:name`
+   * serves the object to the same reader — see {@link readerOptionLabels}.
+   * `undefined` when no formula of `plan` calls `label()`.
+   */
+  private formulaOptionLabels(
+    schema: unknown,
+    plan: FormulaPlanEntry[],
+    context: { locale?: string } | undefined,
+  ): EvalOptionLabels | undefined {
+    return readerOptionLabels(schema, plan, context?.locale, this.i18nService);
   }
 
   /**
@@ -9412,8 +9457,17 @@ export class ObjectQL implements IObjectQLEngine {
    * locale against the field's DECLARED label. The service adds two things —
    * a deployment's `validation.field.*` message overrides, and the field's
    * TRANSLATED label for apps whose declared labels are in another language.
+   * [#26608] It is also what a formula's `label(record.<field>)` is translated
+   * through on a read and a write response (`getTranslations` plus the
+   * declared locale chain); without it `label()` reads the declared labels.
    */
-  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string; getLocales?: () => string[] }): void {
+  setI18nService(service: {
+    t?: (key: string, locale: string, params?: Record<string, unknown>) => string;
+    getLocales?: () => string[];
+    getTranslations?: (locale: string) => Record<string, unknown>;
+    getFallbackLocale?: () => string | undefined;
+    getDefaultLocale?: () => string | undefined;
+  }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
   }
@@ -13573,7 +13627,7 @@ export class ObjectQL implements IObjectQLEngine {
               // [#24197] One batched read per reference field for this PAGE —
               // the rows the driver returned, after limit/offset.
               _findSchema, _findFormula.plan, result, opCtx.context, query,
-            ));
+            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context));
           }
 
           // Post-process: expand related records if expand is requested
@@ -13860,7 +13914,7 @@ export class ObjectQL implements IObjectQLEngine {
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
         ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
           _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
-        ));
+        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context));
       }
 
       // Post-process: expand related records if expand is requested
@@ -14155,8 +14209,10 @@ export class ObjectQL implements IObjectQLEngine {
    * and is refused by the write.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
-   * stored row above, the master-detail headers, and the related rows a
-   * traversing rule names (see the `previewRelatedForRow` block below).
+   * stored row above, the master-detail headers, the related rows a
+   * traversing rule names (see the `previewRelatedForRow` block below), and
+   * [#26684] on an insert, the write's reference check on each id the caller
+   * supplied, behind the same write-gate probe as the related rows.
    * Validation itself is in-process, which is what makes row-by-row dry run
    * of a large import affordable.
    */
@@ -14561,7 +14617,10 @@ export class ObjectQL implements IObjectQLEngine {
       ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
       : undefined;
 
-    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
+    // [#26684] Judged one row after another, as the write's validation loop
+    // judges them: a row's admission (the reference check below) is awaited
+    // before the next row reads what the earlier rows added.
+    const judgeRow = async (row: Record<string, unknown>, i: number): Promise<NonNullable<ValidateDataResponse['results']>[number]> => {
       const warnings: ValidateDataIssue[] = [];
       // Warn-first admissions are the posture signal the caller came for, so
       // they are reported — into this row's own bucket, never into the
@@ -14617,6 +14676,17 @@ export class ObjectQL implements IObjectQLEngine {
           related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
         }));
+        // [#26684] The insert's admit step, run as `insert()` runs it: after
+        // the rules, the reference check on the ids the caller supplied
+        // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
+        // a row the write refuses on a dangling reference is refused here
+        // with the same finding, and is not counted toward a later row's
+        // parent summary. ⛔ Behind the same write-gate probe as the related
+        // read above: the probe on a `lookup` target is elevated, so a caller
+        // the probe refuses learns nothing about which ids exist.
+        if (mode === 'insert' && mayWrite) {
+          await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
+        }
       } catch (e) {
         if (e instanceof ValidationError) {
           return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
@@ -14633,7 +14703,9 @@ export class ObjectQL implements IObjectQLEngine {
       // when nothing would be taken.
       const droppedFields = droppedFieldEvents(object, computedStrip.droppedPerRow[i]!, readonlyDroppedPerRow[i]!);
       return { valid: true, errors: [], warnings, ...(droppedFields.length > 0 ? { droppedFields } : {}) };
-    });
+    };
+    const results: NonNullable<ValidateDataResponse['results']> = [];
+    for (let i = 0; i < rows.length; i++) results.push(await judgeRow(rows[i]!, i));
 
     return {
       object,
@@ -15018,6 +15090,7 @@ export class ObjectQL implements IObjectQLEngine {
         permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
         onFault: this.formulaFaultSink(object),
         relatedFor: (plan, records) => this.resolveFormulaRelated(this._registry.getObject(object), plan, records, opCtx.context),
+        optionLabelsFor: (plan) => declaredOptionLabels(this._registry.getObject(object), plan),
       };
       if (storedExpressionPlan.length > 0) {
         const defaultedRows = (isBatch ? defaultedData : [defaultedData]) as Array<Record<string, unknown>>;
@@ -15955,6 +16028,8 @@ export class ObjectQL implements IObjectQLEngine {
           (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
           this.formulaFaultSink(object),
           (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
+          // [#26608] The 201 body is what the save toast names the record from.
+          (plan) => this.formulaOptionLabels(schemaForValidation, plan, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -16466,6 +16541,7 @@ export class ObjectQL implements IObjectQLEngine {
          permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
          onFault: this.formulaFaultSink(object),
          relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
+         optionLabelsFor: (plan) => declaredOptionLabels(updateSchema, plan),
        };
        const undeclared = undeclaredWriteFieldErrors(
          object,
@@ -17911,6 +17987,7 @@ export class ObjectQL implements IObjectQLEngine {
                (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
                this.formulaFaultSink(object),
                (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
+               (plan) => this.formulaOptionLabels(updateSchema, plan, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view

@@ -423,7 +423,7 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
     sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
   },
   'packages/metadata-protocol/src/migrations/partial-index-probe.ts': {
-    calls: 2,
+    calls: 6,
     sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
   },
   'packages/metadata-protocol/src/migrations/read-probe.ts': {

@@ -318,7 +318,11 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
 
         it('reports at ERROR, naming what is not enforced, the refusal, and the row query', async () => {
             const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
-            await ensureSysSettingIdentityIndex(exec, logger);
+            // [#26630] A seam that ANSWERS a SELECT the way the driver's does, so
+            // the conflict's count has rows to read (`db.exec` returns nothing).
+            const answering: IndexExec = async (sql: string) =>
+                /^\s*SELECT/i.test(sql) ? db.prepare(sql).all() : db.exec(sql);
+            await ensureSysSettingIdentityIndex(answering, logger);
 
             // `error`, not `warn`: the platform keeps looking healthy while a row
             // identity it states it enforces is void (AGENTS.md durability rule).
@@ -327,6 +331,9 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             const [message] = logger.error.mock.calls[0]!;
             expect(message).toContain(SYS_SETTING_IDENTITY_INDEX_NAME);
             expect(message).toContain('The previous index is left in place');
+            // [#26630] With its size: keys and rows, and no value of any row.
+            expect(message).toContain('(1 duplicated key, held by 2 rows)');
+            expect(message).not.toContain('"v"');
             expect(message).toContain('no row is discarded automatically');
             expect(message).toContain(buildSysSettingDuplicateProbeSql());
             expect(message).toContain('os migrate duplicates');

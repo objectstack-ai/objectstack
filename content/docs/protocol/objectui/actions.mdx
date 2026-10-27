@@ -245,6 +245,7 @@ interface Action {
   visible?: ExpressionInput;    // Visibility predicate (CEL)
   requiresFeature?: string;     // Public auth feature flag gate — lowered into `visible` at parse time
   disabled?: boolean | ExpressionInput; // Disabled when TRUE (CEL)
+  disabledReason?: I18nLabel;   // Why it is greyed — hover title + accessible description (display only)
 
   // Bulk
   bulkEnabled?: boolean;        // Apply to multiple selected records
@@ -332,6 +333,21 @@ disabled: "record.status != 'paid'"
 <Callout type="warn">
 Predicates are **bare CEL** — `record.status == 'paid'`, not `${record.status == 'paid'}` and not `{record.status} == 'paid'` (in CEL, `{…}` is a map literal). A `${…}`-wrapped or brace-wrapped predicate is not evaluated as a boolean.
 </Callout>
+
+#### Saying why: `disabledReason`
+
+A greyed action says **why** with `disabledReason`, the sentence beside the `disabled` predicate. It is meant for the button's hover title and its accessible description (a menu item, under its label). The console does not show it yet: until its greyed-action readers ship, every greyed action shows the console's default reason, "Not available for this record", and `os validate` warns an author who declares the key.
+
+```yaml
+name: submit_for_approval
+label: Submit for approval
+disabled: "record.legal_review_status != 'approved'"
+disabledReason: An approved legal review is required before the contract enters approval.
+```
+
+- It is an `I18nLabel`: a plain string, translated at `objects.<object>._actions.<action>.disabledReason` (`globalActions.<action>.disabledReason` for an action with no `objectName`), or an inline locale map. `os i18n extract` scaffolds the key.
+- A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep the default.
+- It is **display only**. It does not change what `disabled` evaluates to, nothing reads it as a condition, and it is not access control: a call that reaches the server anyway is refused by the action's own rules (its body or hook, `requiredPermissions`), never by this text.
 
 #### Evaluation context
 

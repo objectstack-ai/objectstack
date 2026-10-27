@@ -23,7 +23,8 @@ import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { I18nLabelSchema } from './i18n.zod';
+import { I18nLabelSchema, InlineLocaleMapSchema } from './i18n.zod';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
@@ -888,6 +889,37 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
 
 /**
+ * [#26619] `disabledReason` — the sentence a greyed action shows to say WHY it
+ * is unavailable, beside the `disabled` predicate that greys it.
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.disabledReason`, or an inline locale map),
+ * so it takes the copy keys' translation route and not a predicate's. It is
+ * DISPLAY ONLY, and both halves of that are the contract:
+ *
+ * - it never enters the server's admission — a disabled action that is called
+ *   anyway is refused by its own rules (a hook, `requiredPermissions`), never
+ *   by this text, so a wrong reason misleads a reader and leaks nothing;
+ * - it is not an expression — no lint or evaluator reads it as a condition,
+ *   and a predicate-looking value is just a sentence.
+ *
+ * A blank string is refused: it would replace the console's default, "Not
+ * available for this record", with an empty tooltip. Omitting the key is how
+ * an author keeps that default. The rule is {@link NON_BLANK_STRING}, so the
+ * published JSON Schema carries it too (`minLength` + a `\S` pattern) rather
+ * than accepting a document the parse refuses. The locale-map arm is
+ * `InlineLocaleMapSchema` unchanged — the I18nLabel every other copy key takes.
+ */
+const DISABLED_REASON_BLANK =
+  'a blank `disabledReason` would replace the console\'s default reason, "Not available for this '
+  + 'record", with an empty tooltip. Write the sentence that says what is missing (e.g. "An '
+  + 'approved legal review is required first."), or omit the key to keep the default.';
+const actionDisabledReason = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: DISABLED_REASON_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -916,6 +948,11 @@ const actionObject = () => strictObject({
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
     visibleWhen: 'visible', showWhen: 'visible',
     disabledWhen: 'disabled',
+    // [#26619] The words an author reaches for when naming the greyed
+    // action's explanation by the surface it lands on (a tooltip, a hint) or
+    // by the copy keys' `*Message` family.
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1542,6 +1579,11 @@ const actionObject = () => strictObject({
    * gone entirely.
    */
   disabled: ActionConditionInputSchema.optional().describe('Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled.'),
+  /**
+   * Why the action is greyed — the reason `disabled` gives the user. Display
+   * only; the contract is on {@link actionDisabledReason}.
+   */
+  disabledReason: actionDisabledReason().optional().describe('Display-only reason for a greyed action, for its hover title and accessible description while `disabled` evaluates TRUE (declared ahead of its console reader: no renderer shows it yet) — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a

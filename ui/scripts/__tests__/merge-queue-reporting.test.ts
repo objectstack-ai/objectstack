@@ -112,7 +112,7 @@ const MUST_SUBSCRIBE_MERGE_GROUP = new Map<string, string>([
 // workflow that exists` and `runs the test suite on a queue build, not only on
 // pull requests`); the floor derived from `REQUIRED_CONTEXTS` (objectui#6160:
 // `deriveMergeGroupFloor()` and its three cases, which resolved each context
-// through `./workflow-checks.ts`); and step 2 (`filters no pull request at the
+// through the since-deleted `workflow-checks.ts`); and step 2 (`filters no pull request at the
 // trigger`, `keeps ONE ignore list, on the push trigger`, `gates every step
 // after the gate, in every gated job` and both fail-OPEN cases, on objectui's
 // `ci.yml` and `lint.yml`). Each read objectui's workflows from
