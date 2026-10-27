@@ -38,7 +38,7 @@
  *
  * A folded list stays MOUNTED, hidden, so it keeps listening for writes: when
  * it gains a record it answers "not empty" and returns to its place. A refetch
- * keeps the list's last answer while it is in flight (`useListEmptyAnswer`), so a
+ * keeps the list's last answer while it is in flight (the block's `reportListEmpty`), so a
  * write elsewhere does not unfold and refold the whole stack around it.
  */
 
@@ -69,18 +69,15 @@ interface Member extends EmptyFoldMemberState {
 }
 
 /** The verdict for one stack: which lists fold, and which list draws the line. */
-export interface EmptyFoldVerdict {
+interface EmptyFoldVerdict {
   folded: string[];
   host: string | null;
 }
 
 const NO_FOLD: EmptyFoldVerdict = { folded: [], host: null };
 
-/**
- * The fold rule, over the stack's lists in document order. Pure: exported for
- * the tests that pin it; see the file header for the rule in words.
- */
-export function decideEmptyFold(
+/** The fold rule, over the stack's lists in document order; the file header states it in words. */
+function decideEmptyFold(
   ordered: ReadonlyArray<Pick<EmptyFoldMemberState, 'empty' | 'foldable'> & { id: string }>,
 ): EmptyFoldVerdict {
   if (ordered.length < 2) return NO_FOLD;
@@ -128,20 +125,6 @@ const stackOf = (container: Element): Stack => {
 
 const noSubscribe = (): (() => void) => () => {};
 const noVersion = (): number => 0;
-
-/**
- * The list's own answer to "am I empty", as its `RelatedList` reports it
- * (`onEmptyChange`). A read in flight (`null`) after a first answer keeps that
- * answer — see the file header — so only the very first read reads "not
- * answered yet".
- */
-export function useListEmptyAnswer(): [boolean | null, (empty: boolean | null) => void] {
-  const [empty, setEmpty] = React.useState<boolean | null>(null);
-  const report = React.useCallback((next: boolean | null) => {
-    if (next !== null) setEmpty(next);
-  }, []);
-  return [empty, report];
-}
 
 export interface RelatedListStackSlotProps extends EmptyFoldMemberState {
   /** The list's New handler; absent when the list offers no New. */
