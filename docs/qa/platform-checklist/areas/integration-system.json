@@ -9,7 +9,7 @@
       "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -82,7 +82,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts — negative[0] ONLY: its case 'materializes all three generic-executor instances at boot — mcp included, state ready' asserts that showcase_erp_catalog is absent from the runtime listing. No pin asserts a full acceptance clause, so acceptance[0]–[5] and negative[1] are driven by hand. That case and the dispatch case 'dispatches the MCP tool end-to-end through the flow connector_action' assert halves only: acceptance[0]'s mcp variant (origin 'declarative', state 'ready') and the rest and openapi variants' state 'ready', not their origin, where the clause asks one verdict per variant; acceptance[1]'s mcp half as containment (echo_upper is among the actions), not the openapi half (getHealth); acceptance[2]'s mcp dispatch (the echo flow's output carries OBJECTSTACK), not the rest ping. acceptance[3]–[5] and negative[1] (the authoring refusals, the unknown-provider boot error, the disabled declaration) rest on no pin at all"
+        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts — negative[0] ONLY: its case 'materializes all three generic-executor instances at boot — mcp included, state ready' asserts that showcase_erp_catalog is absent from the runtime listing. No pin asserts a full acceptance clause, so acceptance[0]–[5] and negative[1] are driven by hand. That case and the dispatch case 'dispatches the MCP tool end-to-end through the flow connector_action' assert halves only: acceptance[0]'s mcp variant (origin 'declarative', state 'ready') and the rest and openapi variants' state 'ready', not their origin, where the clause asks one verdict per variant; acceptance[1]'s mcp half as containment (echo_upper is among the actions), not the openapi half (getHealth); acceptance[2]'s mcp dispatch (the echo flow's output carries OBJECTSTACK), not the rest ping. acceptance[3]–[5] and negative[1] (the authoring refusals, the unknown-provider boot error, the disabled declaration) rest on no pin at their oracle's layer. Below it: packages/spec/src/integration/connector-provider.test.ts asserts the three superRefine refusals by regex fragment at schema parse (acceptance[3] and negative[1] at unit; no build is run), and packages/services/service-automation/src/connector-materialization.test.ts boots a LiteKernel that rejects an unknown provider ('no provider factory', acceptance[4]) and omits disabled or removed instances from the engine registry over a fake provider (acceptance[5]), in process; the served boot's output and GET /automation/connectors stay the live run's"
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)",
@@ -122,6 +122,12 @@
           "date": "2026-10-26",
           "change": "negative[1] and steps[5] count the build rejections as three — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844): negative[1] said 'any of the four malformed-entry builds' while acceptance[3] lists three. The fourth probe, provider: 'no_such_provider', builds clean (connector.zod.ts declares provider as an open snake_case string) and is acceptance[4]'s boot error, so steps[5] now boots it. Read on main 9753d163. The same run read the automated.ref self-description as accurate; it is unchanged. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "automated.ref names the two pins below acceptance[3]–[5] and negative[1] instead of saying no pin exists. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored those clauses partial from connector-provider.test.ts and connector-materialization.test.ts, neither in the ref. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -873,7 +879,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -970,7 +976,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts — on its own fixture package (auth.password_reset), not the showcase template: acceptance[0] (the registry serves the authored item beside the built-in and sendTemplate renders it, the subject exact and the body by containment), and halves only of acceptance[3] (the exact zh-CN member is reachable; not the no-folding case or the TEMPLATE_NOT_FOUND end) and of acceptance[5] (a Studio save sends on the next mail with no restart; not redeploy survival, not the declared-source reload). + packages/qa/dogfood/test/email-template-overlay-survives-boot.dogfood.test.ts ('after a cold boot the metadata door and the rendered mail both carry the admin's wording') — acceptance[5]'s redeploy-survival half on the showcase. + packages/qa/dogfood/test/email-template-two-locales-survive-boot.dogfood.test.ts ('control: a locale nobody saved keeps the package ladder') — acceptance[3]'s en-US rung for a locale with no row (ja-JP). acceptance[1], [2], [4], [6] and [7] rest on no pin: drive them by hand"
+        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts — on its own fixture package (auth.password_reset), not the showcase template: acceptance[0] (the registry serves the authored item beside the built-in and sendTemplate renders it, the subject exact and the body by containment), and halves only of acceptance[3] (the exact zh-CN member is reachable; not the no-folding case or the TEMPLATE_NOT_FOUND end) and of acceptance[5] (a Studio save sends on the next mail with no restart; not redeploy survival, not the declared-source reload). + packages/qa/dogfood/test/email-template-overlay-survives-boot.dogfood.test.ts ('after a cold boot the metadata door and the rendered mail both carry the admin's wording') — acceptance[5]'s redeploy-survival half on the showcase. + packages/qa/dogfood/test/email-template-two-locales-survive-boot.dogfood.test.ts ('control: a locale nobody saved keeps the package ladder') — acceptance[3]'s en-US rung for a locale with no row (ja-JP). acceptance[6] and [7] rest on no pin, and acceptance[1], [2] and [4] on one below their oracle's layer: packages/plugins/plugin-email/src/send-template.test.ts drives EmailService over a fake loader and a capture transport, asserting MISSING_VARIABLES (acceptance[1]), TEMPLATE_INACTIVE (acceptance[2]) and the fromOverride and derived text (acceptance[4]) at unit — whether the error names the variable, the registry-resolved inactive item, replyTo and the row stay hand-driven: drive them by hand"
       },
       "source": [
         "packages/spec/src/system/email-template.zod.ts#fromOverride (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
@@ -1030,6 +1036,12 @@
           "date": "2026-10-26",
           "change": "automated.ref narrowed per clause and widened by two pins — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). The ref named one e2e pin for an 8-clause item, so `kind: e2e` over-implied coverage: acceptance[1], [2], [4], [6] and [7] rest on no pin. a5: email-template-overlay-survives-boot.dogfood.test.ts pins the redeploy-survival half and was not in the ref. a3: email-template-two-locales-survive-boot.dogfood.test.ts's control case pins the locale ladder's en-US rung and was not in the ref. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "automated.ref names send-template.test.ts under acceptance[1], [2] and [4]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the ref said those clauses rest on no pin, while the mapping pass scored them partial from that unit file. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -1233,7 +1245,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1334,7 +1346,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts. Both mount the real route registrar on the real HonoHttpServer adapter over STUBBED datasource-admin and external-datasource services and a fake auth service: the route layer, and nothing below it runs. They score whole: acceptance[7] (its oracle is test: admin-routes' #4225 cases, each federation route's 503 naming external-datasource while datasource-admin still serves, and envelope's 'the external-datasource service is not wired'), negative[4] and negative[5] (attributions the route layer owns: the 503's service, and each route's refusal code, admin-routes' #4249 cases on both services). They hold route-layer halves only, evidence beside the live answer and never its pass (RUNNER rule 6): acceptance[0]'s admin half (the static catalog with its configSchema, mounted with no service), acceptance[2]'s inline secret split out of the draft, acceptance[4]'s 201 envelope, acceptance[6]'s service refusal answered 400 DATASOURCE_ADMIN_ERROR in the declared envelope, and acceptance[8]'s 404 RESOURCE_NOT_FOUND. Neither drives the capability floor (acceptance[1], and acceptance[0]'s anonymous 401), the real service, the secret binder or the store (acceptance[3], acceptance[5], and the persistence and health halves): drive os dev for every api clause. + packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts — acceptance[8]'s LEDGER half whole: every mounted datasource-admin route has a ledger row and every row is mounted, both directions derived from the registrar against a non-empty enumeration. acceptance[8]'s 404 half stays a live reading"
+        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts. Both mount the real route registrar on the real HonoHttpServer adapter over STUBBED datasource-admin and external-datasource services and a fake auth service: the route layer, and nothing below it runs. They score whole: acceptance[7] (its oracle is test: admin-routes' #4225 cases, each federation route's 503 naming external-datasource while datasource-admin still serves, and envelope's 'the external-datasource service is not wired'), negative[4] and negative[5] (attributions the route layer owns: the 503's service, and each route's refusal code, admin-routes' #4249 cases on both services). They hold route-layer halves only, evidence beside the live answer and never its pass (RUNNER rule 6): acceptance[0]'s admin half (the static catalog with its configSchema, mounted with no service), acceptance[2]'s inline secret split out of the draft, acceptance[4]'s 201 envelope, acceptance[6]'s service refusal answered 400 DATASOURCE_ADMIN_ERROR in the declared envelope, and acceptance[8]'s 404 RESOURCE_NOT_FOUND. Neither drives the capability floor (acceptance[1], and acceptance[0]'s anonymous 401), the real service, the secret binder or the store (acceptance[3], acceptance[5], and the persistence and health halves): drive os dev for every api clause. + packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts — acceptance[8]'s LEDGER half whole: every mounted datasource-admin route has a ledger row and every row is mounted, both directions derived from the registrar against a non-empty enumeration. acceptance[8]'s 404 half stays a live reading. Corroborating below the oracle's layer, none scoring a clause alone: packages/services/service-datasource/src/__tests__/admin-routes-auth-guard.test.ts drives the capability floor that the two pins above do not, on the same real adapter over fake auth and grants — all eleven routes answer 401 UNAUTHENTICATED or 403 PERMISSION_DENIED naming the capability before dispatch (route-layer halves of acceptance[0]'s anonymous 401, acceptance[1], negative[1] and negative[2]); packages/qa/dogfood/test/datasource-meta-door-reaches-admin-door.dogfood.test.ts asserts POST /datasources 201 and the listing's origin 'runtime' on the showcase (acceptance[4], health status unasserted); packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts and datasource-config-redaction.test.ts assert the service-level getDatasource redaction and credentialsRef persistence in process (acceptance[5] and negative[0], no HTTP list or detail read), and the former the credential re-home and refusal (acceptance[3] and negative[3])"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
@@ -1387,6 +1399,12 @@
           "date": "2026-10-26",
           "change": "automated.ref names the route-ledger conformance test, and acceptance[8].verify scopes its two halves — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844): acceptance[8]'s ledger half named datasource-route-ledger.conformance.test.ts as citable evidence, but the ref did not carry it, and the 404 half is pinned over a stubbed service only. Read on main 9753d163 (the ledger holds 11 rows). No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "automated.ref names four corroborating pins, among them the capability-floor pin the revision-6 row said this ref did not name. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored acceptance[0], [1] and [3]–[5] and negatives[0]–[3] partial from admin-routes-auth-guard.test.ts, datasource-meta-door-reaches-admin-door.dogfood.test.ts, datasource-admin-plugin.test.ts and datasource-config-redaction.test.ts, none in the ref, while the ref said nothing drives the capability floor. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -1395,7 +1413,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1467,7 +1485,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts — the real HonoHttpServer over the real ExternalDatasourceService (a fake introspector), twinning listRemoteTables ONLY: acceptance[1] at that layer (its '#7955' describe), acceptance[3]'s remote-tables ≡ external/tables half, and acceptance[4]'s agreement (status and code compared across spellings; the 403 message is not asserted). + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — a real HonoHttpServer over vi.fn services, route-level HTTP and not a booted stack: the admin spelling's 400 EXTERNAL_DATASOURCE_ERROR (#4249 cases, negative[0]) and object-draft's 400 without table by status (negative[2]), evidence beside the live answers. Not pinned: the LIVE mount (real showcase fixture, real sqlite introspection), the draft twin, the shared refusal across spellings and the 403 message — drive os dev for them"
+        "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts — the real HonoHttpServer over the real ExternalDatasourceService (a fake introspector), twinning listRemoteTables ONLY: acceptance[1] at that layer (its '#7955' describe), acceptance[3]'s remote-tables ≡ external/tables half, and acceptance[4]'s agreement (status and code compared across spellings; the 403 message is not asserted). + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — a real HonoHttpServer over vi.fn services, route-level HTTP and not a booted stack: the admin spelling's 400 EXTERNAL_DATASOURCE_ERROR (#4249 cases, negative[0]) and object-draft's 400 without table by status (negative[2]), evidence beside the live answers. packages/services/service-datasource/src/__tests__/external-datasource-service.test.ts computes columnCount in the service over a fake introspector (acceptance[0] at unit). Not pinned: the LIVE mount (real showcase fixture, real sqlite introspection), the draft twin, the shared refusal across spellings and the 403 message — drive os dev for them"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (remote-tables + the #7955 coercion comment), (object-draft), + (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
@@ -1513,6 +1531,12 @@
           "date": "2026-10-26",
           "change": "acceptance[3] (verify, evidence), acceptance[4].verify and automated.ref scoped to what the pins assert — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a3: the twin test twins listRemoteTables only; the draft twin and the shared 400 EXTERNAL_DATASOURCE_ERROR refusal across spellings are not pinned (admin-routes covers the admin spelling's 400 only). a4: the twin admission cases compare status and code, never the 403 message naming manage_platform_settings. n0/n2: admin-routes.test.ts drives a real HonoHttpServer over vi.fn services, route-level HTTP and not a booted stack. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "automated.ref names the service unit pin under acceptance[0]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored acceptance[0] partial from external-datasource-service.test.ts, not in the ref. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -2035,7 +2059,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2126,7 +2150,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts, for acceptance[6] ONLY: the 503 SERVICE_UNAVAILABLE → ExternalServiceUnavailableError cases. The Console builds from this repository's ui/ tree (`pnpm console:build`), so run it on the run subject sha (`pnpm --filter @object-ui/app-shell test`) and cite the output; every other clause still needs the run"
+        "ref": "ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts, for acceptance[6] ONLY: the 503 SERVICE_UNAVAILABLE → ExternalServiceUnavailableError cases. The Console builds from this repository's ui/ tree (`pnpm console:build`), so run it on the run subject sha (`pnpm --filter @object-ui/app-shell test`) and cite the output; every other clause still needs the run. packages/rest/src/external-datasource-routes-auth-guard.test.ts corroborates acceptance[5] and negative[2] below HTTP (the federation handlers captured off a fake server and called with a fake auth service; no adapter, no served stack)"
       },
       "source": [
         "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the 503 detector, which reads the envelope since objectui#11628; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
@@ -2173,6 +2197,12 @@
           "date": "2026-10-26",
           "change": "acceptance[6] (clause, verify) and automated.ref respelled for the in-workspace Console — the retired objectui pin wording #26035 left to the 18.2.0 ledger cards (card #25844). There is no .objectui-sha on main 9753d163: the Console builds from ui/ (`pnpm console:build`), and the pinned test lives at ui/packages/app-shell/src/views/metadata-admin/external/api.test.ts with its 503 cases present. Dated readings at earlier objectui pins (steps[1], acceptance[0]) are records of what was measured then and are unchanged. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "automated.ref names the auth-guard unit pin under acceptance[5] and negative[2]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored both partial from it, and the ref did not name it. No clause changed",
+          "ref": "#25807"
         }
       ]
     },

@@ -396,7 +396,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -412,7 +412,7 @@
       },
       "steps": [
         "boot the showcase on its own port and DB; as admin GET /api/v1/data/showcase_account with no filter and a generous $top — this unfiltered baseline is the local ground truth every operator answer is computed from (never hardcode counts; the seed can drift)",
-        "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}}",
+        "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}} — whose AST spellings ['churn_reason', 'is_null'] and ['churn_reason', 'is_not_null'] take no comparand",
         "for each operator: compute the expected id set from the baseline locally and compare with the returned records — a known-answer check, not a smoke 200",
         "pagination window: GET /api/v1/data/showcase_account?$orderby=name&$top=3&$skip=2 and verify it equals rows 3–5 of the locally sorted baseline; also POST body limit/offset/top equivalents",
         "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys — no system identity key is added, not even `id` (the SQL driver selects query.fields verbatim); then the dotted related column fields: ['account.name'] on showcase_invoice, which is REFUSED by design — 400 INVALID_FIELD whose message prescribes `expand` (a dotted path reaches the driver as a column name, matches none, and would fall back to every field)",
@@ -497,6 +497,12 @@
         "op:like (driver-verbatim pattern, NOT auto-%-wrapped — canonicalAstOperator keeps it distinct)",
         "op:is_null",
         "op:is_not_null",
+        "op:icontains",
+        "op:ilike",
+        "op:is_empty",
+        "op:is_not_empty",
+        "op:before (the date spelling of $lt)",
+        "op:after (the date spelling of $gt)",
         "param:$top",
         "param:$skip",
         "param:$select",
@@ -508,7 +514,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/engine.test.ts ('[#2850] routes the expand sub-read through the middleware for the referenced object (RLS/FLS can apply), tagged __expandRead' — on a MOCK driver it proves the sub-read is routed through the middleware with the __expandRead marker, not that a contributor's expand withholds the contact over HTTP, so it scores acceptance[4] partial at most, never pass) + packages/objectql/src/engine-filter-array-lowering.test.ts (the #5869 list-comparand shape gate, at the engine). ⚠️ No clause of this item has a pin at its oracle's layer: every clause is oracle api and these suites stop at the engine, so the item is Tier 1 by the presence of this field only. Run the pins for their layer, then drive EVERY clause live (RUNNER rule 6, a pin scores only the layer it drives). ⚠️ The REST-contract clauses (operator answer sets, $top/$skip windowing, $select narrowing, sort + INVALID_SORT, the scalar-comparand refusal on both doors, UNSUPPORTED_QUERY_PARAM, the $in/$nin empty-list boundary) are NOT reached by these engine unit suites and remain manual. The POST door's schema-failure envelope (400 VALIDATION_FAILED + fields[], protocol never called) is pinned with a MOCKED protocol by packages/rest/src/request-schema-gate.conformance.test.ts — the door posture at the route-handler layer, not this item's seeded probes, so it scores neither acceptance[5] nor negative[0] beyond partial"
+        "ref": "packages/objectql/src/engine.test.ts ('[#2850] routes the expand sub-read through the middleware for the referenced object (RLS/FLS can apply), tagged __expandRead' — on a MOCK driver it proves the sub-read is routed through the middleware with the __expandRead marker, not that a contributor's expand withholds the contact over HTTP, so it scores acceptance[4] partial at most, never pass) + packages/objectql/src/engine-filter-array-lowering.test.ts (the #5869 list-comparand shape gate, at the engine; it asserts INVALID_FILTER, the engine's code, which the POST door no longer answers — VALIDATION_FAILED there since #20116, acceptance[5]) + packages/qa/dogfood/test/showcase-expand-crud-gate.dogfood.test.ts (#7626: the contributor/admin expand pair over the in-process HTTP stack, through the list `?$expand=`, the by-id `?expand=` and the body `expand` doors — acceptance[4] at the HTTP layer, the one clause pinned at its oracle's). ⚠️ Every other clause is oracle api and these suites stop at the engine, so they need the live leg. Run the pins for their layer, then drive EVERY clause live (RUNNER rule 6, a pin scores only the layer it drives). ⚠️ The REST-contract clauses (operator answer sets, $top/$skip windowing, $select narrowing, sort + INVALID_SORT, the scalar-comparand refusal on both doors, UNSUPPORTED_QUERY_PARAM, the $in/$nin empty-list boundary) are NOT reached by these engine unit suites and remain manual. The POST door's schema-failure envelope (400 VALIDATION_FAILED + fields[], protocol never called) is pinned with a MOCKED protocol by packages/rest/src/request-schema-gate.conformance.test.ts — the door posture at the route-handler layer, not this item's seeded probes, so it scores negative[0] partial at most and does not touch acceptance[5] at all: its bodies are {limit:'ten'}, null and an array, with no scalar comparand on a collection operator"
       },
       "traps": [
         "seed-data-thin",
@@ -566,6 +572,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says no clause is pinned at its oracle's layer, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a4, n0 and the whole-item note. Re-read at base f6c61932: engine.test.ts's [#2850] case proves the expand sub-read is routed through the middleware on a mock driver (round 4 of the 18.0 wave scored acceptance[4] pass from it; under rule 6 it cannot), and request-schema-gate.conformance.test.ts drives RestServer over a mocked protocol. The item keeps `automated` (the pins are real evidence of their layers) and now tells a Tier 1 run that every clause is still driven live. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "automated.ref names the HTTP pin for acceptance[4] and says what two named pins do and do not reach; the variants gain the six AST_OPERATOR_MAP operators the list omitted; steps[1] names the comparand-less null spellings. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): showcase-expand-crud-gate.dogfood.test.ts drives acceptance[4] over HTTP and was missing (so 'no clause has a pin at its oracle's layer' was false); request-schema-gate.conformance.test.ts has no collection-operator case; engine-filter-array-lowering asserts the engine's INVALID_FILTER, not the POST door's code; and AST_OPERATOR_MAP serves icontains, ilike, is_empty/is_not_empty and before/after beyond the list. Re-read at base e4ba846f (packages/spec/src/data/filter.zod.ts AST_OPERATOR_MAP). acceptance[8] now asks a verdict of six more rows",
+          "ref": "#25807"
         }
       ]
     },
@@ -709,7 +721,7 @@
       "title": "Bulk write doors (createMany/updateMany/deleteMany, per-object batch): per-row outcomes, size cap, single/bulk parity, no silent full-table writes",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -729,8 +741,9 @@
         "as the member POST /api/v1/data/showcase_private_note/updateMany {\"records\": [{\"id\": \"<marker id>\", \"data\": {…}}, …]} naming ONLY the marker rows' ids — updateMany is id-based (UpdateManyRequestSchema); a {where, data} body answers 400 VALIDATION_FAILED naming `records`; re-read",
         "as the member POST updateMany naming ids that match nothing the member may touch: a nonexistent id, and the id of another user's private note (invisible to the member) — in SEPARATE calls, or in one call with options.continueOnError: true: under the default (continueOnError: false) the first failed row ends the run and the second id reports NOT_ATTEMPTED, which says nothing about the no-existence-oracle parity; capture the per-row results, then re-read the foreign note system-side. Also send {\"records\": []}",
         "as admin POST createMany with records.length == maxBatchSize+1 (201 on default config); capture",
-        "deleteMany is id-based too ({\"ids\": [...]}; a {where} body answers 400 naming `ids`). As the member, POST deleteMany on two of its own marker notes and capture the refusal — the member baseline holds no allowDelete on showcase_private_note (row 0 PERMISSION_DENIED, the rest NOT_ATTEMPTED); then as admin POST deleteMany with the marker ids; re-read; then re-issue the same deleteMany (the ids are gone now)",
-        "throughout: capture per-row result arrays and any ERR_BULK_RESULT_MISMATCH appearance"
+        "deleteMany is id-based too ({\"ids\": [...]}; a {where} body answers 400 naming `ids`). As the member, POST deleteMany on two of its own marker notes and capture the refusal — the member baseline holds no allowDelete on showcase_private_note (row 0 PERMISSION_DENIED, the rest NOT_ATTEMPTED); then as admin POST deleteMany with the marker ids; re-read; then re-issue the same deleteMany (the ids are gone now). The member's refusal is uniform: a deleteMany naming a foreign or a nonexistent id answers PERMISSION_DENIED as well, because the object-level allowDelete gate fires before any row lookup — so it is no existence oracle, and a runner should not expect RECORD_NOT_FOUND there (QA run #26468)",
+        "throughout: capture per-row result arrays and any ERR_BULK_RESULT_MISMATCH appearance",
+      "the per-object batch door (variants' door:per-object-batch): as the member POST /api/v1/data/showcase_private_note/batch {\"operation\": \"update\", \"records\": [{\"id\": \"OWN_MARKER_ID\", \"data\": {…}}, {\"id\": \"FOREIGN_NOTE_ID\", \"data\": {…}}], \"options\": {\"continueOnError\": true}} (BatchUpdateRequestSchema, packages/spec/src/api/batch.zod.ts), then as admin a create batch of maxBatchSize+1 records; capture per-row results and re-read. QA run #26468 drove it ad hoc: its own row succeeded, the foreign id answered RECORD_NOT_FOUND (the steps[3] no-existence-oracle parity), and 201 creates answered 400 BATCH_TOO_LARGE"
       ],
       "acceptance": [
         {
@@ -823,6 +836,12 @@
           "date": "2026-10-26",
           "change": "automated.ref no longer credits the dogfood file with 'bulk halves', and names the size-cap unit pin, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings on the ref and a3. Re-read at base f6c61932: owner-anchor-and-bulk-writes.dogfood.test.ts's bulk cases are ql.update / ql.delete({multi: true}) calls on the engine with a resolved context, never an HTTP bulk door, so no clause a0–a5 or n0 is asserted; rest-batch-size-cap.test.ts pins BATCH_TOO_LARGE over a mocked protocol, which cannot score an api oracle. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "steps[5] says the member's deleteMany refusal is uniform, and a new last step drives the per-object batch door the variants list named. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): a member deleteMany on a foreign or nonexistent id also answered PERMISSION_DENIED, the object gate firing before the lookup; and door:per-object-batch was a variant no step drove, so the run drove it ad hoc. Re-read at base e4ba846f (batch.zod.ts BatchUpdateRequestSchema: operation, records[{id, data}], options). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
