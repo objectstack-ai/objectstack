@@ -12,9 +12,12 @@ import { strictObject } from '../shared/strict-object';
  * ## Why the platform creates it and the application only declares it
  *
  * A metadata app's demo seed hands records to named people (`owner_id:
- * 'Legal Counsel 1'`), and a seed cannot create a person: a `sys_user` row
- * written through `data` is refused (ADR-0092), and it could not sign in
- * anyway — signing in needs a hashed credential the auth pipeline mints. So
+ * 'Legal Counsel 1'`), and a seed cannot create a person who can sign in. A
+ * `sys_user` row written through `data` is not refused — every seed write runs
+ * under the system execution context, which ADR-0092's identity-write guard
+ * stands aside for — but it lands as a directory row with no account, and it
+ * cannot sign in: signing in needs a hashed credential the auth pipeline mints,
+ * and a seed row carries none. So
  * every application used to carry its own script that created the accounts
  * through the auth door, assigned their positions and permission sets, and
  * re-ran the seed so the deferred owners resolved. The maintainer ruled the

@@ -417,6 +417,13 @@ export async function explainAccessForCaller(
         // manager — the exact behaviour this binding had before the gate.
         ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
         : {}),
+      // [#26180] The pending approval requests that grant the EXPLAINED
+      // principal read of the record — the same answer the sharing read filter
+      // ORs in, asked with the explained context, so the attribution names the
+      // request the filter admitted the row through.
+      ...(sharing && typeof sharing.listApprovalReadGrants === 'function'
+        ? { listApprovalReadGrants: (o: string, rid: string, c: any) => sharing.listApprovalReadGrants(o, rid, c) }
+        : {}),
       ...(sharing && typeof sharing.canEdit === 'function'
         ? { canEditRecord: delegatedWriteGate((o, rid, c) => sharing.canEdit(o, rid, c)) }
         : {}),

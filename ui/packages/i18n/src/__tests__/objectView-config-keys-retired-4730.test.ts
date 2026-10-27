@@ -91,21 +91,25 @@ const at = (pack: unknown, path: string): unknown =>
   path.split('.').reduce<unknown>((n, k) => (n as Record<string, unknown> | undefined)?.[k], pack);
 
 /**
- * The 116 retired keys, listed BY NAME in the packs' own order rather than
+ * The retired keys, listed BY NAME in the packs' own order rather than
  * counted. A count passes when one key returns and another leaves; the names do
- * not. 209 keys existed in the namespace; 116 were retired; 93 survived — 94
- * since objectui#5232 added `viewConfigPermissionDenied`, the refusal shown when
- * a session without `manage_metadata` tries to change ORG-WIDE view config
- * (objectstack#7494's ruling). An ADDITION to a live namespace is not a
- * regression of the retirement this file pins: none of the retired keys
- * came back, which is what the `it` below actually asserts.
+ * not. objectui#4730 retired the first 116; the later rounds are named beside
+ * their entries below.
  *
- * ## The objectui#8754 addition — 116 retired become 118
+ * This list is the ONLY hand-maintained set in the file. The surviving half of
+ * the namespace is not counted anywhere: it is a live namespace, and an ADDITION
+ * to it is not a regression of the retirement this file pins. What the file
+ * asserts about the survivors is derived from the `en` pack — every pack holds
+ * exactly `en`'s key set — so adding a key to every pack changes no test here,
+ * while retiring one still takes an edit to this list (nothing else in the repo
+ * guards the key's absence afterwards; see the header).
+ *
+ * ## The objectui#8754 addition — `groupBy` and `toolbar`
  *
  * `groupBy` and `toolbar` joined the retired list in objectui#8754's deletion
  * round, and they are here rather than in that card's own pin because THIS file
- * owns the namespace's arithmetic: a `console.objectView.*` key retired anywhere
- * else would move the surviving count out from under the assertions below.
+ * owns the namespace's retired list: a `console.objectView.*` key retired
+ * anywhere else belongs in this one list, not in a second one beside it.
  *
  * Both were dead all along and were held out of objectui#4730's sweep by a
  * measurement defect, not by a reader. `check-i18n-dead-keys`' text net matched
@@ -117,21 +121,12 @@ const at = (pack: unknown, path: string): unknown =>
  * `toolbar` was not — a split with no reason behind it, which is the shape a
  * substring false-positive leaves.
  *
- * ⚠️ The total below is 225 and that is deliberate: 225 is the count of keys
- * that ever EXISTED in this namespace, split into a retired half that only
- * grows and a surviving half that shrinks to match. A retirement moves the
- * split; only a genuinely new key moves the total (objectui#10636's
- * `recordCountOne` moved it from 210; objectui#11445 retired that key and
- * added six count-family slots, `_one` / `_other` on `recordCount`,
- * `importedToast` and `bulkDeleteConfirm`, making 217; objectui#11576 added
- * eight dataset-binding keys, making 225).
- *
- * ## The objectui#11445 change — 118 retired become 119
+ * ## The objectui#11445 change — `recordCountOne`
  *
  * `recordCountOne` was the singular half of a code-selected pair; the footer
  * now asks the `recordCount` count family, so the sibling left all ten packs.
  *
- * ## The objectui#11576 change — 119 retired become 123, 217 total become 225
+ * ## The objectui#11576 change — the four chart-axis keys
  *
  * The create-view dialog's chart picks were the pre-ADR-0021 inline axes, which
  * the spec's list chart block refuses by name. The dialog now binds a dataset
@@ -141,14 +136,16 @@ const at = (pack: unknown, path: string): unknown =>
  * `datasetHelp`, `chartMeasure`, `chartMeasureHelp`, `chartDimension`,
  * `chartDimensionHelp`, `viewTypeUnavailableDataset`, `noDatasetMeasure`).
  *
- * ## The objectui#12504 change — 123 retired become 124
+ * ## The objectui#12504 change — `viewConfigPermissionDenied`
  *
- * `viewConfigPermissionDenied` (objectui#5232's addition, above) was the toast
- * the console's toolbar write raised when the adapter's capability gate refused
- * an org-wide view-config change. The maintainer's ruling on objectui#12504
- * retired that write (`persistViewPatch`) with the adapter method and its gate
+ * `viewConfigPermissionDenied` (objectui#5232's addition: the refusal shown when
+ * a session without `manage_metadata` tries to change ORG-WIDE view config,
+ * objectstack#7494's ruling) was the toast the console's toolbar write raised
+ * when the adapter's capability gate refused an org-wide view-config change.
+ * The maintainer's ruling on objectui#12504 retired that write
+ * (`persistViewPatch`) with the adapter method and its gate
  * (`updateViewConfig`), and the toast was its only producer, so the key left
- * all ten packs. A retirement moves the split, not the total.
+ * all ten packs.
  */
 const RETIRED_OBJECT_VIEW_KEYS = [
   'accessibility',
@@ -287,43 +284,20 @@ const RETIRED_OBJECT_VIEW_KEYS = [
   'viewTypeUnavailableShort',
 ] as const;
 
-/**
- * How many keys the namespace keeps — the live + indirect-reference remainder.
- * 104 since objectui#13052 added `objectPackageDisabled`, the object route's
- * "this object's package is disabled" sentence (`ObjectNotFoundState`); 105
- * since objectui#13330 added `managedUsers`, Setup → Users' invite line and
- * 「未授权」 marker on a cloud-managed environment (`managedEnvironmentUsers`);
- * 103 since objectstack#25921 retired `ufTabs` and `viewTypeUnavailableShort`.
- */
-const SURVIVING_KEY_COUNT = 103;
-
 describe('console.objectView config-panel keys are retired (objectui#4730)', () => {
-  it('the retired list is the measured set', () => {
-    // Guards the premise the rest of the file rests on. If this arithmetic ever
-    // stops holding, the assertions below are checking a set nobody chose.
-    expect(RETIRED_OBJECT_VIEW_KEYS).toHaveLength(126);
-    expect(new Set(RETIRED_OBJECT_VIEW_KEYS).size).toBe(126);
-    // 209 at objectui#4730's landing; 210 since objectui#5232 added
-    // `viewConfigPermissionDenied`; 211 since objectui#10636 added
-    // `recordCountOne`, the record-count footer's singular; 217 since
-    // objectui#11445 added six count-family slots (and retired `recordCountOne`,
-    // which moved the split, not the total); 225 since objectui#11576 added the
-    // create-view dialog's eight dataset-binding keys (and retired its four axis
-    // keys); 227 since objectui#12418 added `resetView` and `resetViewTitle`,
-    // the header's "Reset view" entry (and objectui#12504 retired
-    // `viewConfigPermissionDenied`, which moved the split, not the total); 228
-    // since objectui#13052 added `objectPackageDisabled`, the not-found view's
-    // package-disabled sentence; 229 since objectui#13330 added
-    // `managedUsers`, the managed environment's Users-list strings
-    // (objectstack#25921 retired `ufTabs` and `viewTypeUnavailableShort`,
-    // which moved the split, not the total). The RETIRED half is a ratchet that never
-    // runs BACKWARDS — it is pinned twice above, and objectui#8754 advanced it
-    // 116 -> 118 — while the surviving half is a live namespace that grows on a
-    // new key and shrinks by exactly what the retired half gains. Splitting
-    // them is the point: folding a new key into the total would be
-    // indistinguishable from a retired key coming back.
-    expect(RETIRED_OBJECT_VIEW_KEYS.length + SURVIVING_KEY_COUNT).toBe(229);
+  it('the retired list names each key once, and there are packs to check it against', () => {
+    // Guards the premise the rest of the file rests on, without a hand-typed
+    // count: the names ARE the pin, so a second copy of the list's length only
+    // turned every legitimate retirement into a two-place edit. What stays is
+    // what a count never proved — no name is listed twice (a duplicate would
+    // hide that the list is one key short of what its author meant), and the
+    // checks below do not run over an empty list or an empty locale map.
+    expect(RETIRED_OBJECT_VIEW_KEYS.length).toBeGreaterThan(0);
+    expect(new Set(RETIRED_OBJECT_VIEW_KEYS).size).toBe(RETIRED_OBJECT_VIEW_KEYS.length);
+    // The locale roster, not this namespace — pinned the same way across the
+    // package's retirement files, and left to that roster's own sweep.
     expect(LANGS).toHaveLength(10);
+    expect(LANGS).toContain('en');
   });
 
   it('no pack defines any retired key, in any of the ten packs', () => {
@@ -345,8 +319,15 @@ describe('console.objectView config-panel keys are retired (objectui#4730)', () 
     // shape to pin is the surviving key SET, identical across packs — a root
     // that regrows a retired key is the regression this file exists for, and a
     // root that vanishes takes the live create-view dialog with it.
+    //
+    // The surviving set is DERIVED from `en`, never counted: `en` is the source
+    // pack, so its keys are the namespace's live set by definition, and a key
+    // added to every pack moves no assertion here. Whether `en` itself regrew a
+    // retired key is the previous `it`'s question, not this one's.
     const enKeys = Object.keys(at(builtInLocales.en, 'console.objectView') as Record<string, unknown>);
-    expect(enKeys).toHaveLength(SURVIVING_KEY_COUNT);
+    // Anti-vacuity only: an empty `en` root would make every pack's "same set"
+    // comparison below trivially true.
+    expect(enKeys.length).toBeGreaterThan(0);
     // The one key a pack may hold that `en` lacks: an `en` count family's slot
     // for a CLDR category the pack's OWN language selects (`ru` `_few`, `ar`
     // `_two` — `all-locales-key-parity.test.ts` owns that rule repo-wide).
@@ -412,10 +393,10 @@ describe('console.objectView config-panel keys are retired (objectui#4730)', () 
     //
     // Call-SHAPED and key-SPECIFIC, the same trade `report-editor-retired-4145`
     // makes next door: a bare substring scan would score prose that NAMES a
-    // retired key as the offence, and the 93 live keys in this same namespace
+    // retired key as the offence, and the live keys in this same namespace
     // are exactly what must keep working. No dynamic-template check here, and
     // that is the one place this file diverges from its neighbour — a dynamic
-    // read into this namespace can legitimately be reaching for one of the 93
+    // read into this namespace can legitimately be reaching for one of the
     // survivors, so it is not evidence of a revival.
     const roots = ['packages/app-shell/src', 'packages/plugin-view/src'];
     const retired = new Set<string>(RETIRED_OBJECT_VIEW_KEYS);

@@ -9,7 +9,6 @@
     "system/AppInstallResult:createdTables = []",
     "system/AppInstallResult:installedObjects = []",
     "system/AppInstallResult:seededRecords = 0",
-    "system/AppManifest:dependencies = []",
     "system/AppManifest:flows = []",
     "system/AppManifest:hasSeedData = false",
     "system/AppManifest:objects = []",

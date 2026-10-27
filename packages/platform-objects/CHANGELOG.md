@@ -1,5 +1,176 @@
 # @objectstack/platform-objects
 
+## 18.2.0
+
+### Minor Changes
+
+- 384bb7b: feat(spec,lint): an action's `confirmText`, `successMessage` and `errorMessage` are `template` slots over the roots the console's runner binds
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  - **Before.** On the page action rows (`action:button`, `action:icon`, an `action:group` / `action:menu` member) the three copy keys were plain `z.string()`s, and on a registered action `confirmText` / `successMessage` were `I18nLabel`s. None declared a hole. The console filled `${…}` in them (`${record.name}` in a confirm, `${result.email}` in a success toast), and the platform's own sentences were written that way.
+  - **Now.** Each is an ADR-0032 `template` slot (Decisions 2–3), the same mechanism as a bulk action's `confirmText`. A bare string is shorthand for `{ dialect: 'template', source }`, and the envelope is accepted too. Holes are `{{ path }}` and `{{ path | formatter[:arg] }}`, with formatters from the template engine's whitelist and no logic inside a hole. They read a closed scope, the one the console's action runner binds, declared in `@objectstack/spec/ui`:
+    - `confirmText`: `record`, the record the action runs against, and `params` only when the action's `params` is an object of static values (`actionConfirmTemplateRoots(action)`). An input list binds nothing, because its values are collected after the confirmation.
+    - `successMessage`: `result`, the payload the handler answered, then `record` (`ACTION_SUCCESS_TEMPLATE_ROOTS`).
+    - `errorMessage`, on the rows only: no root (`ACTION_ERROR_TEMPLATE_ROOTS`). The runner shows it as written.
+  - **Parsed shape.** A parsed copy key is now the `{ dialect: 'template', source }` envelope rather than a string. A reader of the parsed or served definition takes the text from `source` (`templateSlotSource` in `@objectstack/spec/automation` reads both forms). The console pinned by this release reads both. A registered action keeps its inline locale map, and a blank string still parses as itself.
+  - **Judged at the doors, as warnings.** `objectstack validate`, `objectstack compile` and the publish gate (on `action`, `object` and now `page` writes) judge every sentence through `closedScopeTemplateRefusal`, the template judge's closed-scope entry, then compile it as a template. A hole over a root the runner does not bind, a `${…}` or single-brace `{x}` token, a hole holding logic or an unknown formatter, and a blank sentence are each named. Each locale of an inline map is judged on its own. Every finding is a **warning**, an advisory at the publish gate and never a refusal, so no command's exit code changes: each of these texts parsed while the keys were plain strings.
+  - **`${…}` is prescribed its hole.** The judge reads a `${…}` token with its `$`, so `Delete ${record.name}?` is told to become `Delete {{ record.name }}?`. It no longer says `Delete ${{ record.name }}?`. A slot with no root names every hole and token in it as literal text.
+  - **The platform's sentences.** The `invite_user` success toast on `sys_invitation`, `sys_member`, `sys_organization` and `sys_user` (`Invitation sent to {{ result.email }}`) and the nine `sys_approval_request` decision toasts (`Approved "{{ result.request.record_title }}"`, …) now use `{{ }}` holes, in every shipped locale. The console fills them the same way.
+  - **Translation and extraction.** `translateAction` answers the authored envelope when no translation applies, and a translated sentence as a string. `os i18n extract` seeds an envelope-form `confirmText` / `successMessage` exactly like the bare string.
+  - **Unchanged.** `ActionSchema.errorMessage` and `outcomeMessages` are untouched (`outcomeMessages` still reads `${result.*}`), and so are `emptyText` and every other key. Producers measured at `e649c2d91e`: 13 authored copy sentences carried `${…}` (the 13 above) and none carried `{{`. After this change none carries `${…}`, and none in `examples/**`.
+- f1ddace: feat(automation): a flow declares who may start it — `requiredPermissions` on the flow, checked at every start door
+  
+  A flow can now carry `requiredPermissions: ['capability', …]`, the same value shape as an action's `requiredPermissions` (ADR-0066 D4). Every door that starts a flow by name checks it in one shared check: the trigger route (`POST /automation/:name/trigger`), an action of `type: 'flow'` (REST `POST /actions/:object/:action` and the MCP `run_action` bridge), and a declared endpoint of `type: 'flow'`. A caller that is not the system principal must hold every named capability (granted through a permission set's `systemPermissions`), or the door answers `403 PERMISSION_DENIED` and nothing runs.
+  
+  - **The action door inherits the flow's list.** An action that starts a gated flow is gated by the flow even when the action declares nothing, so the app states it once. An action that declares its own list keeps its own gate, which answers first, so a caller at that door needs both lists.
+  - **A sub-flow is not a door.** A parent flow's `subflow` node starts its child through the engine and is not checked again; the parent's own start was.
+  - **The elevated self-triggered rule still answers first.** Holding the capabilities does not let a member start a `runAs: 'system'` flow of type `autolaunched`, `record_change` or `schedule`.
+  - **Studio's flow form** offers the key (a tag list beside `runAs`).
+  - **`os validate`** judges the key's values the way it judges an action's: a capability no built-in, `defineCapability` or `systemPermissions` grant provides is reported as `capability-reference-unknown` at `flows[i].requiredPermissions` (`os explain capability-reference-unknown`).
+  
+  This is how to say who may start an elevated (`runAs: 'system'`) `screen` or `api` flow. An app that gates such a flow with a `decision` node on `current_user.positions` can move that gate to the flow's `requiredPermissions`; the positions array is not an authorization input. A flow that declares no `requiredPermissions` starts exactly as before.
+  
+  Clause-②: yes (widening) — a flow may declare a new key, `requiredPermissions`; a flow that does not declare it is admitted at every door exactly as before.
+  
+  Metadata-protocol: added (`FlowSchema.requiredPermissions`)
+- d1663ba: feat(spec,analytics,lint,platform-objects,app-shell): a dataset measure can aggregate the time between two datetime fields of each record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`**: `DatasetMeasureSchema` gains an optional `duration: { from, to, unit }`, in place of `field`. `from` and `to` name two `datetime` fields of the dataset's own object by their bare names, `unit` is `seconds`, `minutes`, `hours` or `days`, and the measure's `aggregate` is `avg`, `min`, `max` or `sum` of `to` minus `from`. A relationship path, an expression or the row wildcard in either column, the same column twice, another unit, a counting aggregate, or a `field`, `derived` or `currency` beside it is refused at parse. New exports: `DatasetMeasureDurationSchema`, `DatasetDurationUnit`, `DATASET_DURATION_UNIT_SECONDS`, `DATASET_DURATION_AGGREGATES`, `DATASET_DURATION_FIELD_TYPE` and the `DatasetMeasureDuration` / `DatasetDurationUnit` types.
+  - **`@objectstack/service-analytics`**: the dataset compile refuses a duration column declared anything but `datetime` (`400 DATASET_INVALID`, naming the column and its type). The native-SQL strategy computes the duration as one statement on SQLite, PostgreSQL and MySQL, in double precision on each; SQLite and PostgreSQL are tested live to answer the same number: a record missing either instant is left out, a `to` before its `from` counts as negative, and over a group with no such record `sum` answers `0` and the others `null`. Measure filters, derived measures, ordering and the draft preview serve it. A query the native strategy does not serve (a time dimension bucketed by `granularity`, a field-to-field filter, an object served through engine middleware or an external datasource, a non-SQL datasource) is refused with `400 INVALID_FIELD` naming the measure. Its two columns pass the field-level read gate like any measure's field. The temporal half of the aggregate × field-type refusal now names the duration measure instead of a stored "days open" number.
+  - **`@objectstack/lint`**: `os validate` refuses a duration column not declared `datetime` with the new gating rule `measure-duration-field-type-refused` (at `datasets[N].measures[M].duration.from` / `.to`), with an `os explain` entry. `dataset-field-unknown` now also reports a duration column the object does not declare.
+  - **`@objectstack/platform-objects`**: the dataset form's new **Duration** row is translated in every shipped locale.
+  - **`@object-ui/app-shell`**: changing a dataset's base object in the console's dataset inspector now clears a duration measure along with the other measures that name the old object's fields, instead of keeping it as if it were a plain row count.
+  
+  What to do: nothing. A dataset without `duration` parses, compiles and answers exactly as before.
+
+### Patch Changes
+
+- fc4ac58: feat: Add Member opened from a team now binds that team, so the dialog asks only for the user
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Setup → Teams, Add Member lived only on the team-membership list's toolbar. No team is in hand there, so the dialog asked the administrator to pick the team again. `sys_team` now also declares `add_team_member`, on the team row (`list_item`) and the team record header (`record_header`). It calls the same `POST /api/v1/auth/organization/add-team-member` endpoint behind the same gates (the `organization` feature and the `add_team_member` membership grade). The team's id rides as `teamId` from the row it is opened on, and the dialog asks only for the user. The membership-list copy is unchanged and still asks for both.
+- a0fac02: feat(platform-objects): a single-organization deployment can rename its organization
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **`sys_organization`'s Rename Organization** (name and logo, never the slug) is now gated on the organization capability instead of `multiOrgEnabled`. Under the `single` posture it was the one organization's only possible name door, and it was hidden: the generic edit keeps `name` readonly and every other organization action is multi-organization only. It is still offered only to the organization's owners and admins, and better-auth's `organization/update` still decides at the door.
+  - **Edit Organization** (which also sends the slug), Create, Delete, Switch and Leave stay multi-organization only. Under `multi` nothing changes.
+  - **`sys_organization.name`'s help** now says the name is changed with Rename Organization, in all four bundles.
+  
+  Ruling 6384629949 on #25347.
+- 6444288: fix(platform-objects): the zh-CN label for an organization's logo reads 「徽标」, no longer 「标识」, which read as the slug (「标识符」) on the same record page and in the Rename Organization dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_organization.fields.logo.label` in the zh-CN bundle was 「标识」 ("identifier"), directly beside the slug's 「标识符」. The Rename Organization and Edit Organization dialogs take their `logo` param label from this field label, so a zh-CN admin read the logo URL input as the organization's identifier. ja-JP (「ロゴ」 / 「スラッグ」) and es-ES (「Logotipo」 / 「Slug」) had no such collision and are unchanged.
+- db5fca7: fix(platform-objects): the System Overview's tile captions and column headers are translated in every shipped locale
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The captions.** Under zh-CN, ja-JP and es-ES the System Overview drew a translated title on each KPI tile and the English measure label under it: `Users`, `Organizations`, `Sessions`, `Installations`, `Events`. The event-volume table and the audit charts were headed `Action` and `User` the same way. Those strings come from the board's datasets, not from the dashboard, and the Setup bundle had no `datasets` block. It now carries `datasets.<name>.measures.<m>.label` and `datasets.<name>.dimensions.<d>.label` for every member the board draws, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The analytics query already localizes a saved dataset before it runs, so nothing else changes on the serving path.
+  - **Staleness.** `HAND_AUTHORED_SECTIONS` (exported from `@objectstack/platform-objects/apps`) now lists `datasets`, and the new translations carry recorded source hashes. When a dataset label is edited, the translated locales serve the new English until they are re-translated, as `apps`, `dashboards` and `pages` already do.
+  - **Console.** The Audit Log's `IP` column header reads `console.system.auditLog.ipAddress` ("IP 地址" under zh). A Beta settings page's title carries a space between the name and the badge in its text ("Feature Flags Beta").
+  
+  What to do: nothing.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- 1f40201: fix(platform-objects): a business unit membership is titled by the person's and the unit's names, not their ids
+  
+  Clause-②: no (no exported type, schema field or spec key changes; `sys_business_unit_member.display_title` stays a text formula and `titleFormat` is unchanged)
+  Metadata-protocol: none
+  
+  `sys_business_unit_member.display_title`, the record title Setup → Business Unit Members shows in its Title column and on the record heading, read `record.user_id + ' in ' + record.business_unit_id`, so it showed two raw ids. It now reads the user's name (their email where the name is blank) and the business unit's name, one hop through each lookup, the traversal the formula read path already serves (ADR-0079 addendum, 2026-10-18), as `sys_user_permission_set`'s title does. The title reads "Ada Lovelace in EMEA Sales".
+  
+  Nothing is stored and no hook is added: a write costs nothing more, and a read that serves the title makes one batched read of `sys_user` and one of `sys_business_unit` per page. A renamed user or unit, or a membership moved to another user or unit, shows the new names on the next read. Both hops are read with the reader's permissions: where the reader may not read the user or the unit, or it no longer exists, the title is empty and the console falls back to `titleFormat`. The title is still not sortable or searchable, as before.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+  - @objectstack/metadata-core@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

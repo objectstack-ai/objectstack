@@ -249,8 +249,8 @@ const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
  * `{ id: '__deny_all__' }` read-filter deny). */
 const READ_DENY_ALL = { id: '__comment_thread_denied__' } as const;
 
-/** The object a reaction's access derives from. */
-const COMMENT_OBJECT = 'sys_comment';
+/** The object a reaction's access derives from, and the one a mention notification previews. */
+export const COMMENT_OBJECT = 'sys_comment';
 
 /**
  * A comment's emoji reactions — one row per (comment, emoji, user), the

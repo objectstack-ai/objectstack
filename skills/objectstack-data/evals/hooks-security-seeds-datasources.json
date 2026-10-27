@@ -33,12 +33,32 @@
     },
     {
       "id": 4,
-      "prompt": "Seed the `country` reference table for every environment, and add demo `opportunity` rows (dev/test only) that close 45 days after install and are owned by whoever installs the package.",
-      "expected_output": "Uses `defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data and `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows, with lookups referenced by natural key and dynamic values as CEL: `close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``. Never `externalId: 'id'`, never `new Date()` / `Date.now()` (breaks build determinism), never `defineDataset` (the analytics layer), parents before children in the exported array.",
+      "prompt": "Seed the `country` reference table for every environment, and add demo `opportunity` rows (dev/test only) that close 45 days after install and are owned by whoever installs the package. A nightly job advances each opportunity's `stage`; replaying the seed must not reset it.",
+      "expected_output": "Uses `defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data and `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows, with lookups referenced by natural key and dynamic values as CEL: `close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``. Never `externalId: 'id'`, never `new Date()` / `Date.now()` (breaks build determinism), never `defineDataset` (the analytics layer), parents before children in the exported array. The job-owned column is declared `columns: { stage: { applyOn: 'create' } }`, so an `upsert` replay leaves it as the row holds it.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow"],
+        "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
         "must_not_contain": ["new Date(", "defineDataset", "externalId: 'id'"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, but not once it is approved, signing or active. Legal still edits them.",
+      "expected_output": "Field permission entries with a row condition on the finance set: `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }` and the same for `liability_cap`; the legal set keeps its edit grant. No validation rule and no `readonlyWhen`, which would lock the fields for every user.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["when:", "editable: false", "readable: true", "clm_contract.governing_law"],
+        "must_not_contain": ["validations:", "readonlyWhen"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "Customers' staff sign in to our portal and may read only the orders of the accounts they belong to; staff of one account must never see another account's orders.",
+      "expected_output": "Declares the set on the roster object that defines it: `account_member` (`user` field + `account` lookup) with `membershipKeys: { portal_account_ids: { userField: 'user', valueField: 'account' } }`; a portal permission set whose `rowLevelSecurity` reads it (`using: 'account in current_user.portal_account_ids'`), distributed by a position naming it in `permissionSets`; portal staff are invited on the `external` membership tier, outside the `everyone` baseline. Never a policy per account, never an owner stamp on every order.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["membershipKeys", "current_user.portal_account_ids", "userField", "valueField", "permissionSets", "external"],
+        "must_not_contain": ["permissions: {"]
       }
     }
   ]

@@ -11,7 +11,7 @@ Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-ai#AIFormAssist, @object-ui/plugin-ai#AIRecommendations, @object-ui/plugin-ai#NLQueryInput) the retired operands are React components of a published ui package that nothing in the workspace loaded; no packages/spec schema, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and the three node literals are refused by name on the zod face -->
 
-**BREAKING.** `@object-ui/plugin-ai` is retired and gets no further release. The console registered it neither eagerly nor lazily and no workspace package imported it, so the `ai-form-assist`, `ai-recommendations` and `nl-query` node types it registered rendered nowhere in the product.
+**BREAKING.** `@object-ui/plugin-ai` is retired: `18.2.0` is its last published version, and it gets no further release. The console registered it neither eagerly nor lazily and no workspace package imported it, so the `ai-form-assist`, `ai-recommendations` and `nl-query` node types it registered rendered nowhere in the product.
 
 What leaves, and what to do:
 

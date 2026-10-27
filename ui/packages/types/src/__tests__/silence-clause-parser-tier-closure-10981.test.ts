@@ -12,7 +12,7 @@
  * (`unknown-prop`).
  *
  * Four more sites in this package said an authored value drew no error and no
- * warning. The parser tier's `validateTree` (`@object-ui/sdui-parser`)
+ * warning. The parser tier's `validateTree` (`@objectstack/sdui-parser`)
  * answered each of them when objectui#10981 landed, with the code the
  * registration's declared inputs decide (one has moved since — the `bind` row):
  *
@@ -37,7 +37,7 @@
  * ## Why this file pins the prose, and where the parser half lives
  *
  * `@object-ui/types` declares no workspace dependency and its tests import
- * none, so `@object-ui/sdui-parser` is not importable here (the same reason as
+ * none, so `@objectstack/sdui-parser` is not importable here (the same reason as
  * the objectui#10928 and objectui#10959 pins). The four readings behind these
  * clauses — every key spelling and value shape each sentence describes, over
  * the live registry, with a render leg — are on objectui#10981's pull request:

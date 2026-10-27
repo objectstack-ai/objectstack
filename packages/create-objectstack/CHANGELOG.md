@@ -1,5 +1,46 @@
 # create-objectstack
 
+## 18.2.0
+
+### Patch Changes
+
+- dc6c7ee: fix(create-objectstack): the bundled blank template pins every `@objectstack/*` dependency at the exact release version
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `blank` template's committed `package.json` now lists each `@objectstack/*` package at the exact version of the `create-objectstack` release that ships it (`18.1.0`, a prerelease verbatim), instead of `^18.0.0`. A scaffolded project already received exact pins, because the scaffolder rewrites these entries at scaffold time; the template a reader opens in the tarball or on GitHub now says the same thing, which is what the v18 docs prescribe ("Pin exact versions").
+  
+  The template manifest's `specVersion` stays a range (`^18.0.0`): it names the `@objectstack/spec` line the template is authored against, not a build. The release-time version pass keeps both values current — the exact version in the dependencies, the major's range in `specVersion`.
+  
+  No action is needed in an existing project.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 40f5c6e: fix(metadata-core,service-cluster,create-objectstack): ESM-only subpaths declare their types under `import`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/metadata-core/testing`, `@objectstack/service-cluster/testing` and `create-objectstack/created-summary` are ESM-only, and now say so in their export maps: the subpath's `types` moved inside its `import` condition. `require()` of these subpaths already failed at runtime with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Before this change, TypeScript under `node16`/`nodenext` resolved their declarations for a CommonJS caller anyway (attw `CJSResolvesToESM`). Now it resolves them for `import` only, which is what Node does. ESM callers, and every resolution mode that reads the `import` condition, see no change. Each package's README now says the subpath is ESM-only.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+
 ## 18.1.0
 
 ### Patch Changes

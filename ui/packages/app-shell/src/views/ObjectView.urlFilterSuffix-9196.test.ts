@@ -189,7 +189,7 @@ describe('objectui#9196 — the equality arm this route DOES implement', () => {
 
 describe('objectui#9196 — `ObjectView` no longer keeps a private reader of this family', () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const SOURCE = readFileSync(path.join(here, 'ObjectView.tsx'), 'utf8');
+  const SOURCE = readFileSync(path.join(here, 'objectViewListUrlState.ts'), 'utf8');
   /** Positive control: a wrong or empty read fails here, not silently below. */
   const ANCHOR = 'const urlFilters';
 

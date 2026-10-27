@@ -808,7 +808,12 @@ export const DocNavItemSchema = lazySchema(() => strictObject(navItemSurface('do
 export const GroupNavItemSchema = lazySchema(() => strictObject(navItemSurface('group'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('group'),
-  expanded: z.boolean().default(false).describe('Default expansion state in sidebar'),
+  // ADR-0087 D3 `ui-nav-group-expanded-default-open`: a group that says
+  // nothing opens; `expanded: false` is how an author keeps one closed.
+  expanded: z.boolean().default(true).describe(
+    'Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed '
+    + 'until the user opens it. A group holding the current route opens whatever it declares.',
+  ),
   // children property is added in the recursive definition below
 }));
 

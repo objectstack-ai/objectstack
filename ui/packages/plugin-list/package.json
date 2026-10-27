@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-list",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "ListView plugin for Object UI - unified view component with view type switching",

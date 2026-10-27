@@ -234,7 +234,7 @@ describe('the decision that ends an approval tells its submitter (approval.appro
     expect(told.map((e) => [e.topic, e.audience])).toEqual([['approval.approved', ['u_sub']]]);
     expect(told[0].payload).toEqual({
       title: 'Request approved',
-      body: 'Your Deal D_won was approved.',
+      body: 'Your Deal won was approved.',
       actionUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
     });
     expect(told[0].source).toEqual({ object: 'sys_approval_request', id: req.id });
@@ -251,7 +251,7 @@ describe('the decision that ends an approval tells its submitter (approval.appro
     expect(told.map((e) => [e.topic, e.audience])).toEqual([['approval.rejected', ['u_sub']]]);
     expect(told[0].payload).toEqual({
       title: 'Request rejected',
-      body: `Your Deal D_lost was rejected.\n\n${REJECT_NOTE}`,
+      body: `Your Deal lost was rejected.\n\n${REJECT_NOTE}`,
       actionUrl: `/system/approvals?request=${encodeURIComponent(req.id)}`,
     });
     expect(told[0].actorId).toBe('u_alice');

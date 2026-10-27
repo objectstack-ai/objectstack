@@ -341,9 +341,10 @@
  *
  * ## Adopting this in a sibling repo
  *
- * Copy FOUR files, unchanged — this one, `.github/workflows/board-snapshot.yml`,
+ * Copy FIVE files, unchanged — this one, `.github/workflows/fleet-patrols.yml` (its `board-snapshot` job),
+ * `scripts/ci/board-snapshot-r2-upload.sh` (the workflow's R2 step runs it),
  * `scripts/pm/check-half-states.mjs` (the proxy re-exec plan and the repo
- * resolver are imported from it, so a three-file copy installs an archiver that
+ * resolver are imported from it, so a copy without it installs an archiver that
  * cannot start) and `scripts/invoked-as.mjs` (imported by both). A repo that has
  * already adopted the half-state patrol has the last two. ⛔ Do not shorten this
  * list from memory: the imports below decide it, not this comment.

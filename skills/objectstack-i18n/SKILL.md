@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---
@@ -160,16 +160,24 @@ All translatable content for a single object is aggregated under
 |:--------|:------|
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label) per field |
-| `_views.{view_name}` | `label`, `description`, `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
+| `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key); the same keys hold under `globalActions.{action_name}` |
-| `_sections.{section_name}` | Form section `label`, `description` |
+| `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (actions with no `objectName` — a key naming a bound action is
 an **error** whose message names the `objects.{owner}._actions.{action_name}` key to write
-instead), `dashboards`, `datasets`, `pages`, `flows`, `metadataForms`, `settingsCommon`.
+instead), `picklists` (`label`, `options` by stored value — every field referencing the
+picklist inherits them), `dashboards`, `datasets`, `reports`, `pages`, `flows`, `positions`,
+`permissions` (permission sets, spelled as the stack's `permissions[]`), `metadataForms`,
+`settingsCommon`; `reports`, `positions` and `permissions` hold `label` + `description` by name.
+Two keys sit deeper than their group's `label`: a `page:tabs` item at
+`pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
+one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.
+`os i18n extract --no-objects-only` scaffolds every group above but `messages` and
+`settingsCommon`, both keys included.
 `settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
 the platform declares one, so an app bundle carrying it is refused by name.
 
@@ -393,7 +401,8 @@ the default locale is filled from schema labels, other locales follow `--fill`
 
 ⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
 `globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,
-`dashboard`, `widget`, `page` and `flow` keys. Run the workflow as written and coverage
+`dashboard`, `widget`, `dataset`, `report`, `picklist`, `page`, `flow`, `position` and
+`permission` keys. Run the workflow as written and coverage
 reports gaps the extract never scaffolded. Pass `--no-objects-only` to include those
 groups, or author them by hand.
 

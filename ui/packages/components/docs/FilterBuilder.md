@@ -136,9 +136,10 @@ interface FilterBuilderRow {
   id: string;                    // Row identifier (required)
   field: string;                 // Field value
   operator: FilterBuilderOperator; // Operator id (see below)
-  value?: ViewFilterRule['value'] | (string | number | boolean)[];
+  value?: ViewFilterRule['value'];
   // `ViewFilterRule` from `@objectstack/spec/ui`: optional (value-less operators
-  // carry none) and may be null; the builder's own list may also hold booleans
+  // carry none) and may be null; a list holds strings and numbers, so a boolean
+  // carried into `in` / `not_in` / `between` is written as `"true"` / `"false"`
 }
 ```
 

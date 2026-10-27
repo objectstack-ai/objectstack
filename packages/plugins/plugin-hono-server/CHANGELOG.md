@@ -1,5 +1,120 @@
 # @objectstack/plugin-hono-server
 
+## 18.2.0
+
+### Minor Changes
+
+- c8cb510: feat(spec,security): a field permission entry can carry a row condition (`when`) on its edit vote
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6408558941
+  
+  - **Before.** A `fields["<object>.<field>"]` entry voted `readable` / `editable` on every row of the object. A lock that should apply on some rows only (the amount of an approved opportunity, say) had no spelling: a validation rule or a hook carried it, outside the permission model and outside `os explain`.
+  - **Now.** `FieldPermissionSchema.when` is an optional row condition, authored in the same canonical CEL as `rowLevelSecurity[].using` (`status == 'approved'`, `owner_id == current_user.id`, …). An entry with a `when` votes as declared on the rows the condition names and is **absent** on the others, as if the set had not declared the field; an entry without one votes on every row, as before. The vote reaches the **edit** bit only — reads are row-blind — so `readable: false` beside a `when` is refused at parse, and the message says why. `condition`, `where` and `filter` are refused with a pointer to `when`.
+  - **Judged on the row the write changes.** The write gate (the engine middleware's field-level step and `canWriteObject`) judges the **stored** row before an update, read as the caller reads it, and each **incoming** row of an insert — in process, by `RLSCompiler.compileRowPredicate` (the compile, `current_user` context, field guard and comparand faces an RLS `check` clause takes) and the write gate's own stored-form judge. Never a query rewrite. A row that cannot be judged — a predicate update, a stored row the caller cannot read, a condition that does not resolve for the request — applies the entry as its **lock** (no edit grant), and a WARN line says why.
+  - **Row-blind readers apply the lock.** `/auth/me/permissions` (`buildEffectiveFieldPermissions`, new in `@objectstack/core`, the one vote `PermissionEvaluator.getFieldPermissions` takes per object), the writable-field projections, the query guard and the result masker hold no row, so a conditioned entry is reported as its lock: no client is told of an edit the gate refuses. `os explain`'s `fls` layer names each row-conditioned entry as such — judged per row by the write gate, applied as the lock elsewhere.
+  - **Validated like an RLS predicate.** `@objectstack/lint`'s `validateRlsPredicateEnforceability` walks `permissions[].fields[].when` by the passes `using` / `check` take, against the key's object: `rls-predicate-unenforceable`, `-unparseable`, `-over-budget`, `-unknown-field`, `-unknown-user-variable`, with the cost named (the entry cannot be judged and is applied as its lock on every row).
+  - **Unchanged.** Field grants union without deny: a matched conditioned lock is out-voted by a sibling's unconditioned `editable: true` exactly as before, and only declaring entries vote. The `/auth/me/permissions` `fields` merge keeps its most-permissive rule. Recorded under ADR-0066 ⑧ (note of 2026-10-26).
+
+### Patch Changes
+
+- 65145d3: refactor(core)!: `resolveLocalizationContext` takes the organization as `organizationId`; the `tenantId` key is retired
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/core#ResolveLocalizationInput.tenantId) the retired member is a key of a published runtime TypeScript input with no Zod schema, no spec declaration and no stored shape; the compiler reports it at every object-literal call that still spells it, and nothing exists for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveLocalizationContext` from `@objectstack/core`. The key that names the organization to localize for is renamed. There is no alias and no deprecation window.
+  
+  `ResolveLocalizationInput.tenantId` always meant the **organization** id: the settings service stores and reads `localization` under the organization (ADR-0131 D8), and the direct `sys_setting` fallback reads that organization's rows. The name did not say so, and an environment id passed there type-checked. It matched no organization's settings, so every non-UTC organization silently resolved its timezone as `UTC`, and the date boundaries cut from it moved with it. The key is now `organizationId`, and the resolver reads no other spelling at run time.
+  
+  - FROM `ResolveLocalizationInput.tenantId` TO `ResolveLocalizationInput.organizationId`: pass the caller's organization id under the new key, `resolveLocalizationContext({ ql, settings, organizationId, userId })`. Never pass an environment id.
+  
+  **Who moves.** A caller that builds the input as an object literal with `tenantId` gets a compile error (excess property) and makes the one-key fix above. A caller that builds it some other way, such as spreading an object that holds `tenantId` or passing a variable typed wider than the input, does not get that error: its `tenantId` is ignored and the resolver localizes as for a caller with no organization, so grep for `tenantId` beside `resolveLocalizationContext`. In this repository the four callers (`@objectstack/core`'s request execution context, `@objectstack/mcp`, `@objectstack/plugin-audit` and `@objectstack/plugin-hono-server`) are migrated here and behave as before.
+  
+  **Not moved.** The settings service's own scope argument, `{ tenantId, userId }` on `get` / `getMany`, keeps its spelling. It is a separate surface with its own callers. The resolver passes the organization id there as before.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/observability@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

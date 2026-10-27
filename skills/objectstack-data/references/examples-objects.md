@@ -39,7 +39,7 @@ export default ObjectSchema.create({
     vat_id:     { type: 'text',                   group: 'billing' },
     billing_address: { type: 'address',           group: 'billing' },
     created_at: { type: 'datetime', readonly: true, group: 'system' },
-    created_by: { type: 'lookup', reference: 'user', readonly: true, group: 'system' },
+    created_by: { type: 'user', readonly: true, group: 'system' },
   },
 });
 ```
@@ -85,7 +85,7 @@ export default ObjectSchema.create({
     ]},
     account:     { type: 'lookup', reference: 'account', required: true },
     contact:     { type: 'lookup', reference: 'contact' },
-    assigned_to: { type: 'lookup', reference: 'user' },
+    assigned_to: { type: 'user' },
     due_date:    { type: 'datetime' },
   },
   validations: [

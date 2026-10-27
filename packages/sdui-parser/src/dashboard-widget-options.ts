@@ -65,7 +65,7 @@
  *     repo-wide scan would red on a TRUE claim — and an assertion that reds on
  *     legitimate code gets deleted by the next person who hits it, which puts
  *     the claim back where it started. Leg 2 of
- *     `ui/packages/sdui-parser/src/__tests__/dashboard-widget-options-census.test.ts`
+ *     `ui/packages/plugin-dashboard/src/__tests__/dashboard-widget-options-census.test.ts`
  *     derives exactly this bound: the DatasetWidget read set is the declared
  *     set, and neither `format` nor `thresholds` is in it. That absence is
  *     asserted in its OWN right rather than riding on an equality whose
@@ -101,7 +101,7 @@
  *
  * ## Maintenance — how this list stays true
  *
- * `ui/packages/sdui-parser/src/__tests__/dashboard-widget-options-census.test.ts`
+ * `ui/packages/plugin-dashboard/src/__tests__/dashboard-widget-options-census.test.ts`
  * re-runs the census on every test run: it re-derives the five declared keys from the installed
  * `@objectstack/spec`, re-extracts the `options.<key>` reads from
  * `DatasetWidget.tsx` source text (and fails loudly if that file gains a

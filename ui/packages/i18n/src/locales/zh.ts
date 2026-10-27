@@ -4668,6 +4668,7 @@ const zh = {
       invalidCoordinatesExcluded: '因坐标缺失或无效而未显示在地图上的记录：{{excluded}}',
       styleFailedConfigured: '地图加载失败（{{reason}}）。记录已列在下方；请检查此视图设置的地图样式 URL。',
       styleFailedDefault: '地图加载失败（{{reason}}）。记录已列在下方；此处无法加载公共默认地图瓦片，请联系管理员为此视图设置地图样式。',
+      styleFailedDeployment: '地图加载失败（{{reason}}）。记录已列在下方；此处无法加载为此部署设置的默认地图样式，请联系管理员检查该样式。',
       styleFailedUnknownReason: '无法加载地图样式或瓦片',
       webgl2Unavailable: '地图加载失败（此浏览器不支持地图所需的 WebGL2）。记录已列在下方；请开启硬件加速，或使用支持 WebGL2 的浏览器查看地图。',
       retry: '重试加载地图',

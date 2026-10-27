@@ -57,7 +57,7 @@
  * It lives in `apps/console` rather than beside `plugin-list` for the reason the
  * suites next door already state: the claim is about what an AUTHOR is told, and
  * that answer is produced from the whole registration graph plus the real
- * `object-grid`. `plugin-list` depends on neither `@object-ui/sdui-parser` nor
+ * `object-grid`. `plugin-list` depends on neither `@objectstack/sdui-parser` nor
  * `@object-ui/plugin-grid`, and taking those dependencies to host a test would
  * be the heavier change.
  */
@@ -65,8 +65,8 @@ import { describe, it, expect } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
-import type { Diagnostic } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
+import type { Diagnostic } from '@objectstack/sdui-parser';
 
 // The full registration graph — the same pair `dev/manifest-dump.tsx` builds the
 // published artifacts from, and the pair every live-path suite in this directory

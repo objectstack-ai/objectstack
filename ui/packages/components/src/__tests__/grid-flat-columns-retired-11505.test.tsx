@@ -45,8 +45,8 @@ import { render } from '@testing-library/react';
 import '../renderers';
 import { SchemaRenderer } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 
 const FLAT_KEYS = ['smColumns', 'mdColumns', 'lgColumns', 'xlColumns'] as const;
 

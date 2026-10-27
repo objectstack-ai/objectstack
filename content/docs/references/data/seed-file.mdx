@@ -1,0 +1,94 @@
+---
+title: Seed File schema — Data Protocol reference
+navTitle: Seed File
+description: "A file / image / avatar / video / audio field stores an opaque sys_file id, and only an upload mints one."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+## Seed files — a file a package ships, written into a file field by a seed
+
+A `file` / `image` / `avatar` / `video` / `audio` field stores an opaque
+`sys_file` id (ADR-0104 D3 wave 2), and only an upload mints one. A seed has
+no upload, so a seed record names the file by the PATH the package ships it
+at instead, and the platform carries the bytes from there (#25779, ruled on
+hotclm#19: "the platform's seed loader should carry bundled fixture files;
+the app keeps `file` required"):
+
+1. **Authoring.** A record writes `seedFile('fixtures/nda-v1.pdf')` — the
+   value `SeedFileReferenceSchema` — into a file-class field. The path
+   is relative to the package root: the directory holding
+   `objectstack.config.ts`, the root a declarative connector's file ref
+   resolves against too.
+2. **Bundling.** `os build` / `os compile` reads every referenced file and
+   writes its bytes into the dataset's `files` map
+   (`SeedFileContentSchema`), keyed by the same path. The compiled
+   artifact is what every boot reads — `os dev`, `os serve`, a published
+   package, an artifact URL — so the bytes travel with the seed wherever it
+   goes. A path that names no file fails the build.
+3. **Loading.** The seed loader stores the bytes as a `sys_file`, writes its
+   id into the field, and has the written record own it — (object, record,
+   field), the ownership an upload gets. A replay that finds the row still
+   holding a file with the same bytes keeps it, so a boot does not mint a
+   new file for an unchanged fixture. A reference whose bytes the dataset
+   does not carry is refused, by row, naming the path.
+
+300 rows may name the same path: each row gets a file of its own, because a
+file has one owning field (ADR-0104 D3).
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/seed-file.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { SeedFileContentSchema, SeedFilePathSchema, SeedFileReferenceSchema } from '@objectstack/spec/data';
+import type { SeedFileContent, SeedFilePath, SeedFileReference } from '@objectstack/spec/data';
+
+// Validate data
+const result = SeedFileContentSchema.parse(data);
+```
+
+---
+
+## SeedFileContent
+
+One bundled seed file: its bytes and what they must hash to
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **contentType** | `string` | ✅ | MIME type the stored file carries |
+| **size** | `integer` | ✅ | Byte length of the file |
+| **sha256** | `string` | ✅ | SHA-256 of the bytes, lowercase hex — the loader refuses bytes that do not match it |
+| **data** | `string` | ✅ | The bytes, base64-encoded |
+
+
+---
+
+## SeedFilePath
+
+Path of a file the package ships, relative to the package root (e.g. `fixtures/nda-v1.pdf`)
+
+**Type:** `string`
+
+
+---
+
+## SeedFileReference
+
+A file the package ships, by package-relative path, written into a file field by a seed
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **$file** | `string` | ✅ | Path of a file the package ships, relative to the package root (e.g. `fixtures/nda-v1.pdf`) |
+| **name** | `string` | optional | File name the stored file carries (what a download is saved as); defaults to the last segment of the path |
+| **contentType** | `string` | optional | MIME type of the file; defaults to the one `os build` infers from the path's extension |
+
+
+---
+

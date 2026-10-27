@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-detail",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "DetailView plugin for Object UI - comprehensive detail page with sections, tabs, and related lists",
@@ -60,7 +60,7 @@
     "@object-ui/permissions": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@object-ui/react": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { SEMVER_2_0_0_VERSION_PATTERN } from '../kernel/version-grammar';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Package Version Protocol
@@ -58,8 +59,31 @@ export const PackageDependencySchema = lazySchema(() => z.object({
   packageId: z.string().describe('Manifest ID of the dependency'),
   /** Required version range (semver, e.g. "^1.0.0"). */
   versionRange: z.string().describe('Semver version range (e.g. ^1.0.0)'),
-  /** Whether this dependency is optional (missing dep is a warning, not an error). */
-  optional: z.boolean().default(false).describe('Whether this dependency is optional'),
+  /**
+   * REMOVED (#25792 item 6; ADR-0141 D8 item 2, ADR-0049 enforce-or-remove).
+   *
+   * Said "missing dep is a warning, not an error", and nothing ever made it
+   * so. The authored dependency is the manifest record
+   * `ManifestSchema.dependencies` (`{ [packageId]: versionRange }`): it has no
+   * optional arm, and the ADR-0141 D2 pre-install check reads it alone and
+   * treats every entry as required. This array is a projection of that record
+   * (D8), so an entry carries the id and the range and nothing the record
+   * cannot say. Measured at retirement: no reader and no writer of the key
+   * outside `packages/spec` (this repository and HotCRM).
+   *
+   * Tombstoned rather than deleted, so the rejection carries this prescription
+   * in both channels (`tsc` and the parse). No D2 conversion: a snapshot is not
+   * a stack collection member (the `kernel/Manifest:capabilities` precedent);
+   * the D3 record is `dependency-unread-spellings-retired`.
+   */
+  optional: retiredKey(
+    '`PackageDependency.optional` was removed in @objectstack/spec 18 (ADR-0049 ' +
+    'enforce-or-remove, ADR-0141 D8) — no install path ever honoured it: the ' +
+    'pre-install check reads the package\'s `manifest.dependencies` record, which ' +
+    'has no optional arm, and treats every entry as required. Delete the key. ' +
+    'Declare a dependency in `manifest.dependencies` (`{ \'com.acme.core\': ' +
+    '\'^1.0.0\' }`) only when the package cannot install without it.',
+  ),
 }).describe('Package dependency declaration'));
 
 export type PackageDependency = z.input<typeof PackageDependencySchema>;

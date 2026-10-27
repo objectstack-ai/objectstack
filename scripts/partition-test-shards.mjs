@@ -113,6 +113,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { liveShardTotal } from './ci-shard-matrix.mjs';
 import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { samplesFromSummary } from './measure-test-shard-timings.mjs';
 import { packageListDocument } from './nightly-tiers.mjs';
@@ -121,15 +122,18 @@ import { workspacePackages } from './workspace-enumerator.mjs';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 
-// The Test Core shard count, and the ONLY place it is reasoned about.
-// ci.yml spells it three more times (the matrix, the `name:`, and `--shard
-// N/8`); the self-test below reads that workflow back and fails on drift,
-// because a partitioner splitting into a different number of bins than the
-// matrix declares is not a red step anywhere -- it is packages that no shard
-// runs. scripts/ci/select-shard-timings-run.mjs spells it once more, but only
-// as its matchers' default: the timings refresh judges each run at the width
-// that run's own `Test Core (N/M)` jobs carry, so a resize leaves the runs
-// from before it readable (#25376).
+// The Test Core shard count, READ from ci.yml's `test` matrix (its
+// full-roster fallback; scripts/ci-shard-matrix.mjs), and the ONLY place
+// it is reasoned about. The number lives in the workflow alone: a partitioner
+// splitting into a different number of bins than the matrix declares is not a
+// red step anywhere -- it is packages that no shard runs -- so this module
+// asks the matrix instead of keeping a copy, and an unreadable matrix fails
+// the import rather than falling back to a remembered count. ci.yml spells it
+// twice more (`--shard N/M` and the attestation's `--total`); the self-test
+// below reads those back. scripts/ci/select-shard-timings-run.mjs spells it
+// once more, but only as its matchers' default: the timings refresh judges
+// each run at the width that run's own `Test Core (N/M)` jobs carry, so a
+// resize leaves the runs from before it readable (#25376).
 //
 // WHY EIGHT (#25376, 6 -> 8). On the committed dataset (the 2026-10-23
 // refresh), bins of predicted test windows, the CLI cut into its 3 slices:
@@ -157,7 +161,7 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // beside them. That last figure is the floor this count cannot move: a CLI
 // slice (~960-1010s measured) is serial, so past eight the slowest shard is
 // the slice and more shards only add runners.
-export const SHARD_COUNT = 8;
+export const SHARD_COUNT = liveShardTotal('test');
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
 // It is a RATIO, not a wall-clock target, which is what makes it stable as the
@@ -1950,17 +1954,17 @@ function selfTest() {
     }
   });
 
-  // 4. The shard count is spelled in ci.yml too, and drift there is silent:
-  //    a partitioner cutting six bins for a five-job matrix simply loses a
-  //    sixth of the workspace, with every step green. Read it back.
-  const declaredMatrix = /^\s*shard:\s*\[([^\]]*)\]/m.exec(ciYml);
+  // 4. The shard count is spelled in ci.yml beyond the matrix, and drift
+  //    there is silent: a partitioner cutting six bins for a five-job matrix
+  //    simply loses a sixth of the workspace, with every step green.
+  //    SHARD_COUNT is the matrix itself (read above, through
+  //    scripts/ci-shard-matrix.mjs, whose own self-test refuses an
+  //    unreadable matrix), so what is left to read back is the two other
+  //    spellings: the partitioner's `--shard N/M` and the attestation's
+  //    `--total`.
   check(() => {
-    if (!declaredMatrix) throw new Error('ci.yml: could not find the Test Core shard matrix to compare against');
-  });
-  const matrixSize = declaredMatrix[1].split(',').filter((s) => s.trim() !== '').length;
-  check(() => {
-    if (matrixSize !== SHARD_COUNT) {
-      throw new Error(`ci.yml: the shard matrix declares ${matrixSize} shards, this script splits into ${SHARD_COUNT}`);
+    if (!Number.isInteger(SHARD_COUNT) || SHARD_COUNT < 1) {
+      throw new Error(`ci.yml: the Test Core matrix read as ${SHARD_COUNT} shards`);
     }
   });
   check(() => {

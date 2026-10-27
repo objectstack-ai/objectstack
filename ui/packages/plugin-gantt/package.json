@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-gantt",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Gantt chart plugin for Object UI",
@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@object-ui/test-support": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "^6.0.5",

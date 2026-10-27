@@ -85,7 +85,12 @@ export {
   type AttachmentReclaimOutcome,
   type ReclaimAttachmentContentOptions,
 } from './attachment-reclaim.js';
-export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
+// [#25190] `renderTemplate` is not on this entry: it took a template body
+// inline and rendered its html face with no save moment, so the hole-placement
+// rule, judged where a template is authored or published, could not see it
+// (ruling 6335348115 on #25082, F2 B3). A template is an `email_template`
+// item, rendered by `services.email` (`sendTemplate` / `renderTemplate`).
+export { requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,
   PostmarkTransport,

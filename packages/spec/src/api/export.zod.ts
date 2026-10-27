@@ -397,6 +397,15 @@ export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;
  *   so that row's dry run can name fewer fields than its commit. The element
  *   IS {@link DroppedFieldsEventSchema}, so the `reason` vocabulary is the
  *   engine's — ⛔ never a second enum here.
+ *
+ * One optional report key rides on a `failed` row: `errors`, every cell error
+ * of that row, so one import tells the user about every bad cell instead of
+ * one per re-import. The first-error keys `field`, `code` and `error` stay and
+ * keep naming element 0, so a reader of those keys is unchanged. The element
+ * IS {@link ValidateDataIssueSchema}, the shape the row's `warnings` and the
+ * validate verdict's `errors` already use, rather than a third issue shape: a
+ * cell error is `{ field, code, message }`, and it never carries the
+ * advisory-only `rule` / `severity`.
  */
 export const ImportRowResultSchema = lazySchema(() => z.object({
   row: z.number().int().describe('1-based row number in the source data'),
@@ -404,9 +413,19 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   action: z.enum(['created', 'updated', 'skipped', 'failed'])
     .describe('What happened to the row'),
   id: z.string().optional().describe('Record id (created/updated rows)'),
-  field: z.string().optional().describe('Field that caused a coercion/validation error'),
-  code: z.string().optional().describe('Error code (failed rows)'),
-  error: z.string().optional().describe('Human-readable error message (failed rows)'),
+  field: z.string().optional().describe('Field that caused a coercion/validation error (element 0 of `errors` when present)'),
+  code: z.string().optional().describe('Error code (failed rows; element 0 of `errors` when present)'),
+  error: z.string().optional().describe('Human-readable error message (failed rows; element 0 of `errors` when present)'),
+  errors: z.array(ValidateDataIssueSchema).optional().describe(
+    'Every cell error of a failed row, one element per failed cell, in the validate verdict\'s issue shape '
+    + '(`field`, `code`, `message`). The list holds the import\'s cell-coercion errors, and a cell error never '
+    + 'carries the advisory-only `rule` or `severity`. '
+    + 'Present only on a failed row that has at least one cell error, so a row '
+    + 'that failed for another reason (a duplicate or ambiguous match key, say) omits it. The first-error keys '
+    + '`field`, `code` and `error` stay and name element 0, so a reader of those keys sees the same answer '
+    + 'as before. A server that does not produce this list omits the key, and the row then reports its first '
+    + 'error only.',
+  ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(
     'Findings this deployment ADMITS rather than rejects, copied verbatim from the validate verdict\'s row '
     + '`warnings`: ADR-0104 value shapes under a warn-first posture, then the hits of advisory validation rules '

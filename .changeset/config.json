@@ -116,7 +116,6 @@
       "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
-      "@object-ui/sdui-parser",
       "@object-ui/types",
       "object-ui"
     ]

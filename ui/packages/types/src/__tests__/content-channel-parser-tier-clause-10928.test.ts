@@ -15,7 +15,7 @@
  * rendered NOTHING. They used to go on "no error, no warning, no element". The
  * render half of that is true — `SchemaRenderer` strips both keys out of the
  * props bag it spreads and no renderer reads them. The warning half was false:
- * the parser tier's `validateTree` (`@object-ui/sdui-parser`) warns
+ * the parser tier's `validateTree` (`@objectstack/sdui-parser`) warns
  * `not-a-container` for a child list under a registration that declares no
  * `children` input (objectui#9910), and it answers a `body` child list with the
  * same code (`checkRetiredBodyDialect`, objectui#6771). A reads-neither
@@ -28,7 +28,7 @@
  * ## Why this file pins the prose, and where the parser half is pinned
  *
  * `@object-ui/types` declares no workspace dependency, and its tests import
- * none: `@object-ui/sdui-parser` is not importable here without declaring it,
+ * none: `@objectstack/sdui-parser` is not importable here without declaring it,
  * which a prose pin does not justify. The behaviour the clause describes is
  * held where the parser and the registry live, and those pins are named here
  * so a change to either side has a place to look:

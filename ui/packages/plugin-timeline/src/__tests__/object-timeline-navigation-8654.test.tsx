@@ -40,7 +40,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { safeValidateSchema, StrictAnyComponentSchema } from '@object-ui/types/zod';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import type { ObjectTimelineProps } from '../ObjectTimeline';

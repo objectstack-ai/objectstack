@@ -15,7 +15,7 @@
  * from the related object's highlightFields / default list columns"). The
  * registration in `@object-ui/plugin-detail` still declared
  * `{ name: 'columns', required: true }`, and the page compile (`compile()` in
- * `@object-ui/sdui-parser`, whose `ok` is the save gate) reads the
+ * `@objectstack/sdui-parser`, whose `ok` is the save gate) reads the
  * registration, so it refused two nodes the row and the renderer accept:
  *
  * - a node whose `dataSource` binding names a VIEW, which supplies the view's
@@ -52,7 +52,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { compile, type Manifest } from '@object-ui/sdui-parser';
+import { compile, type Manifest } from '@objectstack/sdui-parser';
 // Module scope, not a hook: the whole registration graph loads at import time.
 import '../../dev/manifest-registry';
 import { emitSduiManifest } from '../../scripts/emit-sdui-manifest';

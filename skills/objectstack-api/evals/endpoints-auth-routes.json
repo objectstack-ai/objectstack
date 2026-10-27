@@ -50,6 +50,16 @@
         "must_contain": ["apiMethods", "/batch", "trackHistory", "lifecycle"],
         "must_not_contain": ["'search'", "'restore'"]
       }
+    },
+    {
+      "id": 6,
+      "prompt": "Our nightly CSV upsert of `supplier` rows by `tax_id` keeps resetting the `owner` column that sales reassigns by hand. Fix the import body.",
+      "expected_output": "Sends `mapping` as a `FieldMappingEntry[]` (the `{ Column: field }` shorthand cannot carry it) with `{ sourceField: 'Owner', targetField: 'owner', applyOn: 'create' }`: the column is written when the upsert creates the row and left out of the patch when it matches one; the other columns keep the default `applyOn: 'always'`. Keeps `writeMode: 'upsert'` and `matchFields: ['tax_id']`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["applyOn", "'create'", "sourceField", "targetField"],
+        "must_not_contain": ["writeMode: 'insert'"]
+      }
     }
   ]
 }

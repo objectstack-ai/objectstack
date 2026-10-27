@@ -64,7 +64,7 @@ Package dependency declaration
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Manifest ID of the dependency |
 | **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
-| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
+| **optional** | `never` | optional | [REMOVED] `PackageDependency.optional` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0141 D8) — no install path ever honoured it: the pre-install check reads the package's `manifest.dependencies` record, which has no optional arm, and treats every entry as required. Delete the key. Declare a dependency in `manifest.dependencies` (`{ 'com.acme.core': '^1.0.0' }`) only when the package cannot install without it. |
 
 
 ---
@@ -83,7 +83,7 @@ Package manifest snapshot embedded in a package version
 | **description** | `string` | optional | Short description |
 | **scope** | `Enum<'platform' \| 'environment'>` | optional (default: `"environment"`) | Package scope |
 | **minPlatformVersion** | `string` | optional | Minimum required platform version (semver) |
-| **dependencies** | `{ packageId: string; versionRange: string; optional?: boolean }[]` | optional (default: `[]`) | Package dependencies |
+| **dependencies** | `{ packageId: string; versionRange: string }[]` | optional (default: `[]`) | Package dependencies |
 | **metadataTypes** | `string[]` | optional (default: `[]`) | Metadata types provided by this package |
 | **migrations** | `string[]` | optional (default: `[]`) | Migration script identifiers (ordered) |
 | **configurationSchema** | `Record<string, any>` | optional | JSON Schema for per-installation configuration properties |
@@ -97,7 +97,7 @@ Package dependency declaration
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Manifest ID of the dependency |
 | **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
-| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
+| **optional** | `never` | optional | [REMOVED] `PackageDependency.optional` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0141 D8) — no install path ever honoured it: the pre-install check reads the package's `manifest.dependencies` record, which has no optional arm, and treats every entry as required. Delete the key. Declare a dependency in `manifest.dependencies` (`{ 'com.acme.core': '^1.0.0' }`) only when the package cannot install without it. |
 
 
 ---

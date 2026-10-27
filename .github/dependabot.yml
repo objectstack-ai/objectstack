@@ -23,9 +23,13 @@ updates:
           - "minor"
           - "patch"
 
-  # Enable version updates for GitHub Actions
+  # Enable version updates for GitHub Actions. The composite actions under
+  # .github/actions/ pin actions of their own (setup-node, actions/cache), and
+  # Dependabot reads only the directories listed here.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "monthly"
       time: "02:00"

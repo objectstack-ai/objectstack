@@ -623,7 +623,7 @@ export { chartConfigPresentation } from '@object-ui/core';
  * one authored description, `widget.description`, which the dashboard surface
  * draws as the card-header subtitle. If a caption under a metric's value
  * returns, it returns as a declared widget-level key outside the options bag,
- * never as a key inside it. The options census in `@object-ui/sdui-parser`
+ * never as a key inside it. The options census in `@objectstack/sdui-parser`
  * reads this file's text, comments included, which is why this note does not
  * spell the bag's member access.
  */
