@@ -945,6 +945,7 @@
     "api/ImportRowResult:code",
     "api/ImportRowResult:droppedFields",
     "api/ImportRowResult:error",
+    "api/ImportRowResult:errors",
     "api/ImportRowResult:field",
     "api/ImportRowResult:id",
     "api/ImportRowResult:ok",
