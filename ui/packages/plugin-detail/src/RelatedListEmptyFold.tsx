@@ -61,7 +61,7 @@ export interface EmptyFoldMemberState {
   newDisabled: boolean;
 }
 
-interface Member extends EmptyFoldMemberState {
+interface FoldStackEntry extends EmptyFoldMemberState {
   id: string;
   el: Element;
   /** The list's current New handler, read at click time. */
@@ -89,7 +89,7 @@ function decideEmptyFold(
 }
 
 class Stack {
-  readonly members = new Map<string, Member>();
+  readonly members = new Map<string, FoldStackEntry>();
   private readonly listeners = new Set<() => void>();
   private version = 0;
   subscribe = (listener: () => void): (() => void) => {
@@ -104,7 +104,7 @@ class Stack {
     for (const listener of [...this.listeners]) listener();
   }
   /** The members in document order. */
-  ordered(): Member[] {
+  ordered(): FoldStackEntry[] {
     return [...this.members.values()].sort((a, b) =>
       a.el === b.el ? 0 : a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
     );
@@ -216,7 +216,7 @@ export const RelatedListStackSlot: React.FC<RelatedListStackSlotProps> = ({
 };
 
 /** The one line naming a stack's folded lists, each with its New action. */
-const EmptyFoldLine: React.FC<{ entries: Member[]; standalone: boolean }> = ({ entries, standalone }) => {
+const EmptyFoldLine: React.FC<{ entries: FoldStackEntry[]; standalone: boolean }> = ({ entries, standalone }) => {
   const { t } = useDetailTranslation();
   return (
     <div
