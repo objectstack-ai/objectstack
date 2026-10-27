@@ -19,6 +19,7 @@
     "automation/ApprovalNodeConfig:lockRecord = true",
     "automation/ApprovalNodeConfig:maxRevisions = 3",
     "automation/ApprovalNodeConfig:onEmptyApprovers = \"admin_rescue\"",
+    "automation/AssignmentRule:active = true",
     "automation/BpmnElementMapping:bidirectional = true",
     "automation/BpmnExportOptions:includeExtensions = false",
     "automation/BpmnExportOptions:includeLayout = true",

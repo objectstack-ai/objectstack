@@ -305,27 +305,6 @@ export const JUSTIFIED = {
     ])
   ),
 
-  ...Object.fromEntries(
-    ["action:button", "action:icon", "action:group", "action:menu"].map((surface) => [
-      `${surface}:variant`,
-      {
-        reason:
-          "Consumed HERE, in another vocabulary. The runner reads `variant` for one purpose: " +
-          "`variant: 'danger'` paints the confirm dialog's button destructive (`confirmOptions` in " +
-          "ActionRunner.ts, objectstack#26580), against the spec's enum on `ActionDef` " +
-          "(`primary | secondary | danger | ghost | link`). These renderers' `variant` is " +
-          "`@object-ui/types`' `UIActionSchema.variant`, the button-style vocabulary " +
-          "(`default | primary | secondary | destructive | outline | ghost`), which each renderer " +
-          "maps onto its own control and `action:group` / `action:menu` read as `'destructive'`. " +
-          "Forwarded raw it does not type-check against `ActionDef` and carries no `danger` for the " +
-          "runner to read; mapping `destructive` to `danger` is a dialect decision, not a forward. " +
-          "The spread-based hosts (DeclaredActionsBar's dispatch spreads the localized " +
-          "declaration) carry the declaration's own `variant`.",
-        issue: 26580,
-      },
-    ])
-  ),
-
   // ── Read off the declaration, never off the node ───────────────────────────
   ...Object.fromEntries(
     ["action:button", "action:icon", "action:group", "action:menu"].map((surface) => [

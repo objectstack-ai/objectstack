@@ -600,7 +600,7 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 50],
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 49],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -1483,7 +1483,7 @@ export const CEILINGS = new Map([
   // 「`lanes/director.md` 职责行」: the seat an app project summons reviews that
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
-  // 88 → 86 (#25753): the objectui pin-chain line retired, and main's governed-draft rule (#26693) landed one line shorter; landed count.
+  // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // alternates between the two multi-lane repos, oldest-first inside a repo, with a

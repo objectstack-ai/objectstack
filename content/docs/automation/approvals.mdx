@@ -401,28 +401,28 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `org_membership_level`, and `expression`
+`team`, `department`, `org_membership_level`, `queue`, and `expression`
 (described in the [callout above](#3-the-approval-node) and in
 [Dynamic approvers](#dynamic-approvers-3447)); `org_membership_level` is the
 one that silently resolves to nobody when it's mistaken for a business
-hierarchy. `queue` still parses so stored flows keep loading, but it is **not
-implemented** by the runtime and is no longer offered for authoring (#3508) —
-a queue entry resolves to nobody. Route to a `team`, `department`, or
-`position` instead. `field`, `manager`, and `expression` resolve against the record's
+hierarchy. A `queue` entry names an ownership queue by its machine name — one
+an installed app declares, or one of the organization's own — and resolves to
+the queue's members at node entry, through the same expansion that decides who
+may claim the queue's records (ADR-0142 D6). `field`, `manager`, and `expression` resolve against the record's
 **live** state at node entry (#3447); `manager` additionally depends on
 `sys_user.manager_id`, which a platform admin sets from **Setup → Users → ⋯ →
 Set Manager** — see [the `manager` callout above](#3-the-approval-node). `position`, `department`,
-`org_membership_level` and `expression` may additionally name which
+`org_membership_level`, `queue` and `expression` may additionally name which
 organization's directory resolves them — see
 [Approving across organizations](#cross-org-approvers).
 
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
-- **A person entry** (`manager`, `field`) adds no slot. Nor does an
-  `expression` that yields no ids. A `user` entry never resolves to nobody: its
-  value is the slot.
+- **A person entry** (`manager`, `field`) adds no slot. Nor does a `queue`
+  with no members, or an `expression` that yields no ids. A `user` entry never
+  resolves to nobody: its value is the slot.
 - **A group entry** (`position`, `team`, `department`, `org_membership_level`)
-  keeps its `<type>:<value>` literal as a slot, and so do a `queue` entry and an
+  keeps its `<type>:<value>` literal as a slot, and so does an
   `expression` value that `resolveAs` re-expands into a group with nobody in it.
   A `position:<name>` slot is decided by whoever is staffed into that position
   later. No person ever holds any other literal, so only an administrator can

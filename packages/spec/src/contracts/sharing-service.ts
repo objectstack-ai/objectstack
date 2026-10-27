@@ -452,10 +452,11 @@ export interface ISharingService {
  * `sys_sharing_rule.recipient_type`.
  *
  * The authoring enum `ShareRecipientType` (`spec/security`, `sharing.zod.ts`)
- * is this union minus `queue`: `plugin-sharing`'s declared-rule bootstrap maps
+ * is this union, member for member, since `queue` was re-admitted with its
+ * implementation (ADR-0142 D7): `plugin-sharing`'s declared-rule bootstrap maps
  * `sharedWith.type` onto this column member-for-member (an unmapped value is
  * skipped with a warning, never widened), and `sharing-service.test.ts` beside
- * this file pins the two lists in step.
+ * this file pins the two lists equal.
  *
  * - `user`                  — a specific user id (no expansion)
  * - `team`                  — a flat collaboration team (`sys_team` + `sys_team_member`)
@@ -471,8 +472,11 @@ export interface ISharingService {
  *                             empty column shares with nobody). Expansion is
  *                             per record, not per rule, and re-materialises on
  *                             the record's own write. Executor: #15072.
- * - `queue`                 — reserved: no `sys_queue` yet, `expandRecipient`
- *                             returns `[]`, deliberately not authorable
+ * - `queue`                 — every member of an ownership queue, named by
+ *                             its machine name (a declared queue or the
+ *                             organization's `sys_queue` row; ADR-0142 D7),
+ *                             expanded through the ownership-queue service and
+ *                             re-materialised when its membership moves
  */
 export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'position' | 'unit_and_subordinates' | 'queue' | 'field';
 

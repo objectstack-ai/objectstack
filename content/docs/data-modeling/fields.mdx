@@ -322,6 +322,11 @@ refuse is not counted. This holds for `count`, and for `sum`, `min` and `max`
 over number values. An `avg` summary, a `sum`/`min`/`max` meeting a value that
 is not a number, and a summary whose `filter` reads a dotted path through
 another reference keep reading the stored value, as they did before.
+An import's **dry run** previews its create rows in the batches the import
+writes them in (200 rows each) and refuses the rows the import refuses, with
+the same message. It writes nothing, so a row in a later batch reads the
+summary as stored before the import: two such rows that fall in different
+batches of a dry run both preview valid, while the import refuses the second.
 **Concurrent writes are not guaranteed (并发不保证):** two writes in flight at
 the same time each read the summary they started from, so a guard like the one
 above can still admit one row from each.

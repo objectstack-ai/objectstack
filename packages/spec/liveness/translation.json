@@ -123,6 +123,26 @@
           "verifiedAt": "2026-10-25",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportAttr (`reports.<name>.description`, read by translateReport)",
           "note": "Overlays the served report's own `description`."
+        },
+        "blocks": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#translateReportBlocks (`reports.<name>.blocks.<block_name>`, read by translateReport per joined block, keyed by the block's required `name`)",
+          "note": "A joined report's block heading and caption, drawn by the joined renderer off the served report. Seeded LIVE with its reader in the same change; the catalog yields per block to a string an org re-authored on the packaged report (ADR-0029 D9.2a).",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportBlockAttr (`reports.<name>.blocks.<block_name>.label`, read by translateReportBlocks)",
+              "note": "Overlays the served block's own `label`."
+            },
+            "description": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportBlockAttr (`reports.<name>.blocks.<block_name>.description`, read by translateReportBlocks)",
+              "note": "Overlays the served block's own `description`."
+            }
+          }
         }
       }
     },

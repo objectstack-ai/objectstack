@@ -85,6 +85,12 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // authors its own rules through the sharing door, not `/meta`. Same
       // category as `capability`.
       'sharing_rule',
+      // [ADR-0142 D1/D5] `queue` and `assignment_rule` are code-only (regime C,
+      // `allowRuntimeCreate: false`): an organization staffs its own queues as
+      // `sys_queue` rows in Setup, and assignment rules are declared only
+      // (merge question 11). Same category as `sharing_rule`.
+      'queue',
+      'assignment_rule',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

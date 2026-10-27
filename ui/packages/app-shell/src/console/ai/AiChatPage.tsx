@@ -44,9 +44,6 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  Empty,
-  EmptyTitle,
-  EmptyDescription,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -143,6 +140,7 @@ import { BuildDebugDrawer } from './BuildDebugDrawer.js';
 import { isConversationZh } from './conversationLanguage.js';
 import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
+import { AiUnavailable } from './AiUnavailable.js';
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
   const value = part[key];
@@ -944,8 +942,8 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     useAgents({ apiBase });
   const catalogNames = useMemo(() => agents.map((a) => a.name), [agents]);
   // Catalog resolved with no agent to talk to. The `/ai` route guard already
-  // redirects when discovery reports AI unavailable (Community Edition), so this
-  // is the secondary safety net: a deployment that reports AI enabled but serves
+  // shows `AiUnavailable` itself when the runtime serves no agent (Community
+  // Edition), so this is the secondary safety net: a deployment that reports AI enabled but serves
   // no agent (misconfig), a transient `/agents` failure, or a `VITE_AI_BASE_URL`
   // server that returns an empty list. Either way, degrade to a graceful state
   // instead of the agent-less echo chat (autoResponse) that ChatPane falls into.
@@ -1523,56 +1521,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
       </div>
       </>
       )}
-    </div>
-  );
-}
-
-/**
- * Graceful state for `/ai` when the agent catalog resolved empty — shown
- * instead of an agent-less echo chat. `hasError` distinguishes "AI not enabled
- * on this deployment" (Community Edition) from "couldn't reach the AI service"
- * (offline/misconfig), which also offers a retry. Either way there's a way out
- * (back to home), so the route never dead-ends.
- */
-function AiUnavailable({
-  hasError,
-  onRetry,
-  onHome,
-  t,
-}: {
-  hasError: boolean;
-  onRetry: () => void;
-  onHome: () => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}) {
-  return (
-    <div className="flex flex-1 items-center justify-center p-6" data-testid="ai-unavailable">
-      <Empty>
-        <EmptyTitle>
-          {t('console.ai.unavailableTitle', { defaultValue: 'AI assistant unavailable' })}
-        </EmptyTitle>
-        <EmptyDescription>
-          {hasError
-            ? t('console.ai.unavailableError', {
-                defaultValue:
-                  "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
-              })
-            : t('console.ai.unavailableDescription', {
-                defaultValue:
-                  "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",
-              })}
-        </EmptyDescription>
-        <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
-          {hasError && (
-            <Button variant="outline" onClick={onRetry} data-testid="ai-unavailable-retry">
-              {t('console.ai.unavailableRetry', { defaultValue: 'Try again' })}
-            </Button>
-          )}
-          <Button onClick={onHome} data-testid="ai-unavailable-home">
-            {t('console.ai.unavailableHome', { defaultValue: 'Back to home' })}
-          </Button>
-        </div>
-      </Empty>
     </div>
   );
 }
