@@ -498,7 +498,10 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * NOT implied by the `viewAllRecords` / `modifyAllRecords` super-user bits.
    * That is deliberate: separating "may see all data" from "may take a bulk
    * copy of it" is the segregation-of-duties case the axis exists for. The
-   * built-in admin sets carry the grant explicitly instead.
+   * built-in admin sets (`admin_full_access`, `organization_admin`) do NOT
+   * carry it either, so an admin holding only those sets is refused export.
+   * Grant it by binding the admin to an app or environment permission set
+   * that names each object to export with `allowRead: true, allowExport: true`.
    *
    * Deliberately OPTIONAL (no Zod default) so the resolved value stays
    * three-valued at the AUTHORING layer — a set that says nothing about export

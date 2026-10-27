@@ -4263,12 +4263,19 @@ export function InterfacesPillar({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [reportBinding, setReportBinding] = React.useState<ReportBinding>(NO_REPORT_BINDING);
   const [pageKind, setPageKind] = React.useState<PageSourceKind>(DEFAULT_PAGE_SOURCE_KIND);
-  const openCreate = React.useCallback((kind: InterfaceCreateKind) => {
-    setCreateError(null);
-    setReportBinding(NO_REPORT_BINDING);
-    setPageKind(DEFAULT_PAGE_SOURCE_KIND);
-    setCreateKind(kind);
-  }, []);
+  const openCreate = React.useCallback(
+    (kind: InterfaceCreateKind) => {
+      // objectstack#26845 — the created item opens at once, and its load
+      // replaces the buffer a held widget lives in: asked before the dialog
+      // opens, so Cancel costs nothing and the create itself asks nothing.
+      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      setCreateError(null);
+      setReportBinding(NO_REPORT_BINDING);
+      setPageKind(DEFAULT_PAGE_SOURCE_KIND);
+      setCreateKind(kind);
+    },
+    [leafHeld, locale],
+  );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
   // way `AppNavCanvas` mints it), born with no label (objectui#11196) and, for
@@ -5602,15 +5609,10 @@ export function DataPillar({
   // they had since selected, which is the regression the mount-time ref exists
   // to prevent — so the id is marked spent as soon as the loaded rail has been
   // consulted, whether or not it held a match.
+  //
+  // Applied below `objHeld`, which it asks about (objectstack#26845).
   const requestedSurface = useRequestedSurface();
   const appliedRequestRef = React.useRef(0);
-  React.useEffect(() => {
-    if (!requestedSurface || !objectsLoaded) return;
-    if (requestedSurface.id === appliedRequestRef.current) return;
-    appliedRequestRef.current = requestedSurface.id;
-    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
-    if (match) setCurrent(match);
-  }, [requestedSurface, objects, objectsLoaded]);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
   // objectui#11272 — the object `objDraft` was loaded for, `object:NAME`:
   // written where the load below installs it, and nowhere else.
@@ -6191,6 +6193,26 @@ export function DataPillar({
   const fieldCopilotMark =
     objLoaded && fieldSel?.kind === 'field' ? copilotDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
+  // The live request's apply (see `requestedSurface` above). objectstack#26845
+  // — another object's load replaces the buffer a held edit lives in, so it
+  // asks first, as the rail does; declined, the request is spent and the held
+  // edit stays. A request for the open object drops nothing and asks nothing.
+  React.useEffect(() => {
+    if (!requestedSurface || !objectsLoaded) return;
+    if (requestedSurface.id === appliedRequestRef.current) return;
+    appliedRequestRef.current = requestedSurface.id;
+    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
+    if (!match) return;
+    if (match.name !== current?.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    setCurrent(match);
+  }, [requestedSurface, objects, objectsLoaded, current, objHeld, locale]);
+  // objectstack#26845 — a created object opens at once, and its load replaces
+  // the buffer a held edit lives in: asked before the dialog opens, so Cancel
+  // costs nothing and the create itself asks nothing.
+  const openCreateObject = () => {
+    if (!confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    openCreateDialog();
+  };
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const objDraftStatus = useStudioItemDraftStatus(
     current ? { type: 'object', name: current.name } : null,
@@ -6439,7 +6461,7 @@ export function DataPillar({
           testId="studio-rail-data"
           heading={t('engine.studio.data.objects', locale)}
           count={objects.length}
-          onAdd={readOnly ? undefined : openCreateDialog}
+          onAdd={readOnly ? undefined : openCreateObject}
           addLabel={t('engine.studio.data.newObject', locale)}
           addTestId="studio-rail-add"
           search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.data.searchObjects', locale) }}
@@ -6564,7 +6586,7 @@ export function DataPillar({
                   <button
                     type="button"
                     data-testid="empty-state-new-object"
-                    onClick={openCreateDialog}
+                    onClick={openCreateObject}
                     className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.newObject', locale)}
@@ -7814,6 +7836,10 @@ export function AutomationsPillar({
   const openCreateFlow =
     !readOnly && packageId !== null
       ? () => {
+          // objectstack#26845 — the created flow opens at once, and its load
+          // replaces the buffer a held step lives in: asked before the dialog
+          // opens, so Cancel costs nothing and the create itself asks nothing.
+          if (!confirmDropUnsavedWork(flowHeld !== null, locale)) return;
           setError(null);
           setNewTrigger('');
           setNewTriggerObject('');

@@ -14,6 +14,14 @@
  * Asserted through the real write doors (`insert` single and batch, `update`
  * by id and by predicate) on a registry double, so the pin covers the label lookup at each
  * call site and not only the sentence builder.
+ *
+ * [#26867] The same resolution travels on the envelope as `fieldLabel`, which
+ * the HTTP doors' user-facing sentence names the field by (`mapDataError`,
+ * `@objectstack/types`): "A record with this Account Name already exists",
+ * with `field` keeping the API key. It is absent when the field has no label,
+ * and the sentence is then the unnamed one. The labels are read in the
+ * writer's locale (translation bundle → declared `label`), the ladder the
+ * record validator and the `DELETE_RESTRICTED` refusal climb.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -21,6 +29,7 @@ import { ObjectQL } from './engine';
 import { DuplicateRecordError } from './duplicate-record-error';
 import { SchemaRegistry } from './registry';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { mapDataError } from '@objectstack/types';
 
 vi.mock('./registry', async () => {
   const { createRegistryModuleMock } = await import('./registry-module-mock.js');
@@ -92,12 +101,25 @@ async function refusalOf(run: () => Promise<unknown>): Promise<any> {
   );
 }
 
-const DOORS: Array<[string, (engine: ObjectQL) => Promise<unknown>]> = [
-  ['insert', (engine) => engine.insert('crm_account', { name: 'Acme' })],
-  ['batch insert', (engine) => engine.insert('crm_account', [{ name: 'Acme' }, { name: 'Acme' }])],
-  ['update by id', (engine) => engine.update('crm_account', { id: 'r1', name: 'Acme' })],
-  ['update by predicate', (engine) => engine.update('crm_account', { name: 'Acme' }, { where: { name: 'Old' }, multi: true } as any)],
+/** The execution context a write carries — `{}` for a bare-kernel caller. */
+type Ctx = { context?: { locale?: string } };
+
+const DOORS: Array<[string, (engine: ObjectQL, ctx?: Ctx) => Promise<unknown>]> = [
+  ['insert', (engine, ctx = {}) => engine.insert('crm_account', { name: 'Acme' }, ctx as any)],
+  ['batch insert', (engine, ctx = {}) => engine.insert('crm_account', [{ name: 'Acme' }, { name: 'Acme' }], ctx as any)],
+  ['update by id', (engine, ctx = {}) => engine.update('crm_account', { id: 'r1', name: 'Acme' }, ctx as any)],
+  ['update by predicate', (engine, ctx = {}) => engine.update('crm_account', { name: 'Acme' }, { where: { name: 'Old' }, multi: true, ...ctx } as any)],
 ];
+
+/** A `zh-CN` bundle for both labels, echoing the key on a miss as `II18nService` does. */
+const ZH: Record<string, string> = {
+  'objects.crm_account.label': '客户',
+  'objects.crm_account.fields.name.label': '客户名称',
+};
+const i18n = {
+  t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
+  getLocales: () => ['en', 'zh-CN'],
+};
 
 describe('a unique refusal names the object and field by label (#24951)', () => {
   beforeEach(() => {
@@ -147,9 +169,68 @@ describe('a unique refusal names the object and field by label (#24951)', () => 
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
       expect(failure.field).toBeUndefined();
+      expect(failure).not.toHaveProperty('fieldLabel');
       expect(failure.message).toBe(
         "Duplicate record refused on 'Account': a unique constraint already holds these values. No record was written.",
       );
+    });
+
+    it('[#26867] `fieldLabel` carries the label, and the HTTP sentence names the field by it', async () => {
+      const engine = makeRig(LABELLED, namedColumn);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine));
+
+      expect(failure.fieldLabel).toBe('Account Name');
+      const answer = mapDataError(failure, 'crm_account');
+      expect(answer.status).toBe(409);
+      expect(answer.body.code).toBe('UNIQUE_VIOLATION');
+      expect(answer.body.field).toBe('name');
+      expect(answer.body.error).toBe('A record with this Account Name already exists');
+    });
+
+    it('[#26867] no label in hand: no `fieldLabel`, and the HTTP sentence is the unnamed one', async () => {
+      const engine = makeRig(UNLABELLED, namedColumn);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine));
+
+      expect(failure).not.toHaveProperty('fieldLabel');
+      const answer = mapDataError(failure, 'crm_account');
+      expect(answer.status).toBe(409);
+      expect(answer.body.code).toBe('UNIQUE_VIOLATION');
+      expect(answer.body.field).toBe('name');
+      expect(answer.body.error).toBe('A record with this value already exists');
+    });
+
+    it('[#26867] in the writer\'s locale: the translated labels, in both sentences', async () => {
+      const engine = makeRig(LABELLED, namedColumn);
+      engine.setI18nService(i18n as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
+
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(failure.status).toBe(409);
+      expect(failure.fieldLabel).toBe('客户名称');
+      expect(failure.message).toBe(
+        "Duplicate record refused on '客户': a unique constraint on '客户名称' already holds this value. " +
+          'No record was written.',
+      );
+      const answer = mapDataError(failure, 'crm_account');
+      expect(answer.body.error).toBe('A record with this 客户名称 already exists');
+      expect(answer.body.field).toBe('name');
+    });
+
+    it('[#26867] a locale the bundle does not translate: the declared labels', async () => {
+      const engine = makeRig(LABELLED, namedColumn);
+      engine.setI18nService(i18n as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'en' } }));
+
+      expect(failure.fieldLabel).toBe('Account Name');
+      expect(failure.message).toContain("refused on 'Account': a unique constraint on 'Account Name'");
     });
 
     it('`developerMessage` names the API names, never the labels', async () => {

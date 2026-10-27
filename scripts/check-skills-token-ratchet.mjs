@@ -679,10 +679,18 @@ export const CEILINGS = new Map([
   // objectstack-automation
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
 
-  // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
+  // objectstack-ui — the three authored eval files; its `references/react-blocks.md`
   // is generator-owned and carries no row here on purpose (see the boundary
   // section). Its JSON twin was retired by #14296 item 3 and is gone entirely.
-  ['skills/objectstack-ui/evals/README.md', 289],
+  // 289 -> 335 (#26633): the README lists the third eval file,
+  // `report-period-export.json`, in one three-line entry (+196 bytes). The
+  // README's four sections share no sentence, so there was no duplicate to cut
+  // (0 bytes). On `origin/main` the file was 1143 bytes (286 tokens, headroom
+  // 3); the LANDED file is 1339 bytes -> 335 tokens, ceiling +46, pinned AT the
+  // measurement. Same ruling as the `analytics-inline-vs-dataset.json` row
+  // below (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/evals/README.md) / 4) == ceil(1339 / 4)
+  ['skills/objectstack-ui/evals/README.md', 335],
   // 1102 -> 1229: the aggregate × field-type rule and the multi-value-dimension
   // rule (card #24425, the skills half of cloud#2861 ruling B) each gain one
   // regression case — a `formula` under `sum` and a `multiselect` as the
@@ -710,6 +718,17 @@ export const CEILINGS = new Map([
   // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1348],
+  // INITIAL measurement (#26633): the third authored eval file — ONE
+  // report-authoring prompt for `dateRange` on a `type: 'date'` dataset
+  // dimension and `exportOptions` csv / xlsx under the base object's
+  // `allowExport`, the eval owed by the spec PR that added both keys. A new
+  // file because both sibling eval files sat at headroom 0 and the analytics
+  // file was held by an open PR. Nothing in it restates anything (0 bytes
+  // cut); 1828 bytes -> 457 tokens, pinned AT the measurement — zero headroom,
+  // so the next token added here is paid for by deleting one from this file.
+  // Same ruling as the row above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/evals/report-period-export.json) / 4) == ceil(1828 / 4)
+  ['skills/objectstack-ui/evals/report-period-export.json', 457],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts

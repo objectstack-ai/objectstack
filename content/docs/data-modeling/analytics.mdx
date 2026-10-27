@@ -285,6 +285,13 @@ and list-view charts to it **by name**. Presentations reference a dataset by its
 `name` string — the shipped presentation schemas carry no inline/anonymous
 dataset shape, so even a one-off single-object KPI is a small named dataset.
 
+A list-view chart's binding must resolve. A `dataset` no package declares, or a
+`dimensions` or `values` entry the dataset does not declare, is refused at
+publish, for a view and for an object's own `listViews` alike, and fails
+`os validate` (`chart-dataset-unknown`, `chart-dimension-unknown`,
+`chart-measure-unknown`). A `values` entry names a dataset **measure**, never
+the base field it aggregates.
+
 A list-view chart draws the rows of its dataset's base `object`, never the
 list's own records: the list's filter does not reach the dataset query. So a
 list view's chart must bind a dataset whose `object` is the object the list

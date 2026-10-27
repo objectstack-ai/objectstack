@@ -9,6 +9,8 @@ import {
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
 import { explainRule } from './rule-explanations.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 
 // [#22161] Each finding of the two converted ids is one verdict sentence; the
 // reasoning it used to carry is the id's `os explain` entry. Every call below
@@ -848,6 +850,150 @@ describe('validateChartBindings — list-view charts', () => {
       ],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+// [#26847] The two standalone `views[]` shapes `PUT /api/v1/meta/view` carries,
+// and the publish door itself. Measured on main before the change: a chart list
+// view naming no declared dataset, or a measure its dataset lacks, published
+// 200 through that door as a ViewItem record, a flattened overlay and a
+// container `listViews` member alike, while `os validate` refused the file.
+describe('[#26847] list-view charts at the view and object publish doors', () => {
+  const chart = (over: Record<string, unknown> = {}) => ({
+    chartType: 'bar',
+    dataset: 'task_metrics',
+    dimensions: ['status'],
+    values: ['est_hours'],
+    ...over,
+  });
+  const listView = (over: Record<string, unknown> = {}) => ({
+    type: 'chart',
+    label: 'Hours by status',
+    data: { provider: 'object', object: 'showcase_task' },
+    columns: ['status'],
+    chart: chart(over),
+  });
+  const SHAPES: Array<[string, (over?: Record<string, unknown>) => Record<string, unknown>, string]> = [
+    [
+      'a ViewItem record',
+      (over) => ({ name: 'showcase_task.hours', object: 'showcase_task', viewKind: 'list', label: 'Hours', config: listView(over) }),
+      'views[0].config.chart',
+    ],
+    [
+      'a flattened list overlay',
+      (over) => ({ name: 'showcase_task.hours', object: 'showcase_task', viewKind: 'list', ...listView(over) }),
+      'views[0].chart',
+    ],
+    [
+      'a container listViews member',
+      (over) => ({ name: 'showcase_task', object: 'showcase_task', listViews: { hours: listView(over) } }),
+      'views[0].listViews.hours.chart',
+    ],
+  ];
+
+  describe.each(SHAPES)('the rule walks %s', (_label, view, at) => {
+    it('chart-dataset-unknown at `chart.dataset`', () => {
+      const findings = validateChartBindings({ ...baseStack(), views: [view({ dataset: 'no_such_dataset' })] });
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[CHART_DATASET_UNKNOWN, 'error', `${at}.dataset`]]);
+    });
+
+    it('chart-measure-unknown at `chart.values[i]`', () => {
+      const findings = validateChartBindings({ ...baseStack(), views: [view({ values: ['est_hours', 'ghost_measure'] })] });
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[CHART_MEASURE_UNKNOWN, 'error', `${at}.values[1]`]]);
+    });
+
+    it('CONTROL — a fully resolved chart reports nothing', () => {
+      expect(validateChartBindings({ ...baseStack(), views: [view()] })).toEqual([]);
+    });
+  });
+
+  it('a ViewItem record is judged at `config` only — its envelope carries no chart to walk twice', () => {
+    const item = { ...SHAPES[0][1]({ dataset: 'no_such_dataset' }), chart: chart({ dataset: 'no_such_dataset' }) };
+    expect(validateChartBindings({ ...baseStack(), views: [item] }).map((f) => f.path)).toEqual([
+      'views[0].config.chart.dataset',
+    ]);
+  });
+
+  it('an object list view names a dataset in a stack that declares none: refused, not skipped', () => {
+    const findings = validateChartBindings({
+      objects: [{ name: 'showcase_task', fields: {}, listViews: { hours: listView() } }],
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [CHART_DATASET_UNKNOWN, 'objects[0].listViews.hours.chart.dataset'],
+    ]);
+  });
+
+  describe('at the runtime publish door', () => {
+    const { datasets } = baseStack();
+    const objects = [
+      {
+        name: 'showcase_task',
+        label: 'Task',
+        sharingModel: 'private',
+        fields: {
+          status: { type: 'text', label: 'Status' },
+          estimate_hours: { type: 'number', label: 'Estimate' },
+        },
+      },
+    ];
+    const chartRules = (fs: Array<{ rule: string; path: string }>) =>
+      fs.filter((f) => f.rule.startsWith('chart-')).map((f) => [f.rule, f.path]);
+
+    it('`validateChartBindings` reaches `view` and `object` writes', () => {
+      for (const type of ['view', 'object']) {
+        expect(
+          REFERENCE_INTEGRITY_RULES.find((r) => r.name === 'validateChartBindings')?.runtimeTypes,
+          type,
+        ).toContain(type);
+      }
+    });
+
+    describe.each(SHAPES)('a view written as %s', (_label, view, at) => {
+      const write = (over?: Record<string, unknown>) =>
+        runRuntimeAuthoringRules({ type: 'view', item: view(over), context: { objects, datasets } });
+
+      it('⭐ LIT — a chart naming no declared dataset is REFUSED at `chart.dataset`', () => {
+        const result = write({ dataset: 'no_such_dataset' });
+        expect(chartRules(result.errors)).toEqual([[CHART_DATASET_UNKNOWN, `${at}.dataset`]]);
+      });
+
+      it('⭐ LIT — a chart whose `values` names no measure of its dataset is REFUSED at `chart.values[i]`', () => {
+        const result = write({ values: ['ghost_measure'] });
+        expect(chartRules(result.errors)).toEqual([[CHART_MEASURE_UNKNOWN, `${at}.values[0]`]]);
+      });
+
+      it('⭐ CONTROL — the same view bound to a declared dataset and measure publishes clean', () => {
+        const result = write();
+        expect(result.rulesRun).toContain('validateReferenceIntegrity');
+        expect(result.errors).toEqual([]);
+      });
+    });
+
+    describe('an object write carrying a built-in chart list view', () => {
+      const write = (over?: Record<string, unknown>) =>
+        runRuntimeAuthoringRules({
+          type: 'object',
+          item: { ...objects[0], listViews: { hours: { ...listView(over), data: undefined } } },
+          context: { objects, datasets },
+        });
+
+      it('⭐ LIT — an unknown dataset is REFUSED', () => {
+        // The door names an object entry by name rather than position.
+        expect(chartRules(write({ dataset: 'no_such_dataset' }).errors)).toEqual([
+          [CHART_DATASET_UNKNOWN, 'objects.showcase_task.listViews.hours.chart.dataset'],
+        ]);
+      });
+
+      it('⭐ LIT — an unknown measure is REFUSED', () => {
+        expect(chartRules(write({ values: ['ghost_measure'] }).errors)).toEqual([
+          [CHART_MEASURE_UNKNOWN, 'objects.showcase_task.listViews.hours.chart.values[0]'],
+        ]);
+      });
+
+      it('⭐ CONTROL — a resolved chart publishes clean', () => {
+        expect(write().errors).toEqual([]);
+      });
+    });
   });
 });
 
