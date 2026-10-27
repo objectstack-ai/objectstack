@@ -30,6 +30,7 @@
     "security/ObjectPermission:modifyAllRecords = false",
     "security/ObjectPermission:viewAllRecords = false",
     "security/PermissionSet:isDefault = false",
+    "security/Queue:members = []",
     "security/RowLevelSecurityPolicy:enabled = true",
     "security/SharingRule:accessLevel = \"read\"",
     "security/SharingRule:active = true"

@@ -27,9 +27,16 @@
  * `bindRuleHooks` binds only on each rule's own `object_name`, and
  * `bu-tree-recompute.ts` covers the two recipient kinds that read the
  * business-unit graph; this module covers the kinds whose expansion reads a
- * membership table instead. `user` (a literal id), `queue` (expands to nobody)
- * and `field` (per record, re-derived by the record's own write) have no
- * membership table to watch.
+ * membership table instead. `user` (a literal id) and `field` (per record,
+ * re-derived by the record's own write) have no membership table to watch.
+ *
+ * [ADR-0142 D2/D7] A `queue` recipient expands through its member
+ * specifications, so a position or team write moves it too: the rule
+ * selection LOOKS THROUGH QUEUES — the queues whose specifications name the
+ * written position or team ({@link QueueLookThrough}) — and reconciles the
+ * queue-recipient rules naming them for the written user, exactly as it does a
+ * position or team rule. A write to the queue's own rows (`sys_queue_member`)
+ * names a set, not a user, and is recomputed by `queue-hooks.ts`.
  *
  * The position expansion also unions `sys_member.role`, the ADR-0057 D4
  * transition source, and so does the holder check: a user who still holds the
@@ -161,6 +168,14 @@ interface MinimalEngine {
   unregisterHooksByPackage(packageId: string): number;
 }
 
+/**
+ * [ADR-0142 D2] The ownership-queue service's look-through: the queues in an
+ * organization whose member specifications name one of `values` under `kind`.
+ */
+export interface QueueLookThrough {
+  queuesNaming(kind: string, values: ReadonlySet<string>, organizationId: string | null): Promise<string[]>;
+}
+
 /** The slice of `SharingRuleService` this module drives. */
 export interface RecipientMembershipRuleService {
   listRules(
@@ -242,6 +257,7 @@ export function bindRecipientMembershipRecompute(
   engine: MinimalEngine,
   service: RecipientMembershipRuleService,
   logger?: OptionalSharingLogger,
+  queues?: QueueLookThrough,
 ): void {
   if (typeof engine.registerHook !== 'function') return;
   if (typeof engine.unregisterHooksByPackage === 'function') {
@@ -267,10 +283,18 @@ export function bindRecipientMembershipRecompute(
         : null;
 
       const rules = await service.listRules({}, SYSTEM_CTX as any);
+      // [ADR-0142 D2] The queues naming the written recipient, in the row's
+      // organization(s) — or everywhere when the organization is unreadable.
+      const queueNames = new Set<string>();
+      if (queues && (rules ?? []).some((r) => r.recipient_type === 'queue')) {
+        for (const org of orgs ?? [null]) {
+          for (const name of await queues.queuesNaming(source.recipientType, recipients, org)) queueNames.add(name);
+        }
+      }
       const affected = (rules ?? []).filter(
         (rule) =>
-          rule.recipient_type === source.recipientType
-          && recipients.has(String(rule.recipient_id))
+          ((rule.recipient_type === source.recipientType && recipients.has(String(rule.recipient_id)))
+            || (rule.recipient_type === 'queue' && queueNames.has(String(rule.recipient_id))))
           && ruleReadsRowsOf(source, rule, orgs),
       );
       for (const rule of affected) {

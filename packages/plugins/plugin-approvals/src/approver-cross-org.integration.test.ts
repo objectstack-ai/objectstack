@@ -162,6 +162,32 @@ describe('ADR-0105 D9 — cross-org approver targeting through ApprovalService',
     expect(req.pending_approvers).toEqual(['position:cfo']);
   });
 
+  // [ADR-0142 D6] A queue is an organization's (APPROVER_ORG_SCOPED.queue), so
+  // `organization` retargets its expansion like a position's, and the D2 wall
+  // still drops a member who could not read the request.
+  it('a `queue` approver expands in the TARGETED organization, bounded by the request org', async () => {
+    const asked: unknown[] = [];
+    const queueSvc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(1767000000000 + (n++) * 1000) },
+      tenancyPosture: () => 'group',
+      ownershipQueues: () => ({
+        expandMembers: async (name: string, org: string | null, options?: { purpose?: string }) => {
+          asked.push([name, org, options?.purpose]);
+          return name === 'group_finance' && org === 'o_group' ? ['u_cfo', 'u_group_only'] : [];
+        },
+      }),
+    });
+    const req = await queueSvc.openNodeRequest(
+      openInput([{ type: 'queue', value: 'group_finance', organization: '$root' }]),
+      CTX,
+    ) as any;
+    expect(asked).toEqual([['group_finance', 'o_group', 'addressing']]);
+    // `u_group_only` holds no Plant A membership, so the wall would hide the
+    // request from them: dropped. The CFO is kept.
+    expect(req.pending_approvers).toEqual(['u_cfo']);
+  });
+
   // Regression: `user` / `field` / `manager` return EARLY in
   // `resolveApproverSpec`, before the graph-expansion branch. D9's resolution
   // originally sat after those returns, so the declaration on a directory-less

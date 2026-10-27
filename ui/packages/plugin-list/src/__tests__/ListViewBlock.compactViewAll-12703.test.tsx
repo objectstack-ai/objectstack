@@ -31,8 +31,8 @@
  *  (b) a compact block with an inline filter only: the host is asked for the
  *      object's list with no view, and the href carries no query;
  *  (c) CONTROL — a host without `listHref`, and no host at all: no link;
- *  (d) CONTROL — the block in a wide region draws the full list and no link,
- *      with the same host.
+ *  (d) the block in a wide region draws the capped list (objectstack#26613),
+ *      whose link says how many records it opens, to the same destination.
  */
 
 import React from 'react';
@@ -227,14 +227,14 @@ describe('the compact list links to the rest through the host (objectui#12703 pa
     expect(within(aside2).queryByTestId('list-compact-footer')).toBeNull();
   });
 
-  it('(d) CONTROL: the same block in the wide region draws the full list and no link', async () => {
+  it('(d) the same block in the wide region draws the capped list, whose link carries the count', async () => {
     const host = makeHost();
     const { container } = renderPage(pageWith(boundBlock), host.value);
     const main = regionOf(container, 'main');
 
-    await waitFor(() => expect(within(main).getByTestId('grid-spy')).toBeTruthy());
-    expect(within(main).getByTestId('toolbar-filter-trigger')).toBeTruthy();
-    expect(within(main).queryByTestId('list-compact-footer')).toBeNull();
-    expect(within(main).queryByRole('link', { name: /^View all/ })).toBeNull();
+    await waitFor(() => expect(within(main).getAllByTestId('list-capped-row')).toHaveLength(2));
+    expect(within(main).queryByTestId('grid-spy')).toBeNull();
+    const link = within(main).getByRole('link', { name: /^View all 2/ });
+    expect(link.getAttribute('href')).toBe(`/apps/crm/${OBJECT}/view/upcoming`);
   });
 });

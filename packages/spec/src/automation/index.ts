@@ -15,6 +15,8 @@ export { flowForm } from './flow.form';
 export * from './execution.zod';
 export * from './webhook.zod';
 export * from './approval.zod';
+// [ADR-0142 D5] Declared routing of an inserted row to a queue or a user.
+export * from './assignment-rule.zod';
 // `etl.zod.ts` (L2 "ETL Pipeline": ETLPipeline, ETLPipelineRun, their
 // source/destination/transformation vocabulary, the ETLEndpointType /
 // ETLTransformationType / ETLSyncMode / ETLRunStatus enums and the `ETL`

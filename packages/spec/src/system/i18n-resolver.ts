@@ -3556,7 +3556,8 @@ function lookupObjectFieldOption(
  * `injectedSystemColumnDefs` (`../data/injected-system-column-provenance`)
  * spreads onto every eligible object with English labels: the tenant scope
  * anchor `organization_id`, the audit family `created_*` / `updated_*`,
- * `owner_id` and `owning_business_unit_id`. Custom objects carry no
+ * `owner_id`, `owning_business_unit_id` and the ownership `queue` (ADR-0142
+ * D3). Custom objects carry no
  * per-object translation entries for these, so without a fallback every
  * localized surface — list headers, export files, import templates, the
  * `/meta` read exits — leaks the English default (e.g. an otherwise
@@ -3593,6 +3594,7 @@ const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
     'ja-JP': '所属ビジネスユニット',
     'es-ES': 'Unidad de negocio propietaria',
   },
+  queue: { en: 'Queue', 'zh-CN': '队列', 'ja-JP': 'キュー', 'es-ES': 'Cola' },
 };
 
 /**
