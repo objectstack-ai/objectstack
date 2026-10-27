@@ -407,19 +407,21 @@ function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels |
       'function exists to remove.',
     );
   }
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') {
-    throw new Error(
-      `label(record.${field}) renders ONE option value, and \`${field}\` holds ` +
-      `${Array.isArray(value) ? 'a list of values' : 'an object'} on this record.`,
-    );
-  }
+  // The field's options first, so a field that declares none faults on EVERY
+  // row, not only on the rows where it happens to hold a value.
   const options = Object.prototype.hasOwnProperty.call(labels, field) ? labels[field] : undefined;
   if (options === undefined) {
     throw new Error(
       `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
       'label() reads a select field\'s option label; read any other field directly ' +
       `(record.${field}).`,
+    );
+  }
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    throw new Error(
+      `label(record.${field}) renders ONE option value, and \`${field}\` holds ` +
+      `${Array.isArray(value) ? 'a list of values' : 'an object'} on this record.`,
     );
   }
   const stored = String(value);

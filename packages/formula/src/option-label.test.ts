@@ -58,13 +58,17 @@ describe('label(record.<field>) — option labels in the reader\'s locale (#2660
     }
   });
 
-  it('refuses a field that declares no options, and a list value', () => {
+  it('refuses a field that declares no options, on every row, and a list value', () => {
     const plain = celEngine.evaluate(cel('label(record.title)'), { record, optionLabels: zhCN });
     expect(plain.ok).toBe(false);
     if (!plain.ok) {
       expect(plain.error.kind).toBe('runtime');
       expect(plain.error.message).toContain('`title` declares no options');
     }
+    // …on every row: an empty value does not hide that the field has no options.
+    const empty = celEngine.evaluate(cel('label(record.title)'), { record: { ...record, title: null }, optionLabels: zhCN });
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.error.message).toContain('`title` declares no options');
     const list = celEngine.evaluate(cel('label(record.tags)'), {
       record,
       optionLabels: { ...zhCN, tags: { a: 'A' } },

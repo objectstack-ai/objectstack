@@ -193,7 +193,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 | Function | Returns | Notes |
 |:---|:---|:---|
-| `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null. A stored (non-formula) field stores the declared label |
+| `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
 `double(x)`, `timestamp(s)`, `duration(s)`.
