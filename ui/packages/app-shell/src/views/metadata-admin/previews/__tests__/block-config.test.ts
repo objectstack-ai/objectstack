@@ -34,6 +34,11 @@ import {
 } from '../block-config';
 import { BLOCK_TYPE_META, PALETTE_EXCLUSIONS, TYPES_BY_CATEGORY } from '../block-types';
 import { t } from '../../i18n';
+// `engine.inspector.pageBlock.*` lives in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 describe('block-config', () => {
   it('exposes a configurable panel for every content block with authorable props', () => {
@@ -823,8 +828,9 @@ describe('object-kanban — the `groupBy` control, and the retired `groupField` 
 
   // The two repo-wide i18n gates do NOT reach this table — `check:i18n-keys`
   // and `check:i18n-dead-keys` both read `packages/i18n/src/locales/en.ts`, and
-  // `engine.inspector.pageBlock.*` lives only in `metadata-admin/i18n.ts`
-  // (which says so in its own header). So the renamed key's two halves are
+  // `engine.inspector.pageBlock.*` lives only in the designer strings (the
+  // `studio` namespace since objectstack#25922; `metadata-admin/i18n.ts` says so
+  // in its own header). So the renamed key's two halves are
   // pinned here, in the same file as the field it labels: the sibling
   // `block-config-i18n.test.ts` derives the NEW key from this table's position
   // and demands both locales define it, and this pin is the other direction —

@@ -39,6 +39,9 @@ const SEVEN_ANCHORS = [
   'owning_business_unit_id',
 ] as const;
 
+/** Every injected anchor today: #7865's seven plus the ownership `queue` (ADR-0142 D3). */
+const INJECTED_ANCHORS = [...SEVEN_ANCHORS, 'queue'] as const;
+
 const external = () => ({
   name: 'showcase_ext_customer',
   external: { remoteName: 'customers' },
@@ -51,10 +54,10 @@ const local = () => ({
 });
 
 describe('provenance derivation at its spec home — where the author-time linter can reach it', () => {
-  it('marks all seven anchors unprovisioned on an external object, none on the local twin', () => {
-    expect(unprovisionedInjectedColumns(external()).sort()).toEqual([...SEVEN_ANCHORS].sort());
+  it('marks every injected anchor unprovisioned on an external object, none on the local twin', () => {
+    expect(unprovisionedInjectedColumns(external()).sort()).toEqual([...INJECTED_ANCHORS].sort());
     expect(unprovisionedInjectedColumns(local())).toEqual([]);
-    for (const anchor of SEVEN_ANCHORS) {
+    for (const anchor of INJECTED_ANCHORS) {
       expect(resolveInjectedColumnProvenance(external(), anchor), anchor).toBe(
         'injected-unprovisioned',
       );

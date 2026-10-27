@@ -261,12 +261,22 @@ describe('#22474 — the preview binds the master-detail header the write binds'
       return count;
     }
 
-    it('insert and update previews of a plain line issue no read of the header object', async () => {
+    it('an update preview of a plain line issues no read of the header object', async () => {
       storeFor(PLAIN_LINE).set('p1', { id: 'p1', invoice: 'h_sent', quantity: 1 });
       const count = countHeaderReads(engine);
-      expect(await preview(engine, PLAIN_LINE, { invoice: 'h_sent', quantity: 1 }, 'insert')).toEqual(ADMITTED);
       expect(await preview(engine, PLAIN_LINE, { quantity: 2, id: 'p1' }, 'update')).toEqual(ADMITTED);
       expect(count.reads).toBe(0);
+    });
+
+    it('an insert preview of a plain line reads the header only as the insert does', async () => {
+      // [#26684] The insert preview runs the write's reference check, which
+      // asks the header's read door whether `h_sent` exists: the read the
+      // insert itself makes. The header binding adds none.
+      const count = countHeaderReads(engine);
+      expect(await preview(engine, PLAIN_LINE, { invoice: 'h_sent', quantity: 1 }, 'insert')).toEqual(ADMITTED);
+      const previewReads = count.reads;
+      expect(await write(() => engine.insert(PLAIN_LINE, { invoice: 'h_sent', quantity: 1 }))).toEqual(ADMITTED);
+      expect(count.reads - previewReads).toBe(previewReads);
     });
 
     it('positive control: the parent-scoped line does read it', async () => {

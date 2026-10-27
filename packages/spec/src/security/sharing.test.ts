@@ -30,7 +30,8 @@ describe('ShareRecipientType', () => {
   it('accepts exactly the authorable recipients', () => {
     // `field` (#14103) is authorable from this release; its per-record executor
     // is the services half (#15072) — see the `field` describe block below.
-    const authorable = ['user', 'team', 'position', 'unit_and_subordinates', 'business_unit', 'field'];
+    // `queue` was reserved until ADR-0142 D7 re-admitted it with its expander.
+    const authorable = ['user', 'team', 'position', 'unit_and_subordinates', 'business_unit', 'field', 'queue'];
     authorable.forEach((t) => {
       expect(() => ShareRecipientType.parse(t)).not.toThrow();
     });
@@ -39,8 +40,6 @@ describe('ShareRecipientType', () => {
   it('rejects the retired `group` (renamed → team) and `guest` recipients', () => {
     expect(() => ShareRecipientType.parse('group')).toThrow();
     expect(() => ShareRecipientType.parse('guest')).toThrow();
-    // Reserved in the runtime contract but not authorable until implemented.
-    expect(() => ShareRecipientType.parse('queue')).toThrow();
   });
 });
 
