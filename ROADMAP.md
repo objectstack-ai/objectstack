@@ -1,7 +1,7 @@
 # ObjectStack Roadmap
 
 > **Last updated:** 2026-06-06
-> **Source of truth:** [content/docs/concepts/north-star.mdx](content/docs/concepts/north-star.mdx) for product direction, ADRs for architectural decisions, and code for shipped behavior.
+> **Source of truth:** [docs/NORTH-STAR.md](docs/NORTH-STAR.md), the one North Star, for product direction and priority, ADRs for architectural decisions, and code for shipped behavior.
 
 This roadmap tracks the current framework repository. Historical Cloud/ObjectOS
 milestone plans that referred to `apps/cloud`, `apps/objectos`,
