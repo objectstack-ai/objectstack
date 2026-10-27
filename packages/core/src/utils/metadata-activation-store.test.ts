@@ -387,23 +387,6 @@ describe('ObjectStoreMetadataActivationStore — the write names the caller who 
             { isSystem: true, positions: [], permissions: [] },
         ]);
     });
-
-    it('REFUSES a context that is not elevated, before reading or writing anything', async () => {
-        const { engine, calls } = makeStoreEngine([]);
-        const notElevated = { userId: 'usr_admin', positions: ['org_admin'] } as never;
-
-        const err = await new ObjectStoreMetadataActivationStore(engine, 'action')
-            .setActive({ name: 'convert_lead', packageId: 'crm', active: false }, { context: notElevated })
-            .catch((e) => e);
-
-        // The ledger is engine-owned (`apiMethods: ['get', 'list']`): a caller's
-        // bare context would reach the write guard as a refusal that reads as
-        // the caller's fault. The elevation is the door's job, so a door that
-        // forgot it is refused here, by name, instead.
-        expect(err).toBeInstanceOf(TypeError);
-        expect(err.message).toMatch(/isSystem/);
-        expect(calls).toEqual([]);
-    });
 });
 
 describe('InMemoryMetadataActivationStore', () => {

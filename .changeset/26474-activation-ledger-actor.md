@@ -13,7 +13,7 @@ The activation ledger (`sys_metadata_activation`) is written by the ADR-0126 act
 
 The action door (`POST /api/v1/actions/_activation/:object/:action`) and the security catalog door (`POST /api/v1/security/_activation/:type/:name`, for positions, permission sets, sharing rules and webhooks) now write the row for the caller. They pass down the caller's own execution context, elevated (`{ ...callerContext, isSystem: true }`). The elevation keeps the engine-owned ledger writable, and the engine and the audit plugin record the caller's user id on both rows.
 
-- `@objectstack/core`: `MetadataActivationStore.setActive(row, options?)` takes an optional `{ context }`. The new `MetadataActivationWriteContext` type requires `isSystem: true`, and `ObjectStoreMetadataActivationStore` refuses a context that is not elevated with a `TypeError` before anything is read or written. Without a context, the store keeps writing under its system context, so a write that no caller requested still names nobody. `MetadataActivationWriteOptions` is exported too.
+- `@objectstack/core`: `MetadataActivationStore.setActive(row, options?)` takes an optional `{ context }`. The new `MetadataActivationWriteContext` type requires `isSystem: true`, so a door cannot pass the caller's context down without the elevation. Without a context, the store keeps writing under its system context, so a write that no caller requested still names nobody. `MetadataActivationWriteOptions` is exported too.
 - `@objectstack/objectql`: `ObjectQL.setActionActive(row, options?)` and `ActionActivationProjection.setActive(row, options?)` pass the options to the store unchanged. `ActionActivationWriteOptions` is exported.
 - `@objectstack/runtime`: both doors pass the caller's elevated context.
 

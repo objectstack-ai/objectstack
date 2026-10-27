@@ -106,8 +106,9 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  *     who threw it. A bare system context names nobody.
  *
  * `isSystem: true` is in the type, so a door cannot hand the caller's bare
- * context down by accident; {@link ObjectStoreMetadataActivationStore.setActive}
- * refuses one at runtime too, for a caller typed `any`.
+ * context down by accident. Runtime doors build it with one shared helper
+ * (`activationWriteContext` in `@objectstack/runtime`), so they cannot disagree
+ * about who a row names.
  */
 export type MetadataActivationWriteContext = { readonly isSystem: true; readonly userId?: string } & Record<string, unknown>;
 
@@ -192,27 +193,6 @@ function refuseEmptyPackageId(row: MetadataActivationRow, subject: string): void
         `Activation row for ${subject} names the empty string as its package. ` +
         `Omit packageId for an item no package ships; an empty package id is not a package.`,
     );
-}
-
-/**
- * The context a write runs under: the caller's elevated context when one is
- * handed in, the store's own system context otherwise. A context that is not
- * elevated is refused before anything is read or written — the elevation is the
- * door's job ({@link MetadataActivationWriteContext}), and a door that forgot it
- * would otherwise meet the engine-owned write guard as a refusal that reads as
- * the caller's fault.
- */
-function writeContextOf(options: MetadataActivationWriteOptions | undefined, subject: string) {
-    const context = options?.context;
-    if (context === undefined) return SYSTEM_CTX;
-    if (context === null || typeof context !== 'object' || context.isSystem !== true) {
-        throw new TypeError(
-            `Activation write for ${subject} was handed a context that is not elevated. ` +
-            `Hand down the caller's context with isSystem: true ({ ...callerContext, isSystem: true }), ` +
-            `or no context for a write no caller asked for.`,
-        );
-    }
-    return context;
 }
 
 /**
@@ -327,9 +307,8 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * under the store's system context and the row names nobody.
      */
     async setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void> {
-        const subject = `${this.metadataType} '${row.name}'`;
-        refuseEmptyPackageId(row, subject);
-        const context = writeContextOf(options, subject);
+        refuseEmptyPackageId(row, `${this.metadataType} '${row.name}'`);
+        const context = options?.context ?? SYSTEM_CTX;
         const packageId = row.packageId ?? null;
         const existing = await this.engine.find(METADATA_ACTIVATION_TABLE, {
             where: { metadata_type: this.metadataType, name: row.name },
