@@ -35,6 +35,7 @@ const ROWS: Approval[] = [
 
 const DATASET = DatasetSchema.parse({
   name: 'approval_ds',
+  label: 'Approvals',
   object: 'approval',
   dimensions: [
     { name: 'status', field: 'status', type: 'string', label: 'Status' },
