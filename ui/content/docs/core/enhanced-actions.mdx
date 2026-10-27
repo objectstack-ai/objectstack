@@ -483,7 +483,7 @@ const complexAction: ActionSchema = {
 ## Runtime Validation
 
 ```ts
-import { ActionSchema } from '@object-ui/types/zod';
+import { CRUDActionSchema } from '@object-ui/types/zod';
 
 const myAction = {
   type: 'action',
@@ -492,7 +492,7 @@ const myAction = {
   confirmText: 'Are you sure?',
 };
 
-const result = ActionSchema.safeParse(myAction);
+const result = CRUDActionSchema.safeParse(myAction);
 
 if (result.success) {
   console.log('Valid action configuration');

@@ -8,7 +8,7 @@ import {
   AppComponentSchema,
   ReportComponentSchema,
   ReportBuilderSchema,
-  ActionSchema,
+  CRUDActionSchema,
   DetailViewSchema,
   ViewSwitcherSchema,
   FilterUISchema,
@@ -364,7 +364,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       errorMessage: 'Failed to load data',
     };
 
-    const result = ActionSchema.safeParse(ajaxAction);
+    const result = CRUDActionSchema.safeParse(ajaxAction);
     expect(result.success).toBe(true);
   });
 
@@ -378,7 +378,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       method: 'DELETE',
     };
 
-    const result = ActionSchema.safeParse(confirmAction);
+    const result = CRUDActionSchema.safeParse(confirmAction);
     expect(result.success).toBe(true);
   });
 
@@ -394,7 +394,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
     // value is a LOUD parse rejection — never a silent strip, which would let
     // the author believe the dialog they configured exists. Absent stays
     // valid (accept case above).
-    const result = ActionSchema.safeParse(structured);
+    const result = CRUDActionSchema.safeParse(structured);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.map((i) => i.path.join('.'))).toContain('confirm');
@@ -408,7 +408,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
     // nothing else. The author now reads the remedy (`confirmText`) in the
     // message itself, which is what `packages/cli`'s `validate` / `check`
     // print verbatim beside the path and code.
-    const result = ActionSchema.safeParse({
+    const result = CRUDActionSchema.safeParse({
       type: 'action',
       label: 'Delete Record',
       actionType: 'confirm',
@@ -427,7 +427,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
 
     // Non-vacuity, IN THIS TEST: the canonical spelling still parses green.
     expect(
-      ActionSchema.safeParse({ type: 'action', label: 'Delete Record', confirmText: 'Sure?' }).success,
+      CRUDActionSchema.safeParse({ type: 'action', label: 'Delete Record', confirmText: 'Sure?' }).success,
     ).toBe(true);
   });
 
@@ -462,7 +462,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       },
     };
 
-    const result = ActionSchema.safeParse(dialogAction);
+    const result = CRUDActionSchema.safeParse(dialogAction);
     expect(result.success).toBe(true);
   });
 
@@ -492,7 +492,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       chainMode: 'sequential',
     };
 
-    const result = ActionSchema.safeParse(chainedAction);
+    const result = CRUDActionSchema.safeParse(chainedAction);
     expect(result.success).toBe(true);
   });
 
@@ -516,7 +516,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       condition,
     };
 
-    const result = ActionSchema.safeParse(gatedAction);
+    const result = CRUDActionSchema.safeParse(gatedAction);
     expect(result.success).toBe(true);
   });
 
@@ -549,7 +549,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       },
     };
 
-    const result = ActionSchema.safeParse(branchAction);
+    const result = CRUDActionSchema.safeParse(branchAction);
     expect(result.success).toBe(false);
     if (result.success) return;
     const issues = result.error.issues.filter((i) => i.path[0] === 'condition');
@@ -573,7 +573,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       },
     };
 
-    const result = ActionSchema.safeParse(trackedAction);
+    const result = CRUDActionSchema.safeParse(trackedAction);
     expect(result.success).toBe(true);
   });
 
@@ -590,7 +590,7 @@ describe('Phase 2: Enhanced ActionSchema Zod Validation', () => {
       },
     };
 
-    const result = ActionSchema.safeParse(retryAction);
+    const result = CRUDActionSchema.safeParse(retryAction);
     expect(result.success).toBe(true);
   });
 });

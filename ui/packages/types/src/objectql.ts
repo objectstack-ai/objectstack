@@ -2279,6 +2279,22 @@ export interface ObjectFormSchema extends BaseSchema {
    */
   modalCloseButton?: boolean;
 
+  /**
+   * How the modal presentation lays out its sections — the
+   * `ComponentPropsMap['object-form']` member, by reference (objectstack#25923,
+   * work item 4). `ModalForm` puts each section on its own tab only for
+   * `'tabbed'` with more than one section to show; any other value stacks them.
+   */
+  contentLayout?: SpecObjectFormProps['contentLayout'];
+
+  /**
+   * Ask before discarding unsaved edits when a drawer or modal form is
+   * dismissed — the `ComponentPropsMap['object-form']` member, by reference
+   * (objectstack#25923, work item 4). `ModalForm` and `DrawerForm` ask unless
+   * it is `false`.
+   */
+  confirmOnDiscard?: SpecObjectFormProps['confirmOnDiscard'];
+
   // ─── Mobile UX (round 3) ────────────────────────────────
 
   /**
@@ -2486,6 +2502,8 @@ type ObjectFormSlotKey =
   | 'children'
   | 'className'
   | 'columns'
+  | 'confirmOnDiscard'
+  | 'contentLayout'
   | 'customFields'
   | 'data'
   // objectui#11070 — joins with `ObjectFormSchema.dataSource`. This slot
@@ -4294,6 +4312,21 @@ export interface ObjectCalendarSchema extends BaseSchema {
    * reads them, in `plugin-calendar`'s `calendarNavigationMembers-8652` test.
    */
   navigation?: ViewNavigationConfig;
+  /**
+   * BCP-47 tag the calendar formats its dates and times with — the
+   * `ComponentPropsMap['object-calendar']` member, by reference
+   * (objectstack#25923, work item 4). `plugin-calendar`'s registration
+   * boundary reads it off the node and drops a tag `Intl` refuses, the same
+   * answer as an absent key.
+   */
+  locale?: SpecObjectCalendarProps['locale'];
+  /**
+   * External loading state — the `ComponentPropsMap['object-calendar']`
+   * member, by reference (objectstack#25923, work item 4). Honoured only
+   * alongside an array `data`; a calendar fed by `staticData` or `objectName`
+   * owns its loading state and drops it.
+   */
+  loading?: SpecObjectCalendarProps['loading'];
   /**
    * REFUSED BY NAME (objectui#9256, ADR-0049) — `object-calendar` reads
    * NEITHER content channel; see `children` below for the measurement.
