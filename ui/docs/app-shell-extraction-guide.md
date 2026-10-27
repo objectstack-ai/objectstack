@@ -1,35 +1,98 @@
-# Console Streamlining - Architecture Guide
+# `@object-ui/app-shell` — Architecture Guide
 
 ## Overview
 
-This document describes the refactored architecture that enables third-party systems to use ObjectUI components without inheriting the full console infrastructure.
+This document describes `@object-ui/app-shell` as it ships today, and the two
+ways a host uses it: compose the full console from its building blocks, or take
+only the layout container and bring your own routing, auth and backend.
 
-## New Packages
+The package started as a minimal rendering engine for third-party hosts. It has
+since become the home of the console itself: its routing tree, its auth and
+organization pages, Studio, the metadata admin engine, the marketplace and the
+AI chat pages all live here, and `apps/console` composes them. The sections
+below describe that package, not the original plan.
 
-### @object-ui/app-shell
+## What the package contains
 
-**Purpose**: Minimal application rendering engine
+### `@object-ui/app-shell`
 
-**Exports**:
-- `AppShell` - Basic layout container
-- `ObjectView` - Renders object views; it reads `objectName` from the router
-  (`useParams()`) and takes an `objects` metadata array. For a router-free embed,
-  use `ObjectView` from `@object-ui/plugin-view` instead - see the examples below.
-- `DashboardView` - Renders a dashboard by name. The dashboard renderer itself,
-  `DashboardRenderer`, is not an app-shell export - it ships from
-  `@object-ui/plugin-dashboard`, and `DashboardView` renders through it.
-- `PageView` - Renders a custom page by name. No package exports a
-  `PageRenderer`: a page body is dispatched through the component registry on
-  the schema node's `type` (`page`, `app`, `utility`, `home`, `record`).
-- `RecordFormPage` - Renders a full-screen create/edit page. No package exports
-  a `FormRenderer`; the exported form renderer is `ObjectForm` from
-  `@object-ui/plugin-form`, which this page delegates to.
+**Entry**: one root entry, `.` (`src/index.ts`), plus `./styles.css`. There are
+no subpath exports.
 
-**Dependencies**: `@object-ui/react`, `@object-ui/components`, `@object-ui/fields`, `@object-ui/layout`
+**Size** (non-test TypeScript under `src/`): about 211,000 lines in about 600
+files, with about 1,700 test files beside them. By directory:
 
-**Bundle Size**: ~50KB
+| Directory | Lines | What it holds |
+|:---|---:|:---|
+| `views/metadata-admin` | ~97,000 | The generic metadata admin engine: directory, list, edit, history and diagnostics pages, the schema form, the per-type previews and inspectors, and its own designer string table (`i18n.ts`) |
+| `views/studio-design` | ~22,000 | The Studio WYSIWYG design surface, its per-type canvases and the builder landing page |
+| `views/` (the rest) | ~27,000 | The inner-SPA views: `ObjectView`, `RecordDetailView`, `RecordFormPage`, `DashboardView`, `PageView`, `ReportView`, search, flows, approvals |
+| `console/` | ~22,000 | The console routing tree (`AppContent`, `ConsoleShell`) and its pages: auth, home, organizations, marketplace, AI chat |
+| `hooks/`, `layout/`, `utils/`, `providers/`, `chrome/`, `context/`, the rest | ~43,000 | Shell chrome (header, sidebar, command palette, toasts), the metadata, adapter and expression providers, navigation and user-state hooks, runtime configuration and observability |
 
-### @object-ui/providers
+**Exports**: the root entry publishes about 200 names (about 35 of them
+type-only). They fall into these groups, in the order `src/index.ts` lists
+them:
+
+- **The minimal shell** — `AppShell` (layout container) and its
+  `MinimalAppShellProps`.
+- **Providers and hooks** — `AdapterProvider`, `MetadataProvider`,
+  `ExpressionProvider`, the settle signal (`useSettleSignal`, `whenIdle`, …),
+  recent items, favorites, navigation pins and sync, the AI-surface signal.
+- **Console building blocks** — `ConsoleShell`, `ConnectedShell`,
+  `AuthenticatedRoute`, `RequireOrganization`, `SystemRedirect`,
+  `SetupRedirect`, and the host-app route policy (`resolveHostAppSegment`).
+- **Layout chrome and top-level chrome** — `ConsoleLayout`, `AppHeader`,
+  `UnifiedSidebar`, `ConsolePageHeader`, `CommandPalette`, `ConsoleToaster`,
+  `ErrorBoundary`, `ThemeProvider`, the unsaved-edits guard.
+- **Runtime configuration and observability** — `initRuntimeConfig`,
+  `getRuntimeConfig` and the branding / stage readers; Sentry wiring.
+- **Inner-SPA views** — `ObjectView`, `RecordDetailView`, `RecordFormPage`,
+  `DashboardView`, `PageView`, `ReportView`, `SearchResultsPage`,
+  `FlowRunner`.
+- **Default pages** — `DefaultAppContent`, `DefaultLoginPage`,
+  `DefaultRegisterPage`, `DefaultHomePage`, the organization pages,
+  `MarketplacePage`, `AiChatPage`, with the sign-up decision they share
+  (`decideSignUpOffer`).
+- **Registries** — the app component registry (`registerAppComponent`), the
+  metadata resource, preview and inspector registries, and the Studio canvas
+  registry, so a plugin can override a page without forking it.
+- **Metadata admin and Studio pages** — `MetadataDirectoryPage`,
+  `MetadataResourceRouter`, `SchemaForm`, `StudioDesignSurface`,
+  `BuilderLanding`, `PackagedAutomationPage`.
+- **AI assistant bus** — `assistantBus`, connecting the metadata designers to
+  the chat.
+
+The [package README](../packages/app-shell/README.md) is the API reference for
+these names.
+
+**Load-time registrations**: importing the entry registers, as a side effect,
+the built-in admin components, the console's SDUI widgets (cloud connection,
+product blocks, diagnostics), the record blocks (`record:attachments`,
+`record:approvals`, `record:approval_decision`), the global search,
+notifications, app launcher and nav menu blocks, and the metadata admin
+built-ins. The built-in metadata designers load from a deferred chunk on the
+first read of a designer registry, not during the entry's evaluation; the
+console's first-load budget (`scripts/check-eager-closure-budget.mjs`) is sized
+on that.
+
+**Dependencies**: `@object-ui/react`, `@object-ui/components`,
+`@object-ui/fields`, `@object-ui/layout`, `@object-ui/core`,
+`@object-ui/types`, `@object-ui/i18n`, `@object-ui/auth`,
+`@object-ui/permissions`, `@object-ui/providers`,
+`@object-ui/data-objectstack`, `@object-ui/collaboration`,
+`@object-ui/plugin-editor`, `@objectstack/spec`, `@objectstack/formula`,
+`@objectstack/lint`; the view plugins (`plugin-grid`, `plugin-list`,
+`plugin-form`, `plugin-detail`, `plugin-view`, `plugin-dashboard`,
+`plugin-calendar`, `plugin-kanban`, `plugin-charts`, `plugin-report`,
+`plugin-designer`, `plugin-chatbot`) are peer dependencies.
+
+**Bundle size**: not one number. A host that imports only `AppShell` still
+evaluates the entry and its load-time registrations; the console's eager
+closure is measured and budgeted by `scripts/check-eager-closure-budget.mjs`,
+not by this page.
+
+### `@object-ui/providers`
 
 **Purpose**: The upload adapter context
 
@@ -44,111 +107,84 @@ Its former `DataSourceProvider`, `MetadataProvider` and `ThemeProvider` retired
 
 **Dependencies**: `@object-ui/types`
 
+## Who consumes it
+
+Inside this repository three workspace members depend on the package:
+
+- `apps/console` — the product console. It imports about 75 names from the
+  root entry, and composes the routing tree mostly through
+  `DefaultAppContent`, so components such as `ObjectView` and `ConsoleLayout`
+  reach it through that tree rather than by name.
+- [`examples/console-starter`](../examples/console-starter/README.md) — the
+  minimal full console: `ConsoleShell`, `AuthenticatedRoute`, the `Default*`
+  pages and `DefaultAppContent`.
+- [`examples/byo-backend-console`](../examples/byo-backend-console/README.md) —
+  the bring-your-own-backend embed. It imports `AppShell` only and renders data
+  through `@object-ui/plugin-view` and `@object-ui/react`.
+
+A name the root entry exports that nothing outside the package names is retired
+from the entry, not kept for a caller that may come: the module that defines it
+stays, and in-package code imports it from there.
+
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────┐
-│  Third-Party Application                │
-│  (Your Custom Console)                  │
-└────────────────┬────────────────────────┘
-                 │
-                 ├── Custom Routing (React Router, Next.js, etc.)
-                 ├── Custom Auth (Your implementation)
-                 ├── Custom API (REST, GraphQL, etc.)
-                 │
-┌────────────────┴────────────────────────┐
-│  @object-ui/app-shell                   │
-│  - AppShell                             │
-│  - ObjectView                           │
-│  - DashboardView                        │
-│  - PageView                             │
-│  - RecordFormPage                       │
-└────────────────┬────────────────────────┘
-                 │
-┌────────────────┴────────────────────────┐
-│  @object-ui/react                       │
-│  - SchemaRenderer                       │
-│  - SchemaRendererProvider (data source) │
-│  - ThemeProvider                        │
-│  - useActionRunner                      │
-│  - Component Registry                   │
-└────────────────┬────────────────────────┘
-                 │
-                 ├──────────────┬──────────────┬──────────────┐
-                 │              │              │              │
-┌────────────────┴──┐  ┌────────┴────┐  ┌──────┴────┐  ┌─────┴──────┐
-│ @object-ui/       │  │ @object-ui/ │  │@object-ui/│  │ Plugins    │
-│ components        │  │ fields      │  │ layout    │  │ (optional) │
-│ (Shadcn UI)       │  │ (Inputs)    │  │ (Layouts) │  │            │
-└───────────────────┘  └─────────────┘  └───────────┘  └────────────┘
+┌────────────────────────────────────────────────┐
+│  Host                                          │
+│  apps/console · examples/console-starter       │
+│  (or your own app — see byo-backend-console)   │
+└───────────────────────┬────────────────────────┘
+                        │
+┌───────────────────────┴────────────────────────┐
+│  @object-ui/app-shell                          │
+│  - AppShell (minimal layout container)         │
+│  - ConsoleShell / DefaultAppContent (routing)  │
+│  - Default pages: auth, home, orgs, AI chat    │
+│  - Inner-SPA views: ObjectView, RecordDetail…  │
+│  - Metadata admin engine + Studio              │
+│  - Providers, chrome, registries               │
+└───────────────────────┬────────────────────────┘
+                        │
+┌───────────────────────┴────────────────────────┐
+│  @object-ui/react                              │
+│  - SchemaRenderer                              │
+│  - SchemaRendererProvider (data source)        │
+│  - ThemeProvider                               │
+│  - useActionRunner                             │
+│  - Component Registry                          │
+└───────────────────────┬────────────────────────┘
+                        │
+     ┌──────────────┬───┴──────────┬──────────────┐
+     │              │              │              │
+┌────┴──────┐ ┌─────┴─────┐ ┌──────┴────┐ ┌───────┴──────┐
+│@object-ui/│ │@object-ui/│ │@object-ui/│ │ View plugins │
+│components │ │ fields    │ │ layout    │ │ (peer deps)  │
+└───────────┘ └───────────┘ └───────────┘ └──────────────┘
 ```
 
-## Comparison: Before vs After
+## Two ways to use it
 
-### Before (Monolithic Console)
+### The full console
 
-```
-apps/console (500KB+)
-├── Routing (hardcoded)
-├── Auth (ObjectStack only)
-├── Data Source (ObjectStack only)
-├── Admin Pages (forced)
-├── App Management (forced)
-└── Object Rendering
-```
+Compose the console's routing tree from the building blocks, as
+`examples/console-starter` does: `ConsoleShell` around `AuthenticatedRoute`,
+the `Default*` pages, and `DefaultAppContent` for the app routes. This brings
+the whole package: its auth flow against the ObjectStack backend, Studio, the
+metadata admin pages and the marketplace.
 
-**Problems**:
-- Cannot use without full console
-- Tied to ObjectStack backend
-- No customization of routing/auth
-- Large bundle size
+### Bring your own backend
 
-### After (Modular Architecture)
+Take `AppShell` for the layout and render data with the view plugins and
+`@object-ui/react` against your own `DataSource`, as
+`examples/byo-backend-console` and the examples below do. Routing, auth and the
+API are yours. The view to embed is `ObjectView` from
+`@object-ui/plugin-view`; app-shell's own `ObjectView` reads `objectName` from
+the router (`useParams()`) and is meant for the console's route tree.
 
-```
-@object-ui/app-shell (50KB)
-├── Object Rendering
-├── Dashboard Rendering
-├── Page Rendering
-└── Form Rendering
-
-@object-ui/react
-├── SchemaRendererProvider (generic DataSource)
-└── ThemeProvider
-
-Third-Party App
-├── Custom Routing
-├── Custom Auth
-├── Custom API
-└── Cherry-picked Components
-```
-
-**Benefits**:
-- Use components independently
-- Bring your own backend
-- Full customization
-- Small bundle size
-
-## Migration Path
-
-### Phase 1: New Packages (Current)
-
-1. Create `@object-ui/app-shell`
-2. Create `@object-ui/providers`
-3. Create `examples/byo-backend-console`
-4. No breaking changes to console
-
-### Phase 2: Extract More Components (Future)
-
-1. Create `@object-ui/console-components`
-2. Create `@object-ui/routing`
-3. More examples (Next.js, Embedded)
-
-### Phase 3: Refactor Console (Future)
-
-1. Console uses new packages internally
-2. Reduce console to ~150 lines
-3. Console becomes reference implementation
+The package's direction — what stays in a product-neutral renderer and what is
+console product — is recorded in
+[ADR-0060](./adr/0060-product-neutral-renderer.md) and held by
+`packages/app-shell/src/__tests__/product-neutral-renderer.ratchet.test.ts`.
 
 ## Usage Examples
 
@@ -329,55 +365,23 @@ export const myDataSource: DataSource = {
 };
 ```
 
-## Testing Strategy
+## Testing
 
-### Unit Tests
-
-- Each package has its own test suite
-- No cross-package dependencies in tests
-- Mock data sources for testing
-
-### Integration Tests
-
-- Test byo-backend-console example end-to-end
-- Verify custom data source integration
-- Test routing scenarios
-
-### E2E Tests
-
-- Separate E2E tests for byo-backend-console
-- Verify it works independently of full console
+- Each package has its own suite: `pnpm --filter @object-ui/app-shell test`
+  runs app-shell's, from the `ui/` root (`vitest run --root ../..`).
+- The code blocks on this page are type-checked by
+  `scripts/check-doc-snippet-types.mjs`, and every symbol a published README
+  imports is checked against the package's built types by
+  `scripts/check-readme-exports.mjs`.
+- `examples/console-starter` carries its own tests under `test/`.
 
 ## Documentation
 
-### Package READMEs
-
-Each package has comprehensive documentation:
-- Installation
-- Usage examples
-- API reference
-- Migration guide
-
-### Examples
-
-- `examples/byo-backend-console` - Basic integration (~100 lines)
-- `examples/nextjs-console` - Next.js integration (TODO)
-- `examples/embedded-widget` - Embedded usage (TODO)
-
-### Guides
-
-- Architecture Guide (this document)
-- Integration Guide
-- Migration Guide for console users
-- Cookbook for common patterns
-
-## Success Metrics
-
-- ✅ Third-party developer can build console in < 1 hour
-- ✅ Minimal bundle size < 200KB (vs current 500KB+)
-- ✅ Zero ObjectStack dependencies for core rendering
-- ⏳ 100% test coverage for extracted packages
-- ✅ At least 1 working integration example
+- [`@object-ui/app-shell` README](../packages/app-shell/README.md) — the API
+  reference for the root entry's names.
+- [`examples/README.md`](../examples/README.md) — which example to start from.
+- [ADR-0060](./adr/0060-product-neutral-renderer.md) — the product-neutral
+  renderer direction.
 
 ## License
 

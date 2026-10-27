@@ -122,8 +122,10 @@
 // announcement, create an anchor without having established one does not exist,
 // revert the anchor lookup to the `open` + `finding` selection that made a
 // GRADED anchor invisible, stop recognising a closed-as-duplicate chain, drop
-// the link a regression anchor owes the anchor it regressed from,
-// and move the redelivery guard below the aggregation -- and requires the
+// the link a regression anchor owes the anchor it regressed from, stop the
+// stack walk at its first hop so a green group between two victims splits
+// their stack again, and move the redelivery guard below the aggregation --
+// and requires the
 // battery to go RED for each, naming the scenario it expects. Each mutation
 // also asserts its own anchor was PRESENT before substituting: a mutation that
 // silently matched nothing would leave the battery green and read exactly like
@@ -567,13 +569,14 @@ const sightingComment = (key, pr, runId) =>
  *
  * `base` is the sha the queue branch NAME carries (the commit this build was
  * stacked on); `head` is the commit the build actually produced. Limb ②'s stack
- * test is `one victim's base === another victim's head`, so a fixture that let
- * these two default to the same shape could not tell the test from a tautology.
+ * test walks `base === head` from a victim's base, through any indexed run, to
+ * another victim's head, so a fixture that let these two default to the same
+ * shape could not tell the test from a tautology.
  */
-const queueRun = (id, pr, base, head) => ({
+const queueRun = (id, pr, base, head, conclusion = 'failure') => ({
   id,
   workflow_id: WORKFLOW_ID,
-  conclusion: 'failure',
+  conclusion,
   head_branch: `gh-readonly-queue/main/pr-${pr}-${base}`,
   head_sha: head,
 });
@@ -594,6 +597,24 @@ const INCIDENT = {
   head12843: pad('e875b2f18'), // #12843's queue head — and #12851's base
   head12851: pad('e391b5fb14'),// #12851's queue head — and #12855's base
   head12855: pad('1a24e9778'),
+};
+
+/**
+ * The #26247 anchor's chain, as the card that filed this work recorded it: one
+ * deterministic break (#26064's queued commit) and a second victim (#26198)
+ * stacked on it THROUGH two green, non-victim groups (#26158, #26210), whose
+ * affected-only Test Core never selected the failing package.
+ *
+ * Same padding caveat as INCIDENT: the record abbreviates, so the four recorded
+ * shas are right-padded, and the two the record does not carry (main before
+ * the queue, #26198's own head) are declared synthetic.
+ */
+const CHAIN = {
+  mainTip: pad('5c0ffee'),     // synthetic: main before the queue
+  head26064: pad('17f21e8d'),  // #26064's victim head — and #26158's base
+  head26158: pad('745c276b'),  // #26158's GREEN group head — and #26210's base
+  head26210: pad('7122b0db'),  // #26210's GREEN group head — and #26198's base
+  head26198: pad('d0d0cafe'),  // synthetic: #26198's own queue head
 };
 
 /**
@@ -1075,6 +1096,52 @@ function scenarios(root) {
             'the stack-inheritance caveat is ABSENT — it must not become boilerplate on every anchor'),
           t(!/could not be placed in a stack/.test(body),
             'every victim WAS placed, so the "unresolved" hedge does not appear either'),
+        ];
+      },
+    },
+    {
+      id: 'A18',
+      name: 'TRANSITIVE STACK: a victim stacked on another THROUGH green, non-victim groups is ONE independent hit',
+      // The #26247 reading, re-scored. A ← B ← C ← D with only A and D red:
+      // D's base is C's head, C's base is B's head, B's base is A's head. B and
+      // C are not victims (their affected-only selection never ran the failing
+      // package), so a stack test that unions only through VICTIM runs never
+      // sees the chain and reports two independent hits for one break.
+      world: () => base({
+        runId: 37500000004,
+        prNumber: 26198,
+        headSha: CHAIN.head26198,
+        headBranch: `gh-readonly-queue/main/pr-26198-${CHAIN.head26210}`,
+        repoComments: [sightingComment(KEY_A, 26064, 37500000001)],
+        queueRuns: [
+          queueRun(37500000001, 26064, CHAIN.mainTip, CHAIN.head26064),
+          queueRun(37500000002, 26158, CHAIN.head26064, CHAIN.head26158, 'success'),
+          queueRun(37500000003, 26210, CHAIN.head26158, CHAIN.head26210, 'success'),
+          // The index is data, not git: a loop in it (here behind main's tip,
+          // where no victim lives) must END the walk, not hang the job, and
+          // must fuse nothing it reaches.
+          queueRun(37500000005, 26001, pad('c1c1e'), CHAIN.mainTip, 'success'),
+          queueRun(37500000006, 26002, CHAIN.mainTip, pad('c1c1e'), 'success'),
+        ],
+      }),
+      check(r, t) {
+        const body = r.calls.issueCreate[0]?.body ?? '';
+        return [
+          t(r.calls.issueCreate.length === 1, `one anchor is filed, got ${r.calls.issueCreate.length}`),
+          t(/\*\*2 pull requests\*\*/.test(body),
+            `the raw victim count is 2 — the green groups are NOT victims and are not listed, got: ${JSON.stringify(body.slice(0, 240))}`),
+          t(/\*\*1 independent hit\*\*/.test(body),
+            `and the chain through the green groups scores ONE independent hit, got: ${JSON.stringify(body.slice(0, 240))}`),
+          t(/\|\s*#26064\s*\|\s*S1 · root\s*\|/.test(body),
+            `#26064 — the queued commit that broke — is the stack ROOT, got: ${JSON.stringify(body)}`),
+          t(/\|\s*#26198\s*\|\s*S1 · inherited\s*\|/.test(body),
+            '#26198 is marked INHERITED — it was built on #26064 two green groups later'),
+          t(!/#2615[8]|#2621[0]|#2600[12]/.test(body),
+            'no green group is promoted to a victim row'),
+          t(!/could not be placed in a stack/.test(body),
+            'both victims WERE placed, so the "unresolved" hedge does not appear'),
+          t(postedBody(r).includes('同属 **1 条投机栈**'),
+            "the victim's own triage comment carries the same reading as the anchor"),
         ];
       },
     },
@@ -1659,8 +1726,8 @@ const MUTATIONS = [
   {
     id: 'M16',
     what: 'same-stack is inferred from CO-OCCURRENCE instead of base === head, so unrelated victims fuse into one stack and a real cross-PR signal is under-reported',
-    from: '      for (const upstream of producers.get(e.base) ?? []) {',
-    to: '      for (const upstream of [...producers.values()].flatMap((s) => [...s])) {',
+    from: '        for (const upstream of producers.get(sha) ?? []) {',
+    to: '        for (const upstream of [...producers.values()].flatMap((s) => [...s])) {',
     // The mirror of M15, and the reason both exist. M15 removes the evidence and
     // the count goes UP; M16 stops requiring it and the count goes DOWN. A stack
     // rule can be wrong in either direction, and a battery that only catches one
@@ -1678,6 +1745,18 @@ const MUTATIONS = [
     // A1 carries no stack of its own, so it is the control that this mutation
     // does not simply red the battery.
     keepGreen: ['A1'],
+  },
+  {
+    id: 'M29',
+    what: 'the stack walk stops at the first hop, so a victim stacked on another THROUGH green, non-victim groups reads as an independent hit again',
+    from: '        for (const b of basesOf.get(sha) ?? []) frontier.push(b);',
+    to: '',
+    expect: ['A18'],
+    // ⚠️ A12 must NOT move: its stack is victim-on-victim, one hop each, so it is
+    // the control that proves A18's red comes from the walk and not from the
+    // stack test as a whole. A13 holds the other direction: a stopped walk can
+    // only fuse less, never invent a stack.
+    keepGreen: ['A12', 'A13'],
   },
   {
     id: 'M17',

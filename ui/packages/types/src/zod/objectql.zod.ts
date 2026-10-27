@@ -1153,9 +1153,14 @@ const TABLE_KEY_RECORD_SOURCE =
 const TABLE_KEY_ROW_CLICK =
   'the view hands its grid its own row-click handler, which the grid obeys first. '
   + 'Write `navigation` / `onNavigate` on the object-view node itself.';
+const TABLE_KEY_NODE_LEVEL_COMPONENT =
+  'the view draws its grid as a component, not as a schema node, so no renderer applies a node-level key to it.';
 const TABLE_KEY_NODE_LEVEL =
-  'the view draws its grid as a component, not as a schema node, so no renderer applies a node-level key to it. '
-  + 'A node-level key belongs on the object-view node itself.';
+  `${TABLE_KEY_NODE_LEVEL_COMPONENT} A node-level key belongs on the object-view node itself.`;
+// `visibleOn` / `hiddenOn` / `disabledOn` carry their own reason below, not
+// `TABLE_KEY_NODE_LEVEL`: that one sends the key to the object-view node, where
+// the spelling is itself retired (objectstack#25926), so the remedy has to name
+// the surviving node key (`visibleWhen` / `hidden` / `disabled`).
 
 const OBJECT_VIEW_TABLE_WITHHELD = {
   ariaLabel: tableKeyRefusal('ariaLabel', TABLE_KEY_NODE_LEVEL),
@@ -1168,10 +1173,18 @@ const OBJECT_VIEW_TABLE_WITHHELD = {
   dataSource: tableKeyRefusal('dataSource', TABLE_KEY_RECORD_SOURCE),
   description: tableKeyRefusal('description', `${TABLE_KEY_NOT_RELAYED} Write \`description\` on the object-view node itself.`),
   disabled: tableKeyRefusal('disabled', TABLE_KEY_NODE_LEVEL),
-  disabledOn: tableKeyRefusal('disabledOn', TABLE_KEY_NODE_LEVEL),
+  disabledOn: tableKeyRefusal(
+    'disabledOn',
+    `${TABLE_KEY_NODE_LEVEL_COMPONENT} \`disabledOn\` is also a retired spelling (a \`?: never\` tombstone on \`BaseSchema\`): `
+    + 'write `disabled` on the object-view node itself; the value is unchanged.',
+  ),
   emptyState: tableKeyRefusal('emptyState', TABLE_KEY_NOT_RELAYED),
   hidden: tableKeyRefusal('hidden', TABLE_KEY_NODE_LEVEL),
-  hiddenOn: tableKeyRefusal('hiddenOn', TABLE_KEY_NODE_LEVEL),
+  hiddenOn: tableKeyRefusal(
+    'hiddenOn',
+    `${TABLE_KEY_NODE_LEVEL_COMPONENT} \`hiddenOn\` is also a retired spelling (a \`?: never\` tombstone on \`BaseSchema\`): `
+    + 'write `hidden` on the object-view node itself; the value is unchanged.',
+  ),
   id: tableKeyRefusal('id', 'the view fixes its grid\'s identity, as it fixes `type` and `objectName`.'),
   keyboardNavigation: tableKeyRefusal('keyboardNavigation', TABLE_KEY_NOT_RELAYED),
   name: tableKeyRefusal('name', TABLE_KEY_UNREAD),
@@ -1196,7 +1209,11 @@ const OBJECT_VIEW_TABLE_WITHHELD = {
   style: tableKeyRefusal('style', TABLE_KEY_NODE_LEVEL),
   testId: tableKeyRefusal('testId', TABLE_KEY_NODE_LEVEL),
   visible: tableKeyRefusal('visible', TABLE_KEY_NODE_LEVEL),
-  visibleOn: tableKeyRefusal('visibleOn', TABLE_KEY_NODE_LEVEL),
+  visibleOn: tableKeyRefusal(
+    'visibleOn',
+    `${TABLE_KEY_NODE_LEVEL_COMPONENT} \`visibleOn\` is also a retired spelling (a \`?: never\` tombstone on \`BaseSchema\`): `
+    + 'write `visibleWhen` on the object-view node itself; the value is unchanged.',
+  ),
   visibleWhen: tableKeyRefusal('visibleWhen', TABLE_KEY_NODE_LEVEL),
 };
 

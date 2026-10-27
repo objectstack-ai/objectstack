@@ -347,7 +347,7 @@ export const REFUSED_PROPS_PREDICATE_PREFIX =
  * bag is `disabled`, in `elements.tsx` (`element:button`:
  * `disabled={props.disabled || running}`) and `text-input.tsx`
  * (`element:text-input`). No visibility-chain key is read from a bag by any
- * renderer in this repo, and neither is `disabledOn`.
+ * renderer in this repo.
  *
  * So `{ type: 'element:button', props: { disabled: true } }` really does
  * produce a disabled button - the node GATE did not bite, but the author got

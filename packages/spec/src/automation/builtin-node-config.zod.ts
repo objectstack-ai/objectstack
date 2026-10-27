@@ -802,6 +802,57 @@ export const SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED =
   + 'resolve.';
 
 /**
+ * The read-only record-link member of a screen field's `type` (ruling B on the
+ * screen-flow result screen): the field SHOWS a record the run already holds the
+ * id of — by its display name (ADR-0079 `nameField`), as a link to the record's
+ * page — and submits nothing.
+ *
+ * Named `record_link`, not `record`: a screen field's `type` borrows the object
+ * field vocabulary (`text`, `number`, `lookup`, `file`, …), and `FieldType`
+ * already spells `'record'` for a name-keyed map of embedded sub-objects. One
+ * word with two meanings across one field vocabulary is the collision the
+ * snake_case name avoids, in the shape `master_detail` already has.
+ */
+export const SCREEN_FIELD_RECORD_LINK_TYPE = 'record_link';
+
+/**
+ * What a `type: 'record_link'` screen field with no target object is told. It
+ * names the key and what the link cannot do without it, as the lookup refusal
+ * does. ⛔ No tracker id in this text (`check:doc-authoring`).
+ */
+export const SCREEN_FIELD_RECORD_LINK_REFERENCE_REQUIRED =
+  "A `type: 'record_link'` screen field must declare `reference` — the name of the object the record belongs to "
+  + "(e.g. `reference: 'crm_account'`). Without it the field cannot name the record or link to its page.";
+
+/**
+ * What a `type: 'record_link'` screen field with no `defaultValue` is told: the
+ * field shows the record whose id its `defaultValue` evaluates to, so without
+ * one there is never a record to show.
+ */
+export const SCREEN_FIELD_RECORD_LINK_DEFAULT_VALUE_REQUIRED =
+  "A `type: 'record_link'` screen field must declare `defaultValue` — the id of the record it shows, usually a CEL "
+  + "value envelope over a flow variable (e.g. `defaultValue: { dialect: 'cel', source: 'account_id' }`). The "
+  + 'field takes no input, so without it there is never a record to show.';
+
+/**
+ * The keys a `type: 'record_link'` screen field refuses, each because it
+ * describes an INPUT and this field takes none: the resume refuses any value
+ * under its name, so `required` could never be met, and `options`,
+ * `placeholder`, `min` and `max` would constrain or decorate a control that is
+ * never drawn.
+ */
+export const SCREEN_FIELD_RECORD_LINK_REFUSED_KEYS = ['required', 'options', 'placeholder', 'min', 'max'] as const;
+
+/** The refusal of one {@link SCREEN_FIELD_RECORD_LINK_REFUSED_KEYS} key on a `type: 'record_link'` screen field. */
+export function screenFieldRecordLinkRefusedKey(key: string): string {
+  return (
+    `A \`type: 'record_link'\` screen field shows a record and takes no input, so it cannot declare \`${key}\`: `
+    + 'the run refuses any value submitted under its name. Remove the key, or use a `lookup` field to let the user '
+    + 'pick a record.'
+  );
+}
+
+/**
  * The sentence every refusal of two colliding screen-field options leads with.
  *
  * An option is addressed as text by {@link flowScreenFieldOptionKey}
@@ -909,10 +960,21 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * asks (#25692); a `runAs: 'system'` run's write is not judged, as no system
    * write is. So a wizard collects its file before the record that will own it
    * exists, and writes everything after its last screen.
+   *
+   * One member is the opposite of an input: `'record_link'`
+   * ({@link SCREEN_FIELD_RECORD_LINK_TYPE}). It shows the `reference` record
+   * whose id `defaultValue` evaluates to — by its display name (ADR-0079
+   * `nameField`), as a link to the record's page — and submits nothing. Both
+   * keys are required on it and the input keys are refused (the refinement
+   * below); the resume refuses any value under its name, so the id it shows is
+   * never written back into a flow variable. It is how a screen flow ends on a
+   * result screen that links the records the run created.
    */
   type: z.string().optional().describe(
     'Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and '
-    + "the screen resumes with the uploaded file's id, which a later node writes into a `file` field",
+    + "the screen resumes with the uploaded file's id, which a later node writes into a `file` field; "
+    + '`record_link` shows the `reference` record whose id `defaultValue` evaluates to, by its display name, as a '
+    + 'link to its record page, and takes no input',
   ),
   /** Whether the runner requires a value before resume. */
   required: z.boolean().optional().describe('Whether a value is required to submit'),
@@ -1000,7 +1062,7 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * the flow and the field), ⛔ never a D2 conversion that would have to invent
    * a target.
    */
-  reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup`"),
+  reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from, or that a `type: 'record_link'` field's record belongs to; REQUIRED when `type` is `lookup` or `record_link`"),
 }).superRefine((field, ctx) => {
   // Two options whose values read the same as text are ONE option to every
   // reader that addresses them as text — the label translation key and the
@@ -1021,6 +1083,25 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
         message: screenFieldOptionCollision(first, field.options![first]!.value, index, option.value),
       });
     });
+  }
+  // The read-only record link: it shows the record whose id `defaultValue`
+  // evaluates to, of the `reference` object, and takes no input. Both keys it
+  // reads are required, and every key that describes an input is refused at
+  // that key — each one either could never be met (the resume refuses a value
+  // under this field's name, so `required` would dead-end the run) or would
+  // decorate a control that is never drawn.
+  if (field.type === SCREEN_FIELD_RECORD_LINK_TYPE) {
+    if (typeof field.reference !== 'string' || field.reference.trim() === '') {
+      ctx.addIssue({ code: 'custom', path: ['reference'], message: SCREEN_FIELD_RECORD_LINK_REFERENCE_REQUIRED });
+    }
+    if (field.defaultValue === undefined || field.defaultValue === null) {
+      ctx.addIssue({ code: 'custom', path: ['defaultValue'], message: SCREEN_FIELD_RECORD_LINK_DEFAULT_VALUE_REQUIRED });
+    }
+    for (const key of SCREEN_FIELD_RECORD_LINK_REFUSED_KEYS) {
+      if (field[key] === undefined) continue;
+      ctx.addIssue({ code: 'custom', path: [key], message: screenFieldRecordLinkRefusedKey(key) });
+    }
+    return;
   }
   // Conditional requirement, not a shape change: the key set is unchanged and
   // `.shape` still enumerates twelve keys. `type` is an open widget hint, so

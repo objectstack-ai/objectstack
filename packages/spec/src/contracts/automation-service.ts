@@ -279,6 +279,12 @@ export interface ScreenFieldSpec {
      * `'file'` (#25801) takes the id of an uploaded `sys_file` — the client
      * renders the platform upload widget and answers with the id the upload
      * minted, never the expanded `{ id, name, url, … }` read form.
+     *
+     * One member is not an input at all: `'record_link'` shows the
+     * {@link reference} record whose id {@link defaultValue} carries (served
+     * already evaluated) by its display name, as a link to its record page.
+     * The client submits nothing for it, and the server refuses any value sent
+     * under its name on resume, so the id is never bound to a flow variable.
      */
     type?: string;
     required?: boolean;
@@ -309,8 +315,10 @@ export interface ScreenFieldSpec {
      */
     inlineHelpText?: string;
     /**
-     * Object whose records a `type: 'lookup'` field picks from (#17306) —
-     * `FieldSchema.reference`'s spelling.
+     * Object whose records a `type: 'lookup'` field picks from (#17306), or
+     * that a `type: 'record_link'` field's record belongs to —
+     * `FieldSchema.reference`'s spelling. Required on both by
+     * `ScreenFieldConfigSchema`.
      *
      * Optional HERE and required on the authoring side: `ScreenFieldConfigSchema`
      * refuses a `type: 'lookup'` field that declares no `reference` (maintainer
