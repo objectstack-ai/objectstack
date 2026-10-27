@@ -85,6 +85,39 @@ describe('filter-builder renderer hands onChange the declared FilterGroup (#2638
     expect(onChange.mock.calls[0][0].conditions).toHaveLength(2);
   });
 
+  it('refuses loudly, rather than handing on, a row the FilterGroup cannot carry', () => {
+    const onChange = vi.fn<(filter: FilterGroup) => void>();
+    // Off contract on purpose: `exists` is the builder's opt-in operator, not
+    // a protocol one, and the zod mirror refuses it in an authored `value`.
+    const offContract = {
+      ...VALUE,
+      conditions: [{ id: 'c1', field: 'name', operator: 'exists' }],
+    };
+    renderDirect({
+      schema: { type: 'filter-builder', name: 'filters', fields: FIELDS, value: offContract },
+      onChange,
+    });
+
+    // A throw inside a React event handler does not reach `fireEvent`'s caller:
+    // the DOM reports it as an uncaught error on `window`. Read it there, and
+    // `preventDefault()` so jsdom does not also print it as unhandled.
+    const reported: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      reported.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener('error', onError);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /add filter/i }));
+    } finally {
+      window.removeEventListener('error', onError);
+    }
+
+    expect(reported).toHaveLength(1);
+    expect(String(reported[0])).toMatch(/operator "exists", which is outside the protocol/);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('pins the declared signature at the type level', () => {
     expectTypeOf<NonNullable<FilterBuilderSchema['onChange']>>().parameter(0).toEqualTypeOf<FilterGroup>();
 
