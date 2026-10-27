@@ -654,7 +654,17 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 894],
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],
+  // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
+  // audit): two eval prompts for the teaching that card adds — the `reports`,
+  // `positions`, `permissions` and `picklists` groups; a form view `title`, a
+  // section entry's own copy, a `page:tabs` item, an approval step. Maintainer
+  // ruling on the seat thread's decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, tap label verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: the file carried no duplicated
+  // content to delete (five prompts, five distinct surfaces), so the remainder
+  // is the whole addition; pinned AT the measurement, zero headroom. The
+  // raising PR's body carries the same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
   ['skills/objectstack-platform/evals/config-plugins-ops.json', 1211],
   ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
   ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1505],
