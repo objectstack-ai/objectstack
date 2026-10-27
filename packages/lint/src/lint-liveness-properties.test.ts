@@ -1695,11 +1695,11 @@ const fieldLedgerDir = () => ledgerDirWith((dir) => writeLedger(dir, 'field', SY
 
 describe('the object/field walk, against a synthetic ledger directory (#19268)', () => {
   // The state that makes this block necessary, asserted rather than recalled.
-  // If `field.json` ever warns on a STABLE subject again, the first assertion
-  // below names it, and the block above ("field walk: a malformed `fields`
+  // While `field.json` warns on a STABLE subject (`externalId` since #25753),
+  // the first assertion below names it, and the block above ("field walk: a malformed `fields`
   // array …") can take its real subject back — but this block keeps working
   // either way, which is the point.
-  it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
+  it('the SHIPPED field ledger warns on one stable subject at most — which is why the walk keeps a subject of its own', () => {
     // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
     // when the server began resolving picklist references (`live`). The last
     // `dead` row, `conditionalRequired`, warned on its own since #16094 — a
@@ -1709,9 +1709,12 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
     // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
     // field, declared ahead of the mailbox ingest that reads it — and left this
     // set when that reader landed and the row flipped `live` (#22871): a
-    // verdict that moved, so it was never a stable subject either. The
-    // synthetic slot below is warned by nothing shipped.
-    expect([...authorWarnedProperties('field')]).toEqual([]);
+    // verdict that moved, so it was never a stable subject either.
+    // `externalId` is the one row in the set: #25753 graded it `dead` (no upsert
+    // reads it). It parses, so it is a stable subject the block above could take
+    // back; this block keeps its synthetic slot so it does not move with the
+    // next verdict. The synthetic slot below is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['externalId']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
