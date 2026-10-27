@@ -43,7 +43,7 @@
     "system/AppInstallResult:seededRecords",
     "system/AppInstallResult:success",
     "system/AppInstallResult:version",
-    "system/AppManifest:dependencies",
+    "system/AppManifest:dependencies [RETIRED]",
     "system/AppManifest:description",
     "system/AppManifest:flows",
     "system/AppManifest:hasSeedData",

@@ -143,7 +143,9 @@ Links to an external URL:
 
 ### Group Navigation
 
-Groups items into collapsible sections with children:
+Groups items into collapsible sections with children. A group opens on first view unless it
+declares `expanded: false`, which keeps it closed until the user opens it; a group that holds the
+current route opens whatever it declares.
 
 ```typescript
 {

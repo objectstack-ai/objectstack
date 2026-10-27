@@ -56,33 +56,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: '22'
+          install-args: --prefer-offline
 
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Verify lockfile is up to date
-        run: |
-          pnpm install --frozen-lockfile --prefer-offline
-
+      # Through its root alias, so its --self-test runs first (#26091).
       - name: Verify Changesets "fixed" group covers every public package
-        run: node scripts/check-changeset-fixed.mjs
+        run: pnpm check:changeset-fixed
 
       # pnpm overrides pin what THIS workspace resolves, but they do not ship
       # with published packages — downstream installs see only the declared

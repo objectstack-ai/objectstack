@@ -28,8 +28,8 @@ import { describe, it, expect } from 'vitest';
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@objectstack/spec/ui';
 import { ComponentRegistry } from '@object-ui/core';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 import '@object-ui/components';
 import '../register-plugins';
 

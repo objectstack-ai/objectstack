@@ -70,7 +70,7 @@
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
 import { DetailViewSectionSchema } from '@object-ui/types/zod';
-import { inputTypeArms, manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { inputTypeArms, manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { headerColorClass } from '../headerColor';
 // Module scope, not a hook: this import IS the registration (AGENTS.md's
 // test-discipline section — an unbounded module load must not be billed to a

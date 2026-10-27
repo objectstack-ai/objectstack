@@ -127,7 +127,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry, collectPredicateFieldRefs, listViewPredicates } from '@object-ui/core';
 import { ComponentPropsMap, ListViewSchema, UserActionsConfigSchema } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 

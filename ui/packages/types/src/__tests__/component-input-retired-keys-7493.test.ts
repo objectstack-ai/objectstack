@@ -66,6 +66,8 @@ import type { ComponentInput, ComponentMeta } from '../base';
 import { ComponentInputSchema, ComponentMetaSchema } from '../zod/base.zod';
 
 const ROOT = resolve(__dirname, '../../../..');
+/** The monorepo root: the serializer lives in `@objectstack/sdui-parser` there (objectstack#25712 item 3). */
+const MONOREPO_ROOT = resolve(__dirname, '../../../../..');
 
 /** The three retired keys, each with the value the registrations used to write. */
 const RETIRED = {
@@ -296,7 +298,7 @@ describe('the `ComponentInput` census after the retirement', () => {
 
 describe('the publication path: `manifestFromConfigs` forwards every live key', () => {
   it('reads the serializer source and finds the seven, and none of the three', () => {
-    const src = readFileSync(resolve(ROOT, 'packages/sdui-parser/src/index.ts'), 'utf8');
+    const src = readFileSync(resolve(MONOREPO_ROOT, 'packages/sdui-parser/src/index.ts'), 'utf8');
     const fn = src.slice(src.indexOf('export function manifestFromConfigs('));
     const forwarded = /inputs: \(c\.inputs \?\? \[\]\)\.map\(\(i\) => \(\{([\s\S]*?)\}\)\)/.exec(fn)?.[1] ?? '';
     expect(forwarded.length, 'the serializer no longer maps inputs where this pin reads it').toBeGreaterThan(0);

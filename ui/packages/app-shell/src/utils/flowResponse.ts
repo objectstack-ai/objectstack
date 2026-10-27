@@ -214,7 +214,7 @@
 import { actionCopySource, actionErrorDetail } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
 import { getLoadedBuiltInLocales } from '@object-ui/i18n';
-import { declaredUserMessage, isPermissionError } from '@object-ui/react';
+import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
 import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
@@ -368,7 +368,9 @@ function permissionDeniedLine(locale: string | undefined): string {
  * The inner refusal is rendered exactly as the record form renders the same
  * refusal on a save: a permission denial (`isPermissionError`) becomes the
  * form's localized permission line instead of server prose (objectstack#3821),
- * anything else reads its own sentence. `message` stays the last rung, so a
+ * anything else reads its own sentence. A delegated-admin scope refusal
+ * (`DELEGATION_SCOPE_VIOLATION`) reads its own reason, asked before the
+ * permission check exactly as the form asks it (objectstack#26059, Q3). `message` stays the last rung, so a
  * run that met no refusal still says something, never nothing.
  */
 function flowFailureMessage(failure: FlowFailureCarriers, message: string, copy: FlowCopyLocale | undefined): string {
@@ -378,6 +380,8 @@ function flowFailureMessage(failure: FlowFailureCarriers, message: string, copy:
     const inner = failure.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
     if (inner && typeof inner === 'object' && typeof inner.code === 'string') {
         const refusal = { code: inner.code, message: typeof inner.message === 'string' ? inner.message : '' };
+        const scopeReason = delegationScopeMessage(refusal);
+        if (scopeReason) return scopeReason;
         if (isPermissionError(refusal)) return permissionDeniedLine(copy?.locale);
         if (refusal.message.trim()) return refusal.message;
     }

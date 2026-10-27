@@ -124,7 +124,7 @@ export type DiagnosticLevel = 'error' | 'warning';
  * One finding of the client-side structural check (`validateFlowDraft`,
  * `missingNodeRefDiagnostics`), anchored on a node, an edge or a cycle.
  *
- * Named `FlowSimDiagnostic`, not `Diagnostic`: `@object-ui/sdui-parser`
+ * Named `FlowSimDiagnostic`, not `Diagnostic`: `@objectstack/sdui-parser`
  * publishes `Diagnostic` for a parser finding (`severity` + `code`), a
  * different thing, and one exported name has one authority (objectui#6349,
  * batch 6).

@@ -208,9 +208,15 @@ export const AFFORDANCE_GRANTS = {
   feedReactionAdd: { crud: 'create', grant: 'create' },
   /**
    * The same control taking the caller's reaction back, asked of
-   * `sys_comment_reaction`: it deletes the caller's own reaction row.
+   * `sys_comment_reaction`: it removes the caller's own reaction row through
+   * the unreact door (`DELETE /api/v1/comments/reactions/:id`), not the data
+   * door, so no CRUD bit is read. That door admits exactly the caller's own
+   * row and needs no `delete` grant, which no every-member set may carry
+   * (ADR-0090 D5), so the take-back asks the grant the reaction was added
+   * under: whoever may react may take their own reaction back. Whose reaction
+   * it is decides which chips offer it; the door's own rule decides the write.
    */
-  feedReactionRemove: { crud: 'delete', grant: 'delete' },
+  feedReactionRemove: { crud: null, grant: 'create' },
   /**
    * The same control on a deployment with no `sys_comment_reaction` (the
    * reactions column store), asked of `sys_comment`: a click updates the

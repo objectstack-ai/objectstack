@@ -79,9 +79,9 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { applyRelationalMeta } from './relationalMetaKeys';
-import { resolveBulkActions, describeUnusableBulkActionDefs, resolvePromotedBulkParams } from './resolveBulkActions';
+import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { partitionBulkRows } from './bulkEligibility';
-import { resolvesToDataColumn, describeUnresolvedColumns } from './columnSpellingDiagnostics';
+import { resolvesToDataColumn } from './columnSpellingDiagnostics';
 import { RowActionMenu, formatActionLabel, planRowActionMenu } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
 import { BulkActionDialog } from './components/BulkActionDialog';
@@ -91,10 +91,11 @@ import { findParamsSignature, useResolvedGridFilters } from './objectGridQuery';
 import { type ObjectGridColumn, type ObjectGridColumnDraft, isChipFieldType, normalizeColumns, resolveColumnLabel } from './objectGridColumns';
 import { LinkCell, recordPointerFace, rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
-import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_FETCH_BATCH_SIZE, DEFAULT_SELECTION_TYPE, NO_GROUPING_REFUSAL, type RowHeightMode, describeNonPositivePageSize, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
+import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_FETCH_BATCH_SIZE, DEFAULT_SELECTION_TYPE, NO_GROUPING_REFUSAL, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, OCC_TOKEN_FIELD, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type ObjectGridColumnState, type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
+import { useObjectGridDiagnostics } from './objectGridDiagnostics';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps } from './objectGridProps';
 
@@ -636,7 +637,9 @@ interface TemporalGroupFace {
  * empty key, the stored text otherwise.
  *
  * The formatting CALLS are the cells' own, with the cells' arguments:
- * `DateCellRenderer` paints `formatDate(value, format || 'relative', …)`;
+ * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)
+ * paints `formatDate(value, format || undefined, …)`, the absolute default
+ * face when no `format` is declared;
  * `DateTimeCellRenderer` paints `formatRelativeDate` for `'relative'`, the
  * compact face for no format and for `'short'`, and `formatDateTime` with the
  * authored word otherwise (the compact face's string is the cell's two halves
@@ -661,7 +664,7 @@ function temporalGroupHeading(
   if (!key) return undefined;
   // The cells' validity guard, the shared parse step.
   if (isNaN(toDisplayDate(key).getTime())) return undefined;
-  if (face.rendererType === 'date') return formatDate(key, face.format || 'relative', { locale });
+  if (face.rendererType === 'date') return formatDate(key, face.format || undefined, { locale });
   // A `datetime` cell renders an INSTANT, from the engine's parse.
   const instant = new Date(key);
   const style = !face.format || face.format === 'short' ? 'compact' : face.format;
@@ -2622,84 +2625,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wholeSetSummary.row,
   );
 
-  // An authored column the renderer cannot read now says so, instead of just
-  // not being there (objectui#5349 — the Q2 objectui#5068 deferred).
-  //
-  // #5068 made `ListColumnSchema`'s `field` / `label` the only spelling read
-  // here, which is right; what it left behind was the receipt. A column
-  // authored `{ accessorKey, header }` (or with no `field` at all) is dropped
-  // by `resolvesToDataColumn` above, and until this effect landed the author
-  // saw no error, no warning and no empty header — just a grid with its
-  // row-number column and no data columns. Same defect shape #5068 exists to
-  // fix, one level down: renderer and author disagree, author gets a success
-  // receipt.
-  //
-  // Scope, deliberately narrow: this reads the `columns` INPUT and nothing
-  // else. It never asks whether the grid found ROWS, because a grid legitimately
-  // draws them from five different places (inline `data` array, `data.provider:
-  // 'value'`, legacy `staticData`, `bind`, or a host that owns the fetch and
-  // passes the window down as a `data` React prop). A predicate that consulted
-  // those would eventually paint a configuration error over a working grid.
-  // `hidden: true` is authored intent and is never reported.
-  //
-  // Channel: the same one `ObjectGrid` already uses for "you declared it, the
-  // renderer dropped it" — a `useEffect` keyed on the schema slice and one
-  // `console.warn` prefixed `[ObjectUI] ObjectGrid <topic>:` (see the export
-  // format warning below) — rather than a second, differently-shaped one.
-  const columnDiagnosticBlockType = (schema as { type?: unknown }).type;
-  const columnDiagnosticLabel = schema.label ?? (schema as { title?: unknown }).title;
-  useEffect(() => {
-    const message = describeUnresolvedColumns(schema.columns, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [schema.columns, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#8730] The same channel, for the sibling failure on
-  // `bulkActionDefs`. A member that is not a usable def (a bare action name —
-  // the OTHER key's vocabulary — or `null`, a number, `{}`, `{ name: '' }`) is
-  // skipped by `resolveBulkActions`; before that guard it reached the bar and
-  // `formatActionLabel(undefined)` threw during render, so the author's first
-  // multi-row selection lost the whole selection bar.
-  //
-  // The skip alone would only relocate the failure into silence — which is what
-  // the mirror direction already does (`bulkActions: [{ name: 'approve' }]`,
-  // stepped over by the `typeof name !== 'string'` guard). Saying which member
-  // was dropped, and that a bare name belongs in `bulkActions`, is what makes
-  // this a diagnosis rather than a quieter version of the same defect. One
-  // `console.warn` per authored array, keyed on it — NOT a second guard: the
-  // predicate lives once, in `resolveBulkActions`, and this reads it.
-  const bulkDefsDiagnosticSlice = (schema as { bulkActionDefs?: unknown }).bulkActionDefs;
-  useEffect(() => {
-    const message = describeUnusableBulkActionDefs(bulkDefsDiagnosticSlice, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [bulkDefsDiagnosticSlice, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#9853] The same channel again, for a `pagination.pageSize` (or the
-  // deprecated flat shorthand) that is not a positive integer. `resolvePageSize`
-  // drops such a value at all three read points and uses the site's default; on
-  // its own that is a quieter version of the defect, because substituting a
-  // number the author never wrote is exactly what the flat site already did in
-  // silence. This is the half that makes it a diagnosis.
-  //
-  // Keyed on the authored slice, so it is one warning per declaration and not
-  // one per render. NOT a second guard — the predicate lives once, in
-  // `isUsablePageSize`, and this reads it.
-  const pageSizeDiagnosticObject = schema.pagination;
-  const pageSizeDiagnosticFlat = schema.pageSize;
-  useEffect(() => {
-    const message = describeNonPositivePageSize(
-      { pagination: pageSizeDiagnosticObject, pageSize: pageSizeDiagnosticFlat },
-      { blockType: columnDiagnosticBlockType, objectName: schema.objectName },
-    );
-    if (message) console.warn(message);
-  }, [pageSizeDiagnosticObject, pageSizeDiagnosticFlat, columnDiagnosticBlockType, schema.objectName]);
+  // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
+  // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).
+  useObjectGridDiagnostics(schema);
 
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's
@@ -2707,6 +2635,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // one helper in `@object-ui/core`, with the scope and relation collapse
     // this grid's conditional formatting uses; a field that is not a declared
     // deadline answers `false` before any predicate runs.
+    //
+    // objectstack#25884 — every column cell built below also carries
+    // `inGridColumn`, so a `date` field with no declared `format` reads in
+    // one absolute face down the column (`CellRendererProps.inGridColumn`).
+    // The record panel and the mobile card's slots draw their cells without
+    // it, outside this function.
     const settledFor = (field: unknown, row: Record<string, unknown> | undefined): boolean =>
       isDeadlineSettled(field as Parameters<typeof isDeadlineSettled>[0], row, { scope: predicateScope, fields: objectFields });
     // Map field type to column header icon (Airtable-style)
@@ -3030,7 +2964,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Both link and action: link takes priority for navigation, action executes on secondary interaction
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -3048,7 +2982,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Link column: clicking navigates to the record detail
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -3088,7 +3022,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // `dependentValues` for a cell whose value only means something
               // beside a sibling column (objectui#12613).
               cellRenderer = (value: any, row: any) => (
-                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
               );
             } else {
               // Default renderer with empty value handling
@@ -3269,7 +3203,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
           if (isPrimaryField && LinkContentRenderer) {
             cellRenderer = (value: any, row: any) => {
-              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
               return (
                 <LinkCell
                   testId="primary-field-link"
@@ -3293,7 +3227,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               </LinkCell>
             );
           } else if (CellRenderer) {
-            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
           }
 
           return {
@@ -3458,7 +3392,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             ...(schema.showColumnTypeIcons && rendererType && { headerIcon: getTypeIcon(rendererType) }),
             ...(inferredAlign && { align: inferredAlign }),
             ...(CellRenderer && {
-              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />,
+              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />,
             }),
             sortable: fieldDef?.sortable !== false,
           };
@@ -3566,7 +3500,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // Aligned on the RENDERER key, like paths A-C: a `text` column with
         // `format: 'currency'` renders as currency, so it aligns as currency.
         ...(!!rendererType && numericTypes.includes(rendererType) && { align: 'right' as const }),
-        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} />,
+        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
         sortable: field.sortable !== false,
       });
     });

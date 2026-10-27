@@ -513,6 +513,22 @@ interface DropdownFiltersProps {
 type DropdownSelection = Record<string, (string | number | boolean)[]>;
 
 /**
+ * A lookup-like chip's selection as the list `LookupValuePicker` edits: the
+ * filter builder's list value, whose entries are the spec `ViewFilterRule`
+ * list's, strings and numbers (#26348).
+ *
+ * The selection map is typed for every control kind at once, because a
+ * boolean chip's selection really is `[true]`; a lookup id never is a boolean.
+ * The one door a boolean has into a lookup chip is an authored `defaultValues`
+ * entry, whose spec type is shared by every control kind. It is handed over as
+ * its string spelling, the same entry the builder writes for a boolean carried
+ * into a list, so the chip still draws it and the user can remove it.
+ */
+function lookupPickerValue(selected: (string | number | boolean)[]): (string | number)[] {
+  return selected.map(v => (typeof v === 'boolean' ? String(v) : v));
+}
+
+/**
  * The starting selection for `fields`: the author's `defaultValues`,
  * overridden by a restored selection (`initialSelections`, e.g. the host's
  * `uf_*` URL params). One rule for the fields present at mount and for a
@@ -830,14 +846,14 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
                   referenceTo: f.referenceTo,
                   displayField: f.displayField,
                 }}
-                value={selected}
+                value={lookupPickerValue(selected)}
                 multiple={true}
                 onChange={(value) => {
                   const arr = Array.isArray(value)
-                    ? (value as (string | number | boolean)[])
+                    ? value
                     : (value === undefined || value === null || value === '')
                       ? []
-                      : [value as string | number | boolean];
+                      : [value];
                   handleChange(f.field, arr);
                 }}
               />

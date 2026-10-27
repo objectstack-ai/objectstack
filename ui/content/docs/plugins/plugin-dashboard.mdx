@@ -377,7 +377,7 @@ If a caption under a metric's value returns, it returns as a declared
 widget-level key, not as an `options` key.
 
 Every other `options` key on a dataset-bound widget **reaches no renderer**.
-The authoring validator (`validateTree` in `@object-ui/sdui-parser`) reports
+The authoring validator (`validateTree` in `@objectstack/sdui-parser`) reports
 each one as a `unconsumed-widget-option` **warning** naming the set above —
 the document still parses, saves and renders; open extras stay open, they just
 stop being silent. A widget with a genuine out-of-band consumer can opt out in

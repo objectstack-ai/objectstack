@@ -67,7 +67,7 @@
 // sync executed at module scope, so a consumer that imported this file to ask
 // "which files does the version pass stamp?" would have rewritten the templates
 // instead of getting an answer. The only available option was to restate the
-// paths, and `cut-rc.yml`'s release-file allowlist did exactly that: two
+// paths, and the retired RC lane's release-file allowlist did exactly that: two
 // literals, both hard-coding the template name `blank`, in a workflow whose own
 // comment recorded that it would rather read this list.
 //
@@ -232,11 +232,11 @@ export function findTemplateDirs(templateRoot = TEMPLATE_ROOT) {
 /**
  * Every repo-relative path this script may write, across ALL template dirs.
  *
- * This is the export `cut-rc.yml`'s release-file allowlist is for: the paths a
+ * This is the export `release.yml`'s post-version shape guard is for: the paths a
  * version pass may touch under `src/templates/`, derived from the same walk and
  * the same table the sync itself uses, so the workflow cannot describe a
  * different set than the one that gets written. `sync-docs-image-tags.mjs` and
- * that allowlist already read the doc half from `check-docs-image-tag.mjs`'s
+ * that guard already read the doc half from `check-docs-image-tag.mjs`'s
  * `SURFACES`; this is the template half on the same terms.
  *
  * Zero templates THROWS rather than returning `[]`, for the same reason the run
