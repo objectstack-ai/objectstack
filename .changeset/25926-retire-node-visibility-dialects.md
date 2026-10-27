@@ -1,7 +1,7 @@
 ---
 '@object-ui/types': minor
 '@object-ui/react': minor
-'@objectstack/sdui-parser': minor
+'@objectstack/sdui-parser': patch
 '@object-ui/app-shell': patch
 ---
 
