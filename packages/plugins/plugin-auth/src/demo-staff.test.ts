@@ -364,6 +364,33 @@ describe('provisioning — each declared manager is linked once every entry has 
     expect(managerLinks(updates)).toEqual([]);
   });
 
+  it('the set-manager write`s own degradation warning reaches the boot logger', async () => {
+    // The cross-organization screen cannot read `sys_member`: the set-manager
+    // write accepts the link without it and says so once, on the logger the
+    // provisioning was handed.
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: null },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+    const find = engine.find.bind(engine);
+    engine.find = async (object, query, options) => {
+      if (object === 'sys_member') throw new Error('sys_member is unreachable');
+      return find(object, query, options);
+    };
+    const warned: string[] = [];
+
+    const outcome = await provisionDemoStaff(STAFF, {
+      ...deps(engine, signUp),
+      logger: { warn: (msg) => warned.push(msg) },
+    });
+
+    expect(outcome).toMatchObject({ failed: [], managersLinked: 1 });
+    expect(managerLinks(updates)).toEqual([['u_c1', 'u_lead']]);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('the cross-organization screen could not read sys_member');
+  });
+
   it('a link the set-manager write refuses is reported with its code and reason', async () => {
     // A directory-owned identity: the set-manager write's refusal 5. The
     // provisioning carries no copy of that rule; this is the shared one.

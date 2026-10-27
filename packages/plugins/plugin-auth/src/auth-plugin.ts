@@ -2517,6 +2517,7 @@ export class AuthPlugin implements Plugin {
         }
       },
       defaultOrganizationId: async () => (tenancy ? await tenancy.defaultOrgId() : null),
+      logger: ctx.logger,
     });
 
     for (const failure of outcome.failed) {

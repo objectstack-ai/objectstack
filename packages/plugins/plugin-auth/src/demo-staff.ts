@@ -247,6 +247,11 @@ export interface DemoStaffProvisioningDeps {
    * (ADR-0131 D1), so there is no unscoped fallback.
    */
   readonly defaultOrganizationId: () => Promise<string | null>;
+  /**
+   * Where the manager links' own degradation is said — the set-manager write's
+   * cross-organization screen warns once when it cannot read `sys_member`.
+   */
+  readonly logger?: { warn(msg: string, meta?: unknown): void };
 }
 
 /** What one provisioning pass did, per address. */
@@ -375,7 +380,7 @@ export async function provisionDemoStaff(
       outcome.failed.push({ email, message: createdNow ? `its account was created, but ${message}` : message });
     }
   }
-  const managersLinked = await linkDemoStaffManagers(staff, engine, outcome);
+  const managersLinked = await linkDemoStaffManagers(staff, engine, outcome, deps.logger);
   return { ...outcome, assignmentsAdded, managersLinked };
 }
 
@@ -389,11 +394,12 @@ async function linkDemoStaffManagers(
   staff: readonly DemoStaffParsed[],
   engine: DemoStaffEngine,
   outcome: DemoStaffOutcome,
+  logger: DemoStaffProvisioningDeps['logger'],
 ): Promise<number> {
   let linked = 0;
   // The same engine the accounts were read through, under the set-manager
   // write's own query shape (its reads carry their context in the query).
-  const linkDeps = { getDataEngine: () => engine as unknown as SetUserManagerEngine };
+  const linkDeps = { getDataEngine: () => engine as unknown as SetUserManagerEngine, logger };
   for (const entry of staff) {
     if (!entry.manager) continue;
     const email = entry.email.trim().toLowerCase();

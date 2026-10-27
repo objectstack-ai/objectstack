@@ -133,8 +133,9 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
      * has its account and before the seed runs, through the same checks as
      * Setup → Users → Set Manager, so an approval's `manager` rung reaches a
      * person on the first boot. A manager someone already set on that account
-     * is left as it is. The stack refuses a manager that names no entry, the
-     * entry itself, or a chain that loops back on itself.
+     * is left as it is; one someone cleared is written again on the next boot.
+     * The stack refuses a manager that names no entry, the entry itself, or a
+     * chain that loops back on itself.
      */
     manager: z
       .string()
