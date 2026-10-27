@@ -5,7 +5,7 @@
 > semantics (dependencies, hierarchy, milestones, real time scales) that define a Gantt chart.
 > SVAR core is GPLv3 — feature reference only, no code reuse (we are MIT).
 >
-> Tracked from the main [ROADMAP.md](../../ROADMAP.md) § P2.11.
+> Tracked from the repository [ROADMAP.md](../../../ROADMAP.md).
 
 ## What we already have
 

@@ -129,8 +129,8 @@ echo -e "  ${GREEN}pnpm lint${NC}             - Lint all packages"
 echo -e "  ${GREEN}pnpm create-plugin${NC}    - Create a new plugin\n"
 
 echo -e "${BLUE}Next steps:${NC}"
-echo -e "  1. Read ${GREEN}README.md${NC} for project overview"
-echo -e "  2. Read ${GREEN}CONTRIBUTING.md${NC} for contribution guidelines"
+echo -e "  1. Read ${GREEN}../README.md${NC} for project overview"
+echo -e "  2. Read ${GREEN}../CONTRIBUTING.md${NC} for contribution guidelines"
 echo -e "  3. Read ${GREEN}content/docs/guide/architecture-overview.md${NC} for architecture insights"
 echo -e "  4. Run ${GREEN}pnpm dev${NC} to start coding!\n"
 
