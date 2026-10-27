@@ -19,7 +19,7 @@ import { handleInboundHookRequest } from './automation-hooks.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
-import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT, readEffectiveTenancyPosture } from './activation-gate.js';
+import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT, readEffectiveTenancyPosture, activationCaller } from './activation-gate.js';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: under a
 // wall the environment's metadata, flow definitions included, is the platform
 // operator's. The same verdict every `/meta` and `/packages` write door asks.
@@ -3075,7 +3075,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         return { handled: true, response: deps.error(`Flow '${name}' not found`, 404) };
                     }
                 }
-                await automationService.toggleFlow(name, enabled);
+                // [#26474] Who asked, so the ledger row and its audit row name
+                // them. The id only: this door has already judged the caller.
+                await automationService.toggleFlow(name, enabled, activationCaller(context));
                 return { handled: true, response: deps.success({ name, enabled }) };
             }
         }

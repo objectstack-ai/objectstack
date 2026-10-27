@@ -112,18 +112,18 @@ describe('#7535 — toggling a flow that does not exist is 404, not 500', () => 
         const off = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: false }, CTX);
         expect(off.response?.status).toBe(200);
         expect(off.response?.body?.data ?? off.response?.body).toMatchObject({ name: 'welcome_flow', enabled: false });
-        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', false);
+        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', false, expect.anything());
         expect(enabled.get('welcome_flow')).toBe(false);
 
         const on = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: true }, CTX);
         expect(on.response?.status).toBe(200);
-        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', true);
+        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', true, expect.anything());
         expect(enabled.get('welcome_flow')).toBe(true);
 
         // The documented legacy shape: a bodyless toggle enables.
         const legacy = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', undefined, CTX);
         expect(legacy.response?.status).toBe(200);
-        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', true);
+        expect(spies.toggleFlow).toHaveBeenLastCalledWith('welcome_flow', true, expect.anything());
     });
 
     it('leaves #3899 strict-body validation intact — a bad body is still a located 400', async () => {
@@ -171,6 +171,6 @@ describe('#7535 — toggling a flow that does not exist is 404, not 500', () => 
 
         const result = await dispatcher.handleAutomation('/whatever/toggle', 'POST', { enabled: false }, CTX);
         expect(result.response?.status).toBe(200);
-        expect(toggleFlow).toHaveBeenCalledWith('whatever', false);
+        expect(toggleFlow).toHaveBeenCalledWith('whatever', false, expect.anything());
     });
 });

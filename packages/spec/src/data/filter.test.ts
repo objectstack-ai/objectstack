@@ -265,6 +265,18 @@ describe('[#25808] NowAnchorSchema — the now-anchored comparand', () => {
     expect(NowAnchorSchema.safeParse({ $now: true, addDays: -1, note: 'x' }).success).toBe(false);
   });
 
+  it('[#26413] …and the `FilterCondition` save door refuses the extra key too, naming it', () => {
+    for (const [anchor, key] of [
+      [{ $now: true, addDays: -30, subDays: 7 }, 'subDays'],
+      [{ $now: true, addDays: GRACE, note: 'x' }, 'note'],
+    ] as const) {
+      const result = FilterConditionSchema.safeParse({ opened_at: { $lt: anchor } });
+      expect(result.success, key).toBe(false);
+      expect(JSON.stringify(result.error?.issues), key).toContain(`undeclared key \\"${key}\\"`);
+    }
+    expect(FilterConditionSchema.safeParse({ opened_at: { $lt: { $now: true, addDays: GRACE } } }).success).toBe(true);
+  });
+
   it('is legal exactly where a { $field } reference is: the six scalar comparisons', () => {
     for (const op of ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']) {
       const result = FilterConditionSchema.safeParse({ opened_at: { [op]: { $now: true, addDays: GRACE } } });
