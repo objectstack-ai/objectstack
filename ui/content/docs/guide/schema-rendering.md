@@ -52,9 +52,9 @@ interface BaseSchema {
   id?: string           // Optional unique identifier
   className?: string    // Tailwind CSS classes
   style?: CSSProperties // Inline styles (use sparingly)
-  visibleOn?: string    // Expression for conditional visibility
-  hiddenOn?: string     // Expression for conditional hiding
-  disabledOn?: string   // Expression for conditional disabling
+  visibleWhen?: string  // Expression for conditional visibility
+  hidden?: boolean | string  // Expression for conditional hiding
+  disabled?: boolean | string // Expression for conditional disabling
 }
 ```
 
@@ -66,7 +66,7 @@ interface BaseSchema {
   "id": "stats-card",
   "className": "p-6 shadow-lg",
   "title": "User Statistics",
-  "visibleOn": "${user.role === 'admin'}",
+  "visibleWhen": "${user.role === 'admin'}",
   "children": {
     "type": "text",
     "content": "Total Users: ${stats.totalUsers}"
@@ -266,7 +266,7 @@ it on `label`: `text` is not a `BadgeSchema` key.
 {
   "type": "button",
   "label": "Delete",
-  "visibleOn": "${user.role === 'admin'}"
+  "visibleWhen": "${user.role === 'admin'}"
 }
 ```
 
@@ -574,11 +574,11 @@ const schema = {
   children: [
     { 
       type: "admin-panel",
-      visibleOn: "${user.isAdmin}"
+      visibleWhen: "${user.isAdmin}"
     },
     {
       type: "user-panel",
-      visibleOn: "${!user.isAdmin}"
+      visibleWhen: "${!user.isAdmin}"
     }
   ]
 }
@@ -597,7 +597,7 @@ Always type your schemas for better IDE support and fewer runtime errors.
   "type": "container",
   "children": {
     "type": "spinner",
-    "visibleOn": "${loading}"
+    "visibleWhen": "${loading}"
   }
 }
 ```
@@ -607,7 +607,7 @@ Always type your schemas for better IDE support and fewer runtime errors.
 ```json
 {
   "type": "empty",
-  "visibleOn": "${items.length === 0}",
+  "visibleWhen": "${items.length === 0}",
   "title": "No items found",
   "action": {
     "type": "button",
@@ -622,13 +622,13 @@ Always type your schemas for better IDE support and fewer runtime errors.
 {
   "type": "alert",
   "variant": "destructive",
-  "visibleOn": "${error}",
+  "visibleWhen": "${error}",
   "title": "Something went wrong",
   "children": { "type": "text", "content": "${error.message}" }
 }
 ```
 
-`visibleOn` is a condition key and is evaluated on every node type. The message text is a
+`visibleWhen` is a condition key and is evaluated on every node type. The message text is a
 nested `text` node because `alert` carries no expression rows — and `message` is not an
 `AlertSchema` key at all: the alert's own text keys are `title` and `description`, and the
 renderer falls back from `description` to `children`. `destructive` is the variant this state
