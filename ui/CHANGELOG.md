@@ -1,6 +1,6 @@
 # Changelog
 
-> **Frozen history.** This file is no longer updated: current `@object-ui/*` history is each package's own `CHANGELOG.md`, and the plan is the repository [ROADMAP.md](../ROADMAP.md).
+> **Frozen history.** This file is no longer updated: current `@object-ui/*` history is each package's own `CHANGELOG.md`, and the plan is the repository [ROADMAP.md](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md).
 
 This file is a **hand-curated summary** of notable changes across the monorepo. It is
 updated at release time by whoever cuts the release — it is not generated. The `Auto

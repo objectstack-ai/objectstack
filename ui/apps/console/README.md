@@ -2,7 +2,7 @@
 
 The standard runtime UI for ObjectStack applications. This package provides the **Console** — a full-featured enterprise admin interface that renders from JSON metadata alone, requiring zero custom pages.
 
-> **Version:** see the [npm page](https://www.npmjs.com/package/@object-ui/console) &nbsp;|&nbsp; **Spec:** the `@objectstack/spec` range declared in [`package.json`](./package.json) &nbsp;|&nbsp; [Full Roadmap →](../../../ROADMAP.md)
+> **Version:** see the [npm page](https://www.npmjs.com/package/@object-ui/console) &nbsp;|&nbsp; **Spec:** the `@objectstack/spec` range declared in [`package.json`](./package.json) &nbsp;|&nbsp; [Full Roadmap →](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## Features
 
@@ -136,7 +136,7 @@ Console App
 
 | Document | Description |
 |----------|-------------|
-| [Roadmap](../../../ROADMAP.md) | Repo-wide development plan |
+| [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md) | Repo-wide development plan |
 | [Getting Started Guide](../../content/docs/guide/console.md) | User-facing documentation |
 | [Architecture Guide](../../content/docs/guide/console-architecture.md) | Technical deep-dive |
 | [UI Improvement Proposal](./docs/UI_IMPROVEMENT_PROPOSAL.md) | Modern UI design improvements for metadata inspector |

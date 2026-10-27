@@ -496,9 +496,6 @@ describe('the repo it guards', () => {
     expect(Object.keys(scanned)).toEqual([
       'content/docs',
       'examples',
-      'README.md',
-      'CONTRIBUTING.md',
-      'ROADMAP.md',
       'docs',
       'packages/*/README.md',
       'apps/*/README.md',
@@ -510,11 +507,10 @@ describe('the repo it guards', () => {
       'CHANGELOG.md',
       'CLAUDE.md',
       'LICENSE-THIRD-PARTY.md',
-      'QUICK_REFERENCE.md',
     ]);
-    expect(scanned['README.md']).toBe(1);
-    expect(scanned['CONTRIBUTING.md']).toBe(1);
-    expect(scanned['ROADMAP.md']).toBe(1);
+    // `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` left
+    // the table with the files themselves (objectstack#26080): folded into the
+    // repository root's documents, outside this tree.
     // A floor against an empty scan, not a census: three READMEs today (the
     // index, hello-world and schema-catalog, measured on objectstack 6a7c0fe3),
     // so deleting one example leaves it green.
@@ -551,7 +547,7 @@ describe('the repo it guards', () => {
     // requires every one of them to be opened, so an `apps/*` row that stopped
     // expanding would fail there the day it started mattering.
     expect(scanned['packages/*/*']).toBeGreaterThanOrEqual(4);
-    for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md', 'QUICK_REFERENCE.md']) {
+    for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md']) {
       expect(scanned[rootFile], `${rootFile} is a SCAN_ROOTS row that opened no file`).toBe(1);
     }
   });
@@ -568,6 +564,10 @@ describe('the repo it guards', () => {
     // objectui#3622 added the package READMEs, `disk` for the same reason and
     // one more: they are read on **npm** as well, where a leading `/` is no
     // more this repo's root than it is on github.com.
+    //
+    // objectstack#26080 removed four rows: the tree's `README.md`,
+    // `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` were folded into
+    // the repository root's documents.
     //
     // objectui#4148 added the app READMEs and the rest of the root-level
     // markdown, every one `disk`. `@object-ui/console` is a published package,
@@ -592,9 +592,6 @@ describe('the repo it guards', () => {
     expect(SCAN_ROOTS).toEqual([
       { path: 'content/docs', rule: 'docs' },
       { path: 'examples', rule: 'disk' },
-      { path: 'README.md', rule: 'disk' },
-      { path: 'CONTRIBUTING.md', rule: 'disk' },
-      { path: 'ROADMAP.md', rule: 'disk' },
       { path: 'docs', rule: 'disk' },
       { path: 'packages/*/README.md', rule: 'disk' },
       { path: 'apps/*/README.md', rule: 'disk' },
@@ -606,7 +603,6 @@ describe('the repo it guards', () => {
       { path: 'CHANGELOG.md', rule: 'disk' },
       { path: 'CLAUDE.md', rule: 'disk' },
       { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
-      { path: 'QUICK_REFERENCE.md', rule: 'disk' },
     ]);
   });
 
@@ -1645,8 +1641,10 @@ describe('objectui#4148 — the app READMEs and the rest of the repo root', () =
     ).toEqual([]);
 
     // Floor under the floor: if `git ls-files` ever returned nothing, the
-    // assertion above would pass while proving nothing at all.
-    expect(tracked.length).toBeGreaterThanOrEqual(8);
+    // assertion above would pass while proving nothing at all. Four since
+    // objectstack#26080 folded `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and
+    // `QUICK_REFERENCE.md` into the repository root's documents.
+    expect(tracked.length).toBeGreaterThanOrEqual(4);
   });
 });
 

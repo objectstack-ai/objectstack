@@ -191,7 +191,7 @@ pnpm publish
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](../../../CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md) for details.
 
 ### Reporting Issues
 
@@ -224,8 +224,8 @@ Built with:
 - 📦 [npm package](https://www.npmjs.com/package/object-ui)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

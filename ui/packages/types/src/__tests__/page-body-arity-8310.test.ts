@@ -95,7 +95,10 @@ import type { PageNodeSchema, SchemaNode } from '../index';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
-const README = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
+// The README's "Basic Usage" example lives in the quick-start guide since
+// objectstack#26080 folded the tree's root README into the repository root's;
+// `README` below names that page, and every assertion still reads the same fence.
+const README = readFileSync(join(REPO_ROOT, 'content/docs/guide/quick-start.md'), 'utf8');
 
 /* -------------------------------------------------------------------------- */
 /* Leg 1 — compile-time, compiled by `tsc -p packages/types/tsconfig.test.json` */
@@ -291,7 +294,7 @@ describe('`body` is refused by name on the page node (objectui#6771)', () => {
  * typed the example as the node the `schema` prop takes.
  */
 function basicUsageSchemaLiteral(): string {
-  const heading = README.indexOf('#### Basic Usage');
+  const heading = README.indexOf('### Basic Usage');
   expect(heading).toBeGreaterThan(-1);
   const start = README.indexOf('const schema: DeclaredNode = {', heading);
   expect(start).toBeGreaterThan(-1);
@@ -315,7 +318,7 @@ function contentValueOpener(literal: string): string {
   return literal.slice(at + 'children:'.length).trimStart()[0];
 }
 
-describe('the root README keeps authoring the single-node form (objectui#8310)', () => {
+describe('the README example, now in the quick-start guide, keeps authoring the single-node form (objectui#8310)', () => {
   it('gives `children` ONE node, not a list — the shape this card made legal', () => {
     expect(contentValueOpener(basicUsageSchemaLiteral())).toBe('{');
   });

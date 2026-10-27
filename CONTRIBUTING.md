@@ -227,7 +227,7 @@ pnpm docs:check-links                                                    # The i
 pnpm test:e2e                                                            # End-to-end tests (playwright)
 ```
 
-turbo reads a `./` filter against the directory it is launched from, so the filter above
+turbo resolves a relative filter against the directory it is launched from, so the filter above
 selects every package under `ui/packages/`, `ui/apps/` and `ui/examples/`. The tree has no
 `build`, `type-check` or `lint` script of its own, because a `turbo run` in a member's script
 would nest inside the root's. The ui packages spell the type-check task `type-check`, with a
@@ -280,7 +280,7 @@ use as a few-shot corpus. Neither declares a `dev` script.
 | Path | Purpose |
 | --- | --- |
 | `ui/packages/*` | The published `@object-ui/*` packages, plus the private `vscode-extension`, `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
-| `ui/apps/console` | The Console app (Vite + React), which `pnpm console:build` builds into `packages/console` |
+| `ui/apps/console` | The Console app (Vite + React), which `pnpm console:build` builds into the `@objectstack/console` package |
 | `ui/apps/site` | The public docs site at <https://www.objectui.org> (fumadocs) |
 | `ui/examples/*` | The snippet and the schema catalog, see [UI examples](#ui-examples) |
 | `ui/content/docs/` | The docs site's pages |
