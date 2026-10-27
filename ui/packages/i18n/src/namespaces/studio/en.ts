@@ -1759,6 +1759,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.adoptDescription': 'Every package-less (loose) metadata item in this system moves into this base. Items that already belong to a package stay where they are.',
   'engine.packages.detail.adoptedOne': '{count} item adopted into this base.',
   'engine.packages.detail.adoptedOther': '{count} items adopted into this base.',
+  // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
+  'engine.studio.access.createTaken': 'This package already has a permission set with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.access.createTakenElsewhere': 'A permission set with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
+  'engine.studio.access.openExisting': 'Open “{label}”',
+  'engine.studio.access.discardConfirm': 'Discard the pending draft of “{item}”? The published set stays as it is; only its unpublished changes are removed.',
+  'engine.studio.access.discardConfirmUnpublished': 'Discard “{item}”? It has never been published, so discarding its draft removes the set.',
+  'engine.studio.access.discardFailed': 'Could not discard the draft',
 };
 
 export default STUDIO_EN;
