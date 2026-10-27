@@ -22,7 +22,10 @@
  * (y) cross-scope: global + embedded on X          : ACCEPTED  stack.actions=["global:dup_y"], object.actions=["dup_y/EMB"]
  * ```
  *
- * Rows (a)–(d) and (z) each yield ONE runtime key and are refused here. Rows
+ * Rows (a)–(d) and (z) each yield ONE runtime key and are refused. Row (d) is
+ * refused one layer down, by the object parse, which owns one object's own
+ * `actions` array for every door (the object save door parses an object
+ * alone); this pass keeps the pairs that span two collections. Rows
  * (x) and (y) yield TWO keys and stay accepted by ruling: the precedence the
  * runtime already implements for by-name readers (the object's own `actions`
  * first — `resolveRouteActionDeclaration`) is documented on the collection,
@@ -73,7 +76,18 @@ function refusal(config: Parameters<typeof defineStack>[0]): string | null {
   }
 }
 
+/** The thrown error, which a refusal case requires. */
+function thrown(config: Parameters<typeof defineStack>[0]): Error & { code?: string; status?: number } {
+  try {
+    defineStack(config);
+  } catch (e) {
+    return e as Error & { code?: string; status?: number };
+  }
+  throw new Error('expected defineStack to refuse the stack, but it was accepted');
+}
+
 const ENVELOPE_ONE = 'defineStack cross-reference validation failed (1 issue):';
+const ENVELOPE_SCHEMA_ONE = 'defineStack validation failed (1 issue):';
 const TAIL =
   'The runtime registers and dispatches every action under this one exact-string key, ' +
   'so only one of these handlers is reachable and the other declaration is a dead button. ' +
@@ -121,18 +135,22 @@ describe('defineStack - duplicate scope-qualified action key', () => {
     );
   });
 
-  it('(d) refuses two embedded twins on one object', () => {
-    const msg = refusal({
+  it('(d) refuses two embedded twins on one object one layer down, at the object parse — the key count never sees them', () => {
+    // The object schema owns one object's own `actions` array (the save door
+    // parses an object alone); this pass keeps the pairs that span two
+    // collections. One judge per pair, so the envelope is the parse's.
+    const err = thrown({
       manifest,
       objects: [{ ...probeItem, actions: [act('dup_d'), act('dup_d')] }],
     });
-    expect(msg).toContain(ENVELOPE_ONE);
-    expect(msg).toContain(
-      "  ✗ Action key 'probe_item:dup_d' is declared twice: " +
-        "objects['probe_item'].actions[0] (embedded on the object) and " +
-        "objects['probe_item'].actions[1] (embedded on the object). " +
-        TAIL,
+    expect(err.code).toBe('STACK_SCHEMA_INVALID');
+    expect(err.status).toBe(422);
+    expect(err.message).toContain(ENVELOPE_SCHEMA_ONE);
+    expect(err.message).toContain(
+      "  ✗ objects.0.actions.1: Object 'probe_item' declares the action 'dup_d' twice in actions: " +
+        'actions[0] and actions[1].',
     );
+    expect(err.message).not.toContain('Action key');
   });
 
   it('(z) refuses two globals in an object-less stack — the check does not need an object to resolve against', () => {
@@ -217,19 +235,18 @@ describe('defineStack - the cross-scope pair stays accepted (two keys, documente
     expect(differing).toContain("  ✗ Action key 'probe_item:twin' is declared twice: ");
   });
 
-  it('counts an identical copy beside a differing twin as three declarations', () => {
+  it('an identical copy beside a differing twin on the object is refused at the object parse, before the key count', () => {
     const bound = act('mixed', { objectName: 'probe_item' });
-    const msg = refusal({
+    const err = thrown({
       manifest,
       objects: [{ ...probeItem, actions: [{ ...bound }, act('mixed')] }],
       actions: [bound],
     });
-    expect(msg).toContain(ENVELOPE_ONE);
-    expect(msg).toContain(
-      "  ✗ Action key 'probe_item:mixed' is declared 3 times: " +
-        "stack.actions[0] (objectName 'probe_item'), " +
-        "objects['probe_item'].actions[0] (embedded on the object) and " +
-        "objects['probe_item'].actions[1] (embedded on the object). ",
+    expect(err.code).toBe('STACK_SCHEMA_INVALID');
+    expect(err.message).toContain(ENVELOPE_SCHEMA_ONE);
+    expect(err.message).toContain(
+      "  ✗ objects.0.actions.1: Object 'probe_item' declares the action 'mixed' twice in actions: " +
+        'actions[0] and actions[1].',
     );
   });
 
