@@ -88,11 +88,13 @@ body:
 
 Navigate to an internal route or external URL. `target` supports `${param.X}` and `${ctx.X}` interpolation (renderers `encodeURIComponent` interpolated values before substituting them into query positions).
 
+An internal route is a console route, written without the console's mount prefix (`/_console` under the framework CLI; the router adds it). Object, record and dashboard routes carry the app segment: a record is `/apps/APP/OBJECT/record/ID`, where `APP` is the app's route segment, its package id (its `name` also resolves). No app-relative form is declared, so write the app segment. The same holds for an action's `onSuccess.navigate`.
+
 ```yaml
 name: view_dashboard
 label: View Dashboard
 type: url
-target: /_console/dashboards/sales_overview
+target: /apps/crm/dashboard/sales_overview
 
 name: open_in_maps
 label: Open in Maps
