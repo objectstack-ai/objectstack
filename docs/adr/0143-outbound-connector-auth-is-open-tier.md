@@ -2,7 +2,7 @@
 
 **Status**: Proposed — 2026-10-27. `docs/adr/` is Tier H (Prime Directive #14): the maintainer's merge,
 with the four [open decisions](#decisions-put-to-the-maintainer) answered in this file, is the acceptance
-act. The five amendment notes this record names land in the same PR and take effect with it.
+act. The six amendment notes this record names land in the same PR and take effect with it.
 - **Deciders**: ObjectStack maintainer, 2026-10-27, verbatim and untranslated. On outbound connector OAuth:
   「OAuth 放开源层，先起草 ADR 修订」, 「平台基于 better-auth ，怎么会有没有 oauth」, 「创建issue 就行」. On request
   signing, the three recommendations of the MCP / OpenAPI directory survey: 「三条行动建议 立卡」 →
@@ -33,7 +33,7 @@ act. The five amendment notes this record names land in the same PR and take eff
 
 Prime Directive #13 places a decision that draws the open / commercial boundary in
 `objectstack-ai/cloud`, cited from here as `cloud ADR-NNNN`. The boundary this record moves was
-never drawn there: the six records that put outbound OAuth2 in the enterprise tier — ADR-0018,
+never drawn there: the five records that put outbound OAuth2 in the enterprise tier — ADR-0018,
 -0022, -0023, -0024 and -0097, each "per ADR-0015" — are all in this repository, and none cites
 a cloud record (`git grep -n "cloud ADR" origin/main -- docs/adr/0015* docs/adr/0018* docs/adr/0022*
 docs/adr/0023* docs/adr/0024* docs/adr/0097*` answers nothing).
