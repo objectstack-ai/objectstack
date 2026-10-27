@@ -781,7 +781,7 @@ function run({ list = false } = {}) {
  * (#26444). ONE-SIDED: a red sink with no ledger row is a violation and fails;
  * a ledger row with no red sink behind it is STALE, which is reported and passes.
  */
-export function reconcileLedger(sinks, allowed) {
+function reconcileLedger(sinks, allowed) {
     const used = new Set();
     const violations = [];
     for (const s of sinks) {
