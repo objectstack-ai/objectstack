@@ -2535,7 +2535,7 @@
             "default",
             "primary",
             "secondary",
-            "destructive",
+            "danger",
             "outline",
             "ghost"
           ]
@@ -2846,7 +2846,7 @@
           "enum": [
             "default",
             "secondary",
-            "destructive",
+            "danger",
             "outline",
             "ghost"
           ]
