@@ -66,7 +66,7 @@ blocked / not-run,⛔ 不进标题计数;与 blocked 的分界是 fixture 债 vs
 - **全是 `api` / `build` / `cli`** → 不需要 console 构建。把框架拉起来
   (`objectstack dev`),驱动 REST/CLI。快(分钟级)。
 - **有任何 `browser` / `mixed`** → 需要 vendored console dist。它与 showcase 工作区
-  闭包**分开**构建(`pnpm objectui:build`,从钉住的 `.objectui-sha` 构建);它存在
+  闭包**分开**构建(在仓库根目录跑 `pnpm console:build`,源码在 `ui/`,改 Console 就改那里);它存在
   之前,第一次启动对 `/_console/` 是 404(dogfood §2 —— 真实前置条件,记录它,不要
   伪造 block)。给构建留预算(冷 monorepo 上 ~10–30 分钟);它占掉大头,浏览器驱动
   只是分钟级。
