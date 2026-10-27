@@ -1756,10 +1756,10 @@ export const RecordRelatedListProps = strictObject({
    * binding: the ruling's own exclusion (a new gate defaults to no).
    *
    * RENDERED by the console. The block hands this key to its parent read
-   * (objectui: packages/plugin-detail/src/renderers/record-related-list.tsx,
+   * (ui/packages/plugin-detail/src/renderers/record-related-list.tsx,
    * whose `RecordRelatedListRenderer` passes `schema.parentDataSource` to
    * `ParentRecordBinding`; the read itself is
-   * objectui: packages/plugin-detail/src/renderers/recordBinding.tsx). Its
+   * ui/packages/plugin-detail/src/renderers/recordBinding.tsx). Its
    * `BoundRecordProvider` asks the page's own adapter, so under the caller's
    * identity, for one row (`$top: 1`) by the binding's `sort`, and provides
    * that row as the record context the list body reads. No row, or a read the

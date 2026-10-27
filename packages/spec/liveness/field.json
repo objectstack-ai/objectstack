@@ -383,9 +383,12 @@
       "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
     },
     "externalId": {
-      "status": "live",
-      "evidence": "objectui console `metadataConverters.ts` (:125, commit not pinned) read field.externalId; that module was deleted in objectui dc14bcb for having zero importers, so no reader is cited here — re-verification owed (#25712 follow-up F23)",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui. 2026-10-26 (#25712, objectui merged into this repo as ui/): the only cited reader, objectui console `metadataConverters.ts`, was deleted in objectui dc14bcb (\"zero importers\"), so the pointer is now prose. Follow-up F23 on #25712 owns finding the current reader or re-classifying."
+      "status": "dead",
+      "verifiedAt": "2026-10-27",
+      "evidenceScope": "in-repo",
+      "evidence": "no reader: at 1c632311, outside packages/spec, nothing under packages/** or ui/** reads a field's `externalId`. The two `ui/` mentions only carry it: the Studio field inspector edits it (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx#ObjectFieldInspector) and ui/packages/app-shell/src/services/MetadataService.ts copies it into a field summary; neither is a preview that shows it to a person. Every upsert matches on something else: a seed dataset's `externalId` (packages/metadata-protocol/src/seed-loader.ts, `name` by default) or an import mapping's `upsertKey` (packages/rest/src/import-prepare.ts)",
+      "note": "RE-GRADED live -> dead 2026-10-27 (#25753, follow-up F23 of #25712). The `live` grade rested on objectui console `metadataConverters.ts` (:125, commit not pinned), which objectui dc14bcb deleted for having zero importers; the re-measure above found no other reader. A boolean `default(false)`, so the author lint warns only on an authored `true`. Owed enforce-or-remove (ADR-0049).",
+      "authorHint": "Remove it: no upsert reads a field's `externalId`. To match seed records on this field, name it in the seed dataset's `externalId`; for an import, in the mapping's `upsertKey`."
     },
     "currencyConfig": {
       "status": "live",
