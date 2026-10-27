@@ -326,6 +326,7 @@ import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
@@ -14665,6 +14666,12 @@ export class ObjectQL implements IObjectQLEngine {
     // write would — resolved once for the whole set, like every posture input
     // above. A resolution failure rejects the preview, as it fails the write.
     const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, permissionResolution);
+    // [#25579] A multi-row insert preview judges a rule reading a parent
+    // roll-up the way the write judges the batch: each row sees the earlier
+    // rows the preview accepted, accumulated in memory (see `insert()`).
+    const batchSummaries = mode === 'insert' && rows.length > 1
+      ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
+      : undefined;
 
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
       const warnings: ValidateDataIssue[] = [];
@@ -14719,7 +14726,7 @@ export class ObjectQL implements IObjectQLEngine {
           // repoint, `roWhenPreviousParent`.
           parent: previewParents?.parents[i],
           previousParent: previewParents?.previousParents[i],
-          related: previewRelatedForRow(judgedViews[i]),
+          related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
         }));
       } catch (e) {
@@ -14728,6 +14735,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
         throw e;
       }
+      batchSummaries?.accept(row);
       // [#20922] THIS row's drops, from the strips' own per-row record above
       // — the report `insertMany` hangs on the same row's `ok` outcome, so a
       // dry run and its commit answer one row in one vocabulary. Only on a
@@ -15717,6 +15725,15 @@ export class ObjectQL implements IObjectQLEngine {
         // when no rule traverses. Read under SYSTEM authority, bounded by the
         // projection — see `resolvePredicateRelated`.
         const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
+        // [#25579] Batch equals one-by-one: the related rows above were read
+        // ONCE, before any row of this batch is written, so a rule reading a
+        // parent roll-up would judge every row against the summary as it stood
+        // before the batch. The rows the rules admit are accumulated in memory
+        // and overlaid on each later row's binding — never re-read per row.
+        // `undefined` (no roll-up aggregates this object exactly) pays nothing.
+        const batchSummaries = rows.length > 1
+          ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
+          : undefined;
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -15736,10 +15753,12 @@ export class ObjectQL implements IObjectQLEngine {
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
+            // [#25579] Admitted: a later row of this batch reads it in the summary.
+            batchSummaries?.accept(rows[i]);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;

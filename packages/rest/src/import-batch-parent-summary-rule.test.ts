@@ -33,6 +33,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
+import { mapDataError } from './error-response.js';
 
 const liveEngines: ObjectQL[] = [];
 afterEach(async () => {
@@ -119,7 +120,20 @@ async function boot() {
   return { engine, importContacts, contacts, primaryCount };
 }
 
-const RULE_REFUSAL = { code: 'VALIDATION_FAILED', status: 400 };
+/**
+ * The rule's refusal, as the engine throws it and as the data door answers it:
+ * the ADR-0112 envelope's `code`, and the `status` the door maps it to.
+ */
+function expectRuleRefusal(err: unknown): void {
+  expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+  expect(mapDataError(err).status).toBe(400);
+  expect((err as { message?: string }).message).toContain('A supplier has at most one primary contact.');
+}
+
+async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+  try { await write; } catch (err) { return err; }
+  throw new Error('expected the write to be refused');
+}
 
 describe('[#25579] acceptance — the card\'s import, through the real door', () => {
   it('two primary rows for a new supplier in one import: one is created, the other carries the rule\'s error', async () => {
@@ -181,17 +195,17 @@ describe('[#25579] the two engine doors a bulk create reaches', () => {
       { id: 'k2', name: 'Li', supplier: 's1', is_primary: true },
     ]);
     expect(outcomes.map((o) => o.ok)).toEqual([true, false]);
-    expect(outcomes[1]!.error).toMatchObject(RULE_REFUSAL);
+    expectRuleRefusal(outcomes[1]!.error);
     expect((await contacts()).map((c) => c.id)).toEqual(['k1']);
     expect(await primaryCount()).toBe(1);
   });
 
   it('`insert(array)` (all or nothing): the batch is refused with the rule\'s envelope, and nothing lands', async () => {
     const { engine, contacts, primaryCount } = await boot();
-    await expect(engine.insert('xt_supplier_contact', [
+    expectRuleRefusal(await refusalOf(engine.insert('xt_supplier_contact', [
       { id: 'k1', name: 'Zhang', supplier: 's1', is_primary: true },
       { id: 'k2', name: 'Li', supplier: 's1', is_primary: true },
-    ])).rejects.toMatchObject(RULE_REFUSAL);
+    ])));
     expect(await contacts()).toEqual([]);
     expect(await primaryCount()).toBe(0);
   });
@@ -199,8 +213,7 @@ describe('[#25579] the two engine doors a bulk create reaches', () => {
   it('a single write behaves as before: the first primary lands, a second single write is refused', async () => {
     const { engine, contacts, primaryCount } = await boot();
     await engine.insert('xt_supplier_contact', { id: 'k1', name: 'Zhang', supplier: 's1', is_primary: true });
-    await expect(engine.insert('xt_supplier_contact', { id: 'k2', name: 'Li', supplier: 's1', is_primary: true }))
-      .rejects.toMatchObject(RULE_REFUSAL);
+    expectRuleRefusal(await refusalOf(engine.insert('xt_supplier_contact', { id: 'k2', name: 'Li', supplier: 's1', is_primary: true })));
     expect((await contacts()).map((c) => c.id)).toEqual(['k1']);
     expect(await primaryCount()).toBe(1);
   });
