@@ -225,17 +225,13 @@ function withoutResolvedOptions(field: unknown): unknown {
 
 /**
  * A document with the resolved `options` left out of every picklist-bound
- * field, in both field spellings a served body carries (a name-keyed record,
- * an array). By reference when no field carries resolved options.
+ * field of its name-keyed `fields` (the only spelling the object schema
+ * accepts). By reference when no field carries resolved options.
  */
 function withoutResolvedPicklistOptions(document: unknown): unknown {
     if (!document || typeof document !== 'object') return document;
     const fields = (document as { fields?: unknown }).fields;
-    if (!fields || typeof fields !== 'object') return document;
-    if (Array.isArray(fields)) {
-        const next = fields.map(withoutResolvedOptions);
-        return next.some((f, i) => f !== fields[i]) ? { ...(document as object), fields: next } : document;
-    }
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return document;
     let next: Record<string, unknown> | undefined;
     for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
         const judged = withoutResolvedOptions(field);
