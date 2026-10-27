@@ -1952,10 +1952,13 @@ function selfTest() {
 
   // 4. The shard count is spelled in ci.yml too, and drift there is silent:
   //    a partitioner cutting six bins for a five-job matrix simply loses a
-  //    sixth of the workspace, with every step green. Read it back.
-  const declaredMatrix = /^\s*shard:\s*\[([^\]]*)\]/m.exec(ciYml);
+  //    sixth of the workspace, with every step green. Read it back. Since
+  //    #26084 the matrix is PLANNED (scripts/ci/plan-test-core-shards.mjs
+  //    starts only the bins that hold work), so the count is its full-roster
+  //    fallback, the literal after `||`.
+  const declaredMatrix = /^\s*shard:\s*\$\{\{\s*fromJSON\(needs\.test-plan\.outputs\.shards \|\| '\[([^\]]*)\]'\)\s*\}\}/m.exec(ciYml);
   check(() => {
-    if (!declaredMatrix) throw new Error('ci.yml: could not find the Test Core shard matrix to compare against');
+    if (!declaredMatrix) throw new Error("ci.yml: could not find the Test Core shard matrix (`shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, ...]') }}`) to compare against");
   });
   const matrixSize = declaredMatrix[1].split(',').filter((s) => s.trim() !== '').length;
   check(() => {
