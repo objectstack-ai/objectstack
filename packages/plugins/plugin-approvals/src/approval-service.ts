@@ -123,6 +123,7 @@ import {
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
 import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
@@ -1619,10 +1620,21 @@ export class ApprovalService implements IApprovalService {
    * registration, and the audit writer memoizes the same way.
    */
   private readonly recordOrgResolver: RecordOrganizationResolver;
+  /**
+   * [#26180] The records a pending approver may read: memoized per execution
+   * context and engine write epoch ({@link ApprovalService.pendingApproverReadGrants}).
+   */
+  private readonly pendingApproverReads: PendingApproverReadGrantSource;
 
   constructor(opts: ApprovalServiceOptions) {
     this.engine = opts.engine;
     this.recordOrgResolver = createRecordOrganizationResolver(opts.engine);
+    this.pendingApproverReads = new PendingApproverReadGrantSource({
+      engine: opts.engine,
+      isOverrideActor: (context, organizationId) => this.isOverrideActor(context, organizationId),
+      accountEmail: (userId) => this.callerAccountEmail(userId),
+      logger: opts.logger,
+    });
     this.clock = opts.clock ?? { now: () => new Date() };
     this.logger = opts.logger;
     this.automation = opts.automation;
@@ -1683,6 +1695,24 @@ export class ApprovalService implements IApprovalService {
         return this.visibleRequestIds(context, tenantOrg, anchor);
       },
     });
+  }
+
+  /**
+   * [#26180 · ruling 6429330267, letter A] The records of `object` the caller
+   * may READ because a pending approval step waits on them: record id → the
+   * pending request ids that grant it.
+   *
+   * While a request is pending, each resolved person on its current step's
+   * slate (the caller's user id or account email in a slot) and the override
+   * holder ({@link ApprovalService.isOverrideActor}) may read the one record
+   * it is about. Derived from the slate this service resolved, never declared;
+   * fenced to the caller's active organization; ends when the step resolves.
+   * plugin-sharing ORs the ids into its read filter and names the requests in
+   * `explain`. Rejects when a read fails, so the consumer can fail closed.
+   * The rules and the cost live in `pending-approver-read-grant.ts`.
+   */
+  async pendingApproverReadGrants(object: string, context: ExecutionContext): Promise<PendingApproverReadGrants> {
+    return this.pendingApproverReads.forObject(object, context);
   }
 
   /** Attach (or replace) the ADR-0105 D9 posture provider. */

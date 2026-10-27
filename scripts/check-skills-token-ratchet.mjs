@@ -631,7 +631,12 @@ export const CEILINGS = new Map([
   // deleting one from this file. Independently reproducible without running
   // this script:
   //   ceil($(wc -c < skills/objectstack-ui/evals/analytics-inline-vs-dataset.json) / 4) == ceil(4915 / 4)
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1229],
+  // 1229 -> 1348 (#26295): one eval prompt for the `duration` measure, +119 tokens in the
+  // file's shape. An eval file is fixtures — nothing in it restates anything, so there was
+  // nothing to delete to fund it; the whole addition is raised, pinned AT the measurement.
+  // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1348],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts
@@ -641,19 +646,39 @@ export const CEILINGS = new Map([
   // the reassembly exposed (plus three cross-references the move killed) and
   // added nothing but five titles and five pointers,
   // so the package nets -58 (33,957 -> 33,899).
-  ['skills/objectstack-ui/rules/actions.md', 2108],
+  // 2108 -> 2151 (#26295): the 18.2 teaching an AI author of actions was missing — the
+  // `{{ }}` copy holes with their roots and refused shapes, and a flow action's `onSuccess`
+  // reading `${result.output.NAME}` — is +141 tokens. PAID DOWN FIRST by 91 tokens of genuine
+  // deletion in this file (five restatements of this file's own prose: the `openIn`
+  // priority sentence, the print-status clause that pages.md's Print pages carries, the
+  // params-callout remedy that restates the two mechanisms above it, the hooks-parity
+  // clause the paragraph's last sentence already states, one code comment restating the
+  // prose above it), then the row's 7 tokens of headroom absorb 7; the ceiling moves by the
+  // remaining 43 and is pinned AT the measurement — zero headroom. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/rules/actions.md', 2151],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
   // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
   // 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/dashboards.md', 6252],
+  // 6252 -> 6239 (#26295): LOWERED. The `duration` measure (+66 tokens, the time between two
+  // `datetime` fields of a record, which the escalation advice sent to a hook-kept number)
+  // is paid in full by deleting 78 tokens of restatement — the example's four-line comment
+  // that restated the Dataset-Bound Widgets section — so the file nets -12 and the ceiling
+  // follows it down to the new measurement, the ratchet's ordinary direction.
+  ['skills/objectstack-ui/rules/dashboards.md', 6239],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
   // Maintainer ruling 2026-09-22 on decision batch #213 item 1, verbatim and
   // untranslated: 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/list-views.md', 3141],
+  // 3141 -> 3129 (#26295): LOWERED. List-view `grouping.fields[]` and `orderBy` (+127 tokens;
+  // grouping was untaught, 0 hits) are paid in full by deleting 131 tokens of restatement —
+  // the paragraph restating the allowed-set table above it, and the related-record search
+  // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
+  // and the ceiling follows it down to the new measurement.
+  ['skills/objectstack-ui/rules/list-views.md', 3129],
   ['skills/objectstack-ui/rules/navigation.md', 2273],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
@@ -708,7 +733,17 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1095],
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],
+  // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
+  // audit): two eval prompts for the teaching that card adds — the `reports`,
+  // `positions`, `permissions` and `picklists` groups; a form view `title`, a
+  // section entry's own copy, a `page:tabs` item, an approval step. Maintainer
+  // ruling on the seat thread's decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, tap label verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: the file carried no duplicated
+  // content to delete (five prompts, five distinct surfaces), so the remainder
+  // is the whole addition; pinned AT the measurement, zero headroom. The
+  // raising PR's body carries the same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
   // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
@@ -721,7 +756,11 @@ export const CEILINGS = new Map([
   //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
   ['skills/objectstack-platform/evals/config-plugins-ops.json', 1458],
   ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1505],
+  // 1505 -> 1789 (#26295): two eval prompts — list grouping with `orderBy`, and the copy hole
+  // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the
+  // whole addition raised and pinned AT the measurement. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1789],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes
