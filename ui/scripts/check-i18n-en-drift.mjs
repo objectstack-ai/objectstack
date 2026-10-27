@@ -661,7 +661,16 @@ export function readDesignerTables(root, ref, { require = true } = {}) {
       return { values: new Map(), fileMissing: true };
     }
   }
-  return { values: readDesignerPairs(root, { source: text, label, require }), fileMissing: false };
+  // The table's namespace homes, read at the SAME ref as the table: a key that
+  // moved home between base and head keeps one value on each side, so the move
+  // itself is not drift (`collectDesignerKeys` reads them only when the table
+  // at that ref imports the namespace).
+  const readHome = (file) => {
+    if (ref !== null) return gitQuiet(root, ['show', revPath(ref, file)]);
+    const full = join(root, file);
+    return existsSync(full) ? readFileSync(full, 'utf8') : null;
+  };
+  return { values: readDesignerPairs(root, { source: text, label, require, readHome }), fileMissing: false };
 }
 
 /**
@@ -874,7 +883,9 @@ if (invokedDirectly) {
       console.error(`      unchanged in: ${finding.unfollowed.join(', ')}`);
     }
     console.error(
-      `\nTranslate the new text in ${DESIGNER_TABLE}, IN THIS PR. objectui#8413 is the case study:\n` +
+      `\nTranslate the new text in ${DESIGNER_TABLE}, or in its studio namespace catalogue\n` +
+        '(packages/i18n/src/namespaces/studio/zh.ts) when the key has moved there, IN THIS PR.\n' +
+        'objectui#8413 is the case study:\n' +
         'an English help string said something untrue and the Chinese row said the same untrue thing,\n' +
         'so fixing only the English half would have left the Chinese designer telling the old lie with\n' +
         'every gate in this repo green. The key is prefixed with its table.\n' +

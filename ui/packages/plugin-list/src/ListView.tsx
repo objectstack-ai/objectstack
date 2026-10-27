@@ -4185,14 +4185,31 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           schema.calendar?.colorField || schema.options?.calendar?.colorField;
         const allDayField =
           schema.calendar?.allDayField || schema.options?.calendar?.allDayField;
+        // ⭐ objectstack#25923 — the five go out NESTED, as the node's own
+        // `calendar` block: the spec's `ComponentPropsMap['object-calendar']`
+        // refuses them flat, so the published `ObjectCalendarSchema` no longer
+        // declares them flat either. `getCalendarConfig` reads this block FIRST
+        // and returns it whole.
+        //
+        // ⛔ Only when a start binding is DECLARED (objectui#7029, above). The
+        // block's `startDateField` is required, and `getCalendarConfig` takes a
+        // present block as configured, so an empty or start-less block would skip
+        // the renderer's own refusal screen; with no block the node reaches that
+        // screen exactly as the flat spelling did, whose branch also asked for
+        // `startDateField`.
+        const calendarBlock = startDateField
+          ? {
+              startDateField,
+              ...(endDateField ? { endDateField } : {}),
+              ...(titleField ? { titleField } : {}),
+              ...(colorField ? { colorField } : {}),
+              ...(allDayField ? { allDayField } : {}),
+            }
+          : undefined;
         return {
           type: 'object-calendar',
           ...baseProps,
-          ...(startDateField ? { startDateField } : {}),
-          ...(endDateField ? { endDateField } : {}),
-          ...(titleField ? { titleField } : {}),
-          ...(colorField ? { colorField } : {}),
-          ...(allDayField ? { allDayField } : {}),
+          ...(calendarBlock ? { calendar: calendarBlock } : {}),
           // objectui#12081 — the days the calendar draws come back here, and
           // this view's fetch windows on them (`calendarWindowed`). Handed only
           // where this view windows: elsewhere nothing would read the report.
@@ -4320,6 +4337,36 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // `plugin-gantt/src/ObjectGantt.unconfiguredRefusal-7070.test.tsx`).
         const startDateField = schema.gantt?.startDateField || schema.options?.gantt?.startDateField;
         const endDateField = schema.gantt?.endDateField || schema.options?.gantt?.endDateField;
+        // ⭐ objectstack#25923 — the block goes out NESTED, as the node's own
+        // `gantt`: `ComponentPropsMap['object-gantt']` refuses every
+        // `GanttConfig` key written flat, so the published `ObjectGanttSchema`
+        // no longer declares them flat either. `getGanttConfig` reads the block
+        // FIRST and validates it against the spec's `GanttConfigSchema`.
+        //
+        // It is handed on under the two conditions the renderer's flat branch
+        // applied to the flat spelling: only once BOTH date fields are declared (otherwise no block, and the
+        // node reaches the renderer's "configuration required" screen, as a
+        // partial flat spelling did), and with `titleField` floored at `'name'`
+        // (the flat branch's own floor — a display-name default, not a date
+        // axis — which the block, requiring `titleField`, cannot leave to it).
+        // The one outcome that moves: the flat branch never validated, so a
+        // binding carrying a value the spec refuses (a pre-door stored
+        // `options.gantt`, say) used to draw and now reaches the renderer's
+        // `gantt-invalid-config` refusal screen. Such a row is converted at the
+        // store (ADR-0087), never tolerated here.
+        const ganttBlock =
+          startDateField && endDateField
+            ? {
+                // The block's DECLARED keys, bag under block per key, exactly as
+                // the two raw spreads this replaced merged them (objectui#6152
+                // round 14). See `GANTT_CONFIG_SPELLING` for what the spreads
+                // let through.
+                ...pickFlatMapConfig({ ...(schema.options?.gantt || {}), ...(schema.gantt || {}) }, GANTT_CONFIG_SPELLING),
+                startDateField,
+                endDateField,
+                titleField: schema.gantt?.titleField || schema.options?.gantt?.titleField || 'name',
+              }
+            : undefined;
         return {
           type: 'object-gantt',
           ...baseProps,
@@ -4391,13 +4438,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // block (`object` / `value`) must reach ObjectGantt, whose
           // getDataConfig prefers schema.data over the objectName fallback.
           ...(schema.data ? { data: schema.data } : {}),
-          ...(startDateField ? { startDateField } : {}),
-          ...(endDateField ? { endDateField } : {}),
-          ...(schema.gantt?.titleField ? { titleField: schema.gantt.titleField } : {}),
-          // The block's DECLARED keys, bag under block per key, exactly as the
-          // two raw spreads this replaces merged them (objectui#6152 round 14).
-          // See `GANTT_CONFIG_SPELLING` for what the spreads let through.
-          ...pickFlatMapConfig({ ...(schema.options?.gantt || {}), ...(schema.gantt || {}) }, GANTT_CONFIG_SPELLING),
+          ...(ganttBlock ? { gantt: ganttBlock } : {}),
         };
       }
       case 'map': {

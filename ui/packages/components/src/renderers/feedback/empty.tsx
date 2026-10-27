@@ -13,7 +13,7 @@ import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { DataEmptyState } from '../../custom/view-states';
 
 ComponentRegistry.register('empty', 
-  ({ schema, ...props }: { schema: EmptySchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: EmptySchema; [key: string]: unknown }) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

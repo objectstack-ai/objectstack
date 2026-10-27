@@ -638,12 +638,13 @@ function occursAtKeyBoundary(content, key) {
  * target key here and self-polluted that key's report entry).
  *
  * @param {object} [options]
- * @param {string} [options.definitionPrefix] Repo-relative path prefix whose
- *   hits are NOT evidence, because it is where the keys are defined. Defaults
- *   to `LOCALES_DIR` (the packs). The designer corpus passes its single table
- *   FILE instead — the whole file, not just its two table literals, because
- *   that module's header docblock quotes example keys in prose and a grep
- *   cannot tell prose from a call site.
+ * @param {string | string[]} [options.definitionPrefix] Repo-relative path
+ *   prefix (or prefixes) whose hits are NOT evidence, because it is where the
+ *   keys are defined. Defaults to `LOCALES_DIR` (the packs). The designer
+ *   corpus passes its table FILE and its namespace homes instead — the whole
+ *   table file, not just its two table literals, because that module's header
+ *   docblock quotes example keys in prose and a grep cannot tell prose from a
+ *   call site.
  * @param {boolean} [options.propertyChain=true] Run the property-chain probe.
  *   Off for a corpus whose table is not exported, where no property-access
  *   reader can exist (see `DESIGNER_TABLE`).
@@ -658,6 +659,7 @@ function occursAtKeyBoundary(content, key) {
  */
 export function textFootprint(root, keys, options = {}) {
   const { definitionPrefix = LOCALES_DIR, propertyChain = true, keyBoundary = true } = options;
+  const definitionPrefixes = [definitionPrefix].flat();
   const result = new Map(keys.map((key) => [key, []]));
   if (keys.length === 0) return result;
 
@@ -711,7 +713,7 @@ export function textFootprint(root, keys, options = {}) {
     const file = line.slice(0, firstColon);
     const content = line.slice(secondColon + 1);
     const relFile = relative(root, file).split('\\').join('/');
-    if (relFile.startsWith(definitionPrefix)) continue;
+    if (definitionPrefixes.some((prefix) => relFile.startsWith(prefix))) continue;
     for (const { key, chain } of probes) {
       const literal = keyBoundary ? occursAtKeyBoundary(content, key) : content.includes(key);
       if (!literal && !(chain !== null && occursAtPropertyBoundary(content, chain))) continue;
@@ -1792,6 +1794,34 @@ export const DESIGNER_TABLE = 'packages/app-shell/src/views/metadata-admin/i18n.
  *  evidence that anything reads it. */
 export const DESIGNER_TABLE_CONSTS = ['ENGINE_STRINGS_EN', 'ENGINE_STRINGS_ZH'];
 
+/**
+ * The table's SECOND home: the `studio` namespace of `@object-ui/i18n`, which
+ * the table moves into slice by slice (objectstack#25922, maintainer ruling
+ * 6431032267 Q2 = A). Each entry names one namespace catalogue, the constant it
+ * declares, and the table constant it is a part of: its keys are read as
+ * members of that table, so every reader of this extractor — the dead-keys
+ * sweep, `check-i18n-designer-table-parity.mjs` and the designer population of
+ * `check-i18n-en-drift.mjs` — sees ONE table whichever home a key sits in.
+ *
+ * ⭐ The homes are read only when the table module IMPORTS
+ * {@link DESIGNER_NAMESPACE_SPECIFIER}, because that import is the edge the
+ * runtime follows (`lookupString` asks the namespace for every key the table
+ * lacks). The extractor follows the same edge rather than a list of its own:
+ * a table read at a commit from before the move, or a fixture table, reads no
+ * home; a table that imports the namespace and a home that cannot be read is
+ * the stale-extractor throw.
+ *
+ * ⛔ A key in BOTH homes throws. The runtime would serve the table's copy and
+ * the namespace's would be dead text a translator could edit to no effect.
+ */
+export const DESIGNER_NAMESPACE_SPECIFIER = '@object-ui/i18n/namespaces/studio';
+
+/** See {@link DESIGNER_NAMESPACE_SPECIFIER}. Paths are relative to `ui/`. */
+export const DESIGNER_NAMESPACE_HOMES = Object.freeze([
+  Object.freeze({ file: 'packages/i18n/src/namespaces/studio/en.ts', decl: 'STUDIO_EN', table: 'ENGINE_STRINGS_EN' }),
+  Object.freeze({ file: 'packages/i18n/src/namespaces/studio/zh.ts', decl: 'STUDIO_ZH', table: 'ENGINE_STRINGS_ZH' }),
+]);
+
 /** The three top-level namespaces this table owns. A string literal or template
  *  head that does not start with one of these cannot be one of its keys, so the
  *  reader walk skips the file entirely when none of them occurs in its text. */
@@ -1860,13 +1890,21 @@ function isDesignerKeyShape(text) {
  *     rather than a stale extractor, and the gate PRINTS every pair it had to
  *     skip for that reason instead of quietly comparing nothing.
  *
+ *   - `readHome` — `(file) => text | null`, how to read a namespace home
+ *     ({@link DESIGNER_NAMESPACE_HOMES}) when the table imports the namespace.
+ *     Defaults to the working tree when `source` is not passed; a caller that
+ *     passes `source` for a table that imports the namespace must pass it too
+ *     (the drift gate's git blobs), or the read throws rather than quietly
+ *     comparing half a table.
+ *
  * ⚠️ None of these loosens what the extractor ACCEPTS at a given constant: the
  * property-form and key-form throws below are untouched, and they are the only
  * way this instrument knows it has gone stale.
  *
  * @param {string} root
  * @param {{ consts?: string[], source?: string | null, label?: string,
- *           withValues?: boolean, require?: boolean }} [options]
+ *           withValues?: boolean, require?: boolean,
+ *           readHome?: ((file: string) => string | null) | null }} [options]
  * @returns {{ tables: Map<string, Set<string>>, corpus: Set<string>,
  *             values: Map<string, Map<string, string>> | null }}
  *   `corpus` is the UNION of both tables: a key present in only one of them is
@@ -1880,56 +1918,125 @@ export function collectDesignerKeys(root, options = {}) {
     label = DESIGNER_TABLE,
     withValues = false,
     require = true,
+    readHome = null,
   } = options;
   const text = sourceText ?? readFileSync(join(root, DESIGNER_TABLE), 'utf8');
   const source = ts.createSourceFile(label, text, ts.ScriptTarget.Latest, true);
   const tables = new Map();
   const values = withValues ? new Map() : null;
 
-  const visit = (node) => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      consts.includes(node.name.text) &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      const keys = new Set();
-      const texts = withValues ? new Map() : null;
-      for (const prop of node.initializer.properties) {
-        if (!ts.isPropertyAssignment(prop)) {
+  /** One table literal's keys (and values), read with every stale-extractor throw. */
+  const readLiteral = (fileLabel, constName, initializer) => {
+    const keys = new Set();
+    const texts = withValues ? new Map() : null;
+    for (const prop of initializer.properties) {
+      if (!ts.isPropertyAssignment(prop)) {
+        throw new Error(
+          `${fileLabel}: unsupported property form in ${constName} ` +
+            `(${ts.SyntaxKind[prop.kind]}) — the extractor is stale`,
+        );
+      }
+      if (!ts.isStringLiteral(prop.name) && !ts.isIdentifier(prop.name)) {
+        throw new Error(`${fileLabel}: unsupported key form in ${constName} — the extractor is stale`);
+      }
+      keys.add(prop.name.text);
+      if (withValues) {
+        const value = prop.initializer;
+        if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value)) {
           throw new Error(
-            `${label}: unsupported property form in ${node.name.text} ` +
-              `(${ts.SyntaxKind[prop.kind]}) — the extractor is stale`,
+            `${fileLabel}: ${constName}[${JSON.stringify(prop.name.text)}] is not a static string ` +
+              `(${ts.SyntaxKind[value.kind]}) — the extractor is stale. Teach it this form, or the ` +
+              'value silently leaves the scope of every gate that compares these tables.',
           );
         }
-        if (!ts.isStringLiteral(prop.name) && !ts.isIdentifier(prop.name)) {
-          throw new Error(`${label}: unsupported key form in ${node.name.text} — the extractor is stale`);
-        }
-        keys.add(prop.name.text);
-        if (withValues) {
-          const value = prop.initializer;
-          if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value)) {
-            throw new Error(
-              `${label}: ${node.name.text}[${JSON.stringify(prop.name.text)}] is not a static string ` +
-                `(${ts.SyntaxKind[value.kind]}) — the extractor is stale. Teach it this form, or the ` +
-                'value silently leaves the scope of every gate that compares these tables.',
-            );
-          }
-          texts.set(prop.name.text, value.text);
-        }
+        texts.set(prop.name.text, value.text);
       }
-      tables.set(node.name.text, keys);
-      if (withValues) values.set(node.name.text, texts);
     }
-    ts.forEachChild(node, visit);
+    return { keys, texts };
   };
-  visit(source);
+
+  /** The object literal `const NAME = { … }` declares in `file`, or null. */
+  const findLiteral = (file, name) => {
+    let found = null;
+    const visit = (node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === name &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer)
+      ) {
+        found = node.initializer;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+    return found;
+  };
+
+  for (const name of consts) {
+    const initializer = findLiteral(source, name);
+    if (initializer === null) continue;
+    const { keys, texts } = readLiteral(label, name, initializer);
+    tables.set(name, keys);
+    if (withValues) values.set(name, texts);
+  }
 
   if (require) {
     for (const name of consts) {
       if (!tables.has(name)) {
         throw new Error(`${label}: \`const ${name} = { … }\` not found — the extractor is stale`);
+      }
+    }
+  }
+
+  // The namespace homes, read only through the import the runtime follows —
+  // see DESIGNER_NAMESPACE_SPECIFIER.
+  const importsNamespace = source.statements.some(
+    (statement) =>
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === DESIGNER_NAMESPACE_SPECIFIER,
+  );
+  if (importsNamespace) {
+    for (const home of DESIGNER_NAMESPACE_HOMES) {
+      if (!consts.includes(home.table) || !tables.has(home.table)) continue;
+      let homeText = null;
+      if (readHome !== null) {
+        homeText = readHome(home.file);
+      } else if (sourceText === null) {
+        const full = join(root, home.file);
+        homeText = existsSync(full) ? readFileSync(full, 'utf8') : null;
+      } else {
+        throw new Error(
+          `${label}: the table imports ${DESIGNER_NAMESPACE_SPECIFIER}, so its keys also live in ` +
+            `${home.file}; a caller that passes \`source\` must pass \`readHome\` too`,
+        );
+      }
+      if (homeText === null) {
+        throw new Error(
+          `${label} imports ${DESIGNER_NAMESPACE_SPECIFIER}, and ${home.file} cannot be read — ` +
+            'the extractor is stale',
+        );
+      }
+      const homeSource = ts.createSourceFile(home.file, homeText, ts.ScriptTarget.Latest, true);
+      const initializer = findLiteral(homeSource, home.decl);
+      if (initializer === null) {
+        throw new Error(`${home.file}: \`const ${home.decl} = { … }\` not found — the extractor is stale`);
+      }
+      const { keys, texts } = readLiteral(home.file, home.decl, initializer);
+      const tableKeys = tables.get(home.table);
+      for (const key of keys) {
+        if (tableKeys.has(key)) {
+          throw new Error(
+            `${JSON.stringify(key)} is in both ${label} (${home.table}) and ${home.file} — a designer ` +
+              'key lives in exactly one home. Delete the copy that is not being served: the table ' +
+              'answers first, so the namespace copy is the dead one unless the table row is the stray.',
+          );
+        }
+        tableKeys.add(key);
+        if (withValues) values.get(home.table).set(key, texts.get(key));
       }
     }
   }
@@ -1965,6 +2072,8 @@ export function collectDesignerReaders(root) {
   const literalKeys = new Map();
   const dynamicHeads = new Map();
   const tablePath = join(root, DESIGNER_TABLE);
+  // The namespace homes' literals are definition sites too.
+  const homeDecls = new Map(DESIGNER_NAMESPACE_HOMES.map((home) => [join(root, home.file), home.decl]));
   let filesScanned = 0;
 
   const add = (map, value, file) => {
@@ -1980,13 +2089,14 @@ export function collectDesignerReaders(root) {
     const rel = relative(root, file).split('\\').join('/');
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     const isTableFile = file === tablePath;
+    const homeDecl = homeDecls.get(file) ?? null;
 
     const visit = (node) => {
       if (
-        isTableFile &&
+        (isTableFile || homeDecl !== null) &&
         ts.isVariableDeclaration(node) &&
         ts.isIdentifier(node.name) &&
-        DESIGNER_TABLE_CONSTS.includes(node.name.text)
+        (isTableFile ? DESIGNER_TABLE_CONSTS.includes(node.name.text) : node.name.text === homeDecl)
       ) {
         return; // the definition site — not a reader
       }
@@ -2056,7 +2166,7 @@ export function sweepDesignerTable(root) {
     .sort();
 
   const footprints = textFootprint(root, candidates, {
-    definitionPrefix: DESIGNER_TABLE,
+    definitionPrefix: [DESIGNER_TABLE, ...DESIGNER_NAMESPACE_HOMES.map((home) => home.file)],
     propertyChain: false,
   });
   const tablesOf = (key) => DESIGNER_TABLE_CONSTS.filter((name) => tables.get(name).has(key));

@@ -13,7 +13,7 @@ name: Nightly Tiers
 #
 # ## Shape
 #
-# `coverage-nightly.yml`'s: `schedule` + `workflow_dispatch`, node 22, pnpm,
+# The house nightly shape: `schedule` + `workflow_dispatch`, node 22, pnpm,
 # RESTORE-ONLY caches (a scheduled run reads main's pnpm store and Build Core's
 # turbo seeds; the per-push workflows own saving them, and a nightly that saved
 # would churn the rationed 10 GB pool the way PR-side saves once did — see
@@ -40,6 +40,14 @@ name: Nightly Tiers
 # Raise the matrix (three places below: `matrix.shard`, the job `name:`, and
 # `--shard k/N`) only when a second tier-owning package arrives heavy enough
 # for the partitioner's own balance line to say so.
+#
+# The second tier-owning package is `@objectstack/example-showcase`, and it is
+# not that heavy: one `*.live.test.ts` file (#26445), the showcase browser
+# smoke, which used to be its own scheduled workflow (Showcase Smoke) and
+# filed nothing when red. The partitioner keeps it whole ("not the run's
+# floor") and places it on one shard; that shard also builds the Console SPA
+# and installs Chromium for it (≈ 5 min, the "Prepare the showcase browser
+# smoke" step), which no other shard pays.
 #
 # ## What lands where — the house idiom of `platform-checklist-watchdog.yml`
 #
@@ -75,9 +83,7 @@ on:
   schedule:
     # Nightly. The minute is offset off the top of the hour ON PURPOSE (scheduled
     # workflows queue behind everyone else's `:00` cron) and off every sibling
-    # patrol's minute, so two of them never contend for the same runner minute;
-    # 05:29 sits after `coverage-nightly` (05:00) has started and well before
-    # `showcase-smoke` (07:00).
+    # patrol's minute, so two of them never contend for the same runner minute.
     #
     # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
     # the `env:` block below, where the report step computes the deadline the
@@ -160,33 +166,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Kept as this job's own step rather than folded into the composite
-      # below. ⛔ No longer because a gate cannot see it:
-      # `scripts/check-node-version.mjs` reads `.github/actions/**` too since
-      # #19229, so its census follows a setup-node step wherever it is written.
-      # Kept because the pin is already here and moving it buys nothing.
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
       # Restore-only: scheduled runs read main's store cache; the per-push
       # workflows own saving it.
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+          save-store: 'false'
 
       # Restore-only, from Build Core's namespace: that job builds the whole
       # workspace on every main push, so its entries replay every `build` task
@@ -202,9 +187,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Two readings before a single test runs, both loud on failure:
       #
@@ -229,6 +211,31 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # The showcase browser smoke (`examples/app-showcase/test/showcase-smoke.live.test.ts`)
+      # drives the Console against a real backend through Playwright, and needs
+      # two things `turbo run test` does not produce: the Console SPA the backend
+      # serves at /_console (`packages/console/dist`, built by the `build:dist`
+      # task — `pnpm console:build`), and a Chromium this `@playwright/test` can
+      # launch. Only the shard the partitioner gave that package pays for them.
+      # The test's own `^build` closure is the `test` task's, as for every
+      # package here.
+      #
+      # `continue-on-error`, on purpose: the same shard carries a slice of the
+      # CLI's e2e tier, and a Console build that fails one night must not take
+      # that slice down with it. The night is still red, and still names the
+      # file — the smoke then fails every test at once, and its failure text
+      # says to read a whole-run red as the environment first; this step's red
+      # in the log is the environment.
+      - name: Prepare the showcase browser smoke
+        continue-on-error: true
+        run: |
+          if ! grep -qE '^@objectstack/example-showcase( |$)' "$RUNNER_TEMP/shard-packages.txt"; then
+            echo "@objectstack/example-showcase is not on this shard — nothing to prepare."
+            exit 0
+          fi
+          pnpm console:build
+          pnpm --filter @objectstack/example-showcase exec playwright install --with-deps chromium
+
       # The same leg loop as ci.yml's "Run this shard's tests", under the
       # nightly setting, with vitest's JSON reporter added beside the default
       # one: `--outputFile.json` is RELATIVE so each package writes its own
@@ -244,6 +251,13 @@ jobs:
       # ⛔ A failing leg STOPS the remaining ones, as in ci.yml: a second full
       # leg on a job that is already red only risks turning an informative red
       # into a killed job with no report at all.
+      #
+      # One deliberate difference from ci.yml: the file-level SLICES run first
+      # and the whole-package leg last. The whole packages here are the cheap
+      # ones (the partitioner keeps a package whole when it is not the run's
+      # floor) — today the showcase browser smoke — and a red in one of them
+      # must not stop the shard's slice of the CLI's e2e tier from running.
+      # The other way round, a red slice skips a few minutes of smoke.
       - name: Run this shard's nightly tiers
         env:
           OS_TEST_TIERS: nightly
@@ -270,7 +284,7 @@ jobs:
           REPORTER="--reporter=default --reporter=json --outputFile.json=.nightly-tiers/vitest-report.json"
           STATUS=0
           LOGS=""
-          for LEG in __whole__ $SLICES; do
+          for LEG in $SLICES __whole__; do
             if [ "$LEG" = __whole__ ]; then
               [ -n "$FILTERS" ] || continue
               LOG="$RUNNER_TEMP/nightly-tiers-packages.log"
@@ -323,6 +337,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # The showcase smoke's screenshots, traces and error context, which
+      # Playwright writes under its default `outputDir` beside its config.
+      # `always()` and `ignore`: a red smoke leaves them, and so does a green
+      # one that passed only on its retry (`retries: 1` under CI) — the flaky
+      # first attempt is the evidence a time-dependent red needs. A clean green,
+      # and every shard without the showcase, leave nothing and upload nothing.
+      - name: Publish the showcase smoke's Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-smoke-diagnostics-${{ matrix.shard }}
+          path: examples/app-showcase/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       # The same two questions ci.yml's guard answers about a red suite — was
       # every test vitest COUNTED actually run, and did every scheduled package
       # report at all — asked of this shard's log against this shard's schedule.
@@ -362,7 +391,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # No `pnpm install`: `scripts/nightly-tiers.mjs --failing-files` imports
       # `node:` builtins and two repo-local helpers only, so installing the
@@ -416,164 +445,10 @@ jobs:
           # otherwise discard a completed sweep.
           retries: 3
           script: |
-            const fs = require('fs');
-            const path = require('path');
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const title = process.env.CARD_TITLE;
-            const marker = process.env.CARD_MARKER;
-            const labels = process.env.CARD_LABELS.split(',').map((s) => s.trim()).filter(Boolean);
-            const result = process.env.TIERS_RESULT;
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-
-            const read = (name) => {
-              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
-              catch { return ''; }
-            };
-            const failing = read('failing-files.txt').split('\n').map((s) => s.trim()).filter(Boolean);
-            const extractorExit = process.env.FAILING_FILES_EXIT;
-
-            // The log tails, bounded. ⛔ The bound below is NOT the platform
-            // cap, and the platform cap is not 65,536 of anything. This step
-            // posts an ISSUE BODY, and that surface is MEASURED, in UTF-8
-            // BYTES: 262,144 bytes stored, 262,145 refused — bisected to one
-            // byte on objectstack#18793, and restated as `ISSUE_BODY_LIMIT` in
-            // scripts/pm/check-half-states.mjs. ⛔ Do not re-derive 65,536 from
-            // a refusal message: GitHub's own 422 text still says "maximum is
-            // 65536 characters" and is false in both unit and value —
-            // objectstack#18826 stored a 262,144-CHARACTER comment. ⚠️ And on
-            // this surface the refusal is not a 422 at all: an oversized issue
-            // body is answered 200 with the OLD body kept and nothing reported
-            // (#18793), so a body that outgrows the cap vanishes silently.
-            // The run link carries the whole log anyway.
-            const tails = [];
-            const reportsDir = path.join(process.env.RUNNER_TEMP, 'nightly-reports');
-            const walk = (dir) => {
-              let entries = [];
-              try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-              for (const e of entries) {
-                const p = path.join(dir, e.name);
-                if (e.isDirectory()) walk(p);
-                else if (e.name === 'log-tail.txt') tails.push({ shard: path.basename(dir), text: fs.readFileSync(p, 'utf8') });
-              }
-            };
-            walk(reportsDir);
-            // BUDGET is a READING budget, ⛔ not a platform bound, and it is
-            // deliberately NOT re-sized now that the cap above is known to be
-            // four times what this file used to assert. 40,000 is about as much
-            // log tail as a person reads off a card before clicking through,
-            // and the run link carries every byte elided here — so this number
-            // is sized against the reader, and a correction to the cap moves a
-            // reading, never a licence to print more. It is counted in the unit
-            // the slice below uses (JS string length, i.e. UTF-16 code units),
-            // because nothing judges it against the byte cap: even as bytes of
-            // CJK prose it stays far under 262,144.
-            const BUDGET = 40000;
-            const perTail = Math.max(2000, Math.floor(BUDGET / Math.max(1, tails.length)));
-            const tailBlocks = tails.sort((a, b) => a.shard.localeCompare(b.shard)).flatMap(({ shard, text }) => [
-              `### ${shard} — last lines of the test log`,
-              '',
-              '```',
-              text.length > perTail ? `… (${text.length - perTail} chars elided) …\n${text.slice(-perTail)}` : text,
-              '```',
-              '',
-            ]);
-
-            // The cadence that makes the `Swept` line below decidable (#17720).
-            // `PATROL_SCHEDULE` is this workflow's own `cron:`, restated in the
-            // `env:` block beside the other single-sourced card strings.
-            // ⛔ Only the daily `M H * * *` form is computed; anything else says
-            // so in the body rather than publishing a deadline derived from a
-            // schedule this did not read.
-            const sweptAt = new Date();
-            const schedule = String(process.env.PATROL_SCHEDULE ?? '').trim();
-            const cronFields = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule);
-            let expectation = `⚠️ expected cadence UNSTATED — PATROL_SCHEDULE is \`${schedule}\`, which is not the daily \`M H * * *\` form this step computes a deadline from`;
-            if (cronFields && Number(cronFields[1]) <= 59 && Number(cronFields[2]) <= 23) {
-              const next = new Date(sweptAt);
-              next.setUTCHours(Number(cronFields[2]), Number(cronFields[1]), 0, 0);
-              if (next <= sweptAt) next.setUTCDate(next.getUTCDate() + 1);
-              expectation = `expected every 24h while this card stands (cron \`${schedule}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
-            }
-
-            const filesSection = failing.length > 0
-              ? ['## Failing files', '', ...failing.map((f) => `- \`${f}\``), '']
-              : extractorExit !== '0'
-                ? ['## Failing files', '', `⚠️ The report reader exited ${extractorExit}; no per-file verdict is available. Read the run log.`, '']
-                : ['## Failing files', '', '⚠️ No vitest report named a failing nightly-tier file, yet the tiers job did not succeed — the run died before or outside vitest (a build failure, a stall kill, a cancelled shard). Read the run log.', ''];
-
-            const body = [
-              `${marker} — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the nightly finds this card instead of filing a new one every night.`,
-              '',
-              `# ${title}`,
-              '',
-              `_Swept ${sweptAt.toISOString()} · ${expectation} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · tiers job result \`${result}\`._`,
-              '',
-              'The `Swept` line above is this nightly\'s heartbeat, and it states the cadence that makes',
-              '「stalled」 decidable: while the tiers stay red this card is refreshed on that schedule, so a',
-              'timestamp still sitting there past the `next by` deadline means either the standing caller',
-              'died or the nightly went green — nothing here files or closes anything on green, so both',
-              'readings end at this card. ⛔ Do not carry a cadence over from a sibling patrol anchor: they',
-              'differ by up to 4× and each states its own.',
-              '',
-              'The `e2e` and `live` test tiers — the files named `*.e2e.test.*` and `*.live.test.*` — run here',
-              'nightly on `main` under `OS_TEST_TIERS=nightly` and nowhere else (the per-PR and merge-queue',
-              'Test Core runs under `queue`). A red here is a real suite that no pull request will red on;',
-              'this card is the channel that sees it. Nothing is blocked by it.',
-              '',
-              '⛔ The remedy is never to rename, skip or delete the failing test to make the nightly green.',
-              'Reproduce locally with `OS_TEST_TIERS=nightly pnpm --filter <pkg> test`, fix what it names, and',
-              'let the next nightly refresh this card.',
-              '',
-              ...filesSection,
-              ...tailBlocks,
-              '_Filed by `.github/workflows/test-nightly-tiers.yml`. Generated by [Claude Code](https://claude.ai/code)_',
-            ].join('\n');
-
-            // ── De-dup: the OPEN cards carrying the title prefix ─────────────
-            // Repo-scoped REST, this workflow's token, bounded pages; a
-            // truncated scan cannot establish ABSENCE, and filing on an
-            // unestablished absence is how a nightly mints a duplicate a day.
-            const isThisCard = (i) => !i.pull_request
-              && (String(i.title ?? '').startsWith(title) || String(i.body ?? '').includes(marker));
-            const MAX_PAGES = 10;
-            const candidates = [];
-            let scanComplete = true;
-            for (let page = 1; page <= MAX_PAGES; page += 1) {
-              const res = await github.rest.issues.listForRepo({
-                owner, repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100, page,
-              });
-              candidates.push(...res.data.filter(isThisCard));
-              if (res.data.length < 100) break;
-              if (page === MAX_PAGES) scanComplete = false;
-            }
-            if (!scanComplete) {
-              throw new Error(`the open-issue scan hit its ${MAX_PAGES}-page bound without completing — absence is NOT established, so nothing was filed. The failing files are in this run's summary.`);
-            }
-
-            // The OLDEST open card wins — that is the one any duplicates were
-            // closed against.
-            const existing = candidates.sort((a, b) => a.number - b.number)[0] ?? null;
-
-            if (existing) {
-              // Rewritten in place, never a comment per run. ⛔ Labels are NOT
-              // rewritten — grading is the devx seat's and a refresh must not
-              // undo it.
-              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
-              core.info(`refreshed nightly-tiers card #${existing.number} (${body.length} chars, tiers ${result})`);
-              core.notice(`nightly tiers are red on main — card #${existing.number} refreshed.`);
-              return;
-            }
-
-            const created = await github.rest.issues.create({
-              owner, repo, title, body,
-              // Additive on create; ⛔ nothing here ever replaces a whole label
-              // set (`check:whole-set-label-write` refuses that verb outright).
-              labels,
-            });
-            core.info(`filed nightly-tiers card #${created.data.number} (${body.length} chars, tiers ${result})`);
-            core.notice(`nightly tiers are red on main — card #${created.data.number} filed.`);
+            // The body lives in scripts/ci/nightly-tiers-card.mjs (#26086), driven
+            // offline by its --self-test; this step hands it the same github/context/core.
+            const { fileNightlyCard } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/nightly-tiers-card.mjs`);
+            await fileNightlyCard({ github, context, core });
 
       - name: Publish the verdict to the run summary
         # Always: on green this IS the whole product; on a branch it is the

@@ -1,6 +1,6 @@
 /* ADR-0080: the registration graph every SDUI manifest this app emits is read
  * from. Importing this module registers everything the console does, EAGERLY,
- * which is the PREREQUISITE `packages/sdui-parser/scripts/gen-manifest.ts`
+ * which is the PREREQUISITE `apps/console/scripts/gen-manifest.ts`
  * states. It has two importers, so they read one list:
  *   - `manifest-dump.tsx` — the browser dump page (`dev/manifest-dump.html`);
  *   - `../scripts/build-sdui-manifest.ts` — the console build step that ships

@@ -15,6 +15,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
@@ -50,6 +51,11 @@ import {
   isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+import {
+  checkDependencyRanges,
+  formatDependencyRangeDiagnostic,
+  type DependencyRangeDiagnostic,
+} from '../utils/dependency-range-check.js';
 // [#14553] The compile-time half of the navigation-contribution group ruling.
 // Reports; never refuses — the runtime still relocates, deliberately.
 import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
@@ -189,6 +195,11 @@ export default class Compile extends Command {
     // and `os validate` computes the identical records. Appended LAST, in
     // `os validate`'s order.
     let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
+    // ADR-0141 D2 author side (step 3b-quater): the `dependencies` findings
+    // the install ADMITS. A member of `warningsSoFar()`, ⛔ not a payload key,
+    // for the reasons the lists above record: it reports without refusing, and
+    // `os validate` computes the identical records. Appended LAST.
+    let dependencyRangeWarnings: DependencyRangeDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -198,6 +209,7 @@ export default class Compile extends Command {
       ...permissionSetCollisionWarnings,
       ...jsxGateNotices,
       ...picklistReferenceNotices,
+      ...dependencyRangeWarnings,
     ];
     // [#18780] ONE rendering of the author-time advisory block, from the
     // COMPLETE list — hoisted here for the same reason the lists above are.
@@ -755,6 +767,43 @@ export default class Compile extends Command {
         );
       }
 
+      // 3b-quater. ADR-0141 D2, author side — every `manifest.dependencies`
+      //     range of the packages one install act would deliver, judged by the
+      //     install's own predicate (`utils/dependency-range-check.ts`).
+      //
+      //     REFUSES exactly what the install refuses whatever the target
+      //     environment holds — an unreadable range on an out-of-artifact
+      //     entry, which no installed version can satisfy — so the artifact
+      //     this would emit is one no environment installs. ⛔ The in-artifact
+      //     findings (a sibling's version outside the range, or a co-delivered
+      //     range or version that cannot be read) are ADMITTED by the install,
+      //     which judges a co-delivered entry for presence only; they report,
+      //     and exiting non-zero on them would narrow what `os build` accepts.
+      const dependencyRanges = checkDependencyRanges(result.data);
+      const dependencyRangeErrors = dependencyRanges.filter((d) => d.severity === 'error');
+      dependencyRangeWarnings = dependencyRanges.filter((d) => d.severity !== 'error');
+      if (dependencyRangeErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: dependencyRangeErrors, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(
+          `Dependency range check failed (${dependencyRangeErrors.length} issue${dependencyRangeErrors.length > 1 ? 's' : ''})`
+            + ' — the install refuses every one of these',
+        );
+        for (const d of dependencyRangeErrors) console.log(chalk.red(`  ✗ ${formatDependencyRangeDiagnostic(d)}`));
+        this.exit(1);
+      }
+      if (dependencyRangeWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Dependency ranges inside this artifact the install does not judge (${dependencyRangeWarnings.length})`
+            + ' — a package the same artifact delivers is checked for presence only',
+        );
+        printBulletList(dependencyRangeWarnings.map(formatDependencyRangeDiagnostic), { noun: 'dependency-range diagnostic' });
+      }
+
       // 3c. [#3366] Installable-provider preflight. Every capability the app
       //     DECLARES in `requires: [...]` must have a provider resolvable in the
       //     active edition. A `requires` entry whose provider has NO installable
@@ -1033,6 +1082,28 @@ export default class Compile extends Command {
       }
       if (placed.packages !== finalBundle.packages) {
         finalBundle.packages = placed.packages;
+      }
+
+      // 4a. [#25779] The files seed records name with `seedFile(path)`, read
+      //     relative to the directory holding the config — the gate
+      //     `os validate` runs too — then written into their datasets'
+      //     `files` maps. The artifact is what every boot loads, so the bytes
+      //     travel with the seed; a path that names no file fails the build
+      //     here rather than a row at boot.
+      const seedFiles = collectSeedFiles(absolutePath, finalBundle);
+      if (seedFiles.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'seed file bundling failed', issues: seedFiles.issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Seed file bundling failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
+        for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+      placeSeedFiles(seedFiles);
+      if (seedFiles.files > 0 && !flags.json) {
+        printStep(`Bundling seed files... ${seedFiles.files} file${seedFiles.files === 1 ? '' : 's'} (${(seedFiles.bytes / 1024).toFixed(1)} KB)`);
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`

@@ -116,7 +116,7 @@
  * the host half (ids, label association, required, uploads).
  */
 
-import { Suspense, useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import { Suspense, useContext, useEffect, useId, useMemo, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -148,7 +148,7 @@ import {
   mapFieldTypeToFormType,
   resolveFormWidgetType,
 } from '@object-ui/fields';
-import { usePredicateScope } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, type ApiFetch } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec } from '@object-ui/app-shell';
 import type { ObjectFormSection } from '@object-ui/types';
@@ -1449,8 +1449,17 @@ export function omitServerOwnedBlanks(
 }
 
 /** Authed/anonymous fetch — credentials included so cookies (auth) flow. */
-async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_BASE}${path}`, {
+/**
+ * One request to the framework API, over `channel`.
+ *
+ * `channel` is the bare global `fetch` on the public route and the host's
+ * authenticated fetch on the internal one — see the `channel` binding in
+ * {@link FormPage} for why the two differ (objectstack#26452). It is resolved
+ * at call time, never captured at module load, so a test that stubs the
+ * global is the global this reads.
+ */
+async function apiFetch(path: string, init?: RequestInit, channel?: ApiFetch): Promise<Response> {
+  return (channel ?? fetch)(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
@@ -1629,8 +1638,9 @@ async function loadInternalForm(
   name: string,
   recordId?: string | null,
   recordObject?: string | null,
+  channel?: ApiFetch,
 ): Promise<LoadedForm> {
-  const viewRes = await apiFetch(`/meta/view/${encodeURIComponent(name)}`);
+  const viewRes = await apiFetch(`/meta/view/${encodeURIComponent(name)}`, undefined, channel);
   if (!viewRes.ok) {
     throw new Error(`Form metadata not found: view/${name}`);
   }
@@ -1658,7 +1668,7 @@ async function loadInternalForm(
   }
   let objectSchema: ObjectSchemaPayload | null = null;
   try {
-    const objRes = await apiFetch(`/meta/object/${encodeURIComponent(objectName)}`);
+    const objRes = await apiFetch(`/meta/object/${encodeURIComponent(objectName)}`, undefined, channel);
     if (objRes.ok) {
       const objBody = await objRes.json();
       const objItem = objBody?.item ?? objBody;
@@ -1691,6 +1701,8 @@ async function loadInternalForm(
   if (recordId) {
     const recRes = await apiFetch(
       `/data/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}`,
+      undefined,
+      channel,
     );
     if (!recRes.ok) {
       const detail = await recRes.text().catch(() => '');
@@ -1725,7 +1737,8 @@ async function submitPublic(slug: string, data: Record<string, unknown>): Promis
 }
 
 /**
- * Internal mode submit. Auth cookie carries identity.
+ * Internal mode submit, over `channel` — the host's authenticated fetch when
+ * the route is mounted inside the console shell (objectstack#26452).
  *
  * `POST /data/:object` to create; `PATCH /data/:object/:id` to update the
  * record `?recordId=` named (objectui#4278). Before that param was read, this
@@ -1746,14 +1759,16 @@ async function submitInternal(
   objectName: string,
   data: Record<string, unknown>,
   recordId?: string | null,
+  channel?: ApiFetch,
 ): Promise<unknown> {
   const path = recordId
     ? `/data/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}`
     : `/data/${encodeURIComponent(objectName)}`;
-  const res = await apiFetch(path, {
-    method: recordId ? 'PATCH' : 'POST',
-    body: JSON.stringify(data),
-  });
+  const res = await apiFetch(
+    path,
+    { method: recordId ? 'PATCH' : 'POST', body: JSON.stringify(data) },
+    channel,
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(
@@ -2146,6 +2161,30 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   // `language` is the visitor's, read by `buildSections` to collapse a field
   // entry's inline locale map (objectui#13380).
   const { t, language } = useObjectTranslation();
+  /**
+   * The fetch the INTERNAL route talks to the API over: the host's
+   * authenticated fetch, published by the console shell as
+   * `SchemaRendererContext.apiFetch` (objectstack#26452).
+   *
+   * It is the channel the in-app record form (`?form=ID`) reads the object
+   * schema over, and the channel decides the language of every option label
+   * on this page. The server localizes `/meta/object` — option labels
+   * included — by the request's `Accept-Language`, and this fetch stamps that
+   * header with the session's UI language (`createAuthenticatedFetch`). The
+   * bare `fetch` this route used sent the BROWSER's language instead, so a
+   * zh-CN user on an en-US browser read Chinese field labels (resolved
+   * client-side by `fieldLabel`) over English options. Taking the same channel
+   * IS the fix: ⛔ no option-label translator lives in this file, and the
+   * overlay's field builder (`fromObjectSchema` in `@object-ui/plugin-form`)
+   * runs none either.
+   *
+   * The public route keeps the bare `fetch`: it is the anonymous resolver's
+   * channel, and moving it onto a session-carrying one is not this change.
+   * With no provider above the route (a bare test harness), the internal
+   * route falls back to the bare `fetch` too.
+   */
+  const hostApiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const channel = mode === 'internal' ? hostApiFetch : undefined;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2213,7 +2252,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
         ? Promise.reject(new Error(target.reason))
         : mode === 'public'
           ? loadPublicForm(identifier)
-          : loadInternalForm(identifier, editingId, editingObject);
+          : loadInternalForm(identifier, editingId, editingObject, channel);
     loader
       .then((result) => {
         if (cancelled) return;
@@ -2238,7 +2277,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     return () => { cancelled = true; };
     // `target`/`editingId` are derived from `search`, already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, identifier, search]);
+  }, [mode, identifier, search, channel]);
 
   const sections = useMemo<RenderableSection[]>(
     () => (loaded ? buildSections(loaded.form, loaded.objectSchema, language) : []),
@@ -2347,7 +2386,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       const result =
         mode === 'public'
           ? await submitPublic(identifier, payload)
-          : await submitInternal(loaded.object, payload, editingId);
+          : await submitInternal(loaded.object, payload, editingId, channel);
       toast.success(t('form.submitted'), { id: outcomeToastId });
       // Behaviour after submit
       switch (behavior.kind) {

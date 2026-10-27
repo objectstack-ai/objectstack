@@ -37,6 +37,14 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. The schedule and dispatch
+# runs share a group keyed on their own event and wait for each other instead.
+concurrency:
+  group: scaffold-e2e-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   scaffold-local:
     name: Scaffold with repo dist
@@ -47,28 +55,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       - name: Build the scaffolder
         run: pnpm --filter create-objectstack build
@@ -553,6 +541,10 @@ jobs:
         # them would gate the release on unmaintained content.
         template: [blank]
     steps:
+      # The one literal Node pin left in the workflows: this job checks nothing
+      # out (it scaffolds from the published package into RUNNER_TEMP), so
+      # there is no .nvmrc to read. `pnpm check:node-version` holds it equal to
+      # .nvmrc.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

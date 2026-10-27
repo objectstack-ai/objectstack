@@ -52,7 +52,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { SonnerSchema as SonnerMirror, ToastSchema as ToastMirror } from '@object-ui/types/zod';
 // Module scope, not a hook: the cold transform is billed to the import phase,
 // which has no test/hook timeout (AGENTS.md §测试纪律, objectui#3010).

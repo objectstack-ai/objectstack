@@ -43,7 +43,6 @@
         "$TURBO_ROOT$/ui/scripts/vite-*.ts",
         "$TURBO_ROOT$/ui/vitest.config.mts",
         "$TURBO_ROOT$/ui/tsconfig.json",
-        "$TURBO_ROOT$/ui/tsconfig.tier-base.json",
         "$TURBO_ROOT$/ui/apps/console/src/lib/auth-preflight.ts",
         "$TURBO_ROOT$/ui/eslint-rules/no-unprefixed-query-params.js",
         "$TURBO_ROOT$/ui/packages/cli/src/commands/generate.ts",
@@ -255,6 +254,7 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
         "$TURBO_ROOT$/scripts/nightly-tiers.d.mts",
+        "$TURBO_ROOT$/tsconfig.base.json",
         "$TURBO_ROOT$/packages/verify/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
         "$TURBO_ROOT$/packages/services/service-cluster/src/**",
@@ -459,7 +459,9 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
+        "$TURBO_ROOT$/scripts/nightly-tiers.d.mts"
       ]
     },
     "@objectstack/plugin-auth#test": {

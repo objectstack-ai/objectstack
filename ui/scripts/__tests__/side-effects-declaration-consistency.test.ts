@@ -4,6 +4,7 @@ import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
 // The shared registration reader (objectui#4894). Types are INFERRED from the
 // .mjs source by `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error`.
 import { readComponentRegistrations } from '../component-registrations.mjs';
+import { UI_SIDE_EFFECTS_ARRAY_FLOOR, UI_SIDE_EFFECTS_FALSE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -1071,14 +1072,15 @@ const falseBarrelProbes: ProbeCase[] = falsePackages.flatMap((pkg) => {
 describe('`sideEffects` declarations match load-time behaviour (objectui#3943)', () => {
   it('discovers the declaring packages (guard cannot pass by finding nothing)', () => {
     // The hazard here is a SILENT one, so a guard that inspected an empty list
-    // would reproduce it exactly: green output, nothing checked. These floors
-    // sit at the census re-measured for objectui#13464, when every published
-    // package came to declare the field: 12 `false` and 17 arrays, the rest
-    // `true` — so a lost workspace root, a broken glob parser or a renamed
-    // field is a failure and not a quiet pass.
-    expect(declaringPackages.length).toBeGreaterThanOrEqual(29);
-    expect(falsePackages.length).toBeGreaterThanOrEqual(12);
-    expect(arrayPackages.length).toBeGreaterThanOrEqual(17);
+    // would reproduce it exactly: green output, nothing checked. So a lost
+    // workspace root, a broken glob parser or a renamed field must be a failure
+    // and not a quiet pass. The floors are the shared ones, about two thirds of
+    // the census measured on objectstack 6a7c0fe3 (11 `false`, 17 arrays, 28
+    // declaring), so retiring a package moves none of them; the declaring floor
+    // is their sum, since the declarers are exactly those two groups.
+    expect(declaringPackages.length).toBeGreaterThanOrEqual(UI_SIDE_EFFECTS_FALSE_FLOOR + UI_SIDE_EFFECTS_ARRAY_FLOOR);
+    expect(falsePackages.length).toBeGreaterThanOrEqual(UI_SIDE_EFFECTS_FALSE_FLOOR);
+    expect(arrayPackages.length).toBeGreaterThanOrEqual(UI_SIDE_EFFECTS_ARRAY_FLOOR);
 
     // The census by name. `true` packages (`components`, `fields`, four
     // plugins and the executables) are excluded on purpose: `true` is the conservative claim and can never lose a
@@ -1111,7 +1113,6 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
       '@object-ui/providers',
       '@object-ui/react',
       '@object-ui/react-runtime',
-      '@object-ui/sdui-parser',
       '@object-ui/types',
     ]);
 
@@ -1171,10 +1172,7 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
     // the entry form that made the console's bundle 0 bytes while every
     // published path was declared.
     const layoutAliases = aliasEntries.filter((a) => a.specifier === '@object-ui/layout');
-    expect(layoutAliases.map((a) => a.config).sort()).toEqual([
-      'apps/console/vite.config.ts',
-      'examples/console-starter/vite.config.ts',
-    ]);
+    expect(layoutAliases.map((a) => a.config).sort()).toEqual(['apps/console/vite.config.ts']);
     for (const alias of layoutAliases) {
       expect(alias.target).toBe(path.join(repoRoot, 'packages/layout/src'));
     }

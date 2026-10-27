@@ -696,6 +696,25 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         expect((zh as { error: string }).error).not.toContain('crm_account');
     });
 
+    // objectstack#26059 Q3: a delegated admin's out-of-scope write is the one
+    // denial whose reason is shown; it describes only the caller's own scope.
+    it('a delegated-admin scope refusal shows the server reason, not the fixed permission line', () => {
+        const SCOPE_REASON =
+            "Outside your delegated scope: delegated 'create' on sys_user_position rejected — business unit 'bu_west' is outside the delegated subtree (scope from 'regional_admin').";
+        const SCOPE = { code: 'DELEGATION_SCOPE_VIOLATION', message: `[Security] ${SCOPE_REASON}` } as const;
+
+        expect(failed400(flowFailed({ innerRefusal: SCOPE }))).toEqual({
+            kind: 'failed', error: SCOPE_REASON, retryable: false,
+        });
+        const on200 = interpretFlowResponse(ok, {
+            success: true,
+            data: { success: false, status: 'failed', error: RAW_ERROR, innerRefusal: SCOPE },
+        }, 'Flow "assign"');
+        expect(on200).toMatchObject({ kind: 'failed', error: SCOPE_REASON });
+        // Control: a plain denial on the same path still reads the fixed line.
+        expect(failed400(flowFailed({ innerRefusal: DENIED }))).toMatchObject({ error: builtInLocales.en.form.noPermissionToSave });
+    });
+
     it('a producer-marked userMessage wins over the inner refusal, verbatim', () => {
         expect(failed400(flowFailed({ innerRefusal: UNIQUE }, USER_TEXT))).toMatchObject({ error: USER_TEXT });
         expect(failed400(flowFailed({ innerRefusal: DENIED }, USER_TEXT))).toMatchObject({ error: USER_TEXT });

@@ -27,8 +27,11 @@
  * ## The record a notification names
  *
  * `object` and `record` ({@link subjectParams}): the object's label and the
- * record id, the #23556 / #23594 ruling B form, never a title. The label rides
- * as a keyed param — `objects.<object>.label`, the key the reader-language
+ * record's name. [#26181 ruling A′] The name is the record's display title as
+ * the one recipient the text is built for may read it, else the record id
+ * (`ApprovalService.notify` resolves it per recipient); the #23556 / #23594
+ * ruling B form, label and id for every reader, stands only on the
+ * reader-less action-link pages. The label rides as a keyed param — `objects.<object>.label`, the key the reader-language
  * labels (`reader-locale-labels.ts`) and objectql's refusals name an object
  * by — so a recipient whose language pack holds it reads it in their language;
  * the schema label (the API name when there is none) stands otherwise.
@@ -75,18 +78,19 @@ export function approvalMessageKey(id: ApprovalMessageId): string {
 }
 
 /**
- * The record `objectName`/`recordId` names: the object's label — keyed by
- * `objects.<object>.label`, falling back to `objectLabel` (the schema label),
- * else the API name — and the record id.
+ * The record of `objectName` a notification names: the object's label — keyed
+ * by `objects.<object>.label`, falling back to `objectLabel` (the schema
+ * label), else the API name — and `record`, the name its recipient reads for
+ * it (its title as they may read it, else its id).
  */
 export function subjectParams(
   objectName: string,
   objectLabel: string | undefined,
-  recordId: string,
+  record: string,
 ): ApprovalSubjectParams {
   return {
     object: { key: objectLabelKey(objectName), fallback: objectLabel ?? objectName },
-    record: recordId,
+    record,
   };
 }
 

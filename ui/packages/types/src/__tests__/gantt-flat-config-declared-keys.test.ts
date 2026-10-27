@@ -95,30 +95,42 @@
  * (`capacity: 'one'` is refused where it used to parse green), that the published
  * types now TEACH the vocabulary, and that the type-level pins below fail when a
  * declaration is removed.
+ *
+ * ## ⏱ objectstack#25923 — the 24 flattened members LEFT this interface
+ *
+ * `ComponentPropsMap['object-gantt']` refuses every `GanttConfig` key written
+ * flat on the node, so a published flat member was an authorable spelling the
+ * spec refuses. The 24 moved to `plugin-gantt`'s package-local hand-off type
+ * (`ObjectGanttFlatFields`, DERIVED from `GanttConfig` there, so the "one
+ * vocabulary" invariant below holds by construction on that side and is pinned
+ * in `plugin-gantt`'s `ganttHandoffFlatFields-25923.test.ts`). What this file
+ * pins now: the 24 are members of NEITHER published face, the three query keys
+ * still are (and are still value-validated), and the `gantt` block is unchanged.
+ * The paragraphs above are this card's reading at the time, kept as written.
  */
 
 import { describe, it, expect } from 'vitest';
 import { ObjectGanttSchema } from '../zod/objectql.zod.js';
+import { StrictAnyComponentSchema } from '../zod/index.zod';
 import type { GanttConfig, ObjectGanttSchema as ObjectGanttSchemaTS, SortConfig } from '../objectql.js';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
 
 const MINIMAL = {
   type: 'object-gantt',
   objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
 } as const;
 
+/** The block every row below may add, carrying the spec's required trio. */
+const BLOCK = { startDateField: 'start', endDateField: 'end', titleField: 'name' } as const;
+
 /**
- * The 27 keys this card declared, each with a value its declared type refuses.
- *
- * 24 flattened `GanttConfig` members and the three query keys (`staticData` /
- * `filter` / `sort`). The 28th measured key, `gantt` (objectui#6475), is pinned
- * separately below — it is declared too, but as a PARSED block rather than a
- * bare optional scalar, so its refusal shape does not fit this table.
+ * The 24 flattened `GanttConfig` members objectui#6051 declared here, each with
+ * a value their type refuses. objectstack#25923 moved them OFF this interface
+ * and its mirror: the rows below pin their ABSENCE, and the bad values pin that
+ * the tolerant mirror no longer examines them (it admits what it does not
+ * declare, objectui#5155).
  */
-const DECLARED: ReadonlyArray<readonly [string, unknown]> = [
-  // — the flattened GanttConfig face —
+const MOVED_OFF: ReadonlyArray<readonly [string, unknown]> = [
   ['colorField', 5],
   ['borderColorField', 5],
   ['dependenciesField', 5],
@@ -143,7 +155,10 @@ const DECLARED: ReadonlyArray<readonly [string, unknown]> = [
   ['exportFileName', 5],
   ['timeZone', 5],
   ['dependencyTypes', 'yes'],
-  // — the query keys the fetch path reads —
+];
+
+/** The three query keys the fetch path reads: still DECLARED, each with a refused value. */
+const DECLARED: ReadonlyArray<readonly [string, unknown]> = [
   ['staticData', { id: 1 }],
   ['filter', 'name = 1'],
   ['sort', 5],
@@ -151,34 +166,6 @@ const DECLARED: ReadonlyArray<readonly [string, unknown]> = [
 
 /** One well-typed value per declared key — the counter-probe for the block above. */
 const GOOD = {
-  colorField: 'status',
-  borderColorField: 'alert',
-  dependenciesField: 'predecessors',
-  parentField: 'parent',
-  typeField: 'kind',
-  lockField: 'locked',
-  objectField: 'object_name',
-  summaryExtent: 'self' as const,
-  defaultCollapsedDepth: 2,
-  tooltipFields: ['owner', { field: 'stage', label: 'Stage' }],
-  baselineStartField: 'plan_start',
-  baselineEndField: 'plan_end',
-  groupByField: 'owner',
-  resourceView: true,
-  assigneeField: 'owner',
-  effortField: 'effort',
-  capacity: 2,
-  quickFilters: [{ field: 'owner', label: 'Owner' }],
-  autoZoomToFilter: false,
-  timeSegments: {
-    dayStart: '08:00',
-    bands: [{ key: 'day', label: 'Day shift', start: '08:00', end: '20:00' }],
-    showMidnight: true,
-  },
-  interactions: { move: true, resize: false, progress: true, link: false },
-  exportFileName: 'Shift Plan',
-  timeZone: 'Asia/Shanghai',
-  dependencyTypes: false,
   staticData: [{ id: 1, name: 'Task' }],
   // objectui#6152 round 10 — the `object-gantt` row's `ViewFilterRule` array; the AST
   // tuple array this used to carry is the row's refusal now, on both faces.
@@ -186,40 +173,42 @@ const GOOD = {
   sort: [{ field: 'name', order: 'desc' as const }],
 };
 
-describe('ObjectGanttSchema — the flattened gantt config is declared (objectui#6051)', () => {
-  it('the mirror declares every one of the 27', () => {
+describe('ObjectGanttSchema — the flattened gantt config is NOT declared (objectstack#25923)', () => {
+  it('the mirror declares none of the 24, and still declares the three query keys', () => {
     const shape = Object.keys(ObjectGanttSchema.shape);
+    for (const [key] of MOVED_OFF) expect(shape, `mirror declares the flat ${key} again`).not.toContain(key);
     for (const [key] of DECLARED) expect(shape, `mirror is missing ${key}`).toContain(key);
+    // CONTROL on the same shape: the block that carries the 24 is declared.
+    expect(shape).toContain('gantt');
   });
 
-  it('the census is the measured 28, not a shorter list that drifted', () => {
-    // Non-vacuity for the loops below: they iterate DECLARED, so a truncated
-    // DECLARED would pass everything while checking less. The number is the
-    // measured residue stated in this file's header.
-    expect(DECLARED).toHaveLength(27);
-    expect(new Set(DECLARED.map(([k]) => k)).size).toBe(27);
+  it('the census is the measured 24 + 3, not a shorter list that drifted', () => {
+    // Non-vacuity for the loops below: they iterate the two lists, so a
+    // truncated list would pass everything while checking less.
+    expect(MOVED_OFF).toHaveLength(24);
+    expect(new Set(MOVED_OFF.map(([k]) => k)).size).toBe(24);
     expect(Object.keys(GOOD).sort()).toEqual(DECLARED.map(([k]) => k).sort());
   });
 
-  it('declares them all OPTIONAL — none of the 27 may become required', () => {
-    // Requiredness is the half the zod-mirror-parity ratchet compares against
-    // `../objectql.ts`, where all 27 are `?:`. A mirror that required one would
-    // reject every gantt already published.
-    const result = ObjectGanttSchema.safeParse(MINIMAL);
-    expect(result.success ? null : result.error.issues).toBe(null);
+  it('the tolerant mirror no longer examines a flat key: a wrong-typed one rides `.passthrough()`', () => {
+    // The flip side of the move, stated so nobody reads the tolerant face as
+    // judging them still. The authoring judgement is the STRICT face's, and for
+    // `object-gantt` that face already refused a flat key (its arm is the
+    // `properties` bag, `ObjectGanttBlockSchema`).
+    for (const [key, bad] of MOVED_OFF) {
+      const result = ObjectGanttSchema.safeParse({ ...MINIMAL, [key]: bad });
+      expect(result.success ? null : result.error.issues, `${key}`).toBe(null);
+    }
   });
 
-  it('materialises NO defaults — an omitted key stays absent after parse', () => {
-    // `autoZoomToFilter` and `dependencyTypes` default ON *in the renderer*, which
-    // reads `!== false`. A `.default(true)` here would arrive downstream as an
-    // explicit author choice; the two spellings are not interchangeable.
+  it('declares the three query keys OPTIONAL, with no materialised default', () => {
     const result = ObjectGanttSchema.safeParse(MINIMAL);
-    expect(result.success).toBe(true);
+    expect(result.success ? null : result.error.issues).toBe(null);
     if (!result.success) return;
     for (const [key] of DECLARED) expect(key in result.data, `${key} must stay absent`).toBe(false);
   });
 
-  it('refuses a wrong-typed value on each declared key', () => {
+  it('refuses a wrong-typed value on each declared query key', () => {
     for (const [key, bad] of DECLARED) {
       const result = ObjectGanttSchema.safeParse({ ...MINIMAL, [key]: bad });
       expect(result.success, `${key} accepted ${JSON.stringify(bad)}`).toBe(false);
@@ -229,22 +218,21 @@ describe('ObjectGanttSchema — the flattened gantt config is declared (objectui
     }
   });
 
-  it('accepts a well-typed value on every declared key', () => {
+  it('accepts a well-typed value on every declared query key', () => {
     // Counter-probe for the assertion above: it must be the VALUE being refused,
     // not the key. A pin that only ever sees red proves nothing.
     const result = ObjectGanttSchema.safeParse({ ...MINIMAL, ...GOOD });
     expect(result.success ? null : result.error.issues).toBe(null);
   });
 
-  it('the `gantt` BLOCK face is declared, and the spec trio now enforces at parse time (objectui#6475)', () => {
-    // The 28th measured key. objectui#6475, Option A: declared as `GanttConfig`,
-    // so a block is now PARSED against the spec's `GanttConfigSchema` — the
-    // published CLI's `validate`/`check` refusal this card exists to pin.
+  it('the `gantt` BLOCK face is declared, and the spec trio enforces at parse time (objectui#6475)', () => {
+    // The 28th measured key, and since objectstack#25923 the ONE spelling of the
+    // other 24 on this node. objectui#6475, Option A: declared as `GanttConfig`,
+    // so a block is PARSED against the spec's `GanttConfigSchema`.
     expect(Object.keys(ObjectGanttSchema.shape)).toContain('gantt');
 
     // A block missing one of the required trio (startDateField / endDateField /
-    // titleField) is REFUSED — this is the accept-set narrowing itself, and it
-    // names the missing field rather than failing silently.
+    // titleField) is REFUSED, naming the missing field.
     const missingTitleField = ObjectGanttSchema.safeParse({
       ...MINIMAL,
       gantt: { startDateField: 'start', endDateField: 'end', lockField: 'locked' },
@@ -261,36 +249,53 @@ describe('ObjectGanttSchema — the flattened gantt config is declared (objectui
     // A wrong-TYPED block (not even an object) is refused.
     expect(ObjectGanttSchema.safeParse({ ...MINIMAL, gantt: 'flat' }).success).toBe(false);
 
-    // A block carrying the complete trio IS accepted — the narrowing is exactly
-    // the trio, nothing more.
+    // A block carrying the complete trio IS accepted, and so is every one of the
+    // 24 inside it, well-typed — the narrowing is exactly the trio.
     const complete = ObjectGanttSchema.safeParse({
       ...MINIMAL,
-      gantt: { startDateField: 'start', endDateField: 'end', titleField: 'name', lockField: 'locked' },
+      gantt: { ...BLOCK, lockField: 'locked', summaryExtent: 'self', capacity: 2, interactions: { move: true } },
     });
     expect(complete.success ? null : complete.error.issues).toBe(null);
+    // …and a wrong-typed one of the 24 inside the block is refused AT its path,
+    // which is where the value validation the flat members used to carry lives now.
+    const bad = ObjectGanttSchema.safeParse({ ...MINIMAL, gantt: { ...BLOCK, capacity: 'one' } });
+    expect(bad.success).toBe(false);
+    if (!bad.success) {
+      expect(bad.error.issues.map((i) => i.path.join('.'))).toContain('gantt.capacity');
+    }
+  });
+
+  it('the STRICT authoring face refuses each of the 24 written flat, and takes them in the block', () => {
+    // Not new with objectstack#25923: the strict face's `object-gantt` arm is the
+    // `properties` bag (`ObjectGanttBlockSchema`, objectui#10859), which refused
+    // every flat key before this card. Pinned here so the published TS/zod
+    // narrowing and the strict face cannot drift apart again.
+    for (const [key] of MOVED_OFF) {
+      const r = StrictAnyComponentSchema.safeParse({ type: 'object-gantt', [key]: 'x' });
+      expect(r.success, `the strict face accepts a flat ${key}`).toBe(false);
+    }
+    const ok = StrictAnyComponentSchema.safeParse({
+      type: 'object-gantt',
+      properties: { objectName: 'task', gantt: { ...BLOCK, lockField: 'locked', summaryExtent: 'self' } },
+    });
+    expect(ok.success ? null : ok.error.issues).toBe(null);
   });
 
   it('does NOT reject an undeclared key — objectui#5155 ceiling, measured not assumed', () => {
-    // Declaring the 28 bought validation of DECLARED keys, not rejection of
-    // undeclared ones: `BaseSchema` is `.passthrough()`. Anyone reading this card
-    // as "misspellings now fail" is reading it wrong, and this pin says so in the
-    // one place that cannot rot.
     const misspelled = ObjectGanttSchema.safeParse({ ...MINIMAL, colourField: 'status', lockFeild: 'locked' });
     expect(misspelled.success).toBe(true);
   });
 });
 
-/* ── The derived invariant: the two authoring faces are one vocabulary ─────── */
+/* ── The derived invariant, inverted: the flat face carries NO block key ───── */
 
 /**
  * A declaration's OWN declared members, with any index signature stripped.
  *
  * Same construction as `zod-mirror-parity.test.ts` and for the same measured
- * reason: `keyof ObjectGanttSchema` resolved to bare `string` while
- * `BaseSchema`'s `[key: string]: any` absorbed every literal name (until
- * objectui#8347), and `GanttConfig` still carries a signature of its own. A homomorphic
- * mapped type maps declared members and index signatures separately, so remapping
- * the index-signature keys to `never` leaves the literal members.
+ * reason: `GanttConfig` carries a signature of its own (the spec's
+ * `GanttConfigSchema` is `$loose`), and bare `keyof GanttConfig` resolves to
+ * `string`.
  */
 type WithoutIndexSignature<D> = {
   [K in keyof D as string extends K ? never : number extends K ? never : K]: D[K];
@@ -298,109 +303,37 @@ type WithoutIndexSignature<D> = {
 type DeclaredKeys<D> = Extract<keyof WithoutIndexSignature<D>, string>;
 
 /**
- * Keys of the BLOCK face that the FLAT face does not declare. `never` is the contract.
- *
- * `DeclaredKeys` is applied to BOTH sides, and that is load-bearing rather than
- * symmetry for its own sake: the spec's `GanttConfigSchema` is `$loose`, so
- * `GanttConfig` carries `[x: string]: unknown` of its own and bare
- * `keyof GanttConfig` resolves to `string` — measured, when this pin was first
- * written that way, and it made the `Exclude` unconditionally `string`. Two index
- * signatures, two chances for the same vacuity; the non-vacuity test below pins
- * both.
+ * Keys of the BLOCK face that the published interface ALSO declares flat.
+ * `never` is the contract since objectstack#25923 — the reverse of the
+ * objectui#6051 invariant this row replaces (which required every one).
  */
-type FlatFaceGaps = Exclude<DeclaredKeys<GanttConfig>, DeclaredKeys<ObjectGanttSchemaTS>>;
+type FlatFaceOverlap = Extract<DeclaredKeys<GanttConfig>, DeclaredKeys<ObjectGanttSchemaTS>>;
 
-describe('ObjectGanttSchema (TS) — the flat face declares the whole block vocabulary', () => {
-  it('every GanttConfig key is declared at the top level too', () => {
-    // Derived, with no key list to maintain: add a member to `GanttConfig` (or to
-    // the spec's `GanttConfigSchema`, which it derives from) without declaring the
-    // flattened spelling and this line stops compiling, NAMING the missing key.
-    const noGaps: FlatFaceGaps extends never ? true : FlatFaceGaps = true;
-    expect(noGaps).toBe(true);
+describe('ObjectGanttSchema (TS) — the published interface declares no block key flat', () => {
+  it('no GanttConfig key is declared at the top level', () => {
+    // Derived, with no key list to maintain: re-declare any `GanttConfig` key on
+    // the interface and this line stops compiling, NAMING the key.
+    const noOverlap: FlatFaceOverlap extends never ? true : FlatFaceOverlap = true;
+    expect(noOverlap).toBe(true);
   });
 
   it('the invariant above is not vacuous', () => {
-    // Two ways `FlatFaceGaps` could be `never` while proving nothing.
-    //
-    // 1. `DeclaredKeys<ObjectGanttSchemaTS>` degenerating to `string` — the exact
-    //    index-signature trap this card is about — would `Exclude` everything.
+    // 1. `DeclaredKeys` degenerating to `string` on either side would make the
+    //    `Extract` meaningless.
     const notWidened: string extends DeclaredKeys<ObjectGanttSchemaTS> ? never : true = true;
-    // 2. the SAME degeneration on the other side would make the `Exclude` source
-    //    `string`, which is what happened before `DeclaredKeys` was applied here.
     const blockNotWidened: string extends DeclaredKeys<GanttConfig> ? never : true = true;
-    // 3. `DeclaredKeys<GanttConfig>` resolving to `never` would leave nothing to
-    //    exclude, and both the spec's members and objectui's must be in it.
+    // 2. Both sides must really carry members: the block its spec and local keys,
+    //    the interface its query keys and `gantt`.
     const blockHasSpecKeys: 'colorField' extends DeclaredKeys<GanttConfig> ? true : never = true;
     const blockHasLocalKeys: 'summaryExtent' extends DeclaredKeys<GanttConfig> ? true : never = true;
-    // 4. ...and the flat face must really carry the derived members, not `any`.
-    const flatHasKeys: 'summaryExtent' extends DeclaredKeys<ObjectGanttSchemaTS> ? true : never = true;
-    expect([notWidened, blockNotWidened, blockHasSpecKeys, blockHasLocalKeys, flatHasKeys])
+    const flatHasOwnKeys: 'gantt' | 'staticData' extends DeclaredKeys<ObjectGanttSchemaTS> ? true : never = true;
+    expect([notWidened, blockNotWidened, blockHasSpecKeys, blockHasLocalKeys, flatHasOwnKeys])
       .toEqual([true, true, true, true, true]);
   });
 });
 
-describe('ObjectGanttSchema (TS) — compile-time pin on every declared key', () => {
-  it('refuses a wrong-typed value on every declared key', () => {
-    // Each directive below failed the build (TS2578, "unused '@ts-expect-error'")
-    // the moment its key stopped being declared, while the member resolved to
-    // `any` through `BaseSchema`'s index signature. Since objectui#8347 a removal
-    // makes the indexed access itself an error, which its directive swallows, so
-    // these directives guard each member's TYPE only. The deletion guards are
-    // elsewhere in this file: the derived invariant above catches a deletion of
-    // any `GanttConfig` key (measured by ablation: deleting `colorField` from
-    // the interface reddens `noGaps`, naming the key), and the three query keys,
-    // which `GanttConfig` does not carry, have the `_StaticData…` / `_Filter…` /
-    // `_Sort…` rows after this block. `tsconfig.test.json` compiles this file, so
-    // it is real enforcement (#3009).
-
-    // @ts-expect-error — `colorField` is declared `string | undefined`.
-    const colorField: ObjectGanttSchemaTS['colorField'] = 5;
-    // @ts-expect-error — `borderColorField` is declared `string | undefined`.
-    const borderColorField: ObjectGanttSchemaTS['borderColorField'] = 5;
-    // @ts-expect-error — `dependenciesField` is declared `string | undefined`.
-    const dependenciesField: ObjectGanttSchemaTS['dependenciesField'] = 5;
-    // @ts-expect-error — `parentField` is declared `string | undefined`.
-    const parentField: ObjectGanttSchemaTS['parentField'] = 5;
-    // @ts-expect-error — `typeField` is declared `string | undefined`.
-    const typeField: ObjectGanttSchemaTS['typeField'] = 5;
-    // @ts-expect-error — `lockField` is declared `string | undefined`.
-    const lockField: ObjectGanttSchemaTS['lockField'] = 5;
-    // @ts-expect-error — `objectField` is declared `string | undefined`.
-    const objectField: ObjectGanttSchemaTS['objectField'] = 5;
-    // @ts-expect-error — `summaryExtent` is declared `'children' | 'self' | undefined`.
-    const summaryExtent: ObjectGanttSchemaTS['summaryExtent'] = 'parent';
-    // @ts-expect-error — `defaultCollapsedDepth` is declared `number | undefined`.
-    const defaultCollapsedDepth: ObjectGanttSchemaTS['defaultCollapsedDepth'] = '2';
-    // @ts-expect-error — `tooltipFields` is declared an ARRAY of field refs.
-    const tooltipFields: ObjectGanttSchemaTS['tooltipFields'] = 'name';
-    // @ts-expect-error — `baselineStartField` is declared `string | undefined`.
-    const baselineStartField: ObjectGanttSchemaTS['baselineStartField'] = 5;
-    // @ts-expect-error — `baselineEndField` is declared `string | undefined`.
-    const baselineEndField: ObjectGanttSchemaTS['baselineEndField'] = 5;
-    // @ts-expect-error — `groupByField` is declared `string | undefined`.
-    const groupByField: ObjectGanttSchemaTS['groupByField'] = 5;
-    // @ts-expect-error — `resourceView` is declared `boolean | undefined`.
-    const resourceView: ObjectGanttSchemaTS['resourceView'] = 'yes';
-    // @ts-expect-error — `assigneeField` is declared `string | undefined`.
-    const assigneeField: ObjectGanttSchemaTS['assigneeField'] = 5;
-    // @ts-expect-error — `effortField` is declared `string | undefined`.
-    const effortField: ObjectGanttSchemaTS['effortField'] = 5;
-    // @ts-expect-error — `capacity` is declared `number | undefined`.
-    const capacity: ObjectGanttSchemaTS['capacity'] = 'one';
-    // @ts-expect-error — `quickFilters[].field` is required.
-    const quickFilters: ObjectGanttSchemaTS['quickFilters'] = [{ label: 'Owner' }];
-    // @ts-expect-error — `autoZoomToFilter` is declared `boolean | undefined`.
-    const autoZoomToFilter: ObjectGanttSchemaTS['autoZoomToFilter'] = 'yes';
-    // @ts-expect-error — `timeSegments.bands[]` requires `start` and `end`.
-    const timeSegments: ObjectGanttSchemaTS['timeSegments'] = { bands: [{ label: 'Day' }] };
-    // @ts-expect-error — `interactions` is declared an object of switches.
-    const interactions: ObjectGanttSchemaTS['interactions'] = 'none';
-    // @ts-expect-error — `exportFileName` is declared `string | undefined`.
-    const exportFileName: ObjectGanttSchemaTS['exportFileName'] = 5;
-    // @ts-expect-error — `timeZone` is declared `string | undefined`.
-    const timeZone: ObjectGanttSchemaTS['timeZone'] = 5;
-    // @ts-expect-error — `dependencyTypes` is declared `boolean | undefined`.
-    const dependencyTypes: ObjectGanttSchemaTS['dependencyTypes'] = 'yes';
+describe('ObjectGanttSchema (TS) — compile-time pin on every declared query key', () => {
+  it('refuses a wrong-typed value on every declared query key', () => {
     // @ts-expect-error — `staticData` is declared `any[] | undefined`.
     const staticData: ObjectGanttSchemaTS['staticData'] = { id: 1 };
     // @ts-expect-error — `filter` is declared `ViewFilterRule[] | undefined` (the
@@ -410,22 +343,25 @@ describe('ObjectGanttSchema (TS) — compile-time pin on every declared key', ()
     // string clause was retired in objectui#8221).
     const sort: ObjectGanttSchemaTS['sort'] = 5;
 
-    expect([
-      colorField, borderColorField, dependenciesField, parentField, typeField,
-      lockField, objectField, summaryExtent, defaultCollapsedDepth, tooltipFields,
-      baselineStartField, baselineEndField, groupByField, resourceView, assigneeField,
-      effortField, capacity, quickFilters, autoZoomToFilter, timeSegments,
-      interactions, exportFileName, timeZone, dependencyTypes,
-      staticData, filter, sort,
-    ]).toHaveLength(27);
+    expect([staticData, filter, sort]).toHaveLength(3);
   });
 
-  it('accepts the well-typed value on every declared key', () => {
+  it('accepts the well-typed value on every declared key, and the 24 inside the block', () => {
     // Counter-probe for the directives above: without this, a declaration narrowed
     // to `never` would satisfy every one of them.
-    const ok: ObjectGanttSchemaTS = { ...MINIMAL, ...GOOD };
-    expect(ok.summaryExtent).toBe('self');
-    expect(ok.interactions?.resize).toBe(false);
+    const ok: ObjectGanttSchemaTS = {
+      ...MINIMAL,
+      ...GOOD,
+      gantt: { ...BLOCK, summaryExtent: 'self', interactions: { move: true, resize: false } },
+    };
+    expect(ok.gantt?.summaryExtent).toBe('self');
+    expect(ok.gantt?.interactions?.resize).toBe(false);
+  });
+
+  it('refuses a flat block key on a fresh literal', () => {
+    // @ts-expect-error — `summaryExtent` is no member of the published interface; write `gantt.summaryExtent`
+    const flat: ObjectGanttSchemaTS = { ...MINIMAL, summaryExtent: 'self' };
+    expect(flat.type).toBe('object-gantt');
   });
 });
 
@@ -436,13 +372,9 @@ type Equal<A, B> =
 type Expect<T extends true> = T;
 
 /**
- * `staticData` / `filter` / `sort` are not `GanttConfig` keys, so the derived
- * invariant above is blind to their deletion, and the counter-probe literal
- * spreads `GOOD`, which excess-property checking does not reach. These rows are
+ * `staticData` / `filter` / `sort` are not `GanttConfig` keys. These rows are
  * their deletion guard: an indexed access on a member that does not exist is
- * itself a compile error, and `Equal` pins each declared type. Measured by
- * ablation on this tree: deleting any one of the three from `ObjectGanttSchema`
- * turns its row red while its directive above stays green; restored, green.
+ * itself a compile error, and `Equal` pins each declared type.
  */
 // The `any[]` below restates the member's own declared type (`staticData?: any[]` in
 // `objectql.ts`); `Equal` is strict, so a narrower spelling would be red. `filter` is the

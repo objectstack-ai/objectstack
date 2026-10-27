@@ -77,9 +77,11 @@
  * that finds the last target, so a good publish pays only its own settle time
  * (18.0.0, replayed on this schedule, goes green at +17m15s -- battery 14).
  * Only a GENUINELY broken publish spends all 35 minutes before it is reported.
- * Whoever raises it re-checks the caller: the publish job declares no
- * `timeout-minutes`, so GitHub's 360-minute job default bounds this step
- * together with everything before it (17m23s on 18.0.0, build included).
+ * Whoever raises it re-checks the caller: the publish job's `timeout-minutes:
+ * 120` in release.yml bounds this step together with everything before it
+ * (17m23s on 18.0.0, build included), and that 120 was set from the sum of the
+ * job's step ceilings, this 35-minute budget among them. Raising the budget
+ * means re-checking that sum: a job timeout here kills a publish half done.
  *
  * ## ⛔ It still fails CLOSED, and that is the whole point
  *

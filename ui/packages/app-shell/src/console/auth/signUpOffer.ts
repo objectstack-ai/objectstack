@@ -13,7 +13,7 @@
  * ONE decision for every such page (objectui#11705): the console's own
  * `/login` and `/register` (`apps/console/src/pages/auth/`) and this package's
  * exported `DefaultLoginPage` / `DefaultRegisterPage` (`./LoginPage`,
- * `./RegisterPage`, which `examples/console-starter` mounts) all call
+ * `./RegisterPage`) all call
  * {@link decideSignUpOffer}. It was written for the console's pages and moved
  * here unchanged, so that a package page can call it too; there is no second
  * copy of the rule.

@@ -42,7 +42,7 @@ import { describe, it, expect } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 
 // The full registration graph — the pair `dev/manifest-dump.tsx` builds the
 // published artifacts from, and the pair every live-path suite here reads.

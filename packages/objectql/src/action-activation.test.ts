@@ -366,6 +366,23 @@ describe('ObjectQL engine — the projection the dispatch doors consult', () => 
         expect(await store.list()).toEqual([{ name: 'convert_lead', packageId: 'crm', active: true }]);
     });
 
+    // [#26474] The door hands the engine the caller it writes on behalf of; the
+    // engine and the projection hand it on to the durable store unchanged, so
+    // the row's `created_by` / `updated_by` and its audit row name that caller.
+    it('setActionActive hands the caller\'s write context through to the durable store', async () => {
+        const { engine: ledger, calls } = makeStoreEngine([]);
+        const engine = new ObjectQL();
+        engine.setActionActivationStore(new ObjectStoreActionActivationStore(ledger));
+        const context = { userId: 'usr_admin', positions: ['org_admin'], isSystem: true as const };
+
+        await engine.setActionActive({ name: 'convert_lead', packageId: 'crm', active: false }, { context });
+
+        expect(calls.map((c) => [c.op, c.options?.context])).toEqual([
+            ['find', context],
+            ['insert', context],
+        ]);
+    });
+
     it('⛔ executeAction does NOT consult the ledger — the key is not the identity (ADR-0110 D2)', async () => {
         // A target-bound script action registers under its `target`, so a check
         // inside `executeAction` would be asking a question the arguments

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceGlobs } from '../workspace-root.mjs';
+import { UI_WORKSPACE_MEMBER_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,7 @@ import { fileURLToPath } from 'node:url';
  * other. It then landed NOTHING that records the derivation — measured on
  * `1e0e46af9`, `git grep -ln 8991 -- scripts packages apps examples` returns two
  * incidental files, a vector fixture and a screenshot. So the next person to
- * derive this population re-discovers these three and re-asks the same question,
+ * derive this population re-discovers these members and re-asks the same question,
  * which is exactly what produced objectui#9106.
  *
  * A prose exclusion is the thing this repo has already proved does not hold, in
@@ -44,7 +45,7 @@ import { fileURLToPath } from 'node:url';
  * `passWithNoTests` to a constant, it sets it to the negation of whether the CLI
  * named test filters, so a positional filter collecting nothing is precisely the
  * case it rejects loudly. That premise is pinned below, because the whole reason
- * these three get no `test` script depends on it.
+ * these members get no `test` script depends on it.
  *
  * ⇒ giving them a `test` script would need `--passWithNoTests`, which would make
  * the package entry exit 0 while the root-config comparison exits 1 —
@@ -91,11 +92,6 @@ const ZERO_TEST_MEMBERS = [
     // this directory at all, so any positional entry would be green by
     // construction and could never notice a test file appearing.
     why: 'the docs site; no test files, and no vitest project covers apps/site',
-  },
-  {
-    dir: 'examples/byo-backend-console',
-    pkgName: '@object-ui/example-byo-backend-console',
-    why: 'a runnable example app; no test files',
   },
   {
     dir: 'examples/hello-world',
@@ -205,21 +201,22 @@ describe('objectui#9106 — the derivation itself can fail', () => {
   });
 
   it('finds the whole workspace, not a slice of it', () => {
-    // Measured on 1e0e46af9: 46 manifests under the three globbed groups.
-    // A floor, not an equality — new packages are routine — but a floor low
-    // enough to be honest and high enough that a half-broken enumeration fails.
-    expect(members.length).toBeGreaterThanOrEqual(40);
+    // A floor, not an equality — packages come and go routinely — but high
+    // enough that a collapsed enumeration fails: the shared workspace-member
+    // floor, about two thirds of the 43 manifests under the three globbed
+    // groups measured on objectstack 6a7c0fe3.
+    expect(members.length).toBeGreaterThanOrEqual(UI_WORKSPACE_MEMBER_FLOOR);
     expect(members.map((m) => m.dir)).toContain('packages/layout');
     expect(members.map((m) => m.dir)).toContain('apps/console');
   });
 
   it('can see test files where test files are', () => {
     // The negative control for `collectTestFiles`: a collector that returned []
-    // for everything would put all 46 members in the excluded bucket and this
+    // for everything would put every member in the excluded bucket and this
     // file would then be asserting nothing at all.
     const layout = members.find((m) => m.dir === 'packages/layout');
     expect(layout?.testFileCount).toBeGreaterThan(0);
-    expect(withScriptAndFiles.length).toBeGreaterThanOrEqual(40);
+    expect(withScriptAndFiles.length).toBeGreaterThanOrEqual(UI_WORKSPACE_MEMBER_FLOOR);
   });
 });
 
@@ -298,7 +295,7 @@ describe('objectui#9106 — the two buckets either side of the exclusion', () =>
 describe('objectui#9106 — the premises the exclusion rests on', () => {
   it('the root config still derives passWithNoTests from the CLI, so a named path that collects nothing is loud', () => {
     // If this ever becomes a constant `true`, the measured exit 1 above stops
-    // being true and the reason these three have no `test` script needs
+    // being true and the reason these members have no `test` script needs
     // re-reading rather than re-spelling.
     expect(rootConfigText).toMatch(/passWithNoTests:\s*!cliHasTestFilters\(process\.argv\)/);
   });

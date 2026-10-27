@@ -116,6 +116,98 @@ bridge (warns). The compiler resolves these
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
 
+## Membership keys — a `current_user.KEY` set the roster object declares
+
+Rows keyed on a **named record** (an account, a supplier) rather than on a
+person or a position: declare the set on the **roster** object whose rows
+define it — not a stamp on every data row, not one policy per record.
+
+<!-- os:check -->
+```typescript
+import { ObjectSchema } from '@objectstack/spec/data';
+
+// Roster: one row per (portal user, account)
+export default ObjectSchema.create({
+  name: 'account_member',
+  sharingModel: 'private',
+  fields: {
+    user:    { type: 'user', required: true },
+    account: { type: 'lookup', reference: 'account', required: true },
+    active:  { type: 'boolean', defaultValue: true },
+  },
+  membershipKeys: {
+    portal_account_ids: { userField: 'user', valueField: 'account', filter: 'active == true' },
+  },
+});
+```
+
+```typescript
+// in the portal permission set — a policy reads the set with `in`
+rowLevelSecurity: [
+  { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
+]
+```
+
+- `userField`: the roster's user column (`user`, or a lookup to `sys_user`);
+  `valueField`: the reference column whose values form the set (never the
+  same column); `filter`: optional canonical CEL over the roster's own
+  columns, no `current_user.*`.
+- One name per stack: a key on two objects, a kernel name (`id`,
+  `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
+  `email`) and a key on an object extension are refused.
+- Read once per request as a system read in the caller's organization (no
+  read on the roster needed), at most 1,000 values; more, a failed read or a
+  `filter` that does not compile matches **no rows**. Whoever writes roster
+  rows grants the key.
+- **Choose by what the rows are keyed on:** the person → owner scoping; a
+  position → `positions` on the policy; a named record → a membership key;
+  one record, once → a sharing rule or a manual share.
+
+## Positions grant only what they name; portal users are `external`
+
+- A position distributes **only** the sets its `permissionSets` names
+  (ADR-0131 D3/D4): `{ name: 'sales_rep', label: 'Sales Rep', permissionSets:
+  ['sales_user'] }`. A set that merely shares the position's name is reported,
+  never granted; a name matching no set confers nothing.
+- A portal or partner user is an organization member on the `external`
+  membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
+  `external`, one per member —
+  https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
+  The `everyone` baseline (`isDefault` sets) does not reach it, it sees no
+  member directory and holds no business unit, and every org-wide default is
+  owner-only for it: rows reach it **only** through explicit grants — a
+  position or permission set whose row policies bound them (the key above),
+  a sharing rule or a manual share.
+
+## Field permissions — a row-conditioned edit lock (`when`)
+
+A set's `fields` entry (`'OBJECT.FIELD': { readable, editable }`) may carry
+`when`, a row condition in the same canonical CEL as `rowLevelSecurity[].using`.
+**Choose by who loses the edit — one mechanism per need, never both:**
+
+- Locked for **everyone** at that stage → a [validation rule](./validation.md)
+  on the object (`readonlyWhen` likewise strips the write for everyone).
+- Locked for **some permission sets** only → `when` on the field entries of
+  each set that loses the edit; the other sets keep their grant.
+
+```typescript
+// finance may not change the contract's legal terms after approval
+fields: {
+  'clm_contract.governing_law': { readable: true, editable: false, when: "status in ['approved', 'signing', 'active']" },
+}
+```
+
+- **Edit vote only.** Reads are row-blind; `readable: false` beside `when` is
+  refused at parse time.
+- **Same object.** Fields of the entry's object vs a literal or `current_user.*`;
+  no relation reach (refused at `os validate` / publish).
+- **Pre-image.** An update is judged on the stored row, so a write cannot unlock
+  itself by moving `status` back; an insert on the row as sent.
+- **Locks, never grants.** On unmatched rows the entry is absent; another held
+  set's `editable: true` still wins (most-permissive merge).
+- Docs: https://objectstack.ai/docs/permissions/field-level-security#row-conditioned-edit-locks-when
+  and the recipe https://objectstack.ai/docs/permissions/access-recipes#data-lock-fields-for-a-position-once-a-record-reaches-a-stage
+
 ## Sensitive fields — `secret` type + `requiredPermissions`
 
 `maskingRule` is **live** (FieldMasker). Two more channels:

@@ -8,7 +8,7 @@
 
 import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
-import { useForm } from 'react-hook-form';
+import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -42,8 +42,9 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -1299,7 +1300,7 @@ function FullscreenTextarea({
    * nothing from that Slot, which is the whole of objectui#4824.
    */
   error?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   // The inline control's own gate. `readOnly`/`disabled` are real attributes on
   // the `<Textarea>` below, but the attribute alone is not the write path —
@@ -1496,7 +1497,7 @@ function BuiltinTextarea({
    * the call site is where the two authored spellings are reconciled.
    */
   maxLength?: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   /** One id per control; see `FullscreenTextarea` for why the dialog needs a second. */
   const descriptionId = `${React.useId()}-charcount`;
@@ -1553,7 +1554,7 @@ function BuiltinTextarea({
 
 // Form renderer component - Airtable-style feature-complete form
 ComponentRegistry.register('form',
-  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: any }) => {
+  ({ schema, className, onAction, disabled: hostDisabled, ...props }: { schema: FormSchema; className?: string; onAction?: (action: any) => void; disabled?: boolean; [key: string]: unknown } & RendererHostProps) => {
     const { t } = useSafeFormTranslation();
     // Prefix for the label ids the GROUP-labelled fields need (objectui#3961).
     // Owned here, not derived from `<FormItem>`'s own `useId()`: that id lives in
@@ -3048,8 +3049,15 @@ ComponentRegistry.register('form',
         // construction rather than by us guessing what a 403 body contains.
         // Status-agnostic on purpose: 403 is where this was reported
         // (objectui#5210), not a fence the contract draws.
+        // A delegated administrator's out-of-scope write (`403
+        // DELEGATION_SCOPE_VIOLATION`) is the one denial whose reason is shown:
+        // it describes only the caller's own scope, and it tells them which
+        // boundary to fix (objectstack#26059, Q3). It is read before
+        // `isPermissionError`, which answers true for any 403; every other
+        // denial keeps the fixed line (objectstack#24914 B′).
         const errorMessage =
           declaredUserMessage(error) ??
+          delegationScopeMessage(error) ??
           (isPermissionError(error)
             ? t('form.noPermissionToSave')
             : extractWriteErrorMessage(error) ?? t('form.submitFailed'));
@@ -4222,7 +4230,13 @@ interface RenderFieldProps {
    * before every registered widget (which reads it off `field`).
    */
   label?: string;
-  [key: string]: any;
+  /** react-hook-form's ref binding, handed to the built-in control by name. */
+  ref?: RefCallBack;
+  /** The field's raw metadata object (`field.field`, else the field config). */
+  field?: Record<string, unknown>;
+  /** A dependent select's gate hint while its controlling field is unset (#2284). */
+  emptyHint?: string;
+  [key: string]: unknown;
 }
 
 // Native date/time inputs only open their picker when the user clicks the tiny

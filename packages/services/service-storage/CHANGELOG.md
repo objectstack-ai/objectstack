@@ -1,5 +1,240 @@
 # @objectstack/service-storage
 
+## 18.2.0
+
+### Minor Changes
+
+- 2163e80: feat(spec,metadata-protocol,service-storage,runtime,cli)!: a seed record can carry a file the package ships, `seedFile(path)`, and a file field's id that names no stored file is refused
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped. The narrowing is a seed load refusing a value it used to write: an id-shaped string in a file field that names no stored file. There is nothing for `objectstack migrate meta` to rewrite and no tombstone; the fix is the author's choice of the file the field should hold. -->
+  
+  A `file`, `image`, `avatar`, `video` or `audio` field stores the id of a stored file, and only an upload made one, so a seed could not fill a required file field at all. A seed record now names the file by the path the package ships it at:
+  
+  ```ts
+  import { defineSeed, seedFile } from '@objectstack/spec/data';
+  
+  defineSeed(ContractVersion, {
+    externalId: 'code',
+    records: [
+      { code: 'NDA-001-V1', file: seedFile('fixtures/nda-v1.pdf') },
+      { code: 'NDA-002-V1', file: seedFile('fixtures/nda-v2', { name: 'NDA v2.pdf', contentType: 'application/pdf' }) },
+    ],
+  });
+  ```
+  
+  - **The path** is relative to the directory holding `objectstack.config.ts`, uses `/`, and stays inside it: an absolute path, a drive letter, a `\`, or an empty, `.` or `..` segment is refused at parse. A `multiple: true` file field takes an array of `seedFile(...)` values. `defineSeed` refuses `seedFile(...)` in a field that does not store a file.
+  - **`os build` / `os compile`** reads each referenced file and writes its bytes into the dataset's new `files` map (`{ contentType, size, sha256, data }`, base64), so the compiled artifact carries them to every boot that loads it: `os dev`, `os serve`, a published package, an artifact URL. A path that names no file, or a file whose type is neither named with `contentType` nor known by its extension, fails the build, and `os validate` refuses the same paths. `os serve` / `os dev` booting a config rather than an artifact reads the files the same way, so both boots seed the same files.
+  - **The seed loader** stores the bytes through the new `field-files` service (`FIELD_FILE_SERVICE`, `IFieldFileService`, registered by `@objectstack/service-storage`), writes the file's id into the field, and makes the written record the file's owner, the (object, record, field) ownership an upload gets. Each row gets a file of its own. A replay that finds the row holding a file stored from the same path with the same bytes, name and type keeps it, so a restart does not store a new file for an unchanged fixture. A file stays `pending` until its row lands, so a file whose row is refused is reclaimed by the pending-upload retention.
+  - **Refused, by row, before the row is written**: a reference whose bytes the dataset does not carry, bytes that do not match their recorded size and SHA-256, a load with no `field-files` service, a field mixing `seedFile(...)` with other values, and several `seedFile(...)` values in a one-file field. Each is counted, reported in the load's errors and logged at `error`.
+  - **The inline boot seed** of an app whose datasets carry seed files runs at `kernel:bootstrapped` (as one with `demoStaff` already does), once the storage service has read its settings, so the files land in the store the deployment serves from.
+  - `SeedLoaderService` takes an optional fourth argument, `{ getFieldFiles }`; every platform caller passes the kernel's `field-files` service.
+  
+  **BREAKING** (a seed-load narrowing). A seed record whose file field holds an id-shaped string (letters, digits, `_` and `-`, at most 64 characters) that names no stored file in the row's organization is now refused, by row, with an error naming the field and the value. Before, it was written as given, and the field then read as holding no file. An external URL or an inline value is not an id and is written as before; so is any value on a deployment without `@objectstack/service-storage`.
+  
+  **What to do.** If a seed load now reports `… holds '<value>', which names no stored file`, replace the value with the file the field should hold, `seedFile('<path in the package>')`, or remove it.
+
+### Patch Changes
+
+- e2b40a2: fix(rest)!: an anonymous public-form submission carries no file
+  
+  `POST /api/v1/forms/:slug/submit` (and its environment-scoped twin) now refuses a submission that carries a value in a field whose declared type is a file type (`file`, `image`, `avatar`, `video` or `audio`, the spec's `FILE_REFERENCE_TYPES`). The refusal comes before anything is written. It is the door's existing envelope, `400 VALIDATION_FAILED`, with one `fields[]` entry per file field, coded `invalid_value` (the ADR-0114 field catalog) and naming the field by its label. A missing `required` field in the same submission is reported in the same envelope. An empty or absent file field submits exactly as before. Only the fields the form declares are judged, so the refusal names nothing the form does not already publish.
+  
+  This is the server half of the rule "an anonymous public-form submission carries no file". A visitor who needs to provide a file registers and signs in, then submits through a signed-in surface that uploads through the authenticated upload doors. The anonymous door has no upload door of its own, and none is added. The protocol half, refusing at publish a guest-facing form that declares a file field, is separate. This door also judges forms published before that refusal exists.
+  
+  `@objectstack/service-storage`: the file-reference claim path now looks a referenced file up within the organization the write acts in. It uses the same channel that already stamps a copied file for that organization, so the driver's tenant scope for the posture in force decides what the lookup sees. A referenced file id outside that scope is kept as written and is neither claimed nor copied, exactly as an id the platform does not manage. A write that carries no organization, and the `single` posture, look files up as before.
+  
+  Clause-②: no (narrowing) — the anonymous public-form submit door refuses a request shape it used to accept (a value in a declared file field), and the file-reference claim path reaches only files within the writing organization's tenant scope. Nothing is widened.
+  
+  Metadata-protocol: none (a request's handling at an anonymous door and a write path's file bookkeeping; nothing a metadata author writes changes. The publish-time refusal of a guest-facing form with a file field is the protocol half, and ships separately)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the anonymous public-form submit door handles a request body (a value in a declared file field is refused) and which files the file-reference claim path can reach for a write (those within the writing organization's tenant scope). The remedy is a change of how a visitor submits (register and sign in to provide a file), never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a public form that collected files anonymously, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** A value in a file field the form declares was written with the anonymous submission.
+  - **Now.** That submission is refused with `400 VALIDATION_FAILED`, naming each file field that carries a value. A submission that leaves every file field empty is accepted as before.
+  - **Fix.** A public form that collected files: have the submitter register and sign in, then provide the file from their account. Remove the file field from the guest-facing form, or leave it for the visitor to leave empty.
+- 3761710: fix(storage)!: a record write claims or copies only a file its caller may read
+  
+  The file-reference claim path (ADR-0104 D3: a file field holds a `sys_file` id, at most one record's field owns a file, and writing an id another record owns copies the bytes into a fresh file the writing record owns) now asks, before it copies or claims a referenced file, whether the write's caller may read that file. The question is the download door's own verdict, asked under the write's caller context: the uploader, a reader of the one record whose field owns the file (its object's `fileAccessDelegate` where one is declared), a member of the organization for a file no record owns, a reader of a parent record for an attachments-scope file, anyone for a `public_read` file. The door and the claim path now call one judgement, so one file has one access rule.
+  
+  A file the caller may not read is answered as the organization-scoped lookup answers a file it cannot see: the value is kept as written, nothing is claimed or copied, and constraint verdicts no longer run ahead of the read check. A copy this write made is claimed by the same write without a second question. System writes and context-less programmatic calls have no caller to ask and reference files as before; so does a kernel with no `auth` service, where the download door binds no gate. An authorization-store outage fails the write with its declared envelope instead of reading as either answer.
+  
+  Clause-②: no (narrowing) — a record write reaches fewer files: a file its caller may not read is no longer copied or claimed for it. Nothing that was refused becomes accepted.
+  
+  Metadata-protocol: none (a write path's file bookkeeping; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which files the file-reference claim path copies or claims for a record write (those its caller may read). The remedy is a change of who writes the reference (a caller who may read the file), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a write that referenced a file its caller may not read, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** The claim path copied or claimed a referenced file without asking whether the write's caller may read it.
+  - **Now.** Both happen only when the caller may read the file under the download door's rule. Otherwise the record keeps the id as written and owns nothing: the file's readers are unchanged, and the written record's readers gain no access to it through that record.
+  - **Fix.** Reference a file as a caller who may read it (its uploader, or a reader of the record that owns it), or upload the file again. A server-side process that copies files between records on purpose runs as a system write.
+- 3b8ea15: fix(storage)!: an unclaimed file is served only within its organization
+  
+  The two download doors (`GET /api/v1/storage/files/:fileId/url` and `GET /api/v1/storage/files/:fileId`) now serve a file with neither an attachments scope nor a field owner (an upload no record has claimed yet, or one whose record let it go) only within its organization. The signed-in check comes first, as before. The download authorizer then judges the file as every other organization-scoped row is read: the organization wall's verdict for the tenancy posture in force, and the driver's tenant scope for the reach. A caller outside that reach is refused `403 FILE_DOWNLOAD_DENIED`, the status and code the doors already give a file the caller may not read, with a message that names no record. No error code is added.
+  
+  What does not change: the uploader is still served their own upload, as for every other private file. Under the `single` posture every signed-in caller is served as before. A file marked `acl: 'public_read'` stays anonymous. Attachments-scope and field-owned files keep their parent-derived verdicts. An anonymous caller still gets `401 AUTH_REQUIRED`. A kernel with no auth service still serves these files without a check.
+  
+  Clause-②: no (narrowing) — the download doors serve an unclaimed file to fewer callers under a walled posture (`isolated`, `group`); nothing is widened.
+  
+  Metadata-protocol: none (how two storage download doors authorize a request; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which callers the storage download doors serve an unclaimed file to under a walled tenancy posture. The remedy is operational (act in the file's organization, or have a record claim the file, or mark it `acl: 'public_read'`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a walled deployment (`isolated` or `group` posture) whose users download unclaimed files from outside the file's organization, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** The download doors did not apply the organization wall to an unclaimed file.
+  - **Now.** A signed-in caller is served an unclaimed file when they uploaded it, or when the file is in their organization's reach under the posture in force (their active organization under `isolated`, any organization they belong to under `group`). Anyone else gets `403 FILE_DOWNLOAD_DENIED`. A caller with no organization under a walled posture is in no organization's reach.
+  - **Fix.** Download the file while acting in its organization. Have a record claim it (a file field or an attachment), so that the record's access decides. Or, for a file that must be readable by everyone, mark its stored file record `acl: 'public_read'`.
+- b4199c9: fix(storage)!: an anonymous write carries no file
+  
+  Ruling C ("an anonymous submission carries no file") now holds at every anonymous write door of ADR-0138 D2, not only at the public form door. A record write whose caller has no user, such as the guest an `authRequired: false` endpoint executes as under the grants a deployment binds to the guest, may not put a value in a file field (`file`, `image`, `avatar`, `video`, `audio`). It is refused before anything is written, with the form door's envelope: `400 VALIDATION_FAILED`, one `fields[]` entry per refused field carrying the ADR-0114 field code `invalid_value` and the field's label. An empty or absent file field is written as before. Signed-in callers, system writes and context-less programmatic writes are unchanged. No error code is added.
+  
+  Clause-②: no (narrowing) — an anonymous write that carried a value in a file field is refused. Nothing that was refused becomes accepted.
+  
+  Metadata-protocol: none (a write path's file rule; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which record writes the file-reference path accepts (an anonymous caller's write carrying a file value is refused). The remedy is a change of who provides the file (a signed-in caller), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for an anonymous write that carried a file value, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** Only the public form door refused a file value from an anonymous caller.
+  - **Now.** Every write whose caller has no user is refused with `400 VALIDATION_FAILED` when a file field carries a value.
+  - **Fix.** Leave file fields empty in an anonymous write. A file is provided by a signed-in caller, through the authenticated upload doors.
+- 7e4af20: fix(storage)!: a record write naming a file its caller may not read is refused at the field
+  
+  A record write that names a file its caller may not read is now refused at that field, instead of saving the id as written. The answer is one `400 VALIDATION_FAILED` whose `fields[]` names each such field with the ADR-0114 code `invalid_value`, the same envelope the public form door gives an anonymous submission that carries a file. It names the field only. An id that names no file of the acting organization gets the same answer, so the write cannot tell the two apart. Nothing is claimed, copied or written. System writes and writes with no caller context reference files as before, and an authorization-store outage still fails the write with its declared envelope.
+  
+  A file governed by a record's rule also gets the record-governed link lifetime at the download door.
+  
+  Clause-②: no (narrowing) — a record write that names a file its caller may not read, or an id no file of the organization has, was saved and is now refused. Nothing that was refused becomes accepted.
+  
+  Metadata-protocol: none (a write-time refusal on file fields; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata author's surface moves: no spec key or authorable spelling is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which record writes the file-reference lifecycle accepts: a write naming a file its caller may not read is refused at the field. The remedy is naming a file the caller may read, or leaving the field empty, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that writes a file id it may not read, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** The write saved, and the field kept an id its readers could not use.
+  - **Now.** The write is refused with `400 VALIDATION_FAILED`, naming the field with `invalid_value`.
+  - **Fix.** Name a file the caller may read (upload it, or choose one they can open), or leave the field empty.
+- d9e6ac2: fix(storage)!: a file its record lets go keeps that record's read rule
+  
+  ADR-0104 D3 promises one file, one owning record and one access rule. That rule now holds after the owning record lets the file go: until a writer who may read that record claims the file again, or the platform collects it, the file is read by that record's rule. The download door and the record-write claim path ask the same verdict, so both follow it. A file no record has owned is read as before, within its organization. The uploader still reads their own file.
+  
+  `sys_file` gains two nullable fields, `released_ref_object` and `released_ref_id`, naming the record that last owned the file. The platform writes them when a record lets a file go and clears them when a record claims it. Existing rows hold NULL and are read as before.
+  
+  Clause-②: no (narrowing) — a file read that a record's rule refuses is now refused after the record lets the file go. Nothing that was refused becomes accepted.
+  
+  Metadata-protocol: none (a file read rule and two platform-managed bookkeeping fields; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata author's surface moves: no spec key or authorable spelling is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. The platform object `sys_file` gains two nullable bookkeeping fields that only the platform writes; schema sync adds the columns and existing rows read NULL, which is the shape every row had before. What changes is which callers a file read admits after the file's owning record lets it go. The remedy is reading the file as a reader of that record, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a reader the owning record's rule refuses, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** The owning record's rule did not hold for the file once the record let it go.
+  - **Now.** It is read by the rule of the record that let it go, until it is claimed again or collected.
+  - **Fix.** Read or claim such a file as a reader of that record.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 69aa630: fix(cli,service-storage): the Console document's `connect-src` names the store the server presigns browser uploads to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  With S3 or an S3-compatible store (R2, MinIO), the Console uploads a file by `PUT`ting it straight to the URL `POST /api/v1/storage/upload/presigned` answers, on the store's host. The Console document's content-security-policy did not name that host, so the browser refused every such upload with `TypeError: Failed to fetch`.
+  
+  - **`@objectstack/service-storage`.** `S3StorageAdapter.getPresignedUploadOrigin()` answers the origin every presigned upload URL carries. It signs a probe upload with the same client options as every real presign, so a virtual-hosted bucket (`BUCKET.ENDPOINT-HOST`), a region-templated AWS host and a path-style endpoint come out exactly as the upload URL carries them. Signing is local and uses fixed probe credentials, so it never reaches the network or the AWS credential chain. `SwappableStorageService.getPresignedUploadOrigin()` answers the active adapter's origin, or `undefined` for an adapter without one (the local adapter's uploads go to the server itself).
+  - **`@objectstack/cli`.** The Console mount reads that origin off the kernel's `storage` service on every document and adds it to `connect-src`, after the error-reporting origin and before `OS_CONSOLE_CSP_CONNECT_SRC`. A storage settings change that swaps the adapter is followed on the next document, with no restart. Local storage, no storage service, or a store whose endpoint the presigner refuses adds nothing. The last case logs one `warn` that names the remedy. `OS_CONSOLE_CSP_CONNECT_SRC` still adds an operator's extra sources, and a deployment that named its store there as a stop-gap can drop it.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/observability@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

@@ -1,5 +1,807 @@
 # @object-ui/app-shell — Changelog
 
+## 18.2.0
+
+### Minor Changes
+
+- d1663ba: feat(spec,analytics,lint,platform-objects,app-shell): a dataset measure can aggregate the time between two datetime fields of each record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`@objectstack/spec`**: `DatasetMeasureSchema` gains an optional `duration: { from, to, unit }`, in place of `field`. `from` and `to` name two `datetime` fields of the dataset's own object by their bare names, `unit` is `seconds`, `minutes`, `hours` or `days`, and the measure's `aggregate` is `avg`, `min`, `max` or `sum` of `to` minus `from`. A relationship path, an expression or the row wildcard in either column, the same column twice, another unit, a counting aggregate, or a `field`, `derived` or `currency` beside it is refused at parse. New exports: `DatasetMeasureDurationSchema`, `DatasetDurationUnit`, `DATASET_DURATION_UNIT_SECONDS`, `DATASET_DURATION_AGGREGATES`, `DATASET_DURATION_FIELD_TYPE` and the `DatasetMeasureDuration` / `DatasetDurationUnit` types.
+  - **`@objectstack/service-analytics`**: the dataset compile refuses a duration column declared anything but `datetime` (`400 DATASET_INVALID`, naming the column and its type). The native-SQL strategy computes the duration as one statement on SQLite, PostgreSQL and MySQL, in double precision on each; SQLite and PostgreSQL are tested live to answer the same number: a record missing either instant is left out, a `to` before its `from` counts as negative, and over a group with no such record `sum` answers `0` and the others `null`. Measure filters, derived measures, ordering and the draft preview serve it. A query the native strategy does not serve (a time dimension bucketed by `granularity`, a field-to-field filter, an object served through engine middleware or an external datasource, a non-SQL datasource) is refused with `400 INVALID_FIELD` naming the measure. Its two columns pass the field-level read gate like any measure's field. The temporal half of the aggregate × field-type refusal now names the duration measure instead of a stored "days open" number.
+  - **`@objectstack/lint`**: `os validate` refuses a duration column not declared `datetime` with the new gating rule `measure-duration-field-type-refused` (at `datasets[N].measures[M].duration.from` / `.to`), with an `os explain` entry. `dataset-field-unknown` now also reports a duration column the object does not declare.
+  - **`@objectstack/platform-objects`**: the dataset form's new **Duration** row is translated in every shipped locale.
+  - **`@object-ui/app-shell`**: changing a dataset's base object in the console's dataset inspector now clears a duration measure along with the other measures that name the old object's fields, instead of keeping it as if it were a plain row count.
+  
+  What to do: nothing. A dataset without `duration` parses, compiles and answers exactly as before.
+- dd5e355: feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  An app authored in one language listed its reports (`reports[].label`, `reports[].description`) in that language on the app's report index and the report page heading. Before this change the translation bundle had no key for them: `reports` was a retired object-first dialect key, so a bundle carrying it was refused by `os validate`, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `reports`, keyed by the report's `name`, carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the singular spelling `report` with a message pointing at `reports`). `reports` leaves `LEGACY_OBJECT_FIRST_KEYS`, so a stored translation row carrying it now loads through the authored-row sync instead of being skipped as a retired dialect; the key's measured footprint in the legacy dialect was zero (#3778). A new translator, `translateReport`, overlays the two strings and is registered in the metadata-document dispatch, so `GET /meta/report` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. A report is overlay-editable (ADR-0126 Regime O), so the translator honours the packaged base: a label or description an org re-authored is served as written (ADR-0029 D9.2a), and the strings it did not touch are still translated.
+  - **`@objectstack/metadata-protocol`:** `getPackagedReportBase(name)` returns the shipped report document beneath any overlay, the base the REST read path hands the translator.
+  - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+  - **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
+  
+  Example (`zh-CN` bundle of an English-authored app):
+  
+  ```ts
+  reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } },
+  ```
+- dc71845: feat(spec,console): a `type: 'flow'` action may declare `onSuccess`, and the console navigates after a run that completes
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A flow action that creates a record could not take the user to it. `ActionSchema` refused `onSuccess` beside `type: 'flow'` (and the page action rows refused it beside a `flow` executor), so after the run the user stayed on the page they started from.
+  
+  - **`@objectstack/spec`:** `onSuccess` is now accepted on a `type: 'flow'` action and beside a page action row's `flow` executor, next to `api` and `script`. On a flow action, `${result.*}` reads the completed run's answer (`AutomationResult`). Its `output` holds the flow's `isOutput` variables, so a `create_record` node that writes an `isOutput` variable `renewal` is reached as `${result.output.renewal.id}`. A variable the flow does not declare `isOutput: true` is not in `output`. The refusal text for `url`, `navigation`, `modal` and `form` now names the three executors. The Studio action form shows the `onSuccess` row for a flow action.
+  - **`@object-ui/types`:** `ActionResult` gains `handedOff`: the success is a hand-off to a follow-up surface, not a completion.
+  - **`@object-ui/app-shell`:** the flow launch judge marks a run that pauses at a screen, or ends refused, `handedOff`. A run that completes is not marked, including one whose toast is the flow's own `successMessage`.
+  - **`@object-ui/core`:** the action runner performs no `onSuccess` hop for a `handedOff` success. A flow run that pauses at a screen or ends refused does not navigate, neither when the screen or the refusal notice opens nor when the flow runner later finishes the run.
+  
+  Example:
+  
+  ```ts
+  {
+    name: 'start_renewal',
+    type: 'flow',
+    target: 'renewal_start',
+    onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}' },
+  }
+  ```
+  
+  with the flow declaring `variables: [{ name: 'renewal', type: 'object', isOutput: true }]` and its `create_record` node writing `outputVariable: 'renewal'`.
+- 6d9d3ef: feat(spec,automation,app-shell): a flow screen field typed `file` collects an upload, and the run resumes with the uploaded file's id
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. `ScreenFieldConfigSchema.type` stays an open string, so every flow that parsed before still parses, and nothing exported is removed or narrowed. What changes is what a screen field already declared `type: 'file'` means: the console renders the upload widget for it, and the resume door refuses a value that is not a file id. The remedy is a change in what a caller posts to `resume` (the uploaded file's id), never a rewrite of a package source or a stored row, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no runtime interface, type or export is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  A wizard can now ask for a file before the record that will own it exists, and write everything after its last screen.
+  
+  - **`@objectstack/spec`**: `ScreenFieldConfigSchema.type` (and the `ScreenFieldSpec` contract) documents `'file'` as the second value domain beside `'number'`. A `type: 'file'` field renders the platform upload widget. The upload goes through the file service and lands as a `sys_file` that no record owns yet. The resume carries that file's id, which is ADR-0104 D3's stored form, and nothing else. A later `create_record` or `update_record` node writes the id into an object's `file` field, and that write claims the file for the record. Under the default `runAs: 'user'`, the claim first makes the download door's read check as the run's user; a `runAs: 'system'` run's write is not checked, as no system write is.
+  - **`@objectstack/service-automation`**: the resume re-checks a `type: 'file'` field as a value domain. A value that is not a file id, judged by the spec's `isFileIdToken` (the same predicate the claim path reads), is refused with `400 INVALID_SCREEN_INPUT` and the field code `invalid_type` ("must be the id of an uploaded file"). That covers a URL, the expanded `{ id, name, url, … }` read form, a list and a number. The value is never reduced to an id. The refusal writes nothing and keeps the pause, so a corrected resume still lands. An empty optional field and a hidden field are not judged. `image`, `avatar`, `video` and `audio` stay open widget hints.
+  - **`@object-ui/app-shell`**: the flow screen dialog renders the object form's `FileField` for a `type: 'file'` field and uploads through the console's `UploadProvider`. While an upload is in flight, Submit is disabled and reads "Uploading…". The resume posts each file field as its bare id, and a prefilled expanded value is reduced to its id first.
+  
+  **BREAKING** (a resume-acceptance narrowing) for a flow whose `screen` node already declares a field `type: 'file'`. None was found in this repository's examples or packages.
+  
+  - **Before.** `type: 'file'` was an open widget hint the console did not know, so the field rendered a plain text input, and `POST /automation/:name/runs/:runId/resume` accepted any value for it.
+  - **Now.** The field renders the upload widget, and the resume refuses any value that is not a file id with `400 INVALID_SCREEN_INPUT` (`invalid_type`). The refusal keeps the pause.
+  - **Fix.** A caller that resumes the run itself, without the console, uploads the file through the file service first and posts the minted `sys_file` id for the field: FROM `{ "contract_file": "https://…/nda.pdf" }` TO `{ "contract_file": "FILE_ID" }`. A field that was never meant to collect an upload takes another `type`, such as `text`.
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+- 4548ba3: feat(spec,automation,app-shell): a read-only `record_link` screen field shows a record the run created, by its display name, as a link to its record page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A screen flow can now end on a result screen that links the records it created, instead of a toast that points at nothing.
+  
+  ```ts
+  { id: 'done', type: 'screen', config: { title: 'Lead converted', fields: [
+    { name: 'account_link', label: 'Account', type: 'record_link',
+      reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } },
+  ] } },
+  ```
+  
+  - **`@objectstack/spec`**: `ScreenFieldConfigSchema` gains the `type` member `'record_link'` (`SCREEN_FIELD_RECORD_LINK_TYPE`). On it, `reference` (the record's object) and `defaultValue` (a value slot that evaluates to the record's id) are required, and `required`, `options`, `placeholder`, `min` and `max` are refused, each at its own key with the exported refusal text (`SCREEN_FIELD_RECORD_LINK_REFERENCE_REQUIRED`, `SCREEN_FIELD_RECORD_LINK_DEFAULT_VALUE_REQUIRED`, `screenFieldRecordLinkRefusedKey`). The name is `record_link`, not `record`, because `record` is already an object field type (a name-keyed map of sub-objects) and a screen field's `type` uses the same vocabulary. Every other `type` value parses as before.
+  - **`@objectstack/service-automation`**: the resume refuses any value sent under a `record_link` field's name, `null` included and visible or not, with `400 INVALID_SCREEN_INPUT` and the field code `invalid_value` ("shows a record and takes no value"). The value is never bound to a flow variable, the refusal keeps the pause, and a resume that leaves the field out still lands. A caller's param that shares the field's name never counts as answering the screen, so a result screen always pauses.
+  - **`@object-ui/app-shell`**: the flow screen dialog shows a `record_link` field as the record's display name (the object's `nameField`, through the lookup widget's read-only branch) inside a link to `/apps/APP/OBJECT/record/ID`. An empty id shows "—" with no link, and an object the console cannot route to shows the name without a link. `visibleWhen` works as on any field. The dialog never seeds or posts a value for the field.
+
+### Patch Changes
+
+- 934810c: feat(app-shell,i18n): the Console draws the install refusal `DEPENDENCY_MISSING` in the author's terms, one line per unmet dependency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0141 D2 refuses to install a package whose declared `dependencies` the environment does not satisfy (`422 DEPENDENCY_MISSING`, `details.unmet[]` naming each entry's `dependency`, `range`, what was `found` and the `installedVersion`). The Console showed the envelope's English sentence, the same in every locale and without the ranges.
+  
+  - **`@object-ui/app-shell`:** the three install surfaces that go through `install-local` (the package page's Install, the catalog page's organization install on a self-hosted runtime, and Setup → Packages → Import) draw the refusal from its facts: a heading saying nothing was installed, then one line per unmet entry, such as 「请先安装 app.objectstack.hotcrm 6.x。」 or "Install com.acme.billing ^2.1.0 first. Version 1.4.0 is installed." `installLocal()` now carries the envelope's `details` on the error it throws, and the Packages page's request helper carries `code` and `details`. A refusal whose facts the Console cannot read in full (an older runtime, or a `found` value it does not know) keeps the server's message.
+  - **`@object-ui/i18n`:** `marketplace.install.dependencyMissing.*` (a heading and one line for each `found` value) in all ten locale packs.
+  
+  What to do: nothing.
+- 7111e14: feat(ui): the Studio permission-set form offers the field permission `when` (row condition on the edit vote)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Part of #25866 — the Studio clause of ruling 6408558941 (part ①, item 4), after #25980 landed the key itself.
+  
+  - **Before.** The permission matrix's field rows carried two checkboxes, `readable` and `editable`: no way to offer or see a `when`. The Read-off cascade could leave `readable: false` beside an authored `when` (the shape the spec refuses at publish), and the Read all / Write all shortcuts dropped the condition.
+  - **Now.** Each field row carries **When (edit)**: an authored condition shows as a chip, and the row opens the same CEL editor the row-level-security clauses use, linted the same way; a finding the publish gate would refuse holds the save. Read off clears the condition, Read all / Write all keep it, Clear drops the entry, blank text removes the key. `FieldPerm` gains `when`, carried verbatim by the package-door slice merge.
+- 054652b: fix(app-shell,react,plugin-detail): on a record under approval, an administrator who is not the approver sees one status line and one override menu instead of five buttons above the title, and Recall is drawn once
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** for a viewer who holds no approver slot but may override, the record page's approval bar is now one line: the request's pending status and who the step waits on, the levers that have no override arm (Reply) as buttons, and one marked menu holding every lever the override flag admits (Override Approve, Override Reject, Override Reassign, and Recall). The approver's own bar is unchanged. Who may override, the override notice each lever shows, and the request each lever sends are unchanged. `DeclaredActionsBar` takes a new optional `foldOverrides` prop for this; a host that does not pass it renders as before.
+  - **`@object-ui/react`:** `InlineEditProvider` and the `InlineEditContext` value gain an optional `approvalRecallDrawnByHost`. It is optional so every existing host keeps its behaviour: absent means `false`, and then the approval band draws its own Recall exactly as before. A host that draws the pending request's declared Recall itself sets it to `true`.
+  - **`@object-ui/plugin-detail`:** the DetailView approval band leaves out its Recall button when the host says it draws one, and keeps its lock badge and tally. The record page sets the signal only while its approval bar actually draws the request's declared Recall, so Recall appears once on the page; before the bar can draw it (definition still loading, or a backend that sends no viewer block) the band keeps its own.
+  
+  What to do: nothing.
+- 326a559: fix(app-shell,console): an invitee who opens the invitation link signed out is greeted for the invitation, offered "Create an account and join" first, and the accept page names the inviter
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Login page.** A signed-out visitor arriving at `/login?redirect=/accept-invitation/ID` used to see the returning-user card ("Welcome back · Sign in to continue your work") with a small "Sign up" link under the form. Both login pages (the console's own and `DefaultLoginPage`) now title the card "Accept your invitation · Use the email address the invitation was sent to." Where the server offers sign-up to this visitor, a full-width "Create an account and join" link (the new `InvitationSignUpPrompt` export) sits above the sign-in form in place of the small link. With sign-up switched off, the visitor gets the invitation header and the sign-in form only.
+  - **Register page.** From an invitation redirect, both register pages title the form "Create an account to join" and ask for the address the invitation was sent to, because only that account can accept it.
+  - **Accept page.** `DefaultAcceptInvitationPage` shows an "Invited by" row with the inviting member's email, which `GET /organization/get-invitation` already returns as `inviterEmail`. That route returns no inviter name.
+  - **Not in this change.** The signed-out pages name no organization, inviter or invited address, and do not prefill the email. The only invitation read the server serves answers a signed-out caller `401`, so a preview for signed-out visitors needs a new server read first.
+  - New locale keys in all ten packs: `auth.login.invitationTitle`, `auth.login.invitationDescription`, `auth.login.invitationSignUpButton`, `auth.login.invitationSignInDivider`, `auth.register.invitationTitle`, `auth.register.invitationDescription`, `organization.accept.invitedBy`.
+- 712770b: fix(plugin-chatbot,app-shell): a whole-app build approved from the proposed plan draws its result card, live and after a reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Approving a proposed plan sends the approval sentence, and the runtime replays the approved `apply_blueprint` under a `replay_` tool-call id. The chat read every replay result as the verdict of a confirm card and dropped its draft review, and a replay streams no build-progress frames, so the build's own envelope (`drafted[]`, `packageId`, `checklist`, `nextSteps`) reached the chat and was drawn nowhere: no result card, no Open app, no checklist, no next steps.
+  
+  - **`@object-ui/plugin-chatbot`:** a replayed whole-app build that drafted keeps its draft review and draws the same result card as a model-driven build. A replayed build in an auto-publish environment (`status: 'published'`) draws the card and its next steps from that envelope; so does a published build after a reload. A replay whose publish rolled back, and a replayed incremental edit, are unchanged.
+  - **`@object-ui/app-shell`:** the AI chat page's hydration keeps the same draft review, so a reloaded thread binds to the package the replay built, and the conversation cache keeps that build's draft envelope instead of the bare replay verdict.
+  
+  What to do: nothing.
+- 4f7e041: fix(app-shell): a related list's "View all" opens the rows the list showed, its own `filter` included, or is not offered
+  
+  Clause-②: yes (an optional member on the exported `ResolveRelatedRecordActionsInput` of `@object-ui/react` widens its public type surface, additive; the seat owes a TIER_DEFAULT review record before the queue; re-declared if the PR changes no exported type)
+  Metadata-protocol: none
+  
+  - **The defect.** A `record:related_list` "View all" link opened the child object's list scoped by the list's relationship alone and dropped the list's own `filter`. The full list was wider than the tab, and on `sys_approval_request` it was empty: the request read gate admits a record reader only on a read that pins both `object_name` and `record_id`, so a reader who saw the requests on a record's Approvals list saw none on "View all".
+  - **The fix.** The destination now carries every condition of the list's `filter`, resolved the way the list resolved it for its own query (`{current_user_id}`, `{record_id}` and the date macros), ANDed with the relationship. When the list route has no spelling for a condition (an `or`, a set or text operator, a boolean comparand), or a condition names a field the viewer cannot read, no link is drawn: the route would drop that condition and open a wider list.
+  - **The type.** `ResolveRelatedRecordActionsInput` gains an optional `filter`, the list's own resolved scope filter. A host implementing `resolve` reads it to scope any destination it builds for the list's rows; a host that ignores it keeps compiling.
+  
+  What to do: nothing. A related list without a `filter` opens the same destination as before.
+- 7bbc0b9: fix(app-shell): pending changes folds what the platform wrote into one collapsed line
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Publishing a new object from Studio listed the platform's injected system columns (`created_at`, `created_by`, `owner_id`, `updated_at`, `updated_by`) as fields the author added, and the object's derived `nameField` under "Also changed", beside the one field the author typed.
+  
+  - A field the publish adds or removes whose every definition carries `system: true` (the spec's mark for an auto-injected system/audit column), and a `nameField` equal to the registry's own `provisionPrimary` derivation, now fold into one collapsed "Generated by the platform (N)" line; opening it shows those rows. A system field whose definition differs between the published and draft bodies is an edit and stays an author row, as does a `nameField` the derivation would not pick.
+  - A new item's top-level keys are headed "Includes:" rather than "Also changed:": every key of an item that does not exist yet is part of it.
+  - The columns the platform injects and hides (`__search`, `organization_id`, `owning_business_unit_id`) are still not listed at all.
+  
+  New strings `preview.changes.detailNewKeys` and `preview.changes.generatedGroup` ship in all ten locale packs.
+- b239a01: fix(app-shell): Browse Marketplace says the catalog could not be reached when the runtime cannot reach it, instead of "the catalog answered with an error (HTTP 502)"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`**: the runtime's marketplace proxy answers `502 MARKETPLACE_PROXY_FAILED` only when its own fetch to the catalog throws. The load-error panel picked its class line by status alone, so that answer read "The marketplace catalog answered with an error (HTTP 502)", with the raw transport text `fetch failed` in full view below it. The panel now reads the error code as well: that code, or no answer at all, reads "The marketplace catalog could not be reached.", and the raw text sits behind a **More** / **Less** disclosure with a copy button. A failure the catalog did answer, including a 502, 503 or 504 relayed from upstream, still names its HTTP status and shows the server's own text. The online hint is unchanged.
+  
+  What to do: nothing.
+- b981324: fix(app-shell): the Studio no longer prints a warning for every navigation `visible` predicate of the apps it lists
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening the Studio printed one "A visibility predicate could not be evaluated - node app-shell:visible" warning per gated navigation entry of every installed app (ten for HotCRM), for predicates such as `!("sales_rep" in current_user.positions)` and `current_user.can("crm_lead", "read")` that evaluate cleanly inside the app. The header's notification bell builds its activity list from every app's navigation, and the Studio mounts no expression scope, so `current_user` was empty and no permissions were bound there: every such predicate faulted, and the warning read as an authoring error.
+  
+  On a screen that mounts no expression scope, such as the Studio, a navigation entry whose predicate cannot be answered is still left out, exactly as before, but nothing is printed for it: the screen only lists from the app's navigation, it does not render it. Inside an app, where the scope is bound, a predicate that really cannot be evaluated is still reported as before.
+  
+  What to do: nothing.
+- 6d15aca: fix(app-shell): the Console no longer sends two requests it knows will be refused, the drafts ledger for a member and the published body of a new draft
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Home's drafts row** read `GET /api/v1/meta/_drafts` for whoever opened Home. A member holding none of the capabilities the ledger admits (`studio.access`, `setup.access` or `manage_metadata`) got a 403, and the console logged it as a failed request on every visit. The row now reads the ledger only for a session that holds one of them, through the new `useCanReadPendingDrafts()`. An unreported capability set still reads it, and the server still enforces the gate.
+  - **The pending-changes sheet** (Studio's Publish and Changes, and the draft-preview bar's Changes) read each draft's published body beside its draft. Under Publish, where every row opens expanded, that read was sent before the sheet knew which drafts are new, so a draft-only object such as one just saved from New object got `GET /api/v1/meta/object/NAME?package=PKG` → 404. A row now waits for its new-or-update classification, and a new draft is not asked for a published body. A row whose classification read failed is read both ways, as before.
+  
+  What to do: nothing. The pages render exactly as before.
+- 56a2346: fix(plugin-editor): the Console's code editor loads Monaco from its own build, never from cdn.jsdelivr.net
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio's code editors (the JSON source tab, the html / react page source editor, the metadata form's code fields) and the `code-editor` page component fetched Monaco's core from `cdn.jsdelivr.net` at run time, through `@monaco-editor/loader`'s default config. An install with no route to that CDN, and every Console served under its content-security-policy (which lists no CDN in `script-src`), got a plain textarea instead, and the `code-editor` component stayed on "Loading..." for good.
+  
+  - **`@object-ui/plugin-editor`:** `monaco-editor` is now a dependency, bundled by the host. The new `configureBundledMonaco(loader)` imports its ESM core as a lazy chunk and hands it to the loader with `loader.config({ monaco })` before the first `loader.init()`, so the loader injects no CDN script. Each language worker is imported through Vite's `?worker` when Monaco first asks for it, and starts from a same-origin file under the build's assets. The `code-editor` component mounts the editor only once that config has landed, and when the editor chunk cannot be fetched it edits the same text in a plain textarea instead of loading forever.
+  - **`@object-ui/app-shell`:** the code editors' one loader probe per page awaits `configureBundledMonaco` before `loader.init()`. The plain-textarea fallback stays for a chunk that cannot be fetched.
+  - **`@objectstack/console`:** the built Console carries Monaco as lazy chunks and worker files under `assets/` (about 13.5 MB of uncompressed JavaScript, loaded only on a screen that opens an editor); the first-paint closure is unchanged.
+  
+  What to do: nothing. A host that bundles `@object-ui/plugin-editor` with a bundler other than Vite must handle the `?worker` imports itself.
+- 3518664: fix(app-shell): the notify node's recipients editor writes and keeps an email-field recipient, `{ emailField }`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A stored `{ emailField }` is kept.** The Studio recipients editor read `recipients: { emailField: 'FIELD' }` as no recipients, so the first edit of the node replaced it. It now reads as one Email field row, and reading the flow and saving it again writes it back unchanged.
+  - **An Email field row.** A recipient can be picked as "Email field": an `email`-typed field of the trigger record, stored as `{ emailField: 'FIELD' }`, the whole `recipients` value. Only `email`-typed fields are suggested. The row is offered only while it is the node's sole recipient, and no recipient can be added beside it. The commit that stores it also writes `channels: ['email']` when the node does not already name email alone; a stored one on a node that names other channels says so and offers a one-click fix.
+  - **The Record field row on a node that sends email.** It no longer suggests an `email`-typed field there: the platform refuses, at run time, an address that row computes when no user holds it. A stored Record field row over such a field keeps its value and says the address must belong to a user.
+  
+  What to do: nothing. To mail a person who is not a user, pick "Email field" as the recipient type.
+- 416e96f: fix(app-shell): a list view or interface page whose `label` is an inline locale map is named in the viewer's language, and a map view label no longer takes the Console down
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **View labels.** `ListViewSchema` types a view's `label` as `I18nLabel`, and the server overlays only catalog text, so a map with no `_views` catalog entry reaches the Console as authored. `viewTabLabel` returned that map untouched. The app header then rendered it as a React child on a `/view/NAME` route and threw. The header sits outside the route's error boundary, so the whole Console went blank. The object page's tab bar, the mobile view switcher and the record page's way back read the same value. `viewTabLabel` now resolves the map in the viewer's language first, so all of them draw a string. A map that resolves to no text is drawn as the object's plural label, like a view with no `label`.
+  - **Interface list pages.** A page whose `label` is a map showed its machine name as the heading and as the record drawer's title, and a map `description` was dropped. Both now resolve in the viewer's language. The machine name is used only when no label resolves.
+  
+  What to do: nothing. Metadata that already carries inline locale-map labels now renders as authored.
+- 04148ac: fix(app-shell): the Setup → Positions list shows each position's description
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The position list in Setup declared only Name, Label, Holders and Permission sets, so a position's `description`, which `GET /meta/position` already serves, was never shown. The list now has a Description column right after Label, the same column the permission-set list next to it has. A position without a description shows the empty cell. The text is the served one, so a description the translation bundle's `positions` namespace translates shows translated, like the label.
+  
+  What to do: nothing.
+- 697a307: test(app-shell): five Interfaces rail label pins share one Studio design-surface harness
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Five `StudioDesignSurface.*` test files that rendered the Interfaces pillar over the same mocks now share one file and one module load. The only shipped change is a JSDoc line on the internal `NavTree` in `StudioDesignSurface.tsx`, which now names the test that pins its separator and badge drawing. No behaviour, export or type changes.
+- fbb7599: fix(app-shell): the "nothing in this app is available to you" screen is drawn by the shared `DataEmptyState`
+  
+  Clause-②: no (one block swaps its own markup for the shared components; no exported type change. If a shared component needs a new prop, the thread reports first and the seat amends this line)
+  Metadata-protocol: none
+  
+  The screen an app's root shows when the app serves the caller no navigation, or names only objects the caller may not read (`AppNoAccessEmptyState`), now uses `DataEmptyState` from `@object-ui/components` instead of the `Empty` primitive with a hand-copied icon square. It is announced to assistive technology as `role="status"`. The text, the Open Setup link, the test ids and the `data-reason` attribute (now on the status node) are unchanged; the title takes the shared component's smaller size.
+- 601c773: fix(app-shell): the draft preview's failure pane is announced as an alert, drawn by the shared `DataErrorState`
+  
+  Clause-②: no (one surface swaps its own block for the shared components; no exported type change. If the shared component needs a new prop, the thread reports first and the seat amends this line)
+  Metadata-protocol: none
+  
+  The pane a `?preview=draft` tree shows when it has nothing to draw (`PreviewDraftEmptyState`) now uses the shared view states from `@object-ui/components` instead of its own `Empty` block. When the draft overlay read fails, it is `DataErrorState` and is announced to assistive technology as `role="alert"`. When the app is not in the draft yet, or nothing is drafted, it is `DataEmptyState` with `role="status"`. Before, both were the same unlabelled node, so a screen reader said nothing when the preview failed to load. The text, the Retry button and the test ids are unchanged; the title and icon now use the shared components' smaller size.
+- c86c823: fix(i18n): the last English literals on the data table, the chart view, react pages, the References sheet and Flow Runs read the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Data table.** The hover "open record" affordance and the inline-edit row's cancel and save buttons are titled from `table.openRecord`, `table.cancelChanges` and `table.saveRow`.
+  - **Chart view.** A chart view's loading fallback reads the existing `chart.loading` row.
+  - **`kind:'react'` pages.** The capability notice, the empty-source refusal, the loading line and the two error titles read `reactPage.*`. Sentences with an inline code chip are one translated string, so each language decides where the chip sits.
+  - **References sheet (Studio).** The table's column headers read `engine.edit.refsColFromType`, `refsColFromName` and `refsColPath` from the Studio's own table, in English and Chinese.
+  - **Flow Runs.** When the client lacks the method a panel calls (`meta.getItems`, `automation.execute`, `automation.listRuns`), the panel keeps the method's name and words the diagnostic at render from `console.developer.flowRuns.clientMethodUnavailable`. A message the call threw is still shown as it came.
+  
+  All ten locale packs carry the new rows. With no i18n provider every surface still renders its English.
+- ef025fe: refactor(react): `AdapterCtx` / `useAdapter` are typed by `DataSource`, and `@object-ui/react` no longer depends on `@object-ui/data-objectstack`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/react/src/context/AppShellContext.tsx#ContextAdapter) No metadata moves: the narrowed type is the one `AdapterCtx` and `useAdapter()` carry, a runtime TypeScript type of a React context, with no Zod schema, spec declaration or stored row behind it, so there is nothing for objectstack migrate meta to rewrite; the compiler names the affected call site. -->
+  
+  The runtime no longer depends on one adapter, so a bring-your-own backend installs `@object-ui/react` without the ObjectStack adapter, and learns at the type level which `DataSource` members it lacks.
+  
+  - **`@object-ui/react`**: `AdapterCtx` and `useAdapter()` are typed by the protocol-level `DataSource` from `@object-ui/types`, not by `ObjectStackAdapter`. A new exported extension point, `AdapterContextRegister`, lets a host declare the concrete adapter its provider installs; `useAdapter()` then returns that adapter and an `AdapterCtx.Provider` value is checked against it. `ContextAdapter` names the resolved type. `@object-ui/data-objectstack` moves from `dependencies` to `devDependencies` (one boundary test still reads it).
+  - **`@object-ui/core`**: exports `API_ACCESS_DENIED_CODES` and `isApiAccessDeniedError`, the `enable`-block API denial predicate, moved here unchanged so `@object-ui/react` can classify the denial without the adapter.
+  - **`@object-ui/data-objectstack`**: re-exports both names from `@object-ui/core`; its published face is unchanged.
+  - **`@object-ui/app-shell`**: declares `ObjectStackAdapter` on `AdapterContextRegister`, and the declaration ships in its published types, so a host that mounts `AdapterProvider` keeps today's `useAdapter()` type.
+  - **`@object-ui/plugin-designer`**: declares the same adapter for its own pages, which read the ObjectStack client.
+  
+  **BREAKING** (a type narrowing) for a TypeScript reader of `useAdapter()` / `AdapterCtx` from `@object-ui/react` that reads an `ObjectStackAdapter` member `DataSource` does not declare (`getClient`, `probeAppAccess`, `probeMetaItemAccess`, `getConnectionState`, `onConnectionStateChange`, `clearCache`, `queryDataset`, …) and does not import `@object-ui/app-shell`. Runtime behaviour is unchanged: the context holds the same adapter object as before.
+  
+  - **Before.** `useAdapter()` returned `ObjectStackAdapter | null` whatever the host installed.
+  - **Now.** It returns `DataSource | null` unless the host declares its adapter, and reading `getClient` off it is `error TS2339`.
+  - **Fix.** Either declare the adapter your provider installs, once, in your own package:
+  
+    ```ts
+    import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
+  
+    declare module '@object-ui/react' {
+      interface AdapterContextRegister {
+        adapter: ObjectStackAdapter;
+      }
+    }
+    ```
+  
+    or narrow at the call site that needs the ObjectStack-only member, and keep reading `DataSource` members everywhere else.
+- aec5f7b: refactor(app-shell)!: retire the 54 root-entry exports that nothing outside the package names
+  
+  `@object-ui/app-shell`'s root entry published 261 names. 57 of them appear in no file of this repository outside `ui/packages/app-shell/` (the measure covers `ui/`, `packages/` and `apps/`); three of those are taken by the package's own README examples and stay (`SignUpOffer`, `RuntimeBranding`, `studioOrgScopePath`). The other 54 leave the entry. Every module that defines them stays, and code inside the package keeps importing them from there; only the package entry stops publishing them. The entry now publishes 209 names (207, plus `InvitationSignUpPrompt` and `isDefaultProductName`, which main added meanwhile).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/app-shell#useExpressionContext, @object-ui/app-shell#UseUrlOverlayOptions, @object-ui/app-shell#UrlOverlayControls, @object-ui/app-shell#SettleSignalState, @object-ui/app-shell#isIdle, @object-ui/app-shell#ObjectUiGlobal, @object-ui/app-shell#ExpressionContextValue, @object-ui/app-shell#RecentItemInput, @object-ui/app-shell#RecentTextItem, @object-ui/app-shell#RecentItemLabelResolver, @object-ui/app-shell#isOverrideOnlyViewer, @object-ui/app-shell#actionAdmittedByOverride, @object-ui/app-shell#bypassedApproverNames, @object-ui/app-shell#DeclaredHomeApp, @object-ui/app-shell#AiSurfaceState, @object-ui/app-shell#PreviewBadgeProps, @object-ui/app-shell#RedirectWithSplashProps, @object-ui/app-shell#toastWithUndo, @object-ui/app-shell#ToastWithUndoOptions, @object-ui/app-shell#getCloudBase, @object-ui/app-shell#getBrandColor, @object-ui/app-shell#isRuntimeConfigInitialised, @object-ui/app-shell#RuntimeFeatures, @object-ui/app-shell#RecordFormPageProps, @object-ui/app-shell#DeclaredActionsBarProps, @object-ui/app-shell#addNavigationItem, @object-ui/app-shell#removeNavigationItems, @object-ui/app-shell#renameNavigationItems, @object-ui/app-shell#navigationEqual, @object-ui/app-shell#generateNavId, @object-ui/app-shell#CommandPaletteContextValue, @object-ui/app-shell#SignUpOfferContext, @object-ui/app-shell#HydratedUIMessage, @object-ui/app-shell#listAppComponents, @object-ui/app-shell#urlSegmentsToComponentRef, @object-ui/app-shell#AppComponentRegistryEntry, @object-ui/app-shell#MetadataPageShell, @object-ui/app-shell#listMetadataResources, @object-ui/app-shell#useMetadataTypes, @object-ui/app-shell#useTypesIndex, @object-ui/app-shell#matchesQuery, @object-ui/app-shell#MetadataPreviewProps, @object-ui/app-shell#MetadataInspectorProps, @object-ui/app-shell#StudioDesignSurfaceProps, @object-ui/app-shell#getStudioCanvasPreview, @object-ui/app-shell#listStudioCanvasPreviewTypes, @object-ui/app-shell#StudioObjectRecordsCanvas, @object-ui/app-shell#StudioCanvasPreview, @object-ui/app-shell#StudioCanvasPreviewProps, @object-ui/app-shell#useAssistant, @object-ui/app-shell#useRegisterAssistantEditor, @object-ui/app-shell#requestAssistantOpen, @object-ui/app-shell#AssistantEditorContext, @object-ui/app-shell#AssistantEditorField) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What retires is 54 names of `@object-ui/app-shell`'s published entry that no file in this repository outside the package names. The affected party is a TypeScript importer, and the compiler at that import delivers the break. -->
+  
+  **BREAKING** (an export retirement), shipped as `patch`: no metadata protocol kind moves. An importer of a retired name gets `TS2305` ("has no exported member") at its import line.
+  
+  Migration. A retired type that describes a name the entry still exports is derived from that name; everything else has no replacement on the entry.
+  
+  - FROM `UseUrlOverlayOptions` TO `Parameters<typeof useUrlOverlay>[1]`.
+  - FROM `UrlOverlayControls` TO `ReturnType<typeof useUrlOverlay>`.
+  - FROM `SettleSignalState` TO `ReturnType<typeof useSettleSignal>`.
+  - FROM `AiSurfaceState` TO `ReturnType<typeof useAiSurfaceEnabled>`.
+  - FROM `CommandPaletteContextValue` TO `ReturnType<typeof useCommandPalette>`.
+  - FROM `RecentItemInput` TO `Parameters<ReturnType<typeof useRecentItems>['addRecentItem']>[0]`.
+  - FROM `RecentTextItem` TO `Extract<RecentItem, { label: string }>`.
+  - FROM `RecentItemLabelResolver` TO `ReturnType<typeof useRecentItemLabel>`.
+  - FROM `DeclaredHomeApp` TO `NonNullable<Parameters<typeof resolveDeclaredHomePath>[0]>[number]`.
+  - FROM `RuntimeFeatures` TO `AppShellRuntimeConfig['features']`.
+  - FROM `SignUpOfferContext` TO `Parameters<typeof decideSignUpOffer>[1]`.
+  - FROM `HydratedUIMessage` TO `ReturnType<typeof toUIMessages>[number]`.
+  - FROM `AppComponentRegistryEntry` TO `Parameters<typeof registerAppComponent>[0]`.
+  - FROM `MetadataPreviewProps` TO `ComponentProps<MetadataPreview>` (`ComponentProps` from `react`).
+  - FROM `MetadataInspectorProps` TO `ComponentProps<MetadataInspector>`.
+  - FROM `StudioCanvasPreview` TO `Parameters<typeof registerStudioCanvasPreview>[1]`.
+  - FROM `StudioCanvasPreviewProps` TO `ComponentProps<Parameters<typeof registerStudioCanvasPreview>[1]>`.
+  - FROM `StudioDesignSurfaceProps` TO `ComponentProps<typeof StudioDesignSurface>`.
+  - FROM `PreviewBadgeProps` TO `ComponentProps<typeof PreviewBadge>`.
+  - FROM `RedirectWithSplashProps` TO `ComponentProps<typeof RedirectWithSplash>`.
+  - FROM `RecordFormPageProps` TO `ComponentProps<typeof RecordFormPage>`.
+  - FROM `DeclaredActionsBarProps` TO `ComponentProps<typeof DeclaredActionsBar>`.
+  - FROM `useExpressionContext`, `ExpressionContextValue`, `isIdle`, `ObjectUiGlobal`, `isOverrideOnlyViewer`, `actionAdmittedByOverride`, `bypassedApproverNames`, `toastWithUndo`, `ToastWithUndoOptions`, `getCloudBase`, `getBrandColor`, `isRuntimeConfigInitialised` TO nothing (no replacement on the entry).
+  - FROM `addNavigationItem`, `removeNavigationItems`, `renameNavigationItems`, `navigationEqual`, `generateNavId` TO nothing (no replacement on the entry).
+  - FROM `listAppComponents`, `urlSegmentsToComponentRef` TO nothing (no replacement on the entry): `getAppComponent` and `componentRefToUrlSegments` stay.
+  - FROM `MetadataPageShell`, `listMetadataResources`, `useMetadataTypes`, `useTypesIndex`, `matchesQuery` TO nothing (no replacement on the entry): `getMetadataResource`, `useMetadataClient` and `useGlobalDiagnostics` stay.
+  - FROM `getStudioCanvasPreview`, `listStudioCanvasPreviewTypes`, `StudioObjectRecordsCanvas` TO nothing (no replacement on the entry): `registerStudioCanvasPreview` stays.
+  - FROM `useAssistant`, `useRegisterAssistantEditor`, `requestAssistantOpen`, `AssistantEditorContext`, `AssistantEditorField` TO nothing (no replacement on the entry): `assistantBus` stays.
+  
+  `ui/docs/app-shell-extraction-guide.md`, the package's architecture guide, is rewritten to describe the package that ships: what each directory holds, the groups of names the entry publishes, its load-time registrations, its dependencies, and its three consumers in this repository.
+- e843b5b: feat(types,react,sdui-parser,app-shell)!: the node-level `visibleOn` / `hiddenOn` / `disabledOn` spellings are retired; `visibleWhen` / `hidden` / `disabled` are the one predicate each
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The three keys are `@object-ui/types` schema members on objectui's own node face, not an `@objectstack/spec` key, object definition, stored row or stored shape: the spec declares `visibleWhen` as the one conditional-visibility predicate at every layer (ADR-0089) and never declared a `*On` suffix on a page component, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. Each old spelling is refused by name on both faces (the TypeScript compiler, the Zod mirror behind `objectui validate`), and the refusal names the surviving key; that is the same disposition the objectui retirements took when the package merged into this repository (maintainer ruling 28 = B on objectstack#25831). The guidance below is for the author of a page, not for a metadata upgrader. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and what narrows is a declared schema key on a published metadata face, not a runtime-only interface, a type annotation or a runtime export (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `@objectstack/spec` declares exactly one conditional-visibility predicate at every layer, `visibleWhen`, and objectui carried three spellings of its own beside it: `visibleOn` beside `visibleWhen`, `hiddenOn` beside `hidden`, `disabledOn` beside `disabled`. Each pair was evaluated by the same code with the same polarity, so the second spelling added a dialect and nothing else. The three are retired, with no alias window.
+  
+  - **`@object-ui/types`**: `BaseSchema.visibleOn`, `hiddenOn` and `disabledOn` are `never` on the TypeScript face and alias refusals on the Zod mirror. A document that writes one is refused at that key, and the message names the key that survives (`visibleWhen`, `hidden`, `disabled`), says the polarity is the same, and says the value is unchanged. `objectui validate` reads the same mirror, so it prints the same refusal. The `object-view` table slot's refusal of the same three keys now names the surviving node key too (write `visibleWhen` / `hidden` / `disabled` on the object-view node itself) instead of sending the author to a retired spelling. Boolean `visible` stays: the spec declares it on actions, navigation entries, tabs, alerts and settings, and the renderer keeps evaluating it.
+  - **`@object-ui/react`**: `SchemaRenderer`'s visibility chain has three legs, `visibleWhen` and `visible` (shown when truthy) and `hidden` (hidden when truthy), and the enablement gate has one, `disabled`. A stale retired key that reaches the renderer unvalidated is not consulted and is held out of the component's props, so it neither gates the node nor lands in the DOM.
+  - **`@objectstack/sdui-parser`**: the three keys are no longer base props. `validateTree` reports each as an `unknown-prop` diagnostic that names the surviving key, so a TSX tree is told the same thing a JSON document is. `checkRetiredVisibilityDialect` and `RETIRED_VISIBILITY_DIALECTS` are exported for that reading.
+  - **`@object-ui/app-shell`**: the command palette reads a navigation entry's `visible` only; the `visibleOn` fallback it carried read a key `NavigationItem` never declared.
+  
+  **BREAKING** (an accept-set narrowing) for any page, view or component document that writes `visibleOn`, `hiddenOn` or `disabledOn` on a node. No shipped example, fixture or skill example in this repository wrote one; the ones in the documentation and the `objectui` skill are rewritten in this change.
+  
+  - **Before.** The three keys parsed, were evaluated beside their canonical twin, and the docs taught both spellings.
+  - **Now.** Each is refused by name on `objectui validate`, on the Zod mirror, by the TypeScript compiler and by the SDUI parser, and the renderer does not read it.
+  - **Fix.** Rename the key and keep the value: `visibleOn` becomes `visibleWhen`, `hiddenOn` becomes `hidden`, `disabledOn` becomes `disabled`. A form field's `fields[].visibleOn` is a different, view-level slot and is unchanged.
+- 9a0108c: fix(app-shell): a record locked by an approval is shown locked to a reader outside that approval
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A member who can read a record but is not on its approval (not an approver, not the submitter, no override) was offered inline edit while a `lockRecord: true` approval held the record, and the save was then refused with `409 RECORD_LOCKED`. The approvals list serves a request only to its participants, so the record page read that member's empty list as "no approval is running".
+  
+  When the list finds no pending request, the record page now also reads the record's own lock, `client.approvals.getRecordLock(object, recordId)`, which the server answers to every caller who can read the record with `{ locked }` and nothing else. A locked answer shows the record locked: Edit is disabled, inline edit is not offered, and the "Locked for approval" band is drawn without a recall button, because a reader who cannot see the request did not submit it. The reader still sees nothing of the request itself (approvers, comments, attachments).
+  
+  Unchanged: a pending request the viewer can see still decides with its own node's `lockRecord`, and a composition without the approvals service (the lock read answers `501`) still opens an answered empty record editable.
+- f20a491: fix(app-shell): a failed flow run reads the refusal its write node met the way a record save reads it, instead of the engine's node-prefixed English diagnostic
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What the user sees.** A flow that fails because a write node was refused (a duplicate, a validation rule, a permission denial) used to show the run's `message` in the dialog and toast: `Node 'create_account' failed: create_record(crm_account) failed: …`, in English under every locale. The Console now shows, in order: the flow's authored `errorMessage`; the producer-marked `userMessage`; the inner refusal's own sentence (a permission denial shows the record form's localized "no permission" line instead of server prose); and only then the run's `message`.
+  - **Where it applies.** Both failure shapes the flow routes answer: `400 FLOW_FAILED` (`error.userMessage` at the envelope's top level, `error.details.innerRefusal`) and the `200` failed run (`AutomationResult.userMessage`, `AutomationResult.innerRefusal`), for the FlowRunner's resume and both flow-launch hosts.
+  - **What does not change.** The wire `message` is untouched, a run that met no refusal still shows its `message`, and nothing parses the run's `message`.
+  
+  What to do: nothing.
+- e638193: refactor(app-shell): the Console `ObjectView`'s leaf pieces move into a sibling module
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "object not found" state (`ObjectNotFoundState`), the viewport check that decides whether the saved-view tab strip is drawn, and the inline-edit toggle's session-only callback move verbatim out of `views/ObjectView.tsx` into `objectViewChrome.tsx` beside it. No logic, name or rendered output changes. `ObjectView.tsx` re-exports every name it exported before, and the package entry is unchanged.
+  
+  What to do: nothing.
+- e677770: refactor(app-shell): the Console `ObjectView`'s header toolbar and list URL state move into sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three concerns move verbatim out of `ObjectViewInner` in `views/ObjectView.tsx`. The header's `list_toolbar` actions, the nav `runAction` deep link and the `action:bar` node move into `useObjectViewHeaderToolbar` in `objectViewHeaderToolbar.ts`. The list's toolbar state in the URL (the seed, its write-back and "Reset view") moves into `useObjectViewListUrlState`, and the `filter[...]` equality filters with the restored user-filter selections into `useObjectViewUrlFilters`, both in `objectViewListUrlState.ts`. The component passes every input in and reads the returned values. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- d00215f: refactor(app-shell): the Console `ObjectView`'s module-level helpers move into sibling modules
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Module-level helpers, types and constants of `views/ObjectView.tsx` (the record links the list publishes, the saved-view tab, override and column helpers, and the small toolbar and filter helpers) move verbatim into `objectViewRecordLinks.ts`, `objectViewTabs.ts` and `objectViewHelpers.ts` beside it. No logic, name or rendered output changes. `ObjectView.tsx` keeps the component and re-exports every name it exported before, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 3db7bbf: refactor(app-shell): the Console `ObjectView`'s identity import and record navigation move into sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two concerns move verbatim out of `ObjectViewInner` in `views/ObjectView.tsx`. The identity-import gate, its password-policy state and data source, and the managed-environment Users marker move into `useObjectViewIdentity` in `objectViewIdentity.tsx`. The record navigation overlay (how a row opens its record, the drawer's `?recordId=` URL state, "expand to full page" and the list's record links) moves into `useObjectViewRecordNavigation` in `objectViewRecordNavigation.ts`. The component passes every input in and reads the returned values. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- b9cd980: refactor(app-shell): the Console `ObjectView`'s realtime refresh and record-count fetch move into a sibling hook
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The realtime subscription that refreshes the list when the server reports a change, the reconnection conflict resolution, and the footer's `$top: 0` record-count fetch move verbatim out of `ObjectViewInner` in `views/ObjectView.tsx` into `useObjectViewLiveData` in `objectViewLiveData.ts` beside it. The component calls the hook at the same place, so the hook order is unchanged; the record-count state stays in the component and is passed in with the other inputs. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 96635f5: refactor(app-shell): the Console `ObjectView`'s view-options family moves into a sibling module
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The per-kind `options` blocks `views/ObjectView.tsx` hands `ListView` (`timelineViewOptions`, `calendarViewOptions`, `ganttViewOptions`, `galleryViewOptions`, `kanbanViewOptions`), `storedLegacyOptions`, the by-value options comparison and `dispatchViewPatches` move verbatim into `objectViewOptions.ts` beside it. No logic, name or rendered output changes. `ObjectView.tsx` re-exports every name it exported before, and the package entry is unchanged.
+  
+  What to do: nothing.
+- a7f4b99: refactor(app-shell): the Console `ObjectView`'s page header and record overlay move into sibling sub-components
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two blocks of `ObjectViewInner`'s JSX in `views/ObjectView.tsx` move verbatim into sub-components. The page header (title, managed-by badge, icon, create button, Import, the toolbar actions, the overflow menu and the folded face) moves into `ObjectViewPageHeader` in `objectViewPageHeader.tsx`. The record detail overlay drawn for every navigation mode but `split` moves into `ObjectViewRecordOverlay` in `objectViewRecordOverlay.tsx`. The component passes every value in as a prop. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 08ed7e2: refactor(app-shell): the Console `ObjectView`'s view tab strip, plugin schema and header chrome move into sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three concerns move verbatim out of `ObjectViewInner` in `views/ObjectView.tsx`. The view tab items, the `ViewTabBar` handed to the list toolbar and its own-row face move into `useObjectViewTabBar` in `objectViewTabBar.tsx`. The views with the open draft merged in and the `ObjectViewSchema` handed to the plugin `ObjectView` move into `useObjectViewPluginSchema` in `objectViewPluginSchema.ts`. The header's create button, its folded actions menu and the list area for a refused view move into `useObjectViewHeaderChrome` in `objectViewHeaderChrome.tsx`. The component passes every input in and reads the returned values. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 3acbeff: refactor(app-shell): the Console `ObjectView`'s list toolbar affordances move into a sibling hook
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The environment list's entitlements, the object's list actions and their localized toolbar copies, and the create and import buttons' toolbar-scope predicates move verbatim out of `ObjectViewInner` in `views/ObjectView.tsx` into `useObjectViewToolbarAffordances` in `objectViewToolbarAffordances.ts` beside it. The object-level verdicts (`resolveAffordance`) stay in the component and are passed in with every other input. No logic, name or rendered output changes, and the package entry is unchanged.
+  
+  What to do: nothing.
+- a52cfaf: fix(app-shell): the flow inspector's list field shows a stored string as one entry instead of an empty list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A notify node's `channels` may be a single string (`channels: 'email'`) or a list; the spec accepts both and the runtime reads the string as a one-item list. Studio's flow inspector read any non-list value as empty, so the field showed no channels and adding one saved a list without `email`. A stored non-blank string now reads as a one-entry list (trimmed, as the runtime does). An edit saves the list form (`['email', 'sms']`); a field left untouched keeps the stored string.
+- 9494dd8: **BREAKING** — `PositionGrantVia` (`@objectstack/spec/contracts`) loses its `'name'` member, and the Setup position list drops its "(by name)" badge (#26022).
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Ruling-ref: #13419 ruling B (`5472608110`); 「甲」 as amended (`6303865025`); triage unlock on #26022 (`6424661273`)
+  
+  **Why.** The security plugin no longer grants a position's holders the permission set that only shares the position's name: a position grants the sets its definition names in `permissionSets`, and nothing else (#24757). Since then nothing serves `via: 'name'` on `describePositionGrants` or on `GET /api/v1/meta/position?include=grants`. The spec still published the member and the console still drew a badge for it, so both described a grant the runtime no longer makes. #13419 ruling B retires the channel in 18.x with no retirement stage.
+  
+  What changes:
+  
+  - `@objectstack/spec`: `PositionGrantVia` is `'definition'`. Every entry of `PositionGrantSummary.permissionSets` carries `via: 'definition'`, as the security plugin already serves it.
+  - `@object-ui/app-shell`, Setup → Positions: the granted-sets column shows each set's name alone. The "(by name)" / 「（同名）」 badge and its hint are gone, with the i18n keys `engine.position.grants.byName` and `engine.position.grants.byNameHint` (en and zh).
+  - `@object-ui/app-shell`, Setup → Users on a managed environment: the 「未授权」 marker judges a held position only by the sets its definition lists. It no longer counts a permission set that shares the position's name, and it no longer reads the permission-set catalogue to do so. A holder of such a position is now marked when nothing else grants them a set beyond the baseline, which is what the server enforces. Before this change, such a holder was left unmarked.
+  
+  For TypeScript consumers: code that compares a `PositionGrantVia` value with `'name'` no longer compiles (TS2367). Delete that branch, because no server serves the value. To have a position grant the set that shares its name, name the set in the position's `permissionSets`. No stored row or authored metadata carries the type, so nothing is converted.
+  
+  The ADR-0087 D3 semantic entry `position-grant-via-name-retired` records the retirement. `PositionGrantVia` types a served description, not a stack collection or a metadata type, so there is no source for a D2 conversion to rewrite.
+  
+  <!-- adr-0087: registered position-grant-via-name-retired -->
+- f00cbe3: fix(cli,i18n,console): the hosted product reads "ObjectOS Cloud" everywhere a user reads it; the Community Console carries a "Powered by ObjectStack" mark
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ObjectOS is one product in three editions — Community (this repository's runtime and Console, open source), Cloud (cloud.objectos.ai) and Enterprise — and ObjectStack is the name of the protocol, SDK, CLI and framework. The hosted product is "ObjectOS Cloud" wherever a user reads it; it was still "ObjectStack Cloud" in the CLI and in the Console's cloud-install strings.
+  
+  - **`@objectstack/cli`.** `os cloud login`, `os cloud logout`, `os cloud whoami`, `os package publish` and `os plugin publish` say "ObjectOS Cloud" in their `--help` descriptions, their `--url` / `--server` / `--token` / `--visibility` flag descriptions, their headers and their "Not logged in" prescriptions; so do the `os serve` welcome page's link to the cloud console and the shared "Authentication required" message. The CLI README and the deployment CLI reference follow. Internal identifiers are unchanged: `~/.objectstack/cloud.json`, `OS_CLOUD_API_KEY`, `OS_CLOUD_URL`, the `os cloud …` command names.
+  - **`@object-ui/i18n`.** The cloud-connection "Connected to …" title and the three cloud-install dialog sentences ("You need to be signed into …", "… sign into … first") name "ObjectOS Cloud" in all ten locales, the product name kept untranslated inside each locale's sentence. New key `auth.shell.poweredBy` ("Powered by ObjectStack") in all ten locales.
+  - **`@object-ui/app-shell`.** New `isDefaultProductName()`: true while the deployment carries the default `branding.productName` ("ObjectOS"), false once a runtime has pushed its own.
+  - **`@object-ui/console`.** The sign-in layout (login, register, forgot/reset password, verify email, setup, consent, device, invitation) shows a small "Powered by ObjectStack" link to objectstack.ai under the form when `isDefaultProductName()` is true. A deployment that pushes its own product name — ObjectOS Cloud, Enterprise, a cloud-connected workspace — shows its own name and no second brand line. The default product name, `logo.svg`, `manifest.json` and `admin@objectos.ai` are unchanged.
+  
+  What to do: nothing. An operator who rebrands the Console through `branding.productName` keeps a single brand line, as before.
+- 9f16f16: feat(plugin-map): a map view with no style of its own draws the deployment's default map style before the public demo style
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An operator who sets `OS_CONSOLE_MAP_STYLE_URL` now gets that style on every map view that names none. A map draws the first style it finds, in this order:
+  
+  1. the view's own style: `mapStyle`, then `map.style`;
+  2. the deployment's default style, the runtime-config `mapStyleUrl`;
+  3. the public MapLibre demo style.
+  
+  - **`@object-ui/react`:** `HostMapStyleProvider` and `useHostMapStyle()` let a host hand the deployment's default map style to the map renderer. Outside a provider, the hook answers `undefined` and the map keeps the demo style.
+  - **`@object-ui/app-shell`:** the runtime config reads the top-level `mapStyleUrl` into `AppShellRuntimeConfig.mapStyleUrl`, re-read from each payload, and `ConsoleShell` supplies it through `HostMapStyleProvider`.
+  - **`@object-ui/plugin-map`:** `ObjectMap` reads the host's style after the view's own. When the deployment's style fails to load, the notice above the record list says the deployment's default map style could not be loaded and asks the reader to have an administrator check it. It no longer blames the public default tiles, which that map never drew.
+  - **`@object-ui/i18n`:** one new key, `element.map.styleFailedDeployment`, in all ten packs.
+  
+  What to do: nothing. A deployment that sets no `OS_CONSOLE_MAP_STYLE_URL` draws the demo style as before, and a view's own `mapStyle` still wins.
+- b3ed6c8: fix(app-shell): the record create and update toasts name the saved record
+  
+  Clause-②: no (adds or rewords message keys; no key is removed, so `TranslationKeys` only widens; no exported runtime contract changes)
+  Metadata-protocol: none
+  
+  A user entering several records in a row saw "Task created successfully" after each save and could not tell which record was just written. The Console's record-form save toasts now carry the saved record's display name (ADR-0079), for example `Task "Quarterly review" created` and `Task "Quarterly review" updated`. This covers the record-form overlay on a list and the child-record form opened over a parent record's page.
+  
+  - **`@object-ui/app-shell`:** the name comes from the same display-name resolver the record page title and lookups use, read through the saved object's declared name field. A record with nothing nameable (the resolver would only answer `Record #ID`) keeps the object-label toast it showed before.
+  - **`@object-ui/i18n`:** two new keys under `form.` in all ten packs, `createdNamed` and `updatedNamed`, each with `{{object}}` (the object label) and `{{title}}` (the record's name). The existing `form.createSuccess` / `form.updateSuccess` strings are unchanged and remain the toast for a record with no name.
+  
+  Settings saves and flow-completion toasts are unchanged.
+- 61ba04f: fix(app-shell,console): one app opens under one address — a name-alias route moves onto the package id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app with a package id answered under two address families in one session. ADR-0048 keys `/apps/<segment>` on the package id, and every sidebar entry builds on it, but the app's `name` still resolves as an alias, and a page opened on the alias built every link of its own (list rows, record pages, related lists) on the alias. Landing on `/apps/clm/…` therefore opened contracts under the name and obligations and the approvals inbox under `/apps/app.objectstack.hotclm/…`.
+  
+  - **`@object-ui/app-shell`:** a route under `/apps/<name>/…` whose app carries a package id is rewritten, with `replace`, to the same path under `/apps/<package id>/…`, keeping the query string, hash and history state. Old name-based bookmarks and shared links keep opening, now on the one address. The top-bar logo and every Home affordance (`resolveDeclaredHomePath`) name the declared app by its package id. An app without a package id, an app whose name is its package id, and every app after the first of a package that ships several (the package id opens the first) keep their name as their address.
+  - **`@object-ui/console`:** the `/` landing (`resolveLandingPath`) names the landing app by the same address, so post-login and the logo agree and no redirect hop follows.
+  
+  What to do: nothing. Links that name an app by its name keep working; they now arrive on its package-id address.
+- 5cb1c1a: fix(app-shell): the permission matrix sets and shows each object's read and write record scope
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0084 declares a record-scope column for the permission matrix, but Setup → Permission Sets and Studio → Access had no control for an object permission's `readScope` / `writeScope`. The only way to set them was `PUT /api/v1/meta/permission/:name`.
+  
+  - **Pickers.** Every object row, in both the Setup table and the Studio Access matrix, now has a **Read scope** and a **Write scope** picker. Each lists "Not set" and the five `ObjectAccessScopeSchema` values: own, own and reports, my unit, my unit and below, whole org. A picked value saves and reloads unchanged. This holds at the environment door and at the package door, where the slice merge keeps it. "Not set" removes the key.
+  - **Hierarchy values.** "Own and reports", "My unit" and "My unit and below" carry the hint "requires enterprise; otherwise owner-only" and stay selectable. The open runtime resolves them to the owner alone. No hierarchy resolver is installed there.
+  - **View All / Modify All.** The spec refuses `readScope` beside View All or Modify All, and `writeScope` beside Modify All, because those bits already grant org-wide access. Ticking View All now disables the read-scope picker and removes `readScope`. Ticking Modify All disables both pickers and removes both scopes. The **All** bulk button does the same. Before this change, both paths saved a row the server refuses. Effective access does not change, because the resolvers answer `org` on those bits before they read a scope. "CRUD", "R" and "None" are unchanged.
+  
+  What to do: nothing. No spec key, stored shape or API changes.
+- 77a52cf: fix(app-shell): the Setup position page shows, read-only, what each permission set the position names grants
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A position grants access only through the permission sets its definition names in `permissionSets`. The position page in Setup → Positions listed those names but showed nothing of what they grant, so an admin had to open every set to see its objects, capabilities and record scopes.
+  
+  - **One preview per named set.** Under the position's definition, beside its holders, the page now shows each named set's permission preview: the object × capability grid with each object's read and write scope, field-level overrides, row-level policies, system permissions and tabs. The previews follow the order the position names the sets. Each is headed by the set's name, which links to the set's own page.
+  - **No merge, no editing.** Each preview shows one set as stored. The page does not compute what the sets add up to, and nothing in the previews is editable. A set is changed on its own page.
+  - **A set that does not load.** A named set the server does not serve shows one line, `Permission set "NAME" was not found.`, for that set only; the other previews still show. A read the server refuses says that, with the server's sentence, instead of "not found".
+  - **No sets.** A position that names no permission sets says so.
+  
+  The permission-set page itself is unchanged: its matrix already shows each object's read and write scope.
+  
+  What to do: nothing. No spec key, stored shape or API changes.
+- 0e7be7e: fix(react,components,app-shell): a delegated admin's out-of-scope save shows the server's reason instead of the fixed no-permission line
+  
+  Clause-②: yes (widening: `@object-ui/react` exports a new `delegationScopeMessage`)
+  Metadata-protocol: none
+  
+  When a delegated administrator saved something outside their own scope, the server answered `403 DELEGATION_SCOPE_VIOLATION` with the boundary that refused it (a business unit outside the delegated subtree, a permission set not in the scope's allowlist, a target user outside the subtree). The console read every 403 as a plain denial, so the toast and the in-form banner said only "You don't have permission to save this record."
+  
+  - **`@object-ui/react`.** New `delegationScopeMessage(err)`: the server's reason, without the `[Security] ` machine prefix, when the error's code (`code` or `details.code`) is `DELEGATION_SCOPE_VIOLATION`; `null` for everything else. It is read before `isPermissionError`, which still answers true for any 403.
+  - **`@object-ui/components`.** The record form's toast and banner show that reason. A producer-marked `userMessage` still comes first.
+  - **`@object-ui/app-shell`.** A flow run whose write node met the same refusal (`innerRefusal`) shows the same reason.
+  
+  Every other denial is unchanged: `PERMISSION_DENIED`, `FORBIDDEN`, a bare 403 and a row-level-security refusal still show the fixed localized line and never the server's text.
+  
+  What to do: nothing.
+- e14d9ce: fix(app-shell): the Delegated Admin Scope block lists the companion grants a delegate needs, and grants the missing ones in one click
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A permission set's admin scope says what its holder may administer; it does not let the holder in. A delegate also needs the `setup.access` capability to enter Setup, read on `sys_user`, `sys_business_unit` and `sys_business_unit_member` so the lookups can pick people and units, and create, read, edit and delete on `sys_user_position` for the assignment rows. The scope block in the permission set editor now lists these five once the scope names a business unit, and marks each one as granted or not by the set being edited.
+  
+  "Grant the missing ones" adds only what is missing to the same set, in one edit that the set's normal Save persists: `setup.access` joins `systemPermissions`, and each object row gains only the flags it lacks. No grant the set already carries is removed or narrowed, and no new key is written. Under a package (the Studio Access pillar) the list is shown without the action, with a note that these grants belong on an environment permission set in Setup: the package editor saves only the package's own objects.
+  
+  What to do: nothing. A set's stored shape is unchanged.
+- d613fdc: fix(app-shell): a position created from Setup → Positions → New is saved live and shows in the Positions list right after Save, as a permission set does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** the `position` resource now registers `createLive: true`, the key the permission set already carries. Outside a package binding, "New" writes the position live (one PUT with no `mode` and no `package`, with the first-write pin `If-None-Match: *`), so it appears in the Positions list and its detail page reads it at once. Before, Setup carried no package, the create landed as a draft with no package, the list showed nothing and a read of the name answered not found until the admin published it by hand. Under a package binding (`?package=`) the create stays a package draft, as before.
+  - Later edits of an existing position in Setup still save as drafts, the generic editor's rule for every type; that is unchanged here.
+  
+  What to do: nothing.
+- 586a7ed: fix(app-shell): in the field type picker, Enter after a search picks the type the search names
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Studio's Add field popover and the field inspector, a search highlighted the first listed type, and a type whose description holds the query as a word can be listed before the type the query names. On a Phone field, typing "Number" listed Phone first ("A phone number."), Phone stayed highlighted, and Enter committed nothing. A query now highlights the first listed type it names by name, id or English name, and the first listed type when it names none, so Enter commits Number. With an empty query the current type is highlighted as before, and re-choosing it still commits nothing. The arrow keys move on from the highlighted type as before.
+- 6ea429d: chore(ui): every ui package whose `test` script calls `vitest` now declares `vitest` as a devDependency, so `pnpm --filter @object-ui/PKG test` runs from the repository root
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The package `test` scripts run `vitest run --root ../.. packages/PKG/`. A pnpm script resolves its binaries from the package's own `node_modules/.bin` and the workspace root's, and vitest was installed only under `ui/node_modules/.bin`, so 24 of the 41 ui packages with a `test` script failed with `vitest: not found` from both the repository root and `ui/`. Each of them now declares `vitest: ^4.1.10`, the range `ui/package.json` and the other 17 packages already declare; the lockfile resolves every new entry to the snapshot those packages already use, so no package gains a copy. Nothing a consumer installs changes: only the `devDependencies` field of the published `package.json` moves.
+- 48a9d9d: fix(app-shell): a member takes back their own comment reaction through the unreact door, with no object delete grant
+  
+  A member whose grants are the every-member ones could add a reaction on the record feed and never take it back. The reaction chip removed through the generic data door's `DELETE /api/v1/data/sys_comment_reaction/:id`, which needs an object-level `delete` grant that no every-member set may carry (ADR-0090 D5), and the `feedReactionRemove` row of the affordance-to-grant map read that grant, so the chip offered no take-back at all.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The record page now removes the caller's own reaction row through the unreact door, `DELETE /api/v1/comments/reactions/:id`, which `@objectstack/plugin-audit` mounts. The door removes only the caller's own row; a refused take-back puts the reaction back on screen and says it was not saved, as before.
+  - `feedReactionRemove` in `@object-ui/core`'s `AFFORDANCE_GRANTS` now reads `{ crud: null, grant: 'create' }`: its write no longer goes through the data door, so no CRUD bit is read, and it asks the grant the reaction was added under. Whose reaction a chip shows still decides which chips offer the take-back: a click on another member's reaction adds the caller's own.
+  - A member who holds the `delete` grant sees the same behaviour: the take-back goes through the same door.
+- 71c620a: fix(app-shell): the permission editor tells the delegated-admin companion list whether it edits under a package, instead of the list guessing from its presentation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/app-shell`:** `PermissionMatrixEditPage` now passes `packageBound={!!packageId}` to `PermissionAdvancedFacets` at both of its mounts (Setup's stacked page and the Studio Access pillar's tabs). The facet's `packageBound` prop defaults to `false` and no longer reads its value from `only`, which picks a presentation, not a binding. What an author sees does not change today: the Studio Access pillar always edits under a package and Setup's permission page never does. A host that sets one without the other now gets the face that matches its binding: under a package the companion grants are listed unmarked with the package note, otherwise they are marked with the one-click grant.
+  
+  What to do: nothing.
+- 26e7c75: fix(app-shell): on a narrow window, a toast raised beside the record drawer no longer covers the record's Edit and ⋯ buttons
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a right-edge drawer is open and the window is too narrow for a toast beside it (a 720px record drawer on a 1024px window, a split screen, a phone), the console's toaster drops below the drawer's header. It cleared only the drawer's own header, so the success toast raised by creating a record sat on the record header's Edit button and ⋯ menu for its whole four seconds. The toast now also drops below the drawer's first row of controls, measured from the drawer's layout, so it clears the record's actions row for any drawer content. Wide windows keep the toast in the strip beside the drawer, as before.
+  
+  What to do: nothing.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [6ad226a]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [80f267d]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [934810c]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [62ba5ef]
+- Updated dependencies [dfaad4d]
+- Updated dependencies [c8cb510]
+- Updated dependencies [c7aa9cd]
+- Updated dependencies [326a559]
+- Updated dependencies [679fc7c]
+- Updated dependencies [054652b]
+- Updated dependencies [411fc00]
+- Updated dependencies [9c3097e]
+- Updated dependencies [ff91895]
+- Updated dependencies [326a559]
+- Updated dependencies [712770b]
+- Updated dependencies [4f7e041]
+- Updated dependencies [326a559]
+- Updated dependencies [7bbc0b9]
+- Updated dependencies [775a000]
+- Updated dependencies [d98d3e2]
+- Updated dependencies [cc378e9]
+- Updated dependencies [56a2346]
+- Updated dependencies [c86c823]
+- Updated dependencies [ef025fe]
+- Updated dependencies [326a559]
+- Updated dependencies [1bbb7bf]
+- Updated dependencies [e843b5b]
+- Updated dependencies [c14e910]
+- Updated dependencies [4f48d2b]
+- Updated dependencies [9598405]
+- Updated dependencies [6676991]
+- Updated dependencies [ef5d0a4]
+- Updated dependencies [3993793]
+- Updated dependencies [0b76a1f]
+- Updated dependencies [4391c50]
+- Updated dependencies [eeaa827]
+- Updated dependencies [7158025]
+- Updated dependencies [222755e]
+- Updated dependencies [9494dd8]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [f00cbe3]
+- Updated dependencies [13136f7]
+- Updated dependencies [9f16f16]
+- Updated dependencies [b3ed6c8]
+- Updated dependencies [f02e644]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [0e7be7e]
+- Updated dependencies [b727956]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [6ea429d]
+- Updated dependencies [4548ba3]
+- Updated dependencies [0489214]
+- Updated dependencies [6390fe5]
+- Updated dependencies [6a2866a]
+- Updated dependencies [48a9d9d]
+- Updated dependencies [57ab06b]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+  - @objectstack/lint@18.2.0
+  - @object-ui/components@18.2.0
+  - @object-ui/layout@18.2.0
+  - @object-ui/plugin-calendar@18.2.0
+  - @object-ui/plugin-dashboard@18.2.0
+  - @object-ui/plugin-detail@18.2.0
+  - @object-ui/plugin-grid@18.2.0
+  - @object-ui/plugin-kanban@18.2.0
+  - @object-ui/react@18.2.0
+  - @object-ui/i18n@18.2.0
+  - @object-ui/types@18.2.0
+  - @object-ui/core@18.2.0
+  - @objectstack/formula@18.2.0
+  - @object-ui/auth@18.2.0
+  - @object-ui/collaboration@18.2.0
+  - @object-ui/data-objectstack@18.2.0
+  - @object-ui/fields@18.2.0
+  - @object-ui/permissions@18.2.0
+  - @object-ui/plugin-charts@18.2.0
+  - @object-ui/plugin-chatbot@18.2.0
+  - @object-ui/plugin-designer@18.2.0
+  - @object-ui/plugin-editor@18.2.0
+  - @object-ui/plugin-form@18.2.0
+  - @object-ui/plugin-list@18.2.0
+  - @object-ui/plugin-report@18.2.0
+  - @object-ui/plugin-view@18.2.0
+  - @object-ui/providers@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

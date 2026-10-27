@@ -42,6 +42,7 @@ import { signUpRefusalMessages } from './signUpRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
+import { invitationArrivalCopy, useInvitationPreview } from './invitationArrival.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -105,6 +106,8 @@ export function RegisterPage() {
   const signedOut = sessionChecked && !user;
   const bootstrap = useBootstrapStatus(signedOut && needsBootstrapProbe(authConfig, invitationRedirect));
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
+  const invitationPreview = useInvitationPreview(redirect);
 
   // Sign-up switched off — bounce a signed-out visitor to /login, keeping
   // `?redirect=`. A signed-in one is moved on below instead, never to /login.
@@ -132,6 +135,7 @@ export function RegisterPage() {
   }
 
   const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  const invitationCopy = invitationRedirect ? invitationArrivalCopy('register', invitationPreview, t) : null;
 
   // Registration here is by invitation only. Say so BEFORE the form; the
   // sentence is the `SELF_REGISTRATION_CLOSED` refusal's own copy, the same
@@ -226,13 +230,11 @@ export function RegisterPage() {
         onVerificationRequired={(email) => setPendingEmail(email)}
         loginUrl={loginUrl}
         // #25886 — an invitee is told to register the invited address: the
-        // invitation is accepted only by the account that carries it.
-        title={invitationRedirect ? t('auth.register.invitationTitle') : t('auth.register.title')}
-        description={
-          invitationRedirect
-            ? t('auth.register.invitationDescription')
-            : t('auth.register.description')
-        }
+        // invitation is accepted only by the account that carries it. #26473 —
+        // with the preview, the card names the inviter and the organization,
+        // and shows the masked address; the email field stays empty.
+        title={invitationCopy ? invitationCopy.title : t('auth.register.title')}
+        description={invitationCopy ? invitationCopy.description : t('auth.register.description')}
         linkComponent={RouterLink}
         errorMessages={signUpRefusalMessages(t)}
         labels={{

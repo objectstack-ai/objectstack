@@ -202,13 +202,17 @@ export function placeholdersOf(value) {
  * re-implementing the parse: see that function's header for why this repo
  * treats a second copy of a reader as a defect and not a convenience.
  */
-export function readDesignerPairs(root, { source = null, label = DESIGNER_TABLE, require = true } = {}) {
+export function readDesignerPairs(
+  root,
+  { source = null, label = DESIGNER_TABLE, require = true, readHome = null } = {},
+) {
   const { values } = collectDesignerKeys(root, {
     consts: DESIGNER_PAIR_CONSTS,
     source,
     label,
     withValues: true,
     require,
+    readHome,
   });
   // Unreachable — `withValues` is requested right above. Asserted rather than
   // coerced to an empty map: an empty map would compare nothing and pass, which

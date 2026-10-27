@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -234,7 +235,7 @@ describe('QUICK_REFERENCE.md — every documented `pnpm` command exists', () => 
   });
 });
 
-describe('QUICK_REFERENCE.md — the "Run Examples" section covers the examples that run', () => {
+describe('QUICK_REFERENCE.md — the "Examples" section covers the examples that run', () => {
   /**
    * The reverse direction, and the one that would have caught this card before it was
    * filed. The forward test above only says the documented examples exist; it stays
@@ -245,16 +246,25 @@ describe('QUICK_REFERENCE.md — the "Run Examples" section covers the examples 
    * when its manifest declares a `dev` script. `hello-world` (a snippet) and
    * `schema-catalog` (a data package) declare none, so they are correctly absent from
    * the command block — and the day either grows one, this goes red.
+   *
+   * Since the two host-console examples were deleted (#25922) no `examples/*` package
+   * is a dev server, and the section says so in words instead of listing commands. That
+   * sentence is pinned for as long as it is true, so neither half can go stale alone:
+   * an example that grows a `dev` script reds the sentence, and the command check
+   * below takes over.
    */
   it('documents a dev command for every `examples/*` package that declares one', () => {
     const runnable = workspacePackages.filter((p) => p.dir.startsWith('examples/') && p.scripts.has('dev'));
-    expect(
-      runnable.length,
-      'no `examples/*` package declares a `dev` script any more — the "Run Examples" section ' +
-        'is now describing something that does not exist and needs rewriting, not re-pinning',
-    ).toBeGreaterThan(0);
-
-    const block = section('### Run Examples');
+    const block = section('### Examples');
+    const noneRuns = 'No directory under `examples/` is a dev server';
+    if (runnable.length === 0) {
+      expect(block, `${docRel}'s "Examples" section must say that no example is a dev server`).toContain(noneRuns);
+      expect(block, `${docRel}'s "Examples" section documents a dev command for an example that has none`).not.toMatch(
+        /--filter @object-ui\/example-[\w-]+ dev/,
+      );
+      return;
+    }
+    expect(block, `${docRel} says no example is a dev server, but ${JSON.stringify(runnable.map((p) => p.dir))} declare one`).not.toContain(noneRuns);
     const missing = runnable.filter((p) => !block.includes(`--filter ${p.name} dev`));
 
     expect(
@@ -336,14 +346,16 @@ describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
   });
 });
 
-describe('QUICK_REFERENCE.md — the published-package count is derived', () => {
+describe('QUICK_REFERENCE.md — the published-package count is not written by hand', () => {
   /**
-   * The count kept a number rather than becoming a pointer, because unlike a churning
-   * enumeration it has an exact anchor (`private` in each manifest) and it tells the
-   * reader something a pointer cannot: the scale of the repo. What it may not do is be
-   * written by hand — "39 published packages" counted directories, and
-   * `packages/vscode-extension` (published to the VS Code marketplace, not to npm) is
-   * `private: true`. Off by one, in the direction that overstates.
+   * The row used to state the count ("39 published packages", later 36, then 35), and
+   * this test derived the true number to hold the prose to it. The first hand-written
+   * figure counted directories and missed that `packages/vscode-extension` (published
+   * to the VS Code marketplace, not to npm) is `private: true` — off by one, in the
+   * direction that overstates. Holding it exact then cost a doc edit on every package
+   * retirement, for a number the manifests already answer (`private` in each one). So
+   * the row names the published packages without counting them, and this test keeps it
+   * that way; the private packages it must still name are checked below.
    */
   const packagesRow = (): string => {
     const layout = section('## Repository Layout');
@@ -356,30 +368,37 @@ describe('QUICK_REFERENCE.md — the published-package count is derived', () => 
   const published = inPackages.filter((p) => !p.private);
   const privateOnes = inPackages.filter((p) => p.private);
 
-  it('states the number of packages that are actually published', () => {
+  it('names the published packages without a hand-written count', () => {
+    // Anti-vacuity: a workspace read that found nothing would make the refusal below
+    // pass over an empty population.
+    expect(published.length).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
+    const row = packagesRow();
     expect(
-      packagesRow(),
-      `${docRel} must state "${published.length} published packages" — that is how many manifests ` +
-        `under \`packages/\` are not \`private: true\` (${inPackages.length} directories, ` +
-        `${privateOnes.length} of them private: ${JSON.stringify(privateOnes.map((p) => p.dir))})`,
-    ).toContain(`${published.length} published`);
+      row,
+      `${docRel}'s \`packages/*\` row spells a package count. Drop the number: ${published.length} of ` +
+        `the ${inPackages.length} manifests under \`packages/\` are not \`private: true\` today, and a ` +
+        'written figure goes stale on the next retirement.',
+    ).not.toMatch(/\b\d+\s+(?:published|packages)\b/i);
+    expect(row, `${docRel}'s \`packages/*\` row must still say these are the published packages`).toMatch(
+      /published/i,
+    );
   });
 
   it('accounts for the private packages instead of quietly dropping them', () => {
     if (privateOnes.length === 0) {
-      // Nothing to reconcile: the count and the directory listing agree, so the row
-      // saying only "N published packages" is complete. This branch exists so the
-      // requirement below retires itself the day the last private package leaves.
+      // Nothing to reconcile: every directory publishes, so the row saying only "the
+      // published packages" is complete. This branch exists so the requirement below
+      // retires itself the day the last private package leaves.
       return;
     }
 
     const row = packagesRow();
     expect(
       row,
-      `${docRel}'s \`packages/*\` row states a published count that is smaller than the ` +
-        `${inPackages.length} directories a reader sees there. It must say why — name the private ` +
-        `package(s) ${JSON.stringify(privateOnes.map((p) => p.name))} — or the next reader "corrects" ` +
-        'the number back to the directory count, which is exactly how objectui#4149 happened.',
+      `${docRel}'s \`packages/*\` row calls the packages published, but ${privateOnes.length} of the ` +
+        `${inPackages.length} directories a reader sees there are not. It must say why — name the private ` +
+        `package(s) ${JSON.stringify(privateOnes.map((p) => p.name))} — or the next reader writes ` +
+        'the directory count back in as the published count, which is exactly how objectui#4149 happened.',
     ).toMatch(/private/i);
 
     for (const pkg of privateOnes) {

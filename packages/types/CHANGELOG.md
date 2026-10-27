@@ -1,5 +1,122 @@
 # @objectstack/types
 
+## 18.2.0
+
+### Patch Changes
+
+- 48e84a9: fix(objectql,types,rest)!: a database NOT NULL refusal on a declared field is the record validator's `ValidationError` at every door, named by the field's label
+  
+  A field declared `storage: { notNull: true }` without `required` is ADR-0113's engine-populated column: the record validator judges `required` only, so a write with no value for it reaches the driver and the database refuses it. The engine let the driver's error out, and each HTTP door classified it from the driver's text its own way. For the same refused write, the runtime dispatcher's `/data` POST and PATCH answered `500 INTERNAL_ERROR`, the actions door answered `400 VALIDATION_ERROR` with the driver's text and `declaredCode: 'SQLITE_CONSTRAINT_NOTNULL'`, and `RestServer` answered `400 VALIDATION_FAILED` relabelled by a second object read on its own `POST` / `PATCH` only.
+  
+  Clause-②: yes (narrowing: `@objectstack/types` adds the export `notNullViolationSite` and retires `notNullRefusalSite` and `relabelNotNullRefusal`; the HTTP doors' answer for this refusal moves to the record validator's envelope)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/types#notNullRefusalSite, @objectstack/types#relabelNotNullRefusal) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What retires is two function exports of `@objectstack/types`' published entry, whose only consumer was `@objectstack/rest`'s door-side relabel, retired in this same change; no other consumer was found in this repository (its `ui/` and `examples/` included) or in hotcrm. The affected party is a TypeScript caller, and the compiler at that call site delivers the break. -->
+  
+  **BREAKING** (an export retirement and a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/objectql`.** The write doors' driver exits (single-row and batch insert, the autonumber retry, by-id and predicate update) translate a driver NOT NULL refusal on a field the object's field map holds into the record validator's own `ValidationError` (`code: 'VALIDATION_FAILED'`), built by the validator's own builder with the validator's message context: one field error, `code: 'required'`, the field named by its label (translation bundle, then declared `label`, then API name) in the caller's locale, with the sentence the validator gives the same verb (`required` on insert, `required_cleared` on update). The driver's error rides `cause`, and the doors' log line still carries the database's own diagnosis. Left as the driver threw it: a column no field declares, a refusal the driver attributes to another table, and a NOT NULL code whose column the driver did not name. `required` and `storage.notNull` stay apart (ADR-0113 D1 / D2): no pre-write check reads `storage.notNull`.
+  - **Every door answers it alike**, because every door already answers that class alike: the dispatcher `/data` POST and PATCH now answer `400 VALIDATION_FAILED` (was `500 INTERNAL_ERROR`), the actions door `400 VALIDATION_FAILED` with the field envelope (was `400 VALIDATION_ERROR` with the driver's text), and `RestServer`'s `POST` / `PATCH` and its `/data/:object/batch` rows answer the validator's envelope and sentence. Import rows, the public form submit and MCP write through the same engine doors and answer the same class through the same arms; they were not driven separately. On `RestServer` the body is now exactly the validator's `required` shape: `fields[0]` carries `label`, there is no `hint`, and a `PATCH` writing null reads the clear-out sentence.
+  - **`@objectstack/types`.** New export `notNullViolationSite(error)`: the column (and table, where the dialect names it) of a driver's NOT NULL refusal, read from the error's codes (better-sqlite3 `SQLITE_CONSTRAINT_NOTNULL`; libsql `extendedCode` / `rawCode: 1299`; node-postgres `23502` with its `column` / `table` fields; mysql2 `ER_BAD_NULL_ERROR` / `errno: 1048`), then its text (all sql.js gives), then one step down its `cause` chain. An error whose code names another refusal is not read for NOT NULL text. `mapDataError`'s NOT NULL branch is unchanged, and answers the column no field declares.
+  - **`@objectstack/rest`.** The `/data` create and update doors' NOT NULL relabel (`not-null-refusal-label.ts`) retires: every path it served is an engine write.
+  
+  Migration, for a TypeScript caller of the retired exports:
+  
+  - FROM `notNullRefusalSite(answer)` TO `notNullViolationSite(error)`: ask the driver's error, not `mapDataError`'s answer.
+  - FROM `relabelNotNullRefusal(answer, { message, declaresNotNull })` TO nothing (no replacement): write through the engine, which answers a declared field's NOT NULL refusal as a labelled `ValidationError` itself.
+- 1af2cea: fix(runtime,types)!: a NOT NULL refusal on a column no field declares answers `RestServer`'s `400 VALIDATION_FAILED` body at the dispatcher `/data` and actions doors too
+  
+  Since #24768 the engine refuses a NOT NULL violation on a field the object declares as its own `ValidationError`, which every door answers alike. A column no field declares (drift: the field left the metadata and its NOT NULL column stayed in the table) still leaves the engine as the driver threw it, and the doors answered that refusal three ways. `RestServer`'s `POST /data/:object` answered `mapDataError`'s NOT NULL arm: `400 VALIDATION_FAILED`, the column's sentence, its `required` field entry and the drift `hint`. The runtime dispatcher's `POST /data/:object` let it reach the Hono exits, which answered `500 INTERNAL_ERROR`. The actions door answered `400 VALIDATION_ERROR` with the driver's text (the physical table and column) as the message and the driver's code as `declaredCode`.
+  
+  Clause-②: yes (widening: `@objectstack/types` adds the export `driverNotNullRefusalAnswer`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the status, code and body two HTTP doors answer for one refusal, a driver NOT NULL refusal on an undeclared column: every write that was refused is still refused and every write that was served is still served. The remedy is on the consumer's side, reading `code` and `details`; never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/types`.** New export `driverNotNullRefusalAnswer(error, object?)`: `mapDataError`'s NOT NULL arm answer (`{ status, body }`) when classification answers the error with that arm, `undefined` for every other answer. Every arm ahead of it (a declared status, a sandboxed body's throw, a unique violation, an unknown column, the record validator's `ValidationError`) still decides first. `mapDataError`'s own answers are unchanged.
+  - **`@objectstack/runtime`.** The dispatcher's `/data/:object` routes answer that refusal themselves with `400`, `error.code: 'VALIDATION_FAILED'`, the column's sentence as `error.message`, and `fields`, `hint` and `object` in `error.details` (was a thrown `500 INTERNAL_ERROR`). The actions door answers the same body (was `400 VALIDATION_ERROR` with the driver's text and `declaredCode`). The driver's text and code no longer reach either wire.
+  - A `PATCH` cannot reach such a column: naming it is refused before the driver as an undeclared field (`400 INVALID_FIELD`), on both `/data` doors alike, as before.
+  - The answers for a field the object declares are unchanged.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

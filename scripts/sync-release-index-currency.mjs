@@ -63,8 +63,7 @@
 // -- the gate whose finding this file exists to clear. A second copy of any of them
 // would be a second contract, and the two silently disagreeing is the original defect
 // one layer up: the rewriter would stamp one sentence while the gate judged another.
-// One list, two consumers -- the principle #9064 wrote down and cut-rc.yml joined as a
-// third consumer.
+// One list, two consumers -- the principle #9064 wrote down.
 //
 // The rewrite is therefore defined as "make the gate's assertion-2 findings go away",
 // and the verdict at the end is literally `indexCurrencyFindings()` -- the gate's own
@@ -166,7 +165,7 @@
 // It is also held out of this file's verdict, and that departs from "the verdict is the
 // gate's own function" on purpose. The gate still reports the field -- advisory on `main`,
 // red under `--strict` -- and nothing here changes that. But a STOP here fails `pnpm run
-// version`: every `cut-rc.yml` prerelease cut and every `version-pr` refresh in pre mode
+// version`: every `version-pr` refresh in pre mode
 // would go red until the GA, for a state no hand-written sentence improves and the GA's
 // own run resolves. The exit-1 ladder below is for the shapes that need a SENTENCE.
 //
@@ -207,9 +206,9 @@ export function scriptRepoRoot() {
 
 /**
  * The surface this rewriter writes, for the consumers that must know it WITHOUT
- * restating it -- release.yml's post-version shape assertion and cut-rc.yml's staging
- * allowlist, which resolve `SURFACES` and `stampedPaths()` from their rewriters on
- * exactly these terms ("a fourth literal is a fourth contract").
+ * restating it -- release.yml's post-version shape assertion, which resolves
+ * `SURFACES` and `stampedPaths()` from their rewriters on exactly these terms
+ * ("a fourth literal is a fourth contract").
  *
  * Derived from the gate's `INDEX_PATH`, never a copy of it: if the gate is ever pointed
  * at a different index, this rewriter and both workflow allowlists follow in the same
@@ -349,8 +348,8 @@ export function rewriteStatusField(field, newestVersion, date, { gaVersionRun = 
  *
  * On the `version-pr` lane `HEAD` is the main commit being rendered: release.yml's
  * post-version step and changesets/action both run `pnpm run version` on a tree reset
- * to it, and the step diffs its output against `HEAD` the same way. cut-rc.yml runs
- * it on its snapshot commit. A shallow checkout still holds `HEAD`'s own tree.
+ * to it, and the step diffs its output against `HEAD` the same way. A shallow
+ * checkout still holds `HEAD`'s own tree.
  *
  * `gitFreeEnv()`: the repository is the one `root` names, never one an inherited
  * GIT_DIR names (`GIT_ENV_ISOLATION_RULE`), so the self-test can hand this a throwaway
@@ -937,8 +936,8 @@ export function selfTest() {
   // ── Control F ─────────────────────────────────────────────────────────────
   battery('Control F: the surface and the scope are the gate\'s, not copies');
   {
-    expect('F — syncedPaths() is exactly the gate\'s INDEX_PATH, so release.yml and cut-rc.yml '
-      + 'resolve the same one path this file can write',
+    expect('F — syncedPaths() is exactly the gate\'s INDEX_PATH, so release.yml '
+      + 'resolves the same one path this file can write',
       syncedPaths().length === 1 && syncedPaths()[0] === INDEX_PATH);
     expect('F — and that surface really exists in this tree; an allowlist naming a path that is '
       + 'gone is an allowlist that stages nothing',

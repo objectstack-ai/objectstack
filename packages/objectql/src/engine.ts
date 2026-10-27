@@ -29,7 +29,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 // [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
 // envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -49,7 +49,12 @@ import { lowerFilterCondition, type FilterCondition, type FilterLoweringOptions 
 import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
-import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
+import {
+  ActionActivationProjection,
+  type ActionActivationRow,
+  type ActionActivationStore,
+  type ActionActivationWriteOptions,
+} from './action-activation.js';
 import {
   assertListComparandShapes,
   assertFilterIsMaterializable,
@@ -89,12 +94,7 @@ import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
-  VALUE_SHAPES_MIGRATION_ID,
-  ORGANIZATION_OWNERSHIP_MIGRATION_ID,
-  ORGANIZATION_OWNERSHIP_SHAPE_GENERATION,
-  organizationOwnershipShapeGenerationOf,
   isDataMigrationFlagVerified,
-  hasMovedFileColumns,
   renderOperationMessage,
   SystemFieldName,
 } from '@objectstack/spec/system';
@@ -148,6 +148,14 @@ import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engin
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#25522 cut 12] The driver options every driver call receives, and the tenancy
+// posture and Layer 0 verdict they are scoped by; the methods of the same names
+// below hand each body the members it reads (`DriverOptionsHost`).
+import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
+// [#25522 cut 13] The `sys_migration` flag reads, the certification question a
+// driver is handed, and the admitted-violation tally and boot advisory; the
+// methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
+import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -177,9 +185,6 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
-  // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
-  // Layer 0 — see {@link buildDriverOptions}.
-  computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
   // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
@@ -260,11 +265,7 @@ import {
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
-import { resolveTenancyPosture } from '@objectstack/types';
 import {
-  normalizeTenancyPosture,
-  postureEnforcesWall,
-  TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
   postureUsesUnionScope,
@@ -322,10 +323,10 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
-import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -339,9 +340,6 @@ import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonl
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
-// [#19911] The settlement's question "does judging the FK's own lock need the
-// header it names?" — asked of the same root reader the strips use.
-import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -357,6 +355,12 @@ import {
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
 // [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
 import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
+// [#25522 cut 14] The master-detail landing, the preview's parents and the
+// related reads a validation rule makes; the methods of the same names below
+// hand each body the members it reads (`MasterDetailRelatedHost`). Imported after
+// every module those bodies import, so the engine's module evaluation order
+// is what it was.
+import { resolveOneHopRelated, resolvePredicateRelated, resolvePreviewParents, settleMasterDetailLanding } from './engine-master-detail-related.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -395,7 +399,7 @@ import {
  * could actually be consulted to reach it (#4769). Both negatives keep the
  * gate closed; only the conclusive one is worth remembering.
  */
-interface MigrationFlagRead {
+export interface MigrationFlagRead {
   verified: boolean;
   conclusive: boolean;
   /**
@@ -2798,7 +2802,7 @@ type FormulaRelated = {
  * unknown target (`declared` absent) declares nothing to judge against, so
  * nothing is undeclared.
  */
-function undeclaredRelatedFields(
+export function undeclaredRelatedFields(
   declared: Record<string, unknown> | undefined,
   named: Iterable<string>,
 ): string[] {
@@ -3970,7 +3974,7 @@ export interface EngineReadOptions {
  * refuse or admit on less than the write knows; the other direction would
  * judge a value the caller may not read.
  */
-function servedAsStored(served: unknown, stored: unknown, depth = 0): boolean {
+export function servedAsStored(served: unknown, stored: unknown, depth = 0): boolean {
   if (Object.is(served, stored)) return true;
   if (depth >= 16) return false;
   if (served instanceof Date || stored instanceof Date) {
@@ -4298,7 +4302,7 @@ function resolveMetadataItemName(key: string, item: any): string | undefined {
  * an FK a later strip would have taken back out, so the prior row's FK — the
  * header the row keeps — answers instead.
  */
-function masterIdOf(
+export function masterIdOf(
   fk: string,
   data: Record<string, unknown> | null | undefined,
   row: Record<string, unknown> | null | undefined,
@@ -4307,51 +4311,6 @@ function masterIdOf(
   if (typeof raw === 'string') return raw === '' ? undefined : raw;
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
   return undefined;
-}
-
-/**
- * [#19853] `data` without `key`, as a COPY — the payloads this is applied to
- * are shared with hooks and with the strip reports' before/after diffs, so
- * none of them may lose a key in place. The same reference when `key` is
- * absent, which is the "nothing changed" signal every strip here keeps.
- */
-function withoutKey<T extends Record<string, unknown>>(data: T, key: string): T {
-  if (!Object.prototype.hasOwnProperty.call(data, key)) return data;
-  const { [key]: _omitted, ...rest } = data;
-  return rest as T;
-}
-
-/**
- * [#19853] Will the static `readonly` strip take `key` back out of this
- * UPDATE payload? Asked before the write's `parent` is resolved, because a
- * master-detail FK that strip takes is a repoint that never lands.
- *
- * Answered by the SAME function the strip runs, over the same `supplied`
- * snapshot, the same hook-write record and the same two exemptions — never by
- * re-deriving "is this FK read-only" from its declaration, which is a second
- * opinion that disagrees the moment either exemption applies. `runs` is the
- * strip's own gate (a system caller skips it), handed in as the value the
- * strip's call site reads once and consumes itself, so the two cannot
- * disagree about whether it runs; `preserveAudit` keeps a preservable column.
- * Silent: no logger, because the strip itself owns every word said about the
- * key, and `strictReadonlyWrites` / `addressKey` shape only that wording,
- * never the verdict.
- */
-function staticReadonlyStripTakes(
-  schema: unknown,
-  data: Record<string, unknown>,
-  key: string,
-  supplied: Readonly<Record<string, unknown>>,
-  strip: {
-    runs: boolean;
-    preserveAudit: boolean;
-    hookWrittenKeys: ReadonlySet<string> | undefined;
-    /** [#24822] The wall's flag, read once by `update()` — see {@link staticReadonlyStoredView}. */
-    wallJudgesOrganization?: boolean;
-  },
-): boolean {
-  if (!strip.runs) return false;
-  return !(key in staticReadonlyStoredView(schema, data, supplied, strip));
 }
 
 /**
@@ -4385,7 +4344,7 @@ function staticReadonlyStripTakes(
  * object unchanged, so the flag reaches {@link staticReadonlyStripTakes} on that
  * path too. Absent, the view is the whole schema's, exactly as before.
  */
-function staticReadonlyStoredView(
+export function staticReadonlyStoredView(
   schema: unknown,
   data: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
@@ -4401,16 +4360,6 @@ function staticReadonlyStoredView(
     updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
     { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
   ) ?? data;
-}
-
-/**
- * [ADR-0105 D2] The context's organization access set
- * (`ExecutionContext.accessible_org_ids`), stringified — `undefined` when
- * absent or empty, which the verdict reads as "no membership" under `group`.
- */
-function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
-  const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
-  return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
 }
 
 /**
@@ -5811,10 +5760,12 @@ export class ObjectQL implements IObjectQLEngine {
    * the projection only after that write returns. Throws (503
    * `SERVICE_UNAVAILABLE`) when no ledger is attached rather than reporting a
    * durable switch that did not persist; the write AUTHORITY (§5) is enforced
-   * one tier up, at the route, because it needs the caller.
+   * one tier up, at the route, because it needs the caller. That route also
+   * names the caller in `options.context` (elevated), so the ledger row and
+   * its audit row record who switched the action.
    */
-  async setActionActive(row: ActionActivationRow): Promise<void> {
-    await this.actionActivation.setActive(row);
+  async setActionActive(row: ActionActivationRow, options?: ActionActivationWriteOptions): Promise<void> {
+    await this.actionActivation.setActive(row, options);
   }
 
   /**
@@ -7225,117 +7176,19 @@ export class ObjectQL implements IObjectQLEngine {
     base?: any,
     scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
   ): any {
-    // The open transaction may arrive explicitly via the context, or ambiently
-    // via txStore when an internal query runs during a transactional write
-    // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
-    // whose unit has closed is no handle: work the unit started and did not
-    // await runs unenrolled (`runOpenedUnit`).
-    const explicit = execCtx?.transaction;
-    const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
-      ? explicit
-      : this.txStore.getStore()?.transaction;
-    // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
-    // driver's connection; handing it to a different driver does not put that
-    // driver's statement inside the transaction, it executes the statement on
-    // the WRONG CONNECTION — measured on knex/SQLite as `no such table` against
-    // a database that never held the object. The write path's
-    // `enforceTransactionOrigin` has already refused a business write by the
-    // time we get here (and let a system ledger through by decision), so this
-    // is the structural half: whatever survives to here, the handle only ever
-    // reaches the driver that owns it. It covers READS too, which have no gate
-    // of their own and were riding the same wrong connection.
-    const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
-    const objectSchema = this._registry.getObject(object) as any;
-    // `isFederatedObject` is the same predicate every schema-sync seam routes a
-    // federated object by — one spelling of "this schema is the remote's",
-    // not a second reading of it.
-    const isFederated = isFederatedObject(objectSchema);
-    const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
-    const tenantScope = tenantObject
-      ? scope.writeTarget
-        ? this.driverWriteTarget(execCtx)
-        : this.driverReadScope(execCtx, scope.recordedVerdict)
-      : undefined;
-    const hasTenant = tenantScope !== undefined;
-    const hasTz = execCtx?.timezone !== undefined;
-    const isSystem = execCtx?.isSystem === true;
-    // [ADR-0131 D9/D13] The tenant-audit's scope is the object's SCHEMA: a
-    // tenant column (the registered schema's, as `resolveTenantFieldName`
-    // reads it) on an object that is not federated. That is the same reading
-    // the system-insert rule takes, and there is no second, per-table one —
-    // the #13491 ledger that used to narrow this by name retired with D13. An
-    // object is outside the audit only by declaring itself outside the
-    // machinery (`tenancy.enabled: false`, `systemFields.tenant: false`, no
-    // tenant field, `external`), which `scripts/platform-object-tenancy-census.json`
-    // enumerates for the platform namespaces.
-    const isTenantAuditInScope =
-      resolveTenantFieldName(objectSchema) !== null &&
-      !isFederated;
-    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
-    // exempt platform admin's predicate write reaches the driver with no
-    // `tenantId` because the wall lifted the scope on purpose, and the
-    // driver's `[tenant-audit]` line tells such a write to declare
-    // `bypassTenantAudit: true` — an option no REST caller can set. The
-    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
-    // here as the recorded verdict; this reads it, it does not re-decide it
-    // (see {@link wallExemptedOperation}).
-    const wallExempt =
-      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
-      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
-    const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
-    const opts: any = base && typeof base === 'object' ? { ...base } : {};
-    if (hasTx && opts.transaction === undefined) {
-      opts.transaction = tx;
-    }
-    if (hasTenant && opts.tenantId === undefined) {
-      opts.tenantId = tenantScope.tenantId;
-    }
-    if (hasTenant && opts.tenantIds === undefined && tenantScope.tenantIds !== undefined) {
-      opts.tenantIds = tenantScope.tenantIds;
-    }
-    if (hasTz && opts.timezone === undefined) {
-      // Thread the business timezone so date-dependent driver generation
-      // (autonumber `{YYYYMMDD}` tokens) resolves the calendar day correctly.
-      opts.timezone = execCtx!.timezone;
-    }
-    if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
-      // [#13491 → ADR-0131 D13] The isSystem mute, cut by the object's
-      // schema alone (2026-08-31 ruling, execution point 1: the OBJECT decides,
-      // never the caller's flag).
-      //
-      // It used to mute EVERY elevated write, whatever the object was. The
-      // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
-      // (77%) were silenced here — at the control's LARGEST gate, sitting
-      // ahead of the condition the control is about — and the control has
-      // never produced a finding, while all five known instances of the defect
-      // were found by a person reading call sites.
-      //
-      // What still mutes: an object with no tenant field at all (nothing to be
-      // unscoped from — the driver would exit at `resolveTenantField` anyway)
-      // and a federated one. What does not: any object with a tenant column,
-      // platform namespace or not — a name prefix, or a hand-kept list of
-      // names, decides nothing here. A caller that means it still passes
-      // `bypassTenantAudit: true` explicitly and is honoured above — this
-      // branch only fills in a value nobody supplied.
-      //
-      // ⚠️ Direction, per execution point 3: what this ADDS is a driver WARN
-      // line. It changes nothing about what any write touches.
-      opts.bypassTenantAudit = true;
-    }
-    if (wallExempt && opts.bypassTenantAudit === undefined) {
-      // The same fill-in-only rule as the isSystem mute above: a caller's own
-      // value wins. Diagnostics only — the driver's scope is already the
-      // verdict's (no `tenantId`), and this option silences a warning and
-      // touches nothing else; on a read it is inert.
-      opts.bypassTenantAudit = true;
-    }
-    if (preserveAudit && opts.preserveAudit === undefined) {
-      // Historical import (#3493): let the driver keep a supplied `updated_at`
-      // instead of force-stamping now on the update path.
-      opts.preserveAudit = true;
-    }
-    return opts;
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTxStore = () => this.txStore;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof buildDriverOptions> = {
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      get txStore() { return readTxStore(); },
+      transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
+      get _registry() { return readRegistry(); },
+      driverWriteTarget: (...a) => this.driverWriteTarget(...a),
+      driverReadScope: (...a) => this.driverReadScope(...a),
+      wallExemptedOperation: (...a) => this.wallExemptedOperation(...a),
+    };
+    return buildDriverOptions.call(host, object, execCtx, base, scope);
   }
 
   /**
@@ -7352,22 +7205,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     recordedVerdict: unknown,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
-    switch (verdict.kind) {
-      case 'none':
-        return undefined;
-      case 'organization':
-        return { tenantId: verdict.organizationId };
-      case 'organizations':
-        return { tenantId: activeOrganization ?? verdict.organizationIds[0], tenantIds: [...verdict.organizationIds] };
-      case 'deny':
-        return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverReadScope> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return driverReadScope.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7379,21 +7221,11 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     activeOrganization: string | undefined,
   ): TenantLayer0Verdict {
-    return computeTenantLayer0Verdict({
-      tenancyPosture: this.resolveEnginePosture(),
-      organizationId: activeOrganization,
-      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-      // Left to the driver, which resolves the tenant column from the
-      // table it actually built (`resolveTenantField`): an object with no
-      // such column is unscoped there whatever this says. `undefined` is
-      // the verdict's "assume a tenant object", as Layer 0 reads an
-      // unresolved field set.
-      objectHasOrgIdField: undefined,
-      tenancyDisabled: false,
-      // The engine holds no permission sets: no exemption is ITS to grant.
-      posturePermitsCrossTenant: false,
-      isPlatformAdmin: false,
-    });
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof engineLayer0Verdict> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return engineLayer0Verdict.call(host, execCtx, activeOrganization);
   }
 
   /**
@@ -7413,14 +7245,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that does not parse answers false too — junk never lifts anything.
    */
   private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
-    if (recordedVerdict === undefined) return false;
-    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    if (!recorded.success || recorded.data.kind !== 'none') return false;
-    const activeOrganization =
-      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
-        ? String(execCtx.tenantId)
-        : undefined;
-    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof wallExemptedOperation> = {
+      engineLayer0Verdict: (...a) => this.engineLayer0Verdict(...a),
+    };
+    return wallExemptedOperation.call(host, execCtx, recordedVerdict);
   }
 
   /**
@@ -7432,10 +7261,11 @@ export class ObjectQL implements IObjectQLEngine {
   private driverWriteTarget(
     execCtx: ExecutionContext | undefined,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
-    if (execCtx?.tenantId === undefined) return undefined;
-    const tenantIds =
-      this.resolveEnginePosture() === 'group' ? accessibleOrganizationsOf(execCtx) : undefined;
-    return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const host: ThisParameterType<typeof driverWriteTarget> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+    };
+    return driverWriteTarget.call(host, execCtx);
   }
 
   /**
@@ -7460,13 +7290,12 @@ export class ObjectQL implements IObjectQLEngine {
    * be worst, so it degrades to the walled reading and the write is refused.
    */
   private resolveEnginePosture(): TenancyPosture {
-    const injected = normalizeTenancyPosture(this.tenancyPostureProvider?.());
-    if (injected) return injected;
-    try {
-      return resolveTenancyPosture();
-    } catch {
-      return 'isolated';
-    }
+    // [#25522 cut 12] The body moved to `engine-driver-options.ts` (see `DriverOptionsHost`).
+    const readTenancyPostureProvider = () => this.tenancyPostureProvider;
+    const host: ThisParameterType<typeof resolveEnginePosture> = {
+      get tenancyPostureProvider() { return readTenancyPostureProvider(); },
+    };
+    return resolveEnginePosture.call(host);
   }
 
   /**
@@ -10051,28 +9880,8 @@ export class ObjectQL implements IObjectQLEngine {
     view: Record<string, unknown>;
     header: H;
   }> {
-    const { schema, data, supplied, staticStrip, resolve, judgeFkLock } = args;
-    const fk = resolveMasterDetailRelation(schema as any)?.fk;
-    if (fk === undefined || !(fk in data)) {
-      return { subject: data, supplied, view: data, header: await resolve(data) };
-    }
-    // ① Whether the FK is still the caller's is the strip's own question
-    // (`isCallerSuppliedValue`, own-property): a hook-written FK is not judged.
-    const namedNeeded = readonlyWhenFkJudgementReadsParent(schema as any, data, fk);
-    const named = namedNeeded ? await resolve(data) : undefined;
-    const subject = judgeFkLock(named, fk);
-    const rest = withoutKey(supplied as Record<string, unknown>, fk);
-    // ②
-    const lands = fk in subject && !staticReadonlyStripTakes(schema, subject, fk, supplied, staticStrip);
-    if (lands) {
-      // [#19911] A landing FK stays in `supplied`: the strip that judges the
-      // rest re-judges it on the SAME landing — the header ① read, or one its
-      // verdict never reads — so it reaches ①'s verdict again, now over the
-      // same drops as everything else, and says it once.
-      return { subject, supplied, view: data, header: namedNeeded ? (named as H) : await resolve(data) };
-    }
-    const view = withoutKey(data, fk);
-    return { subject, supplied: rest, view, header: await resolve(view) };
+    // [#25522 cut 14] The body moved to `engine-master-detail-related.ts`; it reads no member of the class.
+    return settleMasterDetailLanding<H>(args);
   }
 
   /**
@@ -10311,57 +10120,15 @@ export class ObjectQL implements IObjectQLEngine {
     parents: Array<Record<string, unknown> | null>;
     previousParents: Array<Record<string, unknown> | null | undefined>;
   }> {
-    const rel = resolveMasterDetailRelation(schema as any);
-    const landingIds = views.map((view) => (rel ? masterIdOf(rel.fk, null, view) : undefined));
-    const priorIds = storedRows.map((stored) => (rel && stored ? masterIdOf(rel.fk, null, stored) : undefined));
-    // The write resolves a second header only for a repoint (`repointsMaster`).
-    const repoints = priorIds.map((prior, i) => prior != null && landingIds[i] !== prior);
-    const ids = new Set<string>();
-    landingIds.forEach((id) => { if (id != null) ids.add(String(id)); });
-    priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
-
-    const headers = new Map<string, Record<string, unknown>>();
-    // [#24358] ⛔ A stored-metadata-body header is never read here either, as
-    // the write's own header read never reads one: every header binds unbound.
-    if (rel && ids.size > 0 && !isStoredMetadataBodyObject(rel.master)) {
-      // 1. The read door, under the caller's own context.
-      const served = new Map<string, Record<string, unknown>>();
-      try {
-        const rows = await this.find(rel.master, {
-          where: { id: { $in: [...ids] } },
-          context,
-        } as EngineQueryOptions) as Array<Record<string, unknown>>;
-        for (const row of Array.isArray(rows) ? rows : []) {
-          if (row?.id != null && ids.has(String(row.id))) served.set(String(row.id), row);
-        }
-      } catch (err) {
-        this.logger?.warn?.('validate preview: the caller\'s read of the master-detail header failed — parent stays unbound', {
-          object: rel.master, error: err,
-        });
-      }
-      // 2. The write's own header read, for the headers the caller can read.
-      if (served.size > 0) {
-        const asWritten = await this.resolveMasterDetailParents(
-          schema, null, [...served.keys()].map((id) => ({ [rel.fk]: id })), context,
-        );
-        for (const [id, servedRow] of served) {
-          const header = asWritten({ [rel.fk]: id });
-          if (!header) continue;
-          const kept: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(header)) {
-            if (Object.prototype.hasOwnProperty.call(servedRow, key) && servedAsStored(servedRow[key], value)) {
-              kept[key] = value;
-            }
-          }
-          headers.set(id, this.materializeParentHeader(rel.master, kept));
-        }
-      }
-    }
-    const headerOf = (id: string | number | undefined) => (id == null ? null : (headers.get(String(id)) ?? null));
-    return {
-      parents: landingIds.map(headerOf),
-      previousParents: priorIds.map((id, i) => (repoints[i] ? headerOf(id) : undefined)),
+    // [#25522 cut 14] The body moved to `engine-master-detail-related.ts` (see `MasterDetailRelatedHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof resolvePreviewParents> = {
+      find: (...a) => this.find(...a),
+      get logger() { return readLogger(); },
+      resolveMasterDetailParents: (...a) => this.resolveMasterDetailParents(...a),
+      materializeParentHeader: (...a) => this.materializeParentHeader(...a),
     };
+    return resolvePreviewParents.call(host, schema, views, storedRows, context);
   }
 
   /**
@@ -10425,76 +10192,14 @@ export class ObjectQL implements IObjectQLEngine {
     rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
     context: unknown,
   ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
-    const unbound = () => undefined;
-    // ⛔ A referential FK clear resolves NOTHING. `cascadeDeleteRelations`
-    // stamps `__referentialFieldClear` on its cleanup UPDATE, and plugin-security
-    // exempts an update carrying it from its object-level CRUD check — so the
-    // cleanup reaches this seam for a deleter holding no grant on the
-    // referencing object, and a system read here would let a traversing rule's
-    // verdict decide their delete: one bit of a related record they cannot
-    // read, per delete. Left unbound, such a rule meets the bare id as it did
-    // before this seam existed (`resolveTraversalScope` leaves an unbound record
-    // to CEL), where reading through it faults and refuses the cleanup. Pinned
-    // end to end in plugin-security's
-    // `delete-reference-cleanup-system-identity.test.ts`.
-    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) {
-      // [#20006] Still NOTHING is resolved: the binding handed back is empty.
-      // It carries WHY — the delete and the reference it clears, which
-      // `cascadeDeleteRelations` stamps beside the marker — so a traversing rule
-      // that faults here refuses with a text naming them, instead of one
-      // prescribing a column on the object carrying the rule. Only for the
-      // record the cleanup was issued for: a write a hook issues during the
-      // cleanup inherits the envelope, and that write is not the clear.
-      const cause = (context as { __referentialFieldClearCause?: Record<string, unknown> } | undefined)
-        ?.__referentialFieldClearCause;
-      if (!cause || schema?.name !== cause.referencingObject) return unbound;
-      const binding = referentialClearBinding({
-        object: String(cause.object),
-        id: String(cause.id),
-        referencingObject: String(cause.referencingObject),
-        field: String(cause.field),
-      });
-      return (row) => (row?.id != null && String(row.id) === String(cause.referencingId) ? binding : undefined);
-    }
-    const wanted = collectPredicateRelationships(schema);
-    if (wanted.size === 0) return unbound;
-    // [#24468] The read set per reference is the UNION of every rule's
-    // columns, and the loader answers a whole reference `undeclared-field` when
-    // any column of it is undeclared — so one rule's misspelt column left every
-    // sibling rule through the same reference without a verdict, each refusing
-    // the write with the other rule's field. The undeclared columns are taken
-    // out of the shared read here and judged per rule (`resolveTraversalScope`
-    // reads `undeclaredFields` against the rule's own columns); the loader
-    // reads the declared rest, under the same authority and bound as before.
-    // ⛔ Nothing undeclared enters the system-authority read either way.
-    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
-    const undeclared = new Map<string, { object: string; fields: string[] }>();
-    for (const [fk, named] of wanted) {
-      const target = referenceTargetOf(fields[fk]);
-      // The loader's own verdicts stand for these: no target, or a hop into
-      // the stored-metadata-body family, which is never read.
-      if (!target || isStoredMetadataBodyObject(target)) continue;
-      const declared = (this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined)?.fields;
-      const missing = undeclaredRelatedFields(declared, named);
-      if (missing.length === 0) continue;
-      undeclared.set(fk, { object: target, fields: missing });
-      for (const name of missing) named.delete(name);
-      if (named.size === 0) wanted.delete(fk);
-    }
-    const lookup = wanted.size > 0
-      ? await this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate')
-      : unbound;
-    if (undeclared.size === 0) return lookup;
-    return (row) => {
-      if (!row) return undefined;
-      const binding: Record<string, RelatedFieldBinding> = { ...(lookup(row) ?? {}) };
-      for (const [fk, { object, fields: missing }] of undeclared) {
-        // A reference no rule reads a declared column through has no row to
-        // serve; the binding says why, and every rule through it names its own.
-        binding[fk] = { ...(binding[fk] ?? { object, unavailable: 'undeclared-field' }), undeclaredFields: missing };
-      }
-      return binding;
+    // [#25522 cut 14] The body moved to `engine-master-detail-related.ts` (see `MasterDetailRelatedHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof resolvePredicateRelated> = {
+      buildReferentialFieldClear: (...a) => this.buildReferentialFieldClear(...a),
+      get _registry() { return readRegistry(); },
+      resolveOneHopRelated: (...a) => this.resolveOneHopRelated(...a),
     };
+    return resolvePredicateRelated.call(host, schema, rows, context);
   }
 
   /**
@@ -10534,190 +10239,19 @@ export class ObjectQL implements IObjectQLEngine {
     context: unknown,
     authority: 'predicate' | 'caller',
   ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
-    const unbound = () => undefined;
-    // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
-    // submitter or a principal-less caller is bound exactly like a user. Walled
-    // posture: such a caller with no `tenantId` cannot be scoped here, so it reads nothing.
-    // [#24197] The caller-authority read applies the wall itself (it IS the
-    // caller's own `find`), so it computes no bound of its own.
-    const caller = context as ExecutionContext | undefined;
-    const bound = authority === 'predicate' && !caller?.isSystem;
-    const readsNothing = bound && !carriesOrganization(caller?.tenantId)
-      && postureEnforcesWall(this.resolveEnginePosture());
-
-    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
-    type Resolved = {
-      object: string;
-      byId: Map<string, Record<string, unknown>>;
-      /** Named fields the RELATED object does not declare. */
-      undeclared?: string[];
-      /** Set when the read itself failed, whatever the id. */
-      blocked?: boolean;
-      /** The ids the caller's OWN read returned, when that read decides (below). */
-      ownRead?: ReadonlySet<string>;
+    // [#25522 cut 14] The body moved to `engine-master-detail-related.ts` (see `MasterDetailRelatedHost`).
+    const readRegistry = () => this._registry;
+    const readFormulaHopReads = () => this.formulaHopReads;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof resolveOneHopRelated> = {
+      resolveEnginePosture: (...a) => this.resolveEnginePosture(...a),
+      get _registry() { return readRegistry(); },
+      find: (...a) => this.find(...a),
+      masterDetailHeadersCallerReads: (...a) => this.masterDetailHeadersCallerReads(...a),
+      get formulaHopReads() { return readFormulaHopReads(); },
+      get logger() { return readLogger(); },
     };
-    const resolved = new Map<string, Resolved>();
-
-    for (const [fk, namedFields] of wanted) {
-      const target = referenceTargetOf(fields[fk]);
-      if (!target) continue;
-      // [#24316] ⛔ A hop into the stored-metadata-body family is never read,
-      // under either authority. The family's projection runs at its doors and
-      // never here, so this `find` would hand the formula (or the rule) the
-      // stored body and its content hash unprojected — material the family's
-      // own door withholds from the same reader. The binding is `unreadable`,
-      // the disclosure-safe shape: a formula reads `null` with its reason, a
-      // rule has no verdict and refuses the write, and neither says anything
-      // about the row. The lint refuses the same hop at author time.
-      if (isStoredMetadataBodyObject(target)) {
-        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
-        continue;
-      }
-      const named = [...namedFields];
-
-      // ── The READ SET is the intersection of "what the predicate names" and
-      // "what the related object DECLARES", and it is computed here so that it
-      // can never be anything else. A predicate naming a column the related
-      // object does not declare must not put that name into a system-authority
-      // query: the read is elevated. An undeclared name is also a real
-      // authoring fault and is reported as one rather than silently dropped.
-      const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown>; external?: unknown } | undefined;
-      const declared = targetSchema?.fields;
-      // [#8215] The PRIMARY KEY is declared by the platform, not by the author,
-      // so it is absent from every object's field map — the map carries the
-      // injected audit/tenant/owner columns but never the PK. It still has to
-      // count as declared HERE, because `record.<fk>.id` is the repair this
-      // capability's own conflict refusal prescribes: without this the engine
-      // refuses the very spelling it just told the author to write, and then
-      // hands them a second prescription ("declare `id` on the related object")
-      // that is equally impossible. An actively misleading prescription is
-      // worse than none (ADR-0078 §6).
-      //
-      // ⛔ This widens the READ SET by nothing: `id` is already unconditionally
-      // in the projection below, because the by-id map is keyed on it.
-      const undeclared = undeclaredRelatedFields(declared, named);
-      if (undeclared.length > 0) {
-        resolved.set(fk, { object: target, byId: new Map(), undeclared });
-        continue;
-      }
-
-      const ids = new Set<string>();
-      for (const row of rows) {
-        const value = row?.[fk];
-        // A multi-value reference cannot be ONE hop: `record.fk.field` on a list
-        // names no single related record, so it is never hydrated.
-        if (value == null || Array.isArray(value) || typeof value === 'object') continue;
-        ids.add(String(value));
-      }
-      if (ids.size === 0 || readsNothing) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
-      try {
-        // ⭐ SYSTEM authority, and ONLY for this seam.
-        //
-        // A validation rule's output is a pass/fail the SYSTEM enforces, not
-        // data handed to the caller — categorically unlike an access-control
-        // rule, which is why RLS predicates are excluded from this capability
-        // altogether. Reading as the acting user instead made the rule
-        // unauthorable for exactly the persona it exists to constrain: a member
-        // with CRUD on the child and no read on the parent faulted on every
-        // write, so a legitimate business rule could not ship.
-        //
-        // What bounds the elevation is the PROJECTION: only the
-        // columns this predicate names, intersected with the related object's
-        // declared fields above. ⛔ Never the whole row.
-        //
-        // The accepted cost, recorded so nobody widens it by accident: a caller
-        // can INFER a value they cannot see by observing which writes refuse —
-        // a column hidden from them on a row they may read, or a column of a
-        // row a plain `lookup` names on a walled object. The value itself never
-        // appears — not in the row handed to CEL beyond the predicate's own use
-        // of it, and not in the refusal text, which names the field and the
-        // rule and never the value. [#22892] ⛔ Never what a master-detail
-        // header the caller cannot read holds: the door below answers first.
-        //
-        // ⛔ No organization wall scopes a related object with no tenant column
-        // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a
-        // caller that is not SYSTEM its rows are the ones its OWN read returns,
-        // through every enforcement layer; any other id is 'unreadable', stored or not.
-        let ownRead: Set<string> | undefined;
-        let readSet: ReadonlySet<string> = ids;
-        if (bound && (isFederatedObject(targetSchema) || resolveTenantFieldName(targetSchema) === null)) {
-          const own = await this.find(target, {
-            where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
-          }) as Array<Record<string, unknown>>;
-          ownRead = new Set((Array.isArray(own) ? own : []).flatMap((r) => (r?.id == null ? [] : [String(r.id)])));
-          if (ownRead.size === 0) { resolved.set(fk, { object: target, byId: new Map(), ownRead }); continue; }
-          readSet = ownRead;
-        } else if (bound && (fields[fk] as { type?: unknown } | undefined)?.type === 'master_detail') {
-          // [#22892] Through a master-detail FK the related row is the detail's
-          // HEADER, and ruling A on #22519 holds here as on the write's own
-          // header read: the caller's read door first, under the caller's own
-          // context. A header it does not return gets no row below and no
-          // `ownRead`, so it is `unresolved`, exactly as a header that exists
-          // nowhere is, whatever it holds. A failed door read returned no
-          // header, so every header is missing.
-          readSet = await this.masterDetailHeadersCallerReads(target, [...ids], caller);
-          if (readSet.size === 0) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
-        }
-        const query: EngineQueryOptions = {
-          where: { id: { $in: [...readSet] } },
-          fields: [...new Set(['id', ...named])],
-          // [#24197] A formula's hop is read as the CALLER (see the docblock).
-          context: (authority === 'caller'
-            ? context
-            : { ...(context as Record<string, unknown> ?? {}), isSystem: true }) as EngineQueryOptions['context'],
-        };
-        // [#24197] ONE hop: the related object's own formulas are computed on
-        // this read, but none of them reads a hop of its own — that would be
-        // the second hop the formula contract does not serve, and two objects
-        // whose titles read each other would recurse without end.
-        if (authority === 'caller') this.formulaHopReads.add(query);
-        const related = await this.find(target, query) as Array<Record<string, unknown>>;
-        const byId = new Map<string, Record<string, unknown>>();
-        // Materialise the named DECLARED columns to `null`. A driver omits a key
-        // whose value is `undefined`, so without this a legitimately-empty
-        // parent column would fault and refuse a valid write — #6457's trap, one
-        // root over and on a fail-CLOSED seam. A column the related object does
-        // not declare never reaches here (it was reported above), so a real
-        // "this field does not exist" fault stays distinguishable from a null.
-        for (const row of Array.isArray(related) ? related : []) {
-          if (row?.id == null) continue;
-          const copy: Record<string, unknown> = { ...row };
-          for (const name of named) if (!(name in copy)) copy[name] = null;
-          byId.set(String(row.id), copy);
-        }
-        resolved.set(fk, { object: target, byId, ownRead });
-      } catch (err) {
-        this.logger?.warn?.(authority === 'caller'
-          ? 'formula relationship read failed — the formulas reading through this reference read null'
-          : 'predicate relationship read failed — the rule will reject the write', {
-          object: target, field: fk, error: err,
-        });
-        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
-      }
-    }
-    if (resolved.size === 0) return unbound;
-
-    return (row) => {
-      if (!row) return undefined;
-      const binding: Record<string, RelatedFieldBinding> = {};
-      for (const [fk, entry] of resolved) {
-        if (entry.undeclared) {
-          binding[fk] = { object: entry.object, unavailable: 'undeclared-field', undeclaredFields: entry.undeclared };
-          continue;
-        }
-        if (entry.blocked) { binding[fk] = { object: entry.object, unavailable: 'unreadable' }; continue; }
-        const value = row[fk];
-        if (value == null || Array.isArray(value) || typeof value === 'object') {
-          binding[fk] = { object: entry.object, unavailable: 'no-reference' };
-          continue;
-        }
-        const found = entry.byId.get(String(value));
-        binding[fk] = found
-          ? { object: entry.object, row: found }
-          : { object: entry.object, unavailable: entry.ownRead ? 'unreadable' : 'unresolved' };
-      }
-      return binding;
-    };
+    return resolveOneHopRelated.call(host, schema, wanted, rows, context, authority);
   }
 
   /**
@@ -12030,22 +11564,13 @@ export class ObjectQL implements IObjectQLEngine {
    * no such seam is left alone.
    */
   private supplyTenantKeyCertifiedResolver(driver: IDataDriver): void {
-    const sink = driver as unknown as {
-      setTenantKeyCertifiedResolver?: (resolve: () => Promise<boolean>) => void;
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof supplyTenantKeyCertifiedResolver> = {
+      isOrganizationOwnershipCertified: (...a) => this.isOrganizationOwnershipCertified(...a),
+      get logger() { return readLogger(); },
     };
-    if (typeof sink.setTenantKeyCertifiedResolver !== 'function') return;
-    try {
-      sink.setTenantKeyCertifiedResolver(() => this.isOrganizationOwnershipCertified());
-    } catch (e: any) {
-      // A driver that did not take the resolver answers "not certified": it
-      // keeps the two forms distinct and REPORTS a destructive recreate_index,
-      // which is never applied unattended (safe-only boot reconcile, the
-      // artifact gate, `os migrate apply --allow-destructive`).
-      this.logger.debug('Driver declined the ADR-0131 certification resolver', {
-        driverName: driver.name,
-        error: e?.message ?? String(e),
-      });
-    }
+    return supplyTenantKeyCertifiedResolver.call(host, driver);
   }
 
   /**
@@ -12059,25 +11584,13 @@ export class ObjectQL implements IObjectQLEngine {
    * asking reports it (`SqlDriver.isTenantKeyCertified`).
    */
   async isOrganizationOwnershipCertified(): Promise<boolean> {
-    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
-    try {
-      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
-        context: { isSystem: true } as ExecutionContext,
-      });
-      if (!row || row.id !== ORGANIZATION_OWNERSHIP_MIGRATION_ID) return false;
-      const verified = isDataMigrationFlagVerified({
-        id: ORGANIZATION_OWNERSHIP_MIGRATION_ID,
-        last_run_at: String(row.last_run_at ?? ''),
-        verified_at: row.verified_at == null ? null : String(row.verified_at),
-        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-      });
-      return verified && organizationOwnershipShapeGenerationOf(row.details) >= ORGANIZATION_OWNERSHIP_SHAPE_GENERATION;
-    } catch (error) {
-      // A store whose ledger table does not exist yet has no certificate.
-      if (isMissingTableError(error, DATA_MIGRATION_FLAG_OBJECT)) return false;
-      throw error;
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof isOrganizationOwnershipCertified> = {
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+    };
+    return isOrganizationOwnershipCertified.call(host);
   }
 
   /**
@@ -12088,13 +11601,11 @@ export class ObjectQL implements IObjectQLEngine {
    * second copy of them is a second way to read a different row.
    */
   private readFileReferencesFlagRow(): Promise<MigrationFlagRead> {
-    return this.readMigrationFlagRowMemoized(
-      'fileReferencesMigrationVerified',
-      FILE_REFERENCES_MIGRATION_ID,
-      '[value-shape] this deployment has verified the file-as-reference migration — ' +
-        'media value shapes are enforced and released field files may be collected ' +
-        '(ADR-0104)',
-    );
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const host: ThisParameterType<typeof readFileReferencesFlagRow> = {
+      readMigrationFlagRowMemoized: (...a) => this.readMigrationFlagRowMemoized(...a),
+    };
+    return readFileReferencesFlagRow.call(host);
   }
 
   /**
@@ -12137,12 +11648,11 @@ export class ObjectQL implements IObjectQLEngine {
    * classes.
    */
   async isValueShapesMigrationVerified(): Promise<boolean> {
-    return this.readMigrationFlagMemoized(
-      'valueShapesMigrationVerified',
-      VALUE_SHAPES_MIGRATION_ID,
-      '[value-shape] this deployment has verified the value-shape scan — reference and ' +
-        'structured-JSON value shapes are enforced (ADR-0104)',
-    );
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const host: ThisParameterType<typeof isValueShapesMigrationVerified> = {
+      readMigrationFlagMemoized: (...a) => this.readMigrationFlagMemoized(...a),
+    };
+    return isValueShapesMigrationVerified.call(host);
   }
 
   /**
@@ -12224,43 +11734,15 @@ export class ObjectQL implements IObjectQLEngine {
     migrationId: string,
     verifiedLog?: string,
   ): Promise<MigrationFlagRead> {
-    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
-      return { verified: false, conclusive: false, columnsMoved: false };
-    }
-    try {
-      // [#20648] The row by primary key, through the single-row route. ⛔ Not
-      // `find` with `limit: 1`: the SQL driver reads that as page one of a
-      // walk, and this read runs at boot BEFORE `sys_migration` is registered
-      // with the driver — so every boot of an existing deployment printed the
-      // driver's "Paged read ... is NOT deterministic" warning for a lookup
-      // that cannot return two rows. `findOne` is the route it exempts.
-      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: migrationId },
-        context: { isSystem: true } as ExecutionContext,
-      });
-      if (!row || row.id !== migrationId) {
-        return { verified: false, conclusive: true, columnsMoved: false };
-      }
-      const flag = {
-        id: migrationId,
-        last_run_at: String(row.last_run_at ?? ''),
-        verified_at: row.verified_at == null ? null : String(row.verified_at),
-        // A non-numeric count must read as "not zero", not as 0 — a bad
-        // coercion lands on NaN, which fails the === 0 test.
-        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-        // [#15989] Read here so both questions come off ONE row: an absent or
-        // empty stamp is the JSON encoding, which is what every row written
-        // before the column step existed holds.
-        columns_moved_at: row.columns_moved_at == null ? null : String(row.columns_moved_at),
-      };
-      const verified = isDataMigrationFlagVerified(flag);
-      if (verified && verifiedLog) this.logger.info(verifiedLog);
-      return { verified, conclusive: true, columnsMoved: hasMovedFileColumns(flag) };
-    } catch {
-      // unreadable evidence → stay lenient, keep asking; and the columns read
-      // as NOT moved, which is the encoding every deployment already writes.
-      return { verified: false, conclusive: false, columnsMoved: false };
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof readMigrationFlagVerified> = {
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+      get logger() { return readLogger(); },
+    };
+    return readMigrationFlagVerified.call(host, migrationId, verifiedLog);
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -12330,24 +11812,14 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   private noteAdmittedValueShapeViolation(object: string, violation: AdmittedValueShapeViolation): void {
-    const migrationId =
-      violation.gate === 'media' ? FILE_REFERENCES_MIGRATION_ID : VALUE_SHAPES_MIGRATION_ID;
-    const existing = this.admittedValueShapeViolations.get(migrationId);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      this.admittedValueShapeViolations.set(migrationId, {
-        count: 1,
-        first: { object, field: violation.field, type: violation.type, detail: violation.detail },
-      });
-    }
-    // Two consumers of the same counterexample, answering different questions.
-    // The deviation marker goes first because it is the one that applies to
-    // EVERY verified deployment (#4797); the retraction below applies only to
-    // the narrow fresh-datastore case (#4769) and closes the gate outright
-    // there. Each is the other's backstop if one write fails.
-    this.recordObservedDeviation(migrationId);
-    this.retractCreationAttestation(migrationId);
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readAdmittedValueShapeViolations = () => this.admittedValueShapeViolations;
+    const host: ThisParameterType<typeof noteAdmittedValueShapeViolation> = {
+      get admittedValueShapeViolations() { return readAdmittedValueShapeViolations(); },
+      recordObservedDeviation: (...a) => this.recordObservedDeviation(...a),
+      retractCreationAttestation: (...a) => this.retractCreationAttestation(...a),
+    };
+    return noteAdmittedValueShapeViolation.call(host, object, violation);
   }
 
   /**
@@ -12605,46 +12077,20 @@ export class ObjectQL implements IObjectQLEngine {
    * that declares neither class of field.
    */
   async announceOpenMigrationGates(): Promise<void> {
-    if (this.migrationGatesAnnounced) return;
-    this.migrationGatesAnnounced = true;
-    try {
-      const mediaByEnv = mediaPostureSetByEnv();
-      const coveredByEnv = valueShapePostureSetByEnv();
-      if (mediaByEnv && coveredByEnv) return;
-
-      let media = false;
-      let covered = false;
-      for (const obj of this._registry.getAllObjects() as any[]) {
-        if (!media && !mediaByEnv && this.objectHasMediaField(obj)) media = true;
-        if (!covered && !coveredByEnv && this.objectHasCoveredValueField(obj)) covered = true;
-        if ((media || mediaByEnv) && (covered || coveredByEnv)) break;
-      }
-
-      // [#4769] Read the ledger, not the memo. This advisory runs once, at
-      // `kernel:bootstrapped`, and the fresh-datastore attestation may have
-      // written its rows moments earlier — after the boot's first write had
-      // already memoized "not verified". Reporting from that memo tells a
-      // brand-new deployment to run a migration whose gate is already closed.
-      // One query per applicable gate, once per boot.
-      if (media && !(await this.readMigrationFlagVerified(FILE_REFERENCES_MIGRATION_ID)).verified) {
-        this.logger.info(
-          '[value-shape] media values are checked but NOT enforced here, and released files are ' +
-            'never collected — this deployment has not verified its file migration. Run ' +
-            '`os migrate files-to-references` (dry run) to see what it would do, then `--apply` ' +
-            'to close the gate (ADR-0104).',
-        );
-      }
-      if (covered && !(await this.readMigrationFlagVerified(VALUE_SHAPES_MIGRATION_ID)).verified) {
-        this.logger.info(
-          '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
-            'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
-            '(dry run) to see what it would report, then `--apply` to close the gate ' +
-            '(ADR-0104).',
-        );
-      }
-    } catch {
-      // An advisory must never be the reason a boot fails.
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readMigrationGatesAnnounced = () => this.migrationGatesAnnounced;
+    const writeMigrationGatesAnnounced = (v: ObjectQL['migrationGatesAnnounced']) => { this.migrationGatesAnnounced = v; };
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof announceOpenMigrationGates> = {
+      get migrationGatesAnnounced() { return readMigrationGatesAnnounced(); }, set migrationGatesAnnounced(v) { writeMigrationGatesAnnounced(v); },
+      get _registry() { return readRegistry(); },
+      objectHasMediaField: (...a) => this.objectHasMediaField(...a),
+      objectHasCoveredValueField: (...a) => this.objectHasCoveredValueField(...a),
+      readMigrationFlagVerified: (...a) => this.readMigrationFlagVerified(...a),
+      get logger() { return readLogger(); },
+    };
+    return announceOpenMigrationGates.call(host);
   }
   private migrationGatesAnnounced = false;
 
@@ -12665,17 +12111,12 @@ export class ObjectQL implements IObjectQLEngine {
    * counts describe a moment that has passed.
    */
   wasDatastoreCreatedFromEmpty(): boolean {
-    let created = 0;
-    let existing = 0;
-    let reporting = 0;
-    for (const driver of this.drivers.values()) {
-      const stats = (driver as any).getSchemaSyncStats?.();
-      if (!stats) continue;
-      reporting += 1;
-      created += Number(stats.created) || 0;
-      existing += Number(stats.existing) || 0;
-    }
-    return reporting > 0 && existing === 0 && created > 0;
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof wasDatastoreCreatedFromEmpty> = {
+      get drivers() { return readDrivers(); },
+    };
+    return wasDatastoreCreatedFromEmpty.call(host);
   }
 
   async destroy() {

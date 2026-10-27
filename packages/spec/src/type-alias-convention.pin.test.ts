@@ -278,9 +278,11 @@ import type * as M190 from './kernel/execution-context.zod.js';
 import type * as M191 from './automation/api-trigger-secret-ref.zod.js';
 // [#25761] The one column apply-on vocabulary both write doors read -- new module, next free index.
 import type * as M192 from './data/column-apply-on.zod.js';
+// [#25779] A seed file's package-relative path -- new module, next free index.
+import type * as M193 from './data/seed-file.zod.js';
 
 // ---------------------------------------------------------------------------
-// 791 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 792 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -907,6 +909,9 @@ export type Iso_data_query__AggregationFunction = Assert<Eq< z.input< typeof M71
 export type Iso_data_query__AggregationNodeSchema = Assert<Eq< z.input< typeof M71.AggregationNodeSchema >, z.infer< typeof M71.AggregationNodeSchema > >>;
 export type Iso_data_query__DateGranularity = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
 export type Iso_data_query__GroupByNodeSchema = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
+
+// data/seed-file.zod.ts
+export type Iso_data_seedFile__SeedFilePathSchema = Assert<Eq< z.input< typeof M193.SeedFilePathSchema >, z.infer< typeof M193.SeedFilePathSchema > >>;
 
 // data/seed-loader.zod.ts
 export type Iso_data_seedLoader__ReferenceResolutionErrorSchema = Assert<Eq< z.input< typeof M72.ReferenceResolutionErrorSchema >, z.infer< typeof M72.ReferenceResolutionErrorSchema > >>;
@@ -1714,7 +1719,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 791 isomorphic pins', () => {
+  it('still declares all 792 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2611,13 +2616,19 @@ describe('ADR-0122 type-alias convention', () => {
     // and no transform — so it is pinned here (Iso_data_filter__NowAnchorSchema)
     // rather than given a `…Parsed` synonym. +1 added.
     //
-    // 790 -> 791 is #25785: `ServedTranslationDataSchema`
+    // 790 -> 791 is #25779: `SeedFilePathSchema` (`data/seed-file.zod.ts`),
+    // the package-relative path a `seedFile(...)` reference names — a plain
+    // string with a pattern, so it is pinned here
+    // (Iso_data_seedFile__SeedFilePathSchema) rather than given a `…Parsed`
+    // synonym. +1 added.
+    //
+    // 791 -> 792 is #25785: `ServedTranslationDataSchema`
     // (`system/translation.zod.ts`, module slot M152), the served face of the
     // translation document — the platform face less the server-resolved
     // `metadataForms` group, so it gains no default or transform and is pinned
     // here (Iso_system_translation__ServedTranslationDataSchema) beside its
     // platform sibling rather than given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(791);
+    expect(pins).toHaveLength(792);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

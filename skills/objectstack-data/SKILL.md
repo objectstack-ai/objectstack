@@ -15,7 +15,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
@@ -218,7 +218,8 @@ export const Invoice = ObjectSchema.create({
 
 - Use `visibleWhen` to hide irrelevant fields in ObjectUI forms.
 - Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
-  incoming changes when the predicate is `TRUE`.
+  incoming changes when the predicate is `TRUE` (for everyone; per permission
+  set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
   the field **stripped** from any non-system write; the write reports

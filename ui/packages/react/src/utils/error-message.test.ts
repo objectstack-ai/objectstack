@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ApiErrorSchema } from '@objectstack/spec/api';
 
-import { extractFieldErrors, classifyLoadError, declaredUserMessage } from './error-message';
+import { extractFieldErrors, classifyLoadError, declaredUserMessage, delegationScopeMessage, isPermissionError } from './error-message';
 
 describe('extractFieldErrors', () => {
   // The wire shape the server actually sends: `@objectstack/rest` serves a
@@ -248,5 +248,46 @@ describe('declaredUserMessage', () => {
     expect(declaredUserMessage(parsedMarked)).toBe('Ask finance');
     const parsedUnmarked = ApiErrorSchema.parse({ code: 'FORBIDDEN', message: 'denied' });
     expect(declaredUserMessage(parsedUnmarked)).toBeNull();
+  });
+});
+
+// objectstack#26059 Q3: the one denial whose server reason a surface shows.
+describe('delegationScopeMessage', () => {
+  const REASON =
+    "Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — permission set 'finance_admin' is not in the scope's allowlist (scope from 'regional_admin').";
+
+  it("answers the server's reason, without the machine prefix, for a 403 DELEGATION_SCOPE_VIOLATION", () => {
+    const err = Object.assign(new Error(`[Security] ${REASON}`), {
+      code: 'DELEGATION_SCOPE_VIOLATION',
+      httpStatus: 403,
+    });
+    expect(delegationScopeMessage(err)).toBe(REASON);
+    // The reason it must be asked first: the permission predicate claims it too.
+    expect(isPermissionError(err)).toBe(true);
+  });
+
+  it('reads the code from `details` too, the pair isPermissionError reads', () => {
+    const err = Object.assign(new Error(`[Security] ${REASON}`), {
+      httpStatus: 403,
+      details: { code: 'DELEGATION_SCOPE_VIOLATION' },
+    });
+    expect(delegationScopeMessage(err)).toBe(REASON);
+  });
+
+  it('CONTROL: every other denial answers null, so its text stays withheld', () => {
+    const denied = (code: string | undefined) =>
+      Object.assign(new Error("[Security] Access denied: delegated 'update' on sys_user_position rejected — no scope."), {
+        code,
+        httpStatus: 403,
+      });
+    expect(delegationScopeMessage(denied('PERMISSION_DENIED'))).toBeNull();
+    expect(delegationScopeMessage(denied('FORBIDDEN'))).toBeNull();
+    expect(delegationScopeMessage(denied(undefined))).toBeNull();
+    expect(delegationScopeMessage(new Error('row-level security policy violation'))).toBeNull();
+    expect(delegationScopeMessage(null)).toBeNull();
+  });
+
+  it('answers null for a scope refusal with no usable text, so the caller still says something', () => {
+    expect(delegationScopeMessage({ code: 'DELEGATION_SCOPE_VIOLATION', httpStatus: 403, message: '' })).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 # ADR-0104: Field runtime value-shape as a first-class contract — spec-owned value schemas, typed action handlers, file-as-reference
 
-- **Status**: Accepted (2026-07-22) — staged per D4. D1 landed (#3429), D2
+**Status**: Accepted (2026-07-22) — staged per D4. D1 landed (#3429), D2
   landed (#3432); D3 refined into two waves by the 2026-07-24 addendum below,
   and wave 2's ownership model settled by the 2026-07-27 addendum.
   Strict-default flip of D1/D2 tracked in #3438 — the media half flips per

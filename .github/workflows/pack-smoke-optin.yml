@@ -88,6 +88,15 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. An unrelated label's run
+# gets a group of its own (its job is skipped anyway), so adding some other label never
+# cancels a running `needs:pack-smoke` run.
+concurrency:
+  group: pack-smoke-optin-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'needs:pack-smoke' && github.run_id || 'run' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pack-smoke:
     # ~45 minutes of build + pack + clean install. Opt-in only — see the header.
@@ -109,25 +118,8 @@ jobs:
       - name: Checkout the merge preview
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       - name: Setup turbo cache
         uses: actions/cache@v6
@@ -137,9 +129,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-
             ${{ runner.os }}-turbo-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # The driver's own prerequisite, asserted by the script itself: pack mode
       # fails fast unless packages/cli/dist and the create-objectstack bin exist.

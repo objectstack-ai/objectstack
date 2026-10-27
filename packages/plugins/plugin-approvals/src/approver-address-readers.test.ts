@@ -147,6 +147,11 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
     why: 'a presence test, not a comparison: selects the action rows that hold a slot to label (#23889 boot '
       + 'backfill); the slot is compared with nothing, and no caller identity is involved',
   },
+  'pending-approver-read-grant.ts · slateRequestIds · approver: persons.length === 1 ? persons[0] : { $in: persons }': {
+    role: 'reader',
+    why: 'the pending approver\'s record read (#26180): `persons` is actingAddresses(caller) with no positions — the '
+      + 'user id and account email slateNamesAPerson calls a person; a position literal names no person, so grants no read',
+  },
   "sys-approval-request.object.ts · (module) · field: 'pending_approvers'": {
     role: 'declarative',
     why: 'the `my_pending` list view\'s substring filter on {current_user_id}; served only by the generic data '

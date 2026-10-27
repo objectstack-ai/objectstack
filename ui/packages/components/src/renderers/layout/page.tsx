@@ -26,7 +26,7 @@ import {
 } from '@object-ui/react';
 import { ComponentRegistry, toDomProps } from '@object-ui/core';
 import { pickLocalized, useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { compile, manifestFromConfigs, type Diagnostic } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs, type Diagnostic } from '@objectstack/sdui-parser';
 import { PAGE_TEMPLATE_SLOTS, type PageTemplate } from '@objectstack/spec/ui';
 import { ReactKindPage } from './react-page';
 import { PRINT_PAGE_ATTRIBUTE, PRINT_RUNNING_ATTRIBUTE, buildPagePrintStylesheet, isPagePrintDeclaration } from './page-print';
@@ -34,6 +34,7 @@ import { cn } from '../../lib/utils';
 import { PageBlockGrid } from './page-block-grid';
 import { PageDescriptionContext } from './page-description-context';
 import { PageRegionPostureProvider, PageWidthProvider, usePageWidthStore } from './page-region-posture';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -731,8 +732,8 @@ function nameHtmlTierReplacement(d: Diagnostic): Diagnostic {
 export const PageRenderer: React.FC<{
   schema: PageNodeSchema;
   className?: string;
-  [key: string]: any;
-}> = ({ schema, className, ...props }) => {
+  [key: string]: unknown;
+} & RendererHostProps> = ({ schema, className, ...props }) => {
   const pageType = schema.pageType || 'record';
   // A `kind:'html'` page compiles its source against the registry, and a
   // compile error fails the whole page. Without this the failure is permanent
@@ -856,7 +857,7 @@ export const PageRenderer: React.FC<{
       if (!tree) return null;
       /**
        * ⭐ THE ONE BOUNDARY CAST (objectui#11466). `tree` is author source
-       * parsed at runtime (`@object-ui/sdui-parser`'s `SchemaElement`: a
+       * parsed at runtime (`@objectstack/sdui-parser`'s `SchemaElement`: a
        * `type: string` plus unknown props), so the compiler cannot know which
        * declared node type each element is. Its validator is what judges it:
        * `compile` runs `validateTree` against the registry manifest (an

@@ -63,17 +63,12 @@ vitest 调用被拒绝:从包目录跑 vitest 会静默跑错测试集 (objectui
 
 Details in [AGENTS.md](./AGENTS.md) (“怎么跑测试”) and `scripts/vitest-invocation-guard.mjs`.
 
-### Run Examples
+### Examples
 
-```bash
-pnpm --filter @object-ui/example-console-starter dev     # Fork-ready ObjectStack console
-pnpm --filter @object-ui/example-byo-backend-console dev # ObjectUI on your own backend
-```
-
-Those are the only two dev servers under `examples/`: `hello-world` is a snippet to paste
+No directory under `examples/` is a dev server: `hello-world` is a snippet to paste
 into your own app and `schema-catalog` is a data package, so neither declares a `dev`
-script. [`examples/README.md`](./examples/README.md) is the index — which one to pick,
-what to build first, and the port each one serves on.
+script. [`examples/README.md`](./examples/README.md) is the index. The console to run is
+`apps/console` (`pnpm dev`).
 
 ### Release (via changesets)
 
@@ -87,7 +82,7 @@ pnpm changeset publish         # Publish to npm (CI only)
 
 | Path | Purpose |
 | --- | --- |
-| `packages/*` | 37 published packages (`@object-ui/*`), plus the private `vscode-extension`, `test-support` (test-only, never released) and `runner` (workspace demo app, never released) |
+| `packages/*` | The published `@object-ui/*` packages, plus the private `vscode-extension`, `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
 | `apps/console` | Full ObjectUI console app (Vite + React) |
 | `apps/site` | Public docs site at <https://www.objectui.org> (fumadocs) |
 | `examples/*` | Runnable examples and the schema catalog — see [`examples/README.md`](./examples/README.md) |

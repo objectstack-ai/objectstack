@@ -72,79 +72,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 
 /**
- * [#23050 slice 1] The files this census reads. `RestServer#registerDataActionEndpoints`'
- * body moved, unedited, to `data-action-routes.ts`, and its nine sites with it: they
- * are still `this.resolveExecCtx(environmentId, req)` on a `RestServer` route, so
- * they are still this census's population. A site is therefore identified by
- * `file:line`, never by a line alone.
- *
- * [#23050 slice 2] `RestServer#registerBatchEndpoints`' body followed, unedited, to
- * `batch-routes.ts`, and its five sites with it — on the same terms.
- *
- * [#23050 slice 3] …and `RestServer#registerApprovalsEndpoints`' body to
- * `approvals-routes.ts`, with its seven. The files are no longer spelt here: the
- * census reads every file on THE list of the files `RestServer`'s registrars
- * live in (`rest-server-registrar-files.ts`), so the slice that moves the next
- * body widens it by adding its module there. §2 pins the list's length.
- *
- * [#23050 slice 4] …and `registerSharingEndpoints`' and
- * `registerSharingRuleEndpoints`' bodies to `sharing-routes.ts`, with their eight
- * (three and five) — the first module on the list to carry TWO registrars.
- *
- * [#23050 slice 5] …and `registerAnalyticsEndpoints`' body to
- * `analytics-routes.ts`, with its one.
- *
- * [#23050 slice 6] …and `registerSecurityExplainEndpoints`' and
- * `registerSecurityEndpoints`' bodies to `security-routes.ts`, with their five
- * (two and three) — the second module on the list to carry TWO registrars.
- *
- * [#23050 slice 7] …and `registerDiscoveryEndpoints`' and
- * `registerOpenApiEndpoints`' bodies to `discovery-routes.ts`, with their two
- * (none and two) — the third module to carry TWO registrars, and the first
- * moved registrar whose body reads no `resolveExecCtx` at all (the discovery
- * document resolves no caller).
- *
- * [#23050 slice 8] …and `registerEmailEndpoints`' body to `email-routes.ts`,
- * with its one.
- *
- * [#23050 slice 9] …and `registerSearchEndpoints`' body to `search-routes.ts`,
- * with its one.
- *
- * [#23050 slice 10] …and `registerUiEndpoints`' body to `ui-routes.ts`, with
- * its one.
- *
- * [#23050 slice 11] …and `registerFormEndpoints`' body to `form-routes.ts`,
- * with none: the public form doors resolve no caller (their authorization is
- * the form's own declaration).
- *
- * [#23050 slice 12] …and `registerCrudEndpoints`' body to `crud-routes.ts`,
- * with its six: one per CRUD door, each bare and guarded on its next line.
- *
- * [#23050 slice 13a] …and the first three `/meta` groups of
- * `registerMetadataEndpointsInner`' body to `meta-collection-routes.ts`, with
- * their three: the `_drafts` and `_migrate-stored` doors' and the per-type
- * list's, each locally caught (the list's on its continuation line), as before.
- *
- * [#23050 slice 13b] …and the fourth, the per-item reads, to
- * `meta-item-read-routes.ts`, with its one: the item read's, locally caught on
- * its continuation line, as before — one of §7's and §8's four continuation
- * sites, which those sections find there because they read every file here.
- *
- * [#23050 slice 13c] …and the fifth, the per-item writes, to
- * `meta-item-write-routes.ts`, with their two: the item save's and the reset's,
- * each locally caught on its invocation line, as before.
- *
- * [#23050 slice 13d] …and the sixth, the history family, to
- * `meta-item-history-routes.ts`, with its five, each locally caught as before:
- * the audit trail's, the publish's and the rollback's on their invocation
- * lines, the change log's and the comparison's on their continuation lines —
- * two of §7's and §8's four continuation sites, which those sections find there
- * because they read every file here.
- *
- * [#23050 slice 13e] …and the seventh and eighth, the object state-machine read
- * to `meta-object-state-routes.ts` and the published read to
- * `meta-item-history-routes.ts`, with none: neither door resolves a caller
- * itself (the umbrella's wrapper does, before either handler runs).
+ * The files this census reads: every file on THE list of the files
+ * `RestServer`'s registrars live in (`rest-server-registrar-files.ts`). The
+ * split of `rest-server.ts` moves a registrar's body, unedited, to its own
+ * module, and its sites go with it: they are still
+ * `this.resolveExecCtx(environmentId, req)` on a `RestServer` route, so they
+ * are still this census's population. The census widens when the module joins
+ * that list, and a site is therefore identified by `file:line`, never by a line
+ * alone.
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -153,79 +88,19 @@ const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
 const siteKey = (file: string, line: number) => `${file}:${line}`;
 
 /**
- * The frames in `rest-server.ts` that are NOT consumers: the host literal each
- * moved registrar (`registerDataActionEndpoints`, `registerBatchEndpoints`,
- * `registerApprovalsEndpoints`, `registerSharingEndpoints`,
- * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`,
- * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
- * `registerOpenApiEndpoints`, `registerEmailEndpoints`,
- * `registerSearchEndpoints`, `registerUiEndpoints`,
- * `registerCrudEndpoints`) hands its moved body — and each one
- * `registerMetadataEndpointsInner` builds for a moved `/meta` group's module
- * (#23050 slices 13a to 13e), counted as that module's registrar —
- * forwards each member to the server with `(...a) => this.<member>(...a)`, so
- * a moved site's stack shows
- * that forwarder above the site itself. The site is the first censused frame
- * that is not one. Found by their spelling, and §2 pins ONE per moved
- * REGISTRAR whose body reads the seam — one per moved module, plus
- * {@link EXTRA_MOVED_REGISTRARS}, less {@link MOVED_REGISTRARS_READING_NO_EXECCTX}
- * — so a respelt forwarder — or a module moved without joining `SITE_FILES` —
- * is a control failure there rather than every moved site silently attributed
- * to it.
+ * The frames in `rest-server.ts` that are NOT consumers: each host literal a
+ * moved registrar's body is handed forwards the seam to the server with
+ * `resolveExecCtx: (...a) => this.resolveExecCtx(...a),`, so a moved site's
+ * stack shows that forwarder above the site itself. The site is the first
+ * censused frame that is not one. Found by their spelling; §2's completeness
+ * control reds on any other spelling of a call, so a respelt forwarder is a
+ * control failure there rather than every moved site silently attributed to
+ * it, and §3's attribution control reds on a call no censused site made, which
+ * is what a module moved without joining {@link SITE_FILES} produces.
  */
 const FORWARDER_LINES = SOURCE.split('\n').flatMap((l, i) =>
     l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),') ? [i + 1] : []);
 const FORWARDERS = new Set(FORWARDER_LINES.map((line) => siteKey('rest-server.ts', line)));
-/**
- * [#23050 slice 4] The moved registrars beyond one per moved module:
- * `sharing-routes.ts` carries two registrars' bodies, each handed over by its
- * own host literal and so through its own forwarder.
- *
- * [#23050 slice 6] `security-routes.ts` carries two as well, on the same terms.
- *
- * [#23050 slice 7] So does `discovery-routes.ts` (the discovery and OpenAPI
- * bodies), each handed over by its own host literal — but see
- * {@link MOVED_REGISTRARS_READING_NO_EXECCTX}: only one of its two literals
- * carries the forwarder.
- *
- * [#23050 slice 13e] So does `meta-item-history-routes.ts` (the history family
- * and the published read), each handed over by its own host literal the inner
- * method builds at its own position — and, as for the discovery module, only
- * the first of the two carries the forwarder.
- */
-const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
-    'sharing-routes.ts': 1,
-    'security-routes.ts': 1,
-    'discovery-routes.ts': 1,
-    'meta-item-history-routes.ts': 1,
-};
-/**
- * [#23050 slice 7] The moved registrars whose bodies read no `resolveExecCtx`,
- * so whose host literals hand over no forwarder — measured by the AST walk of
- * the body, not assumed. `registerDiscoveryEndpoints`' body resolves no caller
- * (the discovery document is served to anyone), so its host literal names no
- * `resolveExecCtx` member; its module's other registrar, the OpenAPI
- * document's, reads it once (twice until its `/docs` viewer page was retired,
- * #25104) and carries the forwarder. A body that starts reading the
- * seam gains a forwarder, and §2's exact count reds until this entry goes.
- *
- * [#23050 slice 11] `registerFormEndpoints`' body reads no `resolveExecCtx`
- * either (the AST walk of the body finds no read): the public form doors run
- * as the form grant and resolve no caller, so their host literal names no
- * `resolveExecCtx` member.
- *
- * [#23050 slice 13e] Neither the object state-machine read's body
- * (`meta-object-state-routes.ts`) nor the published read's
- * (`meta-item-history-routes.ts`' second registrar) reads it either (the AST
- * walk of each body finds no read): both doors leave the caller to the
- * umbrella's wrapper, so neither host literal names a `resolveExecCtx` member.
- */
-const MOVED_REGISTRARS_READING_NO_EXECCTX: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
-    'discovery-routes.ts': 1,
-    'form-routes.ts': 1,
-    'meta-item-history-routes.ts': 1,
-    'meta-object-state-routes.ts': 1,
-};
 
 /** A stack frame in any censused file, as `<file>:<line>:<column>`. */
 const SITE_FRAME = new RegExp(`(${SITE_FILES.map((file) => file.replace(/\./g, '\\.')).join('|')}):(\\d+):\\d+`, 'g');
@@ -256,16 +131,15 @@ type Handler = (req: any, res: any) => any;
  * The detection below keys on `.catch(` and is deliberately spelling-agnostic,
  * so this census still measures WHICH sites are caught, which is its subject.
  *
- * ⚠️ The catch may sit on the CONTINUATION line — four of them do. A
- * single-line grep counts 16 and misses those four, which is how the thread's
- * "16 caught / 52 bare" split came to name two numbers that do not add to 72.
+ * ⚠️ The catch may sit on the CONTINUATION line. A single-line grep misses
+ * every site spelt that way, which is how the thread's caught / bare split came
+ * to name two numbers that did not add up to its own site total.
  *
  * ⛔ THAT WARNING CAUGHT ITS OWN AUTHOR, AND THE RECORD SAYS SO. The first
  * revision of this block claimed "**every** site now passes
  * `rethrowAuthzStoreUnavailable`". It was FALSE when written: the conversion
- * had reached the 16 single-line sites and none of the four continuation ones
- * (their `.catch` lines were 2747, 4388, 5226, 6759 at that revision; §7 and §8
- * derive the numbers rather than quoting them) — the exact miss the paragraph
+ * had reached the single-line sites and none of the continuation ones (§7 and
+ * §8 derive them rather than quoting them) — the exact miss the paragraph
  * above describes, committed by the person who had just written it down.
  * Contract review found it. The sentence is now QUANTIFIED and, more to the
  * point, ENFORCED: §7 below re-derives the argument at every site from source
@@ -277,7 +151,7 @@ type Handler = (req: any, res: any) => any;
  * it asks whether the file CONTAINS `isAuthzStoreUnavailableError` or
  * `rethrowAuthzStoreUnavailable` at all. One converted site satisfies it for
  * the whole file, so it cannot see a PARTIAL conversion and no pin there failed
- * while those four sites stood. §7 is what closes that gap for this file.
+ * while those sites stood. §7 is what closes that gap for this file.
  */
 function siteTable(): { key: string; file: string; line: number; caught: boolean; nextLine: string }[] {
     const out: { key: string; file: string; line: number; caught: boolean; nextLine: string }[] = [];
@@ -377,9 +251,17 @@ function makeServer(protocol: any) {
 }
 
 /**
+ * What {@link instrument} records for a call whose stack names no censused
+ * frame at all — a call made from a file that is not on {@link SITE_FILES}.
+ */
+const UNATTRIBUTED = '(no censused frame)';
+
+/**
  * Replace `resolveExecCtx` with the leg's value and record, per driven route,
  * which SITE LINES were reached — read off the stack, so the correspondence
- * between a route and a census site is observed rather than transcribed.
+ * between a route and a census site is observed rather than transcribed. A
+ * call no censused frame made is recorded as {@link UNATTRIBUTED}, never
+ * dropped: §3's attribution control reads it.
  */
 function instrument(ctxValue: any) {
     const proto: any = (RestServer as any).prototype;
@@ -387,11 +269,9 @@ function instrument(ctxValue: any) {
     const hits = new Map<string, Set<string>>();
     const state = { route: '' };
     proto.resolveExecCtx = async function () {
-        const site = siteOfStack(new Error().stack ?? '');
-        if (site) {
-            if (!hits.has(state.route)) hits.set(state.route, new Set());
-            hits.get(state.route)!.add(site);
-        }
+        const site = siteOfStack(new Error().stack ?? '') ?? UNATTRIBUTED;
+        if (!hits.has(state.route)) hits.set(state.route, new Set());
+        hits.get(state.route)!.add(site);
         return ctxValue === undefined ? undefined : { ...ctxValue };
     };
     return { hits, state, restore: () => { proto.resolveExecCtx = original; } };
@@ -485,406 +365,67 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 });
 
 // ---------------------------------------------------------------------------
-// 2. The structural census — the counts, and the split the thread had backwards
+// 2. The structural reading — derived from the tree, never counted
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('61 invocation sites, 144 mentions — the thread\'s two control numbers hold', () => {
-        // [#25104] 62 → 61 sites / 145 → 144 mentions: the OpenAPI document's
-        // `/docs` viewer page retired with its route, taking one BARE site
-        // (46 → 45) from `discovery-routes.ts` with it and no prose mention. The
-        // caught half (16) is untouched, and so is the forwarder count: the
-        // OpenAPI body still reads the seam, for the document.
-        //
-        // [ADR-0131 cutover, stage 7-pre] 63 → 62 sites / 78 → 77 mentions:
-        // the permission-set overlay-discard route retired, taking one BARE
-        // site (47 → 46) with it and no prose mention. The caught half (16)
-        // is untouched.
-        //
-        // [ADR-0131 D6 + #22430, merged] 68 → 63 sites / 92 → 78 mentions:
-        // #22430's two new BARE sites and ADR-0131 D6's five removed CAUGHT
-        // sites, landed on parallel branches and composed at the merge. The
-        // two entries below are each measured against their own base.
-        //
-        // [ADR-0131 D6] 66 → 61 sites / 90 → 76 mentions (on its own base) — five consumers
-        // REMOVED, all from the CAUGHT half (21 → 16; 13 → 12 on the
-        // invocation line). The `/meta` doors stopped carrying an organization
-        // into metadata reads, so the five reads that resolved the caller only
-        // to name its organization no longer resolve it:
-        // `fetchCurrentMetaDocument` (same-line), the layered read, the
-        // diagnostics sweep, the references sweep and the `/published` overlay
-        // read (continuation-line). The bare half (45) is untouched. Nine prose
-        // mentions went with the org-scope comments that named the seam, so
-        // mentions fall by 14 against 5 sites.
-        //
-        // [#22430] 66 → 68 sites / 90 → 92 mentions (on its own base) — two NEW consumers, both
-        // BARE. The API-description endpoints (`registerOpenApiEndpoints`: the
-        // document and its viewer) resolved no identity at all and served an
-        // anonymous caller; each handler now opens with a bare site and the
-        // shared anonymous floor on the very next line, the family §2's third
-        // case describes and §3 drives. The caught half (21, 13 on the
-        // invocation line) is untouched. No prose mention was added, so the
-        // two numbers move together (+2 / +2).
-        //
-        // [#20237] 68 → 66 sites / 92 → 90 mentions — a MOVE, not a lost
-        // consumer. `GET /meta/:type`'s app nav filter and dashboard widget
-        // gate each resolved the context inline (two same-line CAUGHT sites);
-        // both moved into `createMetaListReadGate` in `meta-item-read-gate.ts`,
-        // the one list gate the runtime dispatcher's `/meta` list branch now
-        // asks too, where they read the caller through the SAME port the item
-        // gate uses (`metaReadAudienceSources`'s `resolveCaller`, already
-        // counted, still same-line `.catch(rethrowAuthzStoreUnavailable)`). So
-        // no site replaced them: −2 sites, both from the CAUGHT half (23 → 21,
-        // 15 → 13 on the invocation line); the bare half (45) is untouched. No
-        // prose mention was added, so the two numbers move together (−2 / −2).
-        //
-        // [#20193] 70 → 68 sites / 93 → 92 mentions — a MOVE, not a new
-        // consumer. `metaItemReadGate`'s body and the docs-audience helpers it
-        // calls moved into `meta-item-read-gate.ts`, the one gate the runtime
-        // dispatcher's `/meta` domain now asks too. Three same-line CAUGHT sites
-        // left this file with them (the gate's app and dashboard arms, and
-        // `resolveAudienceCaller`); ONE took their place — the caller port
-        // `metaReadAudienceSources` hands the moved gate, still same-line
-        // `.catch(rethrowAuthzStoreUnavailable)`, still not behind the shared
-        // anonymous floor. Net −2 sites, all from the CAUGHT half (25 → 23, 17
-        // → 15 on the invocation line); the bare half (45) is untouched. The
-        // new port's docblock names the seam once, so mentions fall by one
-        // fewer than sites (−2 invocations, +1 prose mention).
-        //
-        // [#20156] 69 → 70 sites / 92 → 93 mentions — one net site, and it is
-        // a MOVE plus one. The plain read's app and dashboard gates each
-        // resolved the context inline (two same-line CAUGHT sites); both moved
-        // into `metaItemReadGate`, the one per-caller read gate the plain read
-        // and every door beside it now ask, where they stay same-line CAUGHT.
-        // The one new site is `fetchCurrentMetaDocument`, which the event doors
-        // and `/diff` use to judge the item the plain read would judge — the
-        // plain read's org partition, so it resolves the context too. Same-line
-        // CAUGHT, like the two it sits beside: none of these doors is behind the
-        // shared anonymous floor's `enforceAuth` line, and they already carried
-        // `rethrowAuthzStoreUnavailable`. No prose mention was added, so the two
-        // numbers move together (+1 / +1).
-        //
-        // [#20102] 77 → 69 sites / 100 → 92 mentions. The saved-report
-        // `/reports` family was retired whole with the saved-report stack, and
-        // its eight routes each carried ONE bare site (`resolveExecCtx` then
-        // `enforceAuth` on the next line) and no other mention — so both numbers
-        // fall by exactly eight, every one of them from the BARE half. The
-        // caught half (24, 16 on the invocation line) is untouched, which the
-        // next case asserts rather than this comment claiming it.
-        //
-        // [#15866] 77 sites UNCHANGED / 98 → 99 mentions — the fourth pattern,
-        // and the first entry here that moves the mention count while adding no
-        // consumer at all. That card retired the `as any` casts on this file's
-        // protocol-dispatch sites, so each data door's request literal is now
-        // compiled against the declared spec contract through a typed envelope
-        // (`ServerScopedDataRequest`). The envelope's doc-comment has to say
-        // where its `context` member comes from — it is the SERVER-DERIVED
-        // execution context, which is the whole reason it may not join the
-        // published request schema — and naming {@link RestServer.resolveExecCtx}
-        // is how it says so. ⚠️ No call site was added, moved or removed: the
-        // repair is a type annotation, and `SITES.length` staying at 77 across
-        // it is the assertion that says so. A reader who sees only the mention
-        // count move should read it as documentation about the consumers, never
-        // as a consumer.
-        //
-        // [#13753, the `/references` half] 76 → 77 sites / 97 → 98 mentions.
-        // `GET /meta/:type/:name/references` resolved NO identity, so the
-        // reference sweep behind the admin "Used by" panel read the env
-        // partition only and rendered "Nothing in the metadata graph points at
-        // this item. Safe to delete." over an organization it never read. It
-        // joins as a LOCALLY CAUGHT site in the continuation-line spelling, for
-        // the same reason as its siblings: this door does not sit behind the
-        // shared anonymous floor either.
-        //
-        // ⚠️ Here the two numbers moved by the SAME amount (+1 and +1), which
-        // is the third pattern this block has recorded and is not a mistake:
-        // the door's new comment states the memoised resolution in prose
-        // WITHOUT naming the symbol, so the call is the only new mention. A
-        // reader checking the +1/+2 shape of the entries below should read this
-        // as the mention count tracking mentions, not as a lost site.
-        //
-        // [#13753] 75 → 76 sites / 95 → 97 mentions. `GET /meta/diagnostics`
-        // resolved NO identity, so the Studio governance sweep could not state
-        // which organization's partition it was reading and reported clean
-        // tiles over one it never read. It joins as a LOCALLY CAUGHT site (the
-        // continuation-line `.catch(rethrowAuthzStoreUnavailable)` spelling),
-        // like the `/history` and `/diff` doors before it: this door does not
-        // sit behind the shared anonymous floor either.
-        //
-        // ⚠️ +1 and +2 again, for the same reason as below: one call site, and
-        // one prose mention in the door's new comment recording that
-        // `resolveExecCtx` is memoised per request so this is not a new
-        // org-resolution seam.
-        //
-        // ⚠️ The site is resolved INSIDE an `if (diagnosticsType)` block rather
-        // than in a ternary, and the shape is load-bearing for this census: a
-        // ternary puts the `.catch(…)` on a continuation line with NO trailing
-        // `;`, which is a THIRD layout {@link catchArguments} cannot read — it
-        // would have counted 23 caught sites and found 22 arguments, i.e. the
-        // §7 CONTROL failing rather than a silent hole. Conforming to the
-        // house spelling was preferred over teaching the reader a layout.
-        //
-        // [#13406] 73 → 75 sites / 92 → 95 mentions. The `/meta/:type/:name/
-        // history` and `/diff` read doors resolved NO identity, so neither
-        // could state which organization's `sys_metadata_history` partition it
-        // was reading — they read the env one and answered an empty change log
-        // for org-scoped overlays. Both join as LOCALLY CAUGHT sites (the
-        // continuation-line `.catch(rethrowAuthzStoreUnavailable)` spelling),
-        // which is the family the next case describes: neither door sits behind
-        // the shared anonymous floor, so each must decide the outage for
-        // itself — the same shape the `/audit` twin and the `/layers` door
-        // already carry.
-        //
-        // ⚠️ Again the two numbers moved by DIFFERENT amounts (+2 and +3): two
-        // call sites, and ONE prose mention in the history door's new
-        // doc-comment recording that `resolveExecCtx` is memoised per request
-        // and so this is not a new org-resolution seam.
-        //
-        // [commit cc837dbfe] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
-        // the ONE metadata-touching route in the table that resolved no
-        // identity at all — the exception this census surfaced — and the
-        // 2026-08-30 ruling closed it. It joins as a BARE site behind the
-        // shared floor, which is the family the next two cases describe.
-        //
-        // ⚠️ The two numbers moved by DIFFERENT amounts (+1 and +3) and that is
-        // the point of counting both: one is the call site, the other two are
-        // prose mentions in the new doc-comments (the registrar's, recording
-        // that this route used to call `resolveExecCtx` zero times, and the
-        // ownership guard's, recording that adding `resolveExecCtx` +
-        // `enforceAuth` was measured NOT to be the repair). A mention count
-        // that tracked the site count exactly would be measuring one thing
-        // twice.
-        //
-        // [#15685] 77 → 77 sites / 99 → 100 mentions. The `/references` door's
-        // refusal arm added ONE prose mention and NO call site: its comment
-        // records that the arm's catch is scoped to the protocol call alone, so
-        // the `resolveExecCtx` seam above it cannot reach the arm whatever that
-        // seam declares. That is the safety claim the narrow catch rests on, so
-        // naming the seam is the point of the sentence — and the sentence
-        // moving only the mention count is this control working: a site was not
-        // added, and the number that tracks sites did not move.
-        //
-        // [#23050 slice 1] 62 sites UNCHANGED / 77 → 81 mentions — a MOVE, and
-        // the seam that carries it. `registerDataActionEndpoints`' body left
-        // `rest-server.ts` for `data-action-routes.ts` with its nine BARE sites
-        // (and the `ServerScopedDataRequest` docblock's one prose mention), so
-        // this census now reads both files: 53 + 9 = 62 sites. The four new
-        // mentions are the seam itself, none of them a consumer — the host
-        // literal's forwarder (`resolveExecCtx: (...a) => this.resolveExecCtx(...a)`,
-        // two) and the host interface's member (`resolveExecCtx:
-        // RestServer['resolveExecCtx']`, two). The forwarder is the one
-        // `rest-server.ts` frame `siteOfStack` steps over; the control below
-        // proves it is still where that spelling says it is.
-        //
-        // [#23050 slice 2] 62 sites UNCHANGED / 81 → 85 mentions — the same MOVE.
-        // `registerBatchEndpoints`' body left for `batch-routes.ts` with its five
-        // BARE sites, so this census reads three files: 48 + 9 + 5 = 62 sites.
-        // The four new mentions are that slice's seam, the same two spellings
-        // (its host literal's forwarder, two; its host interface's member, two).
-        // There are now two forwarders, one per moved module, and the control
-        // pins that pairing.
-        //
-        // [#23050 slice 3] 62 sites UNCHANGED / 85 → 89 mentions — the same MOVE.
-        // `registerApprovalsEndpoints`' body left for `approvals-routes.ts` with
-        // its seven BARE sites: 41 + 9 + 5 + 7 = 62 sites, read off the registrar
-        // list, whose length is pinned here. The four new mentions are this
-        // slice's seam, the same two spellings; three forwarders now, one per
-        // moved module.
-        //
-        // [#23050 slice 4] 62 sites UNCHANGED / 89 → 97 mentions — the same MOVE.
-        // `registerSharingEndpoints`' and `registerSharingRuleEndpoints`' bodies
-        // left for `sharing-routes.ts` with their eight BARE sites (three and
-        // five): 33 + 9 + 5 + 7 + 8 = 62 sites. The eight new mentions are this
-        // slice's seam, the same two spellings TWICE — two host literals'
-        // forwarders (four) and two host interfaces' members (four) — because
-        // the module carries two registrars. Five forwarders now: one per moved
-        // registrar, which is one per moved module plus `EXTRA_MOVED_REGISTRARS`.
-        //
-        // [#23050 slice 5] 62 sites UNCHANGED / 97 → 101 mentions — the same MOVE.
-        // `registerAnalyticsEndpoints`' body left for `analytics-routes.ts` with
-        // its one BARE site: 32 + 9 + 5 + 7 + 8 + 1 = 62 sites. The four new
-        // mentions are this slice's seam, the same two spellings once (its host
-        // literal's forwarder, two; its host interface's member, two). Six
-        // forwarders now, one per moved registrar: (6 - 1) + 1.
-        //
-        // [#23050 slice 6] 62 sites UNCHANGED / 101 → 109 mentions — the same MOVE.
-        // `registerSecurityExplainEndpoints`' and `registerSecurityEndpoints`'
-        // bodies left for `security-routes.ts` with their five BARE sites (two
-        // and three): 27 + 9 + 5 + 7 + 8 + 1 + 5 = 62 sites. The eight new
-        // mentions are this slice's seam, the same two spellings TWICE, as slice
-        // 4's (two host literals' forwarders, four; two host interfaces'
-        // members, four). Eight forwarders now, one per moved registrar:
-        // (7 - 1) + 2, the second module carrying two registrars counted in
-        // `EXTRA_MOVED_REGISTRARS`.
-        //
-        // [#23050 slice 7] 62 sites UNCHANGED / 109 → 113 mentions — the same MOVE.
-        // `registerOpenApiEndpoints`' body left for `discovery-routes.ts` with its
-        // two BARE sites (the document and its viewer), and
-        // `registerDiscoveryEndpoints`' with none: 25 + 9 + 5 + 7 + 8 + 1 + 5 + 2
-        // = 62 sites. The four new mentions are this slice's seam, the two
-        // spellings ONCE (one host literal's forwarder, two; one host
-        // interface's member, two): `rest-server.ts` stays at 57 (two sites
-        // out, one forwarder's two mentions in). Nine forwarders now:
-        // (8 - 1) + 3 - 1 — the third module carrying two registrars counted in
-        // `EXTRA_MOVED_REGISTRARS`, and the discovery registrar, which reads no
-        // `resolveExecCtx`, in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
-        //
-        // [#23050 slice 8] 62 sites UNCHANGED / 113 → 117 mentions — the same MOVE.
-        // `registerEmailEndpoints`' body left for `email-routes.ts` with its one
-        // BARE site: 24 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 = 62 sites. The four new
-        // mentions are this slice's seam, the two spellings once (its host
-        // literal's forwarder, two; its host interface's member, two):
-        // `rest-server.ts` goes 57 → 58 (one site out, one forwarder's two
-        // mentions in). Ten forwarders now: (9 - 1) + 3 - 1, the module carrying
-        // one registrar that reads the seam, so neither map gains an entry.
-        //
-        // [#23050 slice 9] 62 sites UNCHANGED / 117 → 121 mentions — the same MOVE.
-        // `registerSearchEndpoints`' body left for `search-routes.ts` with its one
-        // BARE site: 23 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 = 62 sites. The four
-        // new mentions are this slice's seam, the two spellings once (its host
-        // literal's forwarder, two; its host interface's member, two):
-        // `rest-server.ts` goes 58 → 59 (one site out, one forwarder's two
-        // mentions in). Eleven forwarders now: (10 - 1) + 3 - 1, the module
-        // carrying one registrar that reads the seam, so neither map gains an
-        // entry.
-        //
-        // [#23050 slice 10] 62 sites UNCHANGED / 121 → 125 mentions — the same MOVE.
-        // `registerUiEndpoints`' body left for `ui-routes.ts` with its one BARE
-        // site (guarded on its next line, as before):
-        // 22 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 = 62 sites. The four new
-        // mentions are this slice's seam, the two spellings once (its host
-        // literal's forwarder, two; its host interface's member, two):
-        // `rest-server.ts` goes 59 → 60 (one site out, one forwarder's two
-        // mentions in). Twelve forwarders now: (11 - 1) + 3 - 1, the module
-        // carrying one registrar that reads the seam, so neither map gains an
-        // entry.
-        //
-        // [#23050 slice 11] 62 sites / 125 mentions UNCHANGED — the same MOVE.
-        // `registerFormEndpoints`' body left for `form-routes.ts` with NO site:
-        // 22 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 = 62 sites. Its host
-        // literal and host interface name no `resolveExecCtx` member, so no
-        // mention moved and `rest-server.ts` stays at 60. Still twelve
-        // forwarders: (12 - 1) + 3 - 2, the module counted in
-        // `MOVED_REGISTRARS_READING_NO_EXECCTX`.
-        //
-        // [#23050 slice 12] 62 sites UNCHANGED / 125 → 129 mentions — the same MOVE.
-        // `registerCrudEndpoints`' body left for `crud-routes.ts` with its six BARE
-        // sites (each guarded on its next line, as before):
-        // 16 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 = 62 sites. The four new
-        // mentions are this slice's seam, the two spellings once (its host
-        // literal's forwarder, two; its host interface's member, two):
-        // `rest-server.ts` goes 60 → 56 (six sites out, one forwarder's two
-        // mentions in). Thirteen forwarders now: (13 - 1) + 3 - 2, the module
-        // carrying one registrar that reads the seam, so neither map gains an
-        // entry.
-        //
-        // [#23050 slice 13a] 62 sites UNCHANGED / 129 → 133 mentions — the same MOVE.
-        // The first three `/meta` groups of `registerMetadataEndpointsInner` left for
-        // `meta-collection-routes.ts` with their three LOCALLY CAUGHT sites (`_drafts`
-        // and `_migrate-stored` on the invocation line, the per-type list on its
-        // continuation line, as before):
-        // 13 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 = 62 sites. The four
-        // new mentions are this slice's seam, the two spellings once (the host
-        // literal the inner method builds, its forwarder, two; the host interface's
-        // member, two): `rest-server.ts` goes 56 → 55 (three sites out, one
-        // forwarder's two mentions in). Fourteen forwarders now: (14 - 1) + 3 - 2,
-        // the module carrying one host literal that reads the seam, so neither map
-        // gains an entry.
-        //
-        // [#23050 slice 13b] 62 sites UNCHANGED / 133 → 137 mentions — the same MOVE.
-        // The fourth `/meta` group, the per-item reads, left for
-        // `meta-item-read-routes.ts` with its one LOCALLY CAUGHT site (the item read's,
-        // on its continuation line, as before):
-        // 12 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 = 62 sites. The
-        // body also carries one prose mention, which moved with it. The four new
-        // mentions are this slice's seam, the two spellings once (the second host
-        // literal the inner method builds, its forwarder, two; the host interface's
-        // member, two): `rest-server.ts` stays at 55 (the site and the prose mention
-        // out, one forwarder's two mentions in). Fifteen forwarders now:
-        // (15 - 1) + 3 - 2, the module carrying one host literal that reads the
-        // seam, so neither map gains an entry.
-        //
-        // [#23050 slice 13c] 62 sites UNCHANGED / 137 → 141 mentions — the same MOVE.
-        // The fifth `/meta` group, the per-item writes, left for
-        // `meta-item-write-routes.ts` with its two LOCALLY CAUGHT sites (the item
-        // save's and the reset's, each on its invocation line, as before):
-        // 10 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 = 62 sites. The
-        // four new mentions are this slice's seam, the two spellings once (the third
-        // host literal the inner method builds, its forwarder, two; the host
-        // interface's member, two): `rest-server.ts` stays at 55 (the two sites out,
-        // one forwarder's two mentions in). Sixteen forwarders now: (16 - 1) + 3 - 2,
-        // the module carrying one host literal that reads the seam, so neither map
-        // gains an entry.
-        //
-        // [#23050 slice 13d] 62 sites UNCHANGED / 141 → 145 mentions — the same MOVE.
-        // The sixth `/meta` group, the history family, left for
-        // `meta-item-history-routes.ts` with its five LOCALLY CAUGHT sites (the audit
-        // trail's, the publish's and the rollback's on their invocation lines, the
-        // change log's and the comparison's on their continuation lines, as before):
-        // 5 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 + 5 = 62 sites.
-        // The four new mentions are this slice's seam, the two spellings once (the
-        // fourth host literal the inner method builds, its forwarder, two; the host
-        // interface's member, two): `rest-server.ts` goes 55 → 52 (the five sites
-        // out, one forwarder's two mentions in). Seventeen forwarders now:
-        // (17 - 1) + 3 - 2, the module carrying one host literal that reads the seam,
-        // so neither map gains an entry.
-        //
-        // [#23050 slice 13e] 62 sites / 145 mentions UNCHANGED — the same MOVE. The
-        // seventh and eighth `/meta` groups, the object state-machine read and the
-        // published read, left for `meta-object-state-routes.ts` (a new module on the
-        // list) and `meta-item-history-routes.ts` (already on it) with NO site, and
-        // neither host literal the inner method builds for them names a
-        // `resolveExecCtx` member, so no mention moved either:
-        // 5 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 + 5 + 0 = 62
-        // sites. Still seventeen forwarders: (18 - 1) + 4 - 4, the published read
-        // counted as the history module's second registrar in BOTH maps and the new
-        // module in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
-        expect(SITE_FILES).toHaveLength(18);
-        expect(SITES.length).toBe(61);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(144);
-        const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
-        expect(extraMovedRegistrars).toBe(4);
-        const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
-        expect(registrarsReadingNoExecCtx).toBe(4);
-        expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar whose body reads it: one was respelt or removed, or a module moved without joining SITE_FILES')
-            .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
-    });
+/**
+ * Every line of a censused file that CALLS `resolveExecCtx` in a spelling this
+ * census does not read: neither a site (`this.resolveExecCtx(environmentId,
+ * req)`), nor a host literal's forwarder, nor the method's own declaration. A
+ * call spelt any other way is invisible to {@link siteTable}, and so to every
+ * section of this file — still green, and reading less than it says.
+ */
+function callsTheCensusCannotRead(): string[] {
+    const out: string[] = [];
+    for (const [file, source] of SOURCES) {
+        source.split('\n').forEach((text, i) => {
+            const rest = text
+                .split('this.resolveExecCtx(environmentId, req)').join('')
+                .split('resolveExecCtx: (...a) => this.resolveExecCtx(...a),').join('')
+                .replace('private async resolveExecCtx(', '');
+            if (/resolveExecCtx\s*\(/.test(rest)) out.push(`${siteKey(file, i + 1)}: ${text.trim()}`);
+        });
+    }
+    return out;
+}
 
-    it('the split is 16 locally caught / 45 bare — NOT 12 / 45, which does not add to 61', () => {
-        // 12 sites spell the catch on the invocation line; 4 more spell it on
-        // the continuation line. A single-line grep sees 12 and the arithmetic
-        // silently loses four sites. [#20237] 15 → 13 and 23 → 21: the list
-        // route's app and dashboard sites moved into the shared list gate (§2).
-        // [ADR-0131 D6] 13 → 12 and 21 → 16: five organization-only reads
-        // stopped resolving the caller (§2).
-        //
-        // [commit cc837dbfe] The new site is BARE, and that is a decision the next case
-        // enforces: a locally-caught site sitting behind the shared floor would
-        // be the first of its kind and would break the structural claim below.
-        const sameLine = CAUGHT.filter((s) => SOURCES.get(s.file)!.split('\n')[s.line - 1].includes('.catch('));
-        expect(sameLine.length).toBe(12);
-        expect(CAUGHT.length).toBe(16);
-        expect(BARE.length).toBe(45);
-        expect(CAUGHT.length + BARE.length).toBe(SITES.length);
-    });
+describe('[#13160] §2 every consumer states, where it stands, what decides an absent context', () => {
+    it('⭐ each site is EITHER bare with the shared anonymous floor as its very next statement, OR locally caught and not behind that floor — never a bare read with nothing deciding', () => {
+        // The reading this census recorded, kept as the rule and not as the
+        // count of the day. #13160's worry about the bare sites was that each
+        // is an ordinary `await` with no local sign that a fault arrives as an
+        // ABSENT context. Measured, the opposite holds: a site is bare BECAUSE
+        // the shared anonymous floor (`enforceAuth`) is its next statement,
+        // and a site carries its own `.catch` because it is NOT behind that
+        // floor and its door decides the absent context itself (§4 drives those
+        // doors; §7 pins what the catch passes). ⛔ The shape #13160 found
+        // unsafe — a consumer that takes the context bare and proceeds with no
+        // floor beside it, so a swallowed fault walks on as an anonymous
+        // subject nobody refused — is exactly the row this assertion names.
 
-    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 16 caught ones is', () => {
-        // This inverts the reason the thread gave for doing the bare sites
-        // first ("no local signal that a fault becomes an anonymous subject").
-        // The bare sites are bare BECAUSE the shared anonymous floor is the
-        // next statement; the locally-caught ones carry a `.catch` because
-        // they are NOT behind that floor and each must decide for itself.
-        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(45);
-        expect(CAUGHT.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(0);
+        // CONTROL — completeness. The partition below is only as wide as the
+        // site table, so a call the table cannot read must fail here rather
+        // than leave the census silently narrower.
+        expect(callsTheCensusCannotRead()).toEqual([]);
+        // CONTROL — neither half of the partition is vacuous.
+        expect(SITES.some((s) => !s.caught)).toBe(true);
+        expect(SITES.some((s) => s.caught)).toBe(true);
+
+        // ⭐ THE INVARIANT. Named, so a failure says WHICH consumer left its
+        // shape. Derived from every censused file; ⛔ no count of either half.
+        const outOfShape = SITES
+            .filter((s) => s.caught === (s.nextLine === ENFORCE_AUTH_GUARD))
+            .map((s) => `${s.key} — ${s.caught ? 'locally caught, yet behind the shared floor' : 'bare, and NOT followed by the shared floor'}`);
+        expect(outOfShape).toEqual([]);
     });
 });
 
 // ---------------------------------------------------------------------------
-// 3. The 45 bare sites, driven
+// 3. The bare sites, driven
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
-    it('all 45 are reached by the mounted route table, so none is classified by inference', async () => {
+describe('[#13160] §3 the bare sites — driven, every one of them', () => {
+    it('every bare site is reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
         const unreached = BARE.map((s) => s.key).filter((k) => !reached.has(k));
         // ⛔ A bare site that stopped being reachable must show up as a
@@ -892,17 +433,30 @@ describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
         expect(unreached).toEqual([]);
     }, 120_000);
 
-    it('an absent context is the ANONYMOUS SUBJECT at all 45: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
+    it('CONTROL: every call the mounted table makes, under either mount, is attributed to a censused site', async () => {
+        // The other half of reach: a call the census cannot attribute is a
+        // consumer outside its population — a registrar body moved to a module
+        // that never joined `SITE_FILES` lands here as UNATTRIBUTED (the stack
+        // shows only its forwarder, which is stepped over), a helper frame
+        // between a route and its call lands here as a non-site line. Either
+        // way the census would read less than the server runs.
+        const siteKeys = new Set(SITES.map((s) => s.key));
+        const rows = [...await sweep(undefined, 'FULL'), ...await sweep(undefined, 'ISOLATED')];
+        expect(rows.some((r) => r.sites.length > 0)).toBe(true);
+        expect(rows.flatMap((r) => r.sites.filter((k) => !siteKeys.has(k)).map((k) => `${r.route} ← ${k}`))).toEqual([]);
+    }, 180_000);
+
+    it('an absent context is the ANONYMOUS SUBJECT at every bare site: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
         const bareLines = new Set(BARE.map((s) => s.key));
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
-        // [#25104] The floor stays 46 although the bare sites fell to 45: 51 rows
-        // reach a bare line after the `/docs` viewer page retired, so the old
-        // floor still holds, and a floor that holds is not lowered.
-        expect(rows.length).toBeGreaterThanOrEqual(46);
+        // The rows below cover EVERY bare site — derived, so the loop cannot
+        // pass on a subset however the population moves.
+        const covered = sitesOf(rows);
+        expect([...bareLines].filter((k) => !covered.has(k))).toEqual([]);
 
         for (const row of rows) {
             expect(row.status, `${row.route} under an absent context`).toBe(ANONYMOUS_DENY_STATUS);
@@ -927,10 +481,10 @@ describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. The 20 locally-caught sites
+// 4. The locally-caught sites
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §4 the 20 locally-caught sites — the half with no shared floor above it', () => {
+describe('[#13160] §4 the locally-caught sites — the half with no shared floor above it', () => {
     it('the metadata umbrella refuses an absent context on every non-carve-out `/meta` route', async () => {
         const fault = await sweep(undefined, 'FULL');
         const meta = fault.filter((r) => r.route.includes('/meta') && r.sites.length > 0);
@@ -945,7 +499,7 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
         }
     }, 180_000);
 
-    it('⭐ with the umbrella ISOLATED, four of the inner sites do NOT refuse on their own reading', async () => {
+    it('⭐ with the umbrella ISOLATED, the org-scope-only inner doors do NOT refuse on their own reading', async () => {
         // ⛔ Counterfactual, not a production posture — production mounts the
         // umbrella, and section 4's first case measures that it refuses. What
         // this separates is DOUBLE-guarded from SINGLE-guarded: an absent
@@ -966,7 +520,7 @@ describe('[#13160] §4 the 20 locally-caught sites — the half with no shared f
             // [#20441] An authoring door now, like `_drafts`: the authoring
             // capability is asked at its head, so an absent context is refused
             // there even with the umbrella isolated. It moved from the list
-            // below, whose length the title states.
+            // below.
             'GET /api/v1/meta/:type/:name/audit',
         ];
         const SERVES_ON_ITS_OWN = [
@@ -1108,8 +662,9 @@ describe('[#13160] §6 the boundary of this census', () => {
 // 7. ⭐ The catch ARGUMENT at every site — the half a presence check cannot see
 //
 //    Added after contract review found this file asserting, in prose, that
-//    "every site now passes `rethrowAuthzStoreUnavailable`" while four sites
-//    still passed `() => undefined`. Prose cannot rot loudly; this can.
+//    "every site now passes `rethrowAuthzStoreUnavailable`" while the
+//    continuation-layout sites still passed `() => undefined`. Prose cannot
+//    rot loudly; this can.
 //
 //    Why the sibling ledger did not catch it: that check is PRESENCE-based
 //    (does the file mention the guard at all), so one converted site satisfies
@@ -1143,21 +698,17 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
     it('CONTROL: the reader finds sites in BOTH layouts, so neither can pass vacuously', () => {
         // Without this, a regex that silently stopped matching the continuation
         // form would report "0 survivors" and read exactly like a clean pass —
-        // which is the precise failure that let the four sites through.
+        // which is the precise failure that let the continuation sites through.
+        // So this reader is held to the site table's own, independent reading
+        // of where each catch sits — site by site, never by a count.
         const args = catchArguments();
-        // [#20193] 16 → 14, the floor keeping its one site of slack: the inline
-        // population fell 17 → 15 when three inline sites moved into
-        // `meta-item-read-gate.ts` with the gate and one inline caller port
-        // replaced them (§2 has the arithmetic) — the population shrank, the
-        // reader did not go blind.
-        //
-        // [#20237] 14 → 12, the same one site of slack: the inline population
-        // fell 15 → 13 when the list route's app and dashboard sites moved into
-        // `createMetaListReadGate`, and no port replaced them (§2) — again the
-        // population shrank, not the reader's sight.
-        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(12);
-        expect(args.filter((a) => a.layout === 'continuation').length).toBeGreaterThanOrEqual(4);
-        expect(args.length).toBe(CAUGHT.length);
+        const lineOf = (s: (typeof CAUGHT)[number]) => SOURCES.get(s.file)!.split('\n')[s.line - 1];
+        const inline = CAUGHT.filter((s) => lineOf(s).includes('.catch(')).map((s) => s.key).sort();
+        const continuation = CAUGHT.filter((s) => !lineOf(s).includes('.catch(')).map((s) => s.key).sort();
+        expect(inline.length).toBeGreaterThan(0);
+        expect(continuation.length).toBeGreaterThan(0);
+        expect(args.filter((a) => a.layout === 'inline').map((a) => a.line).sort()).toEqual(inline);
+        expect(args.filter((a) => a.layout === 'continuation').map((a) => a.line).sort()).toEqual(continuation);
     });
 
     it('⭐ NO caught site swallows with `() => undefined`', () => {
@@ -1176,28 +727,28 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
 });
 
 // ---------------------------------------------------------------------------
-// 8. ⭐ BEHAVIOURAL: the four continuation-layout doors PROPAGATE the outage
+// 8. ⭐ BEHAVIOURAL: the continuation-layout doors PROPAGATE the outage
 //
 //    §7 proves the source says `rethrowAuthzStoreUnavailable` at every site.
 //    That is a claim about text. This section drives the doors and observes
 //    what they ANSWER when the resolver rejects with the real error, because
-//    the defect these four carried was not a spelling: during a store outage
+//    the defect these doors carried was not a spelling: during a store outage
 //    they swallowed the loud failure and served an org-unscoped, env-wide
 //    `200` — a fabricated success, not a refusal.
 //
 //    ⚠️ The site lines are DERIVED from §7, never transcribed. This file's own
-//    history is that hardcoded line numbers in it went stale and hid four
-//    sites; a literal here would be the same mistake in the test that exists
+//    history is that hardcoded line numbers in it went stale and hid
+//    sites from it; a literal here would be the same mistake in the test that exists
 //    to catch it.
 //
 //    ⛔ REACH OF THIS SECTION, measured by ablation rather than assumed — read
 //    it before trusting §8 as the tripwire for a single site. Reverting ONE of
-//    the four sites to `() => undefined` turns §7 red and leaves §8 GREEN. That
-//    is not a gap in the assertion, it is the shape of the handlers: the
-//    `${metaPath}/:type` handler registered at line 4332 runs to 4794 and
-//    resolves the context THREE times (the continuation site, then two guarded
-//    single-line sites), so under the TOTAL outage this section drives, a later
-//    site still throws and the door still refuses. §8 therefore pins what a
+//    the continuation sites to `() => undefined` turns §7 red and leaves §8
+//    GREEN. That is not a gap in the assertion, it is the shape of the
+//    handlers: the `${metaPath}/:type` handler registered at line 4332 runs to
+//    4794 and resolves the context THREE times (the continuation site, then two
+//    guarded single-line sites), so under the TOTAL outage this section drives,
+//    a later site still throws and the door still refuses. §8 therefore pins what a
 //    door ANSWERS; §7 pins what each SITE spells. Only §7 fails on one reverted
 //    site, and that is the division of labour to keep.
 //
@@ -1249,24 +800,24 @@ async function sweepRejecting(err: unknown, mount: 'FULL' | 'ISOLATED'): Promise
     return rows;
 }
 
-describe('[#13279] §8 an outage at the four continuation sites is not served as success', () => {
+describe('[#13279] §8 an outage at the continuation sites is not served as success', () => {
     const CONTINUATION = catchArguments().filter((a) => a.layout === 'continuation').map((a) => a.line);
 
     // ISOLATED, and the reason is measured rather than stylistic: under the FULL
     // mount `registerMetadataEndpoints`'s umbrella guard resolves the context
-    // FIRST and refuses there, so the handler never reaches these four sites and
+    // FIRST and refuses there, so the handler never reaches these sites and
     // a sweep observes nothing about them. Isolating the floor is the same move
     // §6 documents — a counterfactual that reads a site on its OWN behaviour,
     // never a production posture.
     const MOUNT = 'ISOLATED' as const;
 
-    it('CONTROL: the four sites are REACHED by real routes, and 200 is their HEALTHY answer', async () => {
+    it('CONTROL: the continuation sites are REACHED by real routes, and 200 is their HEALTHY answer', async () => {
         // Two things at once, and both are needed. Without the reachability half,
         // "no 200 during an outage" is satisfied by a door that never runs.
         // Without the 200 half, it is satisfied by a door that never returned 200
         // in the first place — and the defect being pinned is precisely that
         // these doors served an org-unscoped 200 while the store was down.
-        expect(CONTINUATION.length).toBeGreaterThanOrEqual(4);
+        expect(CONTINUATION.length).toBeGreaterThan(0);
         const healthy = await sweep(ENTITLED, MOUNT);
         const touched = healthy.filter((r) => r.sites.some((line) => CONTINUATION.includes(line)));
         expect(touched.length).toBeGreaterThan(0);

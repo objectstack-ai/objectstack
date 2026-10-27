@@ -13,6 +13,13 @@ import { LocaleSchema } from '../system/translation.zod';
 import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 import { ColumnApplyOnSchema } from './column-apply-on.zod';
+import { FILE_REFERENCE_TYPES } from './field-value.zod';
+import {
+  SeedFileContentSchema,
+  SeedFilePathSchema,
+  SeedFileReferenceSchema,
+  isSeedFileReference,
+} from './seed-file.zod';
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
@@ -64,6 +71,31 @@ export const SeedColumnSchema = lazySchema(() => strictObject({
 export type SeedColumn = z.input<typeof SeedColumnSchema>;
 /** Post-parse shape of {@link SeedColumn} — defaults applied, transforms run (ADR-0122). */
 export type SeedColumnParsed = z.infer<typeof SeedColumnSchema>;
+
+/**
+ * One value of a seed record. The target object's field decides what it may
+ * be, so this schema takes anything — except a value that CLAIMS to be a seed
+ * file reference (an object carrying `$file`, {@link isSeedFileReference}),
+ * alone or as an element of a `multiple: true` file field's array, which must
+ * be a well-formed one (#25779): a misspelt key or a path that climbs out of
+ * the package is refused here, by name, instead of reaching a file field as an
+ * object the field cannot store.
+ */
+const SeedRecordValueSchema = z.unknown().superRefine((value, ctx) => {
+  const elements = Array.isArray(value) ? value : [value];
+  elements.forEach((element, index) => {
+    if (!isSeedFileReference(element)) return;
+    const parsed = SeedFileReferenceSchema.safeParse(element);
+    if (parsed.success) return;
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: Array.isArray(value) ? [index, ...issue.path] : [...issue.path],
+      });
+    }
+  });
+});
 
 /**
  * Seed Schema (Seed Data / Fixtures)
@@ -216,8 +248,37 @@ export const SeedSchema = lazySchema(() => strictObject({
   /**
    * The Payload
    * Array of raw JSON objects matching the Object Schema.
+   *
+   * A file-class field (`file`, `image`, `avatar`, `video`, `audio`) takes a
+   * file the package ships as `seedFile('fixtures/nda-v1.pdf')` — see
+   * {@link SeedSchema.shape.files}.
    */
-  records: z.array(z.record(z.string(), z.unknown())).describe('Data records'),
+  records: z.array(z.record(z.string(), SeedRecordValueSchema)).describe('Data records'),
+
+  /**
+   * Bundled Files
+   *
+   * The bytes of every file the records name with `seedFile(path)` (a
+   * `{ $file: path }` value), keyed by that path (#25779).
+   *
+   * `os build` / `os compile` writes this map: it reads each referenced path
+   * relative to the package root (the directory holding
+   * `objectstack.config.ts`) and bundles the bytes into the compiled
+   * artifact, so the seed carries its files to every boot that reads the
+   * artifact — `os dev`, `os serve`, a published package. An author writes the
+   * references, not this map.
+   *
+   * The loader checks each entry's `size` and `sha256` against its `data`,
+   * stores the bytes as a `sys_file`, writes the new id into the field and
+   * has the written record own the file. A reference with no entry here, or
+   * an entry whose bytes do not match, refuses its row by name.
+   */
+  files: z.record(SeedFilePathSchema, SeedFileContentSchema).optional()
+    .describe(
+      'Bytes of the package files the records name with `seedFile(path)`, keyed by path. Written by ' +
+      '`os build`, which reads each path relative to the package root; the loader stores each one as a ' +
+      'file the written record owns.',
+    ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `seed` is a registered metadata type, so `MetadataPlugin`'s artifact loader
@@ -354,6 +415,44 @@ function assertSeedKeysDeclared(
 }
 
 /**
+ * The call-time check that a seed file reference ({@link isSeedFileReference})
+ * is written only into a file-class field (#25779): a `seedFile(...)` value on
+ * a `text` field would reach the engine as an object it cannot store. Every
+ * finding is refused together, one line per field and record. A field the
+ * object does not declare is {@link assertSeedKeysDeclared}'s finding, and a
+ * caller passing no field map is not judged.
+ */
+function assertSeedFilesOnFileFields(
+  objectDef: { name: string; fields: unknown },
+  records: ReadonlyArray<Record<string, unknown>>,
+): void {
+  const { fields } = objectDef;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+  const lines: string[] = [];
+  records.forEach((record, index) => {
+    for (const [key, value] of Object.entries(record)) {
+      const elements = Array.isArray(value) ? value : [value];
+      if (!elements.some(isSeedFileReference)) continue;
+      const def = (fields as Record<string, unknown>)[key];
+      if (!def || typeof def !== 'object') continue;
+      const type = (def as { type?: unknown }).type;
+      if (typeof type === 'string' && FILE_REFERENCE_TYPES.has(type)) continue;
+      lines.push(
+        `  • records[${index}]: \`${key}\` is a \`${String(type)}\` field, and \`seedFile(...)\` writes only a file field.`,
+      );
+    }
+  });
+  if (lines.length === 0) return;
+  throw new Error(
+    `defineSeed('${objectDef.name}'): seedFile(...) written into a field that does not store a file.\n`
+    + 'A seed file reference stores a file the package ships, so it goes only into a field of type '
+    + `${[...FILE_REFERENCE_TYPES].map((t) => `\`${t}\``).join(', ')}.\n\n`
+    + `${lines.join('\n')}\n\n`
+    + 'Write the value the field stores instead, or move the reference to the file field it was meant for.',
+  );
+}
+
+/**
  * Type-safe factory for creating seed definitions. Every record key is checked
  * against the object definition passed in, twice:
  *
@@ -375,6 +474,10 @@ function assertSeedKeysDeclared(
  * The keys of {@link SeedSchema.shape.columns} are held to the same set, both
  * times ({@link SeedColumns}).
  *
+ * A `seedFile(path)` value is refused when it runs on a field that is not a
+ * file field (`file`, `image`, `avatar`, `video`, `audio`) — see
+ * {@link SeedSchema.shape.files} for how the bytes reach the loader.
+ *
  * @example
  * ```ts
  * export const leadSeed = defineSeed(Lead, {
@@ -386,6 +489,7 @@ function assertSeedKeysDeclared(
  *     { first_name: 'Bob', created_at: cel`daysAgo(3)` }, // ✅ an injected system column
  *     { first_name: 'Bob', account: 'Acme Corp' },   // ✅ reference by natural key
  *     { first_name: 'Bob', account: { externalId: 'Acme Corp' } }, // ❌ object not allowed
+ *     { first_name: 'Eve', resume: seedFile('fixtures/eve-resume.pdf') }, // ✅ a file the package ships
  *   ],
  * });
  * ```
@@ -401,5 +505,6 @@ export function defineSeed<
 ): Seed {
   const seed = SeedSchema.parse({ ...config, object: objectDef.name });
   assertSeedKeysDeclared(objectDef, seed.records, seed.columns);
+  assertSeedFilesOnFileFields(objectDef, seed.records);
   return seed;
 }

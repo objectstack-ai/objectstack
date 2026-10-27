@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 70 — spawns the real producer once per single-cause fixture: three `os verify` spawns, one per (flags, fixture) pair, already in one beforeAll (`--json` and `--unique-scopes --json` on the app, `--unique-scopes --json` on the control); slowest CI reading 49.91 s (run 40424746941) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * PIN — `os verify --unique-scopes` runs the unique-scope family and counts

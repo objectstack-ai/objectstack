@@ -2059,6 +2059,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 onCelErrorsChange={setCelErrorCount}
                 t={t}
                 only={facetTab}
+                packageBound={!!packageId}
               />
             </div>
           </div>
@@ -2229,6 +2230,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             loadObjectFields={loadObjectFields}
             onCelErrorsChange={setCelErrorCount}
             t={t}
+            packageBound={!!packageId}
           />
         </div>
         {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface

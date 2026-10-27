@@ -3,8 +3,9 @@
 
 /**
  * check-platform-checklist-watchdog (#11730) -- the static pin over
- * `.github/workflows/platform-checklist-watchdog.yml`, the daily caller that
- * gives `check:platform-checklist`'s red a reporting channel.
+ * `.github/workflows/fleet-patrols.yml`, whose `platform-checklist-watchdog`
+ * job is the daily caller that gives `check:platform-checklist`'s red a
+ * reporting channel.
  *
  *   node scripts/check-platform-checklist-watchdog.mjs              # the gate
  *   node scripts/check-platform-checklist-watchdog.mjs --list       # what it read
@@ -26,7 +27,8 @@
  *   2. it carries `schedule:` (with a real `cron:`) and `workflow_dispatch:`;
  *   3. it carries NO `merge_group:` and NO `pull_request_target:` trigger;
  *   4. any `pull_request:` trigger it carries is `paths`-filtered to THIS
- *      WORKFLOW FILE AND NOTHING ELSE;
+ *      WORKFLOW FILE AND THE SIBLING PATROL JOBS' OWN INPUTS -- a list frozen
+ *      here as a SET -- and nothing else;
  *   5. it invokes the gate's PACKAGE SCRIPT, `pnpm check:platform-checklist`;
  *   6. and it does NOT inline a copy of that alias's command.
  *
@@ -55,6 +57,19 @@
  * PURPOSE is untouched; only its letter changed. Widen the filter by one path
  * and that stops being true, which is exactly what clause 4 refuses.
  *
+ * ## Why the allowed list is more than one entry (four patrols, one file)
+ *
+ * The watchdog is one of four jobs in `fleet-patrols.yml` (the ruling that
+ * folded the four daily patrols into one workflow), and a workflow has ONE
+ * `pull_request:` trigger, so its filter is the UNION of the four retired
+ * files' own: this file, plus the scripts the three sibling patrol jobs run. A
+ * pull request editing one of those scripts therefore runs the watchdog job
+ * too -- a job that publishes no required context and never reds on checklist
+ * drift, so no pull request is blocked by it, which is the decision's purpose.
+ * What clause 4 keeps is the LETTER: the declared list is compared as a set to
+ * `PR_TRIGGER_ALLOWED_PATHS`, so adding a path to the workflow without the
+ * same reviewed edit here is refused exactly as before.
+ *
  * `pull_request_target:` stays refused outright beside `merge_group:`. It is a
  * per-PR trigger under another name that no `paths:` filter makes safe here,
  * and a pin refusing one while accepting its sibling is a pin with a documented
@@ -79,8 +94,8 @@
  *
  * ## Why the workflow itself cannot hold this
  *
- * The watchdog carries no `pull_request:` trigger, by clause 3, so it never
- * runs on a pull request and cannot judge the pull request that edits it.
+ * The watchdog's `pull_request:` trigger fires only on the pull requests
+ * clause 4 admits, so it cannot judge every pull request that edits it.
  * Worse, a pull request DELETING the workflow would silence any check that
  * lived inside it -- a patrol cannot report its own removal. This gate runs in
  * `lint.yml` on every pull request instead, which is the only place the
@@ -98,17 +113,30 @@ import { isEntrypoint } from './invoked-as.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 
-export const WORKFLOW_REL = '.github/workflows/platform-checklist-watchdog.yml';
+export const WORKFLOW_REL = '.github/workflows/fleet-patrols.yml';
 export const PACKAGE_SCRIPT = 'check:platform-checklist';
 export const REQUIRED_TRIGGERS = Object.freeze(['schedule', 'workflow_dispatch']);
 export const REFUSED_TRIGGERS = Object.freeze(['pull_request_target', 'merge_group']);
 
 /**
- * The only path a `pull_request:` trigger on this workflow may name. One entry,
- * and the gate compares the declared list to it as a SET -- not a prefix, not a
- * subset -- so neither widening it nor swapping it for some other file passes.
+ * The only paths a `pull_request:` trigger on this workflow may name: the
+ * workflow file itself, then each sibling patrol job's own inputs -- the union
+ * of the four retired files' filters. The gate compares the declared list to
+ * it as a SET -- not a prefix, not a subset -- so neither widening it nor
+ * swapping an entry for some other file passes. ⛔ A new entry is a reviewed
+ * edit HERE, in the same PR that adds it to the workflow.
  */
-export const PR_TRIGGER_ALLOWED_PATHS = Object.freeze([WORKFLOW_REL]);
+export const PR_TRIGGER_ALLOWED_PATHS = Object.freeze([
+  WORKFLOW_REL,
+  // `required-set-patrol`
+  'scripts/check-required-contexts.mjs',
+  // `release-coverage-patrol`
+  'scripts/check-release-section-coverage.mjs',
+  // `board-snapshot`
+  'scripts/pm/board-snapshot.mjs',
+  'scripts/pm/check-half-states.mjs',
+  'scripts/invoked-as.mjs',
+]);
 
 /** The `if:` condition a board-writing step must carry. */
 export const PR_WRITE_GUARD = "github.event_name != 'pull_request'";
@@ -140,7 +168,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'clause 1 — the file exists, is non-empty, and parses as a workflow': 5,
   'clause 2 — schedule (with a real cron) and workflow_dispatch': 5,
   'clause 3 — merge_group and pull_request_target refused outright': 6,
-  'clause 4 — a pull_request trigger paths-filtered to this file ALONE': 10,
+  'clause 4 — a pull_request trigger paths-filtered to the frozen list ALONE': 10,
   'clause 4b — no board write reachable from a pull_request run': 6,
   'clauses 5 and 6 — the package script, and no inlined copy of it': 5,
   'the manifest clause — the package script exists to be invoked': 3,
@@ -251,7 +279,7 @@ export function judgePullRequestTrigger(doc) {
   const head = `${WORKFLOW_REL} declares a \`pull_request:\` trigger`;
   const out = [];
   if (!pr || typeof pr !== 'object' || Array.isArray(pr)) {
-    out.push(`${head} with no configuration, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths: ['${WORKFLOW_REL}']\`.`);
+    out.push(`${head} with no configuration, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths:\` naming exactly ${PR_TRIGGER_ALLOWED_PATHS.join(', ')}.`);
     return out;
   }
   if ('paths-ignore' in pr) {
@@ -259,14 +287,14 @@ export function judgePullRequestTrigger(doc) {
   }
   const paths = pr.paths;
   if (!Array.isArray(paths) || paths.length === 0) {
-    out.push(`${head} with no usable \`paths:\` filter, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths: ['${WORKFLOW_REL}']\`.`);
+    out.push(`${head} with no usable \`paths:\` filter, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths:\` naming exactly ${PR_TRIGGER_ALLOWED_PATHS.join(', ')}.`);
     return out;
   }
   const declared = paths.map((x) => String(x));
   const extra = declared.filter((x) => !PR_TRIGGER_ALLOWED_PATHS.includes(x));
   const missing = PR_TRIGGER_ALLOWED_PATHS.filter((x) => !declared.includes(x));
   if (extra.length > 0) {
-    out.push(`${head} whose \`paths:\` filter also names ${extra.map((x) => `\`${x}\``).join(', ')}. ${DECISION_TAIL} Widening this filter by one path puts the checklist gate on the critical path of pull requests that have nothing to do with it — the filter may name this workflow and nothing else.`);
+    out.push(`${head} whose \`paths:\` filter also names ${extra.map((x) => `\`${x}\``).join(', ')}. ${DECISION_TAIL} Widening this filter by one path puts the checklist gate on the critical path of pull requests that have nothing to do with it — the filter may name this workflow and the sibling patrol jobs' own inputs (\`PR_TRIGGER_ALLOWED_PATHS\`) and nothing else.`);
   }
   if (missing.length > 0) {
     out.push(`${head} whose \`paths:\` filter does not name ${missing.map((x) => `\`${x}\``).join(', ')}, so a change to the watchdog itself is never exercised before it merges — which is the only thing this trigger is for.`);
@@ -380,14 +408,19 @@ export function judgeManifest(manifestText) {
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // A minimal workflow that satisfies every clause. Each self-test case mutates
 // exactly one thing about it, so a case that fires names one cause.
-const GOOD = `name: Platform-Checklist Watchdog
+const GOOD = `name: Fleet Patrols
 on:
   schedule:
     - cron: '51 2 * * *'
   workflow_dispatch: {}
   pull_request:
     paths:
-      - '.github/workflows/platform-checklist-watchdog.yml'
+      - '.github/workflows/fleet-patrols.yml'
+      - 'scripts/check-required-contexts.mjs'
+      - 'scripts/check-release-section-coverage.mjs'
+      - 'scripts/pm/board-snapshot.mjs'
+      - 'scripts/pm/check-half-states.mjs'
+      - 'scripts/invoked-as.mjs'
 permissions:
   contents: read
   issues: write
@@ -413,7 +446,7 @@ jobs:
 const withTrigger = (name) => GOOD.replace('  workflow_dispatch: {}\n', `  workflow_dispatch: {}\n  ${name}: {}\n`);
 
 /** Swap the whole `pull_request:` block for another spelling of it. */
-const PR_BLOCK = "  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n";
+const PR_BLOCK = `  pull_request:\n    paths:\n${PR_TRIGGER_ALLOWED_PATHS.map((p) => `      - '${p}'\n`).join('')}`;
 const withPullRequest = (block) => GOOD.replace(PR_BLOCK, block);
 
 export function selfTest(parse) {
@@ -473,9 +506,10 @@ export function selfTest(parse) {
     t(`a \`${trigger}:\` trigger ⇒ cites the decision it protects`, fires(withTrigger(trigger), 'never blocked by checklist drift'));
   }
 
-  battery('clause 4 — a pull_request trigger paths-filtered to this file ALONE');
+  battery('clause 4 — a pull_request trigger paths-filtered to the frozen list ALONE');
   // Clause 4 -- THE NARROWED CLAUSE. `pull_request:` is permitted, and ONLY
-  // while its `paths:` filter names this workflow and nothing else. The good
+  // while its `paths:` filter names this workflow and the sibling patrol jobs'
+  // own inputs, nothing else. The good
   // fixture carries exactly that and is silent (asserted above), so each case
   // here is a single mutation away from a shape that passes.
   t('an UNFILTERED `pull_request:` ⇒ fires', fires(withPullRequest('  pull_request: {}\n'), 'fires on EVERY pull request'));
@@ -484,17 +518,20 @@ export function selfTest(parse) {
     withPullRequest('  pull_request:\n    types: [opened, synchronize]\n'), 'no usable `paths:` filter'));
   t('a `pull_request:` with an EMPTY paths list ⇒ fires', fires(
     withPullRequest('  pull_request:\n    paths: []\n'), 'no usable `paths:` filter'));
-  t('⭐ a paths filter naming ANOTHER file BESIDE this one ⇒ fires', fires(
-    withPullRequest("  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n      - 'docs/qa/platform-checklist/**'\n"),
+  t('⭐ a paths filter naming ANOTHER file BESIDE the frozen list ⇒ fires', fires(
+    withPullRequest(`${PR_BLOCK}      - 'docs/qa/platform-checklist/**'\n`),
     'also names `docs/qa/platform-checklist/**`'));
   t('…and it says widening is the defect', fires(
-    withPullRequest("  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n      - 'docs/qa/platform-checklist/**'\n"),
-    'may name this workflow and nothing else'));
+    withPullRequest(`${PR_BLOCK}      - 'docs/qa/platform-checklist/**'\n`),
+    "may name this workflow and the sibling patrol jobs' own inputs"));
   t('⭐ a paths filter naming a DIFFERENT file instead ⇒ fires on both halves', (() => {
     const text = withPullRequest("  pull_request:\n    paths:\n      - 'scripts/check-platform-checklist.mjs'\n");
     return fires(text, 'also names `scripts/check-platform-checklist.mjs`')
-      && fires(text, 'does not name `.github/workflows/platform-checklist-watchdog.yml`');
+      && fires(text, 'does not name `.github/workflows/fleet-patrols.yml`');
   })());
+  t('⭐ the frozen list MINUS one sibling input ⇒ fires on the missing half', fires(
+    withPullRequest(PR_BLOCK.replace("      - 'scripts/invoked-as.mjs'\n", '')),
+    'does not name `scripts/invoked-as.mjs`'));
   t('a `paths-ignore:` filter ⇒ fires, and is called the complement', fires(
     withPullRequest("  pull_request:\n    paths-ignore:\n      - 'README.md'\n"), "filter's COMPLEMENT"));
   t('the bare flow-sequence spelling `on: [pull_request]` ⇒ fires', fires(
@@ -618,7 +655,7 @@ async function main(argv) {
     process.exit(1);
   }
 
-  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, any pull_request trigger paths-filtered to this file alone, no board write reachable from a pull_request run, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
+  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, any pull_request trigger paths-filtered to this file and the sibling patrol jobs' own inputs alone, no board write reachable from a pull_request run, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
 }
 
 if (isEntrypoint(import.meta.url)) {

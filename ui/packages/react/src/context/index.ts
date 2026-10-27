@@ -10,5 +10,7 @@ export * from './InlineEditContext.js';
 export * from './DiscussionContext.js';
 export * from './DrillNavigationContext.js';
 export * from './HostNavigationContext.js';
+export * from './HostMapStyleContext.js';
+export * from './RecordPagePreferencesContext.js';
 export * from './RelatedRecordActionsContext.js';
 export * from './PrintPageContext.js';

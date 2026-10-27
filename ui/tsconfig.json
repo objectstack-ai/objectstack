@@ -22,8 +22,8 @@
 //     `packages/types/tsconfig.examples.json`
 //   Nothing under `apps/` or `examples/` extends it.
 //
-//   `tsconfig.tier-base.json` is extended by 3: `tsconfig.node.json`,
-//   `tsconfig.react.json` and `examples/byo-backend-console/tsconfig.json`.
+//   `tsconfig.tier-base.json` is extended by 2: `tsconfig.node.json` and
+//   `tsconfig.react.json`.
 //   Its full header carries the rest, including why `tsconfig.scripts.json` is
 //   NOT among them although objectui#9330's ruling names it.
 //
@@ -71,8 +71,8 @@
       "@object-ui/core": ["packages/core/src"],
       "@object-ui/core/*": ["packages/core/src/*"],
       "@object-ui/react-runtime": ["packages/react-runtime/src"],
-      "@object-ui/sdui-parser": ["packages/sdui-parser/src"],
-      "@object-ui/sdui-parser/*": ["packages/sdui-parser/src/*"],
+      "@objectstack/sdui-parser": ["../packages/sdui-parser/src"],
+      "@objectstack/sdui-parser/*": ["../packages/sdui-parser/src/*"],
       "@object-ui/protocol": ["packages/core/src"],
       "@object-ui/protocol/*": ["packages/core/src/*"],
       "@object-ui/console": ["apps/console/plugin.ts"]

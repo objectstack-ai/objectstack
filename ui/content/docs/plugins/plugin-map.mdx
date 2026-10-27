@@ -158,7 +158,7 @@ to `onMarkerClick` is not `===` the authored object.
   descriptionField?: string,   // Field for marker description
   zoom?: number,               // Zoom level (1-20) — opts out of the auto-fit
   center?: [number, number],   // Center coordinates [lat, lng] — opts out of the auto-fit
-  style?: string               // MapLibre style URL/spec (overrides the demo default)
+  style?: string               // MapLibre style URL/spec (overrides the deployment and demo defaults)
 }
 ```
 
@@ -170,6 +170,23 @@ issue at `properties.map` that names the key (on a root node; a nested node repo
 warns `[ObjectMap] Invalid map configuration`, naming the same key. A typo that
 leaves the block with no coordinate binding, as `latitudeFieId` does, draws the
 refusal described under "An unconfigured map refuses" rather than a map.
+
+## Which style draws
+
+A map draws the first style it finds, in this order:
+
+1. the view's own style: the node-level `mapStyle`, then `map.style`;
+2. the deployment's default style, which the host hands down through
+   `HostMapStyleProvider` from `@object-ui/react`. The Console supplies the
+   operator's `OS_CONSOLE_MAP_STYLE_URL`, served as `mapStyleUrl` on
+   `GET /api/v1/runtime/config`;
+3. the public MapLibre demo style (`https://demotiles.maplibre.org/style.json`),
+   which is rate-limited and not meant for production traffic.
+
+A host that provides no style, such as an embedded renderer or a Console whose
+operator set none, keeps the demo style. When the style that drew fails to load,
+the map is replaced by its record list, and the notice names that style: the
+view's own, the deployment's or the public default.
 
 ## Configuration
 

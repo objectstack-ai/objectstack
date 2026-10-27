@@ -1,5 +1,55 @@
 # @objectstack/hono
 
+## 18.2.0
+
+### Patch Changes
+
+- f4860da: Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/cli`, `@objectstack/hono` and `@objectstack/plugin-dev` now depend on the other `@objectstack/*` packages at exactly their own release version, not at a caret range. Twenty-one dependencies were published as `^<version>`: eight of the CLI's (`core`, `driver-memory`, `driver-mongodb`, `driver-sql`, `driver-sqlite-wasm`, `objectql`, `observability`, `runtime`), the Hono adapter's `runtime`, and twelve of `plugin-dev`'s (`account`, `driver-memory`, `objectql`, `plugin-auth`, `plugin-hono-server`, `plugin-security`, `rest`, `runtime`, `service-i18n`, `service-realtime`, `service-storage`, `setup`).
+  
+  Every `@objectstack/*` package is released together on one version, so the range bought nothing. What it did was let an app that pins exact `@objectstack/*` versions still install a newer release of these packages, and of everything they depend on, through the CLI, which mixes two releases in one tree. They are now published exact, like the other `@objectstack/*` dependencies of these three packages.
+  
+  If you pinned exact versions and added `overrides` to hold these packages at your version, you can remove those overrides once you are on this release. Peer dependencies keep their caret ranges.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [48e84a9]
+- Updated dependencies [0dc4b5d]
+- Updated dependencies [65145d3]
+- Updated dependencies [f1ddace]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [073f08b]
+- Updated dependencies [bb85f5f]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [69fa23d]
+- Updated dependencies [3446d43]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [e12d3f3]
+- Updated dependencies [c8cb510]
+- Updated dependencies [1ee1d1b]
+- Updated dependencies [3821ec8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [1d3ad39]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+  - @objectstack/types@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/plugin-hono-server@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

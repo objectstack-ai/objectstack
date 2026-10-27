@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: two `os serve` boots of one host config in one beforeAll, the source leg and its compiled twin; slowest CI reading 34.85 s (run 40424746941) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * #22989 — `os serve` of a HOST config serves the stack's declared `apis`

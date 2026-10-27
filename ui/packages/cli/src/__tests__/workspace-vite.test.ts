@@ -143,17 +143,19 @@ describe('workspace alias table (objectui#3890)', () => {
     }
   });
 
-  it('aliases the six the dependency scan could not reach past them', () => {
+  it('aliases the five the dependency scan could not reach past them', () => {
     // A Vite dependency scan reports only the first layer it fails on, so the
-    // card's list of four was the visible half. These six sit behind them in
-    // the same import graph and would have stayed broken under a backfill.
+    // card's list of four was the visible half. These sat behind them in the
+    // same import graph and would have stayed broken under a backfill. The
+    // sixth, `@object-ui/sdui-parser`, was retired for `@objectstack/sdui-parser`
+    // at the repo root (objectstack#25712 item 3), which resolves through its
+    // built `dist` like `@objectstack/spec` and is outside this table.
     for (const name of [
       '@object-ui/data-objectstack',
       '@object-ui/i18n',
       '@object-ui/plugin-map',
       '@object-ui/providers',
-      '@object-ui/react-runtime',
-      '@object-ui/sdui-parser'
+      '@object-ui/react-runtime'
     ]) {
       expect(aliases[name]).toBeDefined();
     }

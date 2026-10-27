@@ -56,8 +56,6 @@ Pick the path that matches where you are starting from:
 | You want to… | Start here | Install |
 |---|---|---|
 | Render a JSON schema inside your React app | [`examples/hello-world`](examples/hello-world) | `@object-ui/react @object-ui/components` |
-| Embed views in an existing app, against **your own** backend | [`examples/byo-backend-console`](examples/byo-backend-console) | `@object-ui/app-shell @object-ui/plugin-view @object-ui/react` |
-| Stand up a complete console on an **ObjectStack** backend | [`examples/console-starter`](examples/console-starter) | fork the example |
 | Build a UI from a JSON file, no React code at all | [`@object-ui/cli`](packages/cli) | `npm install -g @object-ui/cli` |
 
 The [examples catalog](examples/README.md) explains each one in more depth.
@@ -115,47 +113,6 @@ it is handed to the component the schema names — so a value passed as `data={�
 read nor refused, and the expression that wanted it is returned as its own source text, with
 nothing thrown and one line on the console.
 
-### Bring your own backend
-
-Use the shell and views without the full console infrastructure — your routing, your auth, your API:
-
-```bash
-npm install @object-ui/app-shell @object-ui/plugin-view @object-ui/react
-```
-
-```tsx
-import type { FC } from 'react';
-import { AppShell } from '@object-ui/app-shell';
-import { ObjectView } from '@object-ui/plugin-view';
-import { ThemeProvider, SchemaRendererProvider } from '@object-ui/react';
-import type { DataSource } from '@object-ui/types';
-
-// The two pieces you bring: the backend adapter you implement (see "Custom
-// Data Sources" below) and your own sidebar component.
-declare const myAPI: DataSource;
-declare const MySidebar: FC;
-
-function MyConsole() {
-  return (
-    <ThemeProvider>
-      <SchemaRendererProvider dataSource={myAPI}>
-        <AppShell sidebar={<MySidebar />}>
-          <ContactList />
-        </AppShell>
-      </SchemaRendererProvider>
-    </ThemeProvider>
-  );
-}
-
-function ContactList() {
-  return (
-    <ObjectView schema={{ type: 'object-view', objectName: 'contact' }} dataSource={myAPI} />
-  );
-}
-```
-
-[`examples/byo-backend-console`](examples/byo-backend-console) is the complete working version, with a mock REST adapter.
-
 ### No React at all
 
 ```bash
@@ -167,18 +124,10 @@ objectui dev app.json     # dev server on http://localhost:3000
 
 Edit `app.json` to build your UI.
 
-### Run the examples from this repo
+### The examples in this repo
 
-```bash
-pnpm run setup      # builds @objectstack/* at .objectstack-sha, then installs
-pnpm -w build
-
-cd examples/console-starter   # or examples/byo-backend-console
-pnpm dev
-```
-
-`hello-world` ships no dev server: copy its `App.tsx` and `schema.json` into your own
-Vite/Next.js app. `schema-catalog` is a data package — the canonical JSON schemas the
+Neither example ships a dev server. `hello-world` is a snippet: copy its `App.tsx` and
+`schema.json` into your own Vite/Next.js app. `schema-catalog` is a data package — the canonical JSON schemas the
 docs render, a smoke test mounts, and AI agents use as a few-shot corpus.
 
 ## Copy-Paste Schemas
@@ -378,7 +327,7 @@ Grouped by dependency weight — atoms and fields stay light, heavy widgets live
 
 | Package | Description |
 |---------|-------------|
-| **[@object-ui/app-shell](./packages/app-shell)** | Minimal application shell — the base of every console |
+| **[@object-ui/app-shell](./packages/app-shell)** | The Console's shell, views and Studio; a private workspace package, last published to npm as 18.2.0 |
 | **[@object-ui/providers](./packages/providers)** | The upload adapter context the file and image fields upload through |
 | **[@object-ui/auth](./packages/auth)** | `AuthProvider`, `useAuth`, `AuthGuard`, sign-in forms |
 | **[@object-ui/permissions](./packages/permissions)** | Object / field / row-level permission guards and hooks |
@@ -424,7 +373,7 @@ Grouped by dependency weight — atoms and fields stay light, heavy widgets live
 | **[@object-ui/cli](./packages/cli)** | Scaffold, develop, build, and validate schema-driven apps |
 | **[@object-ui/create-plugin](./packages/create-plugin)** | Scaffold a new Object UI plugin |
 | **[@object-ui/runner](./packages/runner)** | Universal application runner for testing schemas (private workspace app, not published) |
-| **[@object-ui/sdui-parser](./packages/sdui-parser)** | Constrained JSX source → schema tree compiler (parse, never execute) |
+| **[@objectstack/sdui-parser](https://github.com/objectstack-ai/objectstack/tree/main/packages/sdui-parser)** | Constrained JSX source → schema tree compiler (parse, never execute) |
 | **[@object-ui/react-runtime](./packages/react-runtime)** | Trusted runtime execution for `kind: 'react'` pages |
 | **[vscode-extension](./packages/vscode-extension)** | IntelliSense and live preview for schema files |
 

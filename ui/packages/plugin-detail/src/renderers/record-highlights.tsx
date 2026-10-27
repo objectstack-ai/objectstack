@@ -106,6 +106,11 @@ const RecordHighlightsBody: React.FC<RecordHighlightsRendererProps> = ({
   // Normalize: accepts either bare strings or { name, label?, type?, readonly? }
   // — the four keys the contract's object arm declares, and no fifth.
   //
+  // A bare name carries no `label`, and none is invented here: `HeaderHighlight`
+  // climbs the details body's label ladder for the caption (the object's
+  // declared label, then the name; objectstack#26417), so the strip's other
+  // caller, `DetailView`'s `highlightFields`, gets the same caption.
+  //
   // `readonly` is copied through deliberately: HeaderHighlight's editability
   // gate has always consulted `field.readonly`, but this map used to rebuild
   // each entry from a fixed four-key list, so an authored `readonly: true` was

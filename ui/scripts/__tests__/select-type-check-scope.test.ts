@@ -72,9 +72,11 @@ describe('select-type-check-scope — the root rule (objectui#12222)', () => {
       'e2e/smoke.spec.ts',
       'playwright.config.ts',
       'tsconfig.e2e.json',
-      // A `build` input that sits INSIDE a package: every package's build hash
-      // reads it, while the package graph would only select its owner.
-      'packages/sdui-parser/src/parse.ts',
+      // A `type-check` input that sits INSIDE a package: every package's
+      // type-check hash reads it, while the package graph would only select its
+      // owner. (The `build` specimen, `packages/sdui-parser/src/parse.ts`, left
+      // with the ui copy of the parser — objectstack#25712 item 3.)
+      'packages/cli/src/utils/issue-path.ts',
     ];
     expect(caught(roots)).toEqual(roots);
   });

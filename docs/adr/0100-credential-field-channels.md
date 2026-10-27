@@ -1,6 +1,6 @@
 # ADR-0100: Credential Field Channels — `secret` (encrypted) and `password` (masked)
 
-- **Status**: Accepted
+**Status**: Accepted
 - **Date**: 2026-07-18
 - **Issue**: #2036 (found via #2033 / #2025 / #2028 field-type round-trip work)
 - **Relates to**: ADR-0077 (authoring-surface boundary), ADR-0078 (no silently

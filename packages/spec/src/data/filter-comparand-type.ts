@@ -225,24 +225,47 @@ function isNowAnchor(value: unknown): boolean {
 }
 
 /**
+ * [#26413] The keys a now-anchor carries: `NowAnchorSchema` is closed over
+ * exactly these two, and `filter-comparand-type.test.ts` reconciles this set
+ * against the schema's own shape. Restated rather than imported because
+ * `filter.zod.ts` imports this module.
+ */
+const NOW_ANCHOR_KEYS: ReadonlySet<string> = new Set(['$now', 'addDays']);
+
+function undeclaredNowAnchorKeys(value: Record<string, unknown>): string[] {
+  return Object.keys(value).filter((key) => !NOW_ANCHOR_KEYS.has(key));
+}
+
+/**
  * [#25808] Is this anchor WELL-FORMED — `addDays` present, an integer or a
- * `{ $field: string }`? The door steps around a well-formed anchor as it steps
- * around a reference; a malformed one (`{ $now: true }` with no offset, a
- * fractional or string offset) is refused HERE in the anchor's own words,
- * because the `FilterCondition` door runs this walk and not the operator
- * schemas, and an exemption by `$now` alone would have let the malformed shape
- * through to the executors as a plain object they each refuse differently.
+ * `{ $field: string }`, and no other key? The door steps around a well-formed
+ * anchor as it steps around a reference; a malformed one (`{ $now: true }`
+ * with no offset, a fractional or string offset) is refused HERE in the
+ * anchor's own words, because the `FilterCondition` door runs this walk and
+ * not the operator schemas, and an exemption by `$now` alone would have let
+ * the malformed shape through to the executors as a plain object they each
+ * refuse differently.
+ *
+ * [#26413] An undeclared key (`subDays`, `note`) makes the anchor malformed
+ * too, as `NowAnchorSchema` declares: every executor reads `$now` and
+ * `addDays` only, so a kept extra key would run the query on the `addDays`
+ * reading alone and say nothing.
  */
 function isWellFormedNowAnchor(value: Record<string, unknown>): boolean {
+  if (undeclaredNowAnchorKeys(value).length > 0) return false;
   const offset = value.addDays;
   if (typeof offset === 'number') return Number.isInteger(offset);
   return isFilterNode(offset) && typeof offset.$field === 'string';
 }
 
 function malformedNowAnchorRefusal(context: string | undefined, path: string, value: Record<string, unknown>): Error {
-  const detail = value.addDays === undefined
-    ? 'it carries no addDays — for the unshifted instant write the "{now}" placeholder'
-    : `its addDays (${preview(value.addDays)}) is neither an integer nor a { "$field": "numeric_column" } reference`;
+  const undeclared = undeclaredNowAnchorKeys(value);
+  const detail = undeclared.length > 0
+    ? `it carries an undeclared key ${undeclared.map((key) => preview(key)).join(', ')} — the anchor takes `
+      + '$now and addDays only (there is no subDays: a negative addDays subtracts)'
+    : value.addDays === undefined
+      ? 'it carries no addDays — for the unshifted instant write the "{now}" placeholder'
+      : `its addDays (${preview(value.addDays)}) is neither an integer nor a { "$field": "numeric_column" } reference`;
   return invalidComparandError(
     context,
     `Filter comparand at ${path} is a malformed now-anchored comparand (${preview(value)}): ${detail}. `

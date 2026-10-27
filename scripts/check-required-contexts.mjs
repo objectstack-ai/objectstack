@@ -43,7 +43,7 @@
  *   2. the job id still exists in it;
  *   3. its `name:` is EXACTLY the registered literal — the pin proper;
  *   4. the job declares no `strategy.matrix`. A matrix job's check-run name is
- *      the name with the matrix values appended (`Test Core (1/3)`), so a bare
+ *      the name with the matrix values appended (`Test Core (1/N)`), so a bare
  *      registered name would never report. Worse, per #5617's audit a SKIPPED
  *      matrix job publishes the name UNEXPANDED, so the two spellings are not
  *      even stable across runs;
@@ -78,7 +78,7 @@
  *      Two jobs with one name publish one context whose conclusion is whichever
  *      finished last, so an unrelated job could satisfy a required gate. This
  *      is live ammunition here rather than a hypothetical: ci.yml's sharded
- *      `test` job is named `Test Core (${{ matrix.shard }}/3)` and its gate is
+ *      `test` job is named `Test Core (${{ matrix.shard }}/N)` and its gate is
  *      named `Test Core`; deleting the suffix collides them.
  *
  * ## The required SET: readable, diffable, and deliberately not merge-blocking
@@ -194,6 +194,7 @@ import { fileURLToPath } from 'node:url';
 // the same narrow reading for the same defect one flag over (#10889).
 import { invokes, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { shardTotal } from './ci-shard-matrix.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -470,6 +471,15 @@ export const REQUIRED_CONTEXTS = [
       'after #25856 (fc2aaaec52) closed bill item 49 with the job green on the main push run 40253800516',
     carries: 'the type-check + vitest-setup type-check family of the `ui/` workspace',
   },
+  {
+    workflow: 'ci.yml',
+    job: 'test-ui-gate',
+    context: 'Test UI',
+    authorized:
+      '#26460 ruling letter A (staged), maintainer 「批 #408  同意」 2026-10-27T06:24Z, recorded in comment 6435318516 — ' +
+      'after the ui flake reading 6436579765 (0/50); the ruleset entry is the maintainer\'s, in the same sitting as the merge (#9325)',
+    carries: 'the sharded `ui/` vitest matrix, `Test UI (k/16)`, read through the aggregate job',
+  },
 ];
 
 /**
@@ -584,10 +594,10 @@ export const INSTRUCTION_SURFACES = [
     // with every gate green, which is what put the exclusivity rule below in
     // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
     // contexts moved to the full battery). Then 5→7 by #25853 (the `ui/`
-    // import's `Lint UI` and `Build & E2E UI`) and 7→8 with `Type Check UI`
-    // once bill item 49 closed (#25856). The full set is pinned here so the
-    // corrected sentence cannot rot back — a rename in ANY of the eight
-    // reddens this gate instead.
+    // import's `Lint UI` and `Build & E2E UI`), 7→8 with `Type Check UI`
+    // once bill item 49 closed (#25856), and 8→9 with the `Test UI` aggregate
+    // (#26460). The full set is pinned here so the corrected sentence cannot
+    // rot back — a rename in ANY of the nine reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
     mustName: [
@@ -599,6 +609,7 @@ export const INSTRUCTION_SURFACES = [
       'Lint UI',
       'Build & E2E UI',
       'Type Check UI',
+      'Test UI',
     ],
   },
   {
@@ -630,6 +641,7 @@ export const INSTRUCTION_SURFACES = [
       'Lint UI',
       'Build & E2E UI',
       'Type Check UI',
+      'Test UI',
     ],
   },
   {
@@ -651,7 +663,7 @@ export const INSTRUCTION_SURFACES = [
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for every
- * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8). Editing the merge-queue
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8, 8→9 by #26460). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *
@@ -1505,8 +1517,8 @@ export async function scanInstructionSurfaces(
  * its seat class — hence this paragraph. Two seat classes, both dead ends;
  * there is no third spelling that works from here.
  *
- * The standing caller is therefore `.github/workflows/required-set-patrol.yml`
- * (#9678), where a runner reaches the API directly with the workflow's own
+ * The standing caller is therefore the `required-set-patrol` job of
+ * `.github/workflows/fleet-patrols.yml` (#9678), where a runner reaches the API directly with the workflow's own
  * GITHUB_TOKEN — no proxy env and no `--use-env-proxy` needed. It is scheduled,
  * report-only and ⛔ never a required context; the "live mode stays OFF the
  * required path" block in `--self-test` pins that from this side.
@@ -1706,7 +1718,7 @@ export const EXIT_ENVIRONMENT = 2;
  * self-test can assert the caller EXISTS and that nothing else runs the flag.
  * Repo-root-relative to `.github/workflows/`.
  */
-export const PATROL_WORKFLOW = 'required-set-patrol.yml';
+export const PATROL_WORKFLOW = 'fleet-patrols.yml';
 
 /**
  * The clean mark a COMPLETED sweep renders when the two lists agree in both
@@ -1935,6 +1947,13 @@ async function selfTest() {
     renamedTestCore.problems.some((p) => p.includes("job 'test-gate'") && p.includes("'Test Core'")),
     'growing a suffix on the bare `Test Core` name ⇒ red — the exact literal is the contract, not decoration',
   );
+  // The same property on the second matrix aggregate (#26460): `Test UI` is the
+  // bare name of `test-ui-gate`, and its shards are `Test UI (k/16)`.
+  const renamedTestUi = fixture('rename Test UI', 'ci.yml', (s) => s.replace('    name: Test UI\n', '    name: Test UI (aggregate)\n'));
+  assert(
+    renamedTestUi.problems.some((p) => p.includes("job 'test-ui-gate'") && p.includes("'Test UI'")),
+    'growing a suffix on the bare `Test UI` name ⇒ red, naming the aggregate job and the required context',
+  );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
   // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
@@ -2065,13 +2084,16 @@ async function selfTest() {
   );
 
   // ── (9) the shadowing collision, on the live specimen ────────────────────
-  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/8)`
+  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/N)`
   // and its aggregate gate is named `Test Core`. Dropping the suffix makes two
   // jobs publish one context, and the surviving conclusion is whichever
-  // finished last — a shard could satisfy the aggregate's required gate.
+  // finished last — a shard could satisfy the aggregate's required gate. N is
+  // the matrix's own size, read from the workflow (scripts/ci-shard-matrix.mjs),
+  // so a resized matrix moves this anchor with it.
   battery('(9) the shadowing collision, on the live specimen');
+  const TEST_CORE_SHARD_NAME = `name: Test Core (\${{ matrix.shard }}/${shardTotal(sources['ci.yml'], 'test')})`;
   const collided = fixture('collide the shard name with the gate name', 'ci.yml', (s) =>
-    s.replace('name: Test Core (${{ matrix.shard }}/8)', 'name: Test Core'),
+    s.replace(TEST_CORE_SHARD_NAME, 'name: Test Core'),
   );
   assert(
     collided.problems.some((p) => p.includes("job 'test'") && p.includes("published by ci.yml:test-gate")),
@@ -2080,8 +2102,22 @@ async function selfTest() {
   // The suffixed spelling is NOT a collision — the guard must not read a
   // prefix as a clash, or ci.yml is red on main today.
   assert(
-    baseline.problems.length === 0 && sources['ci.yml'].includes('name: Test Core (${{ matrix.shard }}/8)'),
+    baseline.problems.length === 0 && sources['ci.yml'].includes(TEST_CORE_SHARD_NAME),
     'the real suffixed shard name coexists with the bare gate name (assertion 9 compares whole names, not prefixes)',
+  );
+  // The second live specimen (#26460): the `test-ui` shards and their `Test UI`
+  // aggregate, the same shape with the matrix width read the same way.
+  const TEST_UI_SHARD_NAME = `name: Test UI (\${{ matrix.shard }}/${shardTotal(sources['ci.yml'], 'test-ui')})`;
+  const collidedUi = fixture('collide the Test UI shard name with its gate name', 'ci.yml', (s) =>
+    s.replace(TEST_UI_SHARD_NAME, 'name: Test UI'),
+  );
+  assert(
+    collidedUi.problems.some((p) => p.includes("job 'test-ui'") && p.includes('published by ci.yml:test-ui-gate')),
+    'a Test UI shard wearing the bare `Test UI` context name ⇒ red',
+  );
+  assert(
+    sources['ci.yml'].includes(TEST_UI_SHARD_NAME),
+    'the real suffixed Test UI shard name coexists with the bare `Test UI` gate name',
   );
 
   // ── (8) a registry that lists one context twice ──────────────────────────

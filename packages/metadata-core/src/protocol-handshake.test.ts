@@ -397,3 +397,61 @@ describe('[#24029] a `||` union admits a major when any alternative admits it', 
     expect((thrown as ProtocolIncompatibleError).status).toBe(422);
   });
 });
+
+describe('[#26480] a package AHEAD of this runtime is told to upgrade, never to migrate', () => {
+  // `migrate meta --from N` replays metadata FORWARD from an older major. A
+  // package whose declared floor major is above this runtime's has nothing to
+  // migrate here, so the refusal names the two remedies that can apply.
+  const refuse = (range: string) => {
+    const r = checkProtocolCompat({ id: 'com.acme.future', engines: { protocol: range } }, RT);
+    expect(r.status).toBe('incompatible');
+    if (r.status !== 'incompatible') throw new Error(`'${range}' was not refused under ${RT}`);
+    return r.diagnostic;
+  };
+
+  it('carries no migrateCommand, and the message names the runtime upgrade and a build for this major', () => {
+    const d = refuse('^12');
+    expect(d.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(d.targetMajor).toBe(12);
+    expect(d).not.toHaveProperty('migrateCommand');
+    expect(d.message).not.toContain('migrate meta');
+    expect(d.message).toMatch(/upgrade the runtime to protocol 12/i);
+    expect(d.message).toContain("a build of 'com.acme.future' for protocol 11");
+  });
+
+  it('holds five majors ahead, and for a union whose every alternative is ahead', () => {
+    for (const range of ['^16', '>=13', '^13 || ^12']) {
+      const d = refuse(range);
+      expect(d).not.toHaveProperty('migrateCommand');
+      expect(d.message).not.toContain('migrate meta');
+    }
+  });
+
+  it('the HTTP answer carries the four members that apply, and still declares 422', () => {
+    let thrown: unknown;
+    try {
+      assertProtocolCompat({ id: 'com.acme.future', engines: { protocol: '^12' } }, RT, () => {});
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isProtocolIncompatibleError(thrown)).toBe(true);
+    const answer = protocolIncompatibleAnswer(thrown as ProtocolIncompatibleError);
+    expect(answer.status).toBe(422);
+    expect(answer.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(answer.details).toEqual({
+      requiredRange: '^12',
+      rangeSource: 'engines.protocol',
+      protocolVersion: RT,
+      targetMajor: 12,
+    });
+    expect(Object.keys(answer.details)).not.toContain('migrateCommand');
+  });
+
+  it('CONTROL: a package behind this runtime keeps its --from prescription', () => {
+    const d = refuse('^10');
+    expect(d.migrateCommand).toBe('objectstack migrate meta --from 10');
+    expect(d.message.endsWith('Run: objectstack migrate meta --from 10')).toBe(true);
+    // A union that reaches back below this runtime still has metadata to move.
+    expect(refuse('^10 || ^12').migrateCommand).toBe('objectstack migrate meta --from 10');
+  });
+});

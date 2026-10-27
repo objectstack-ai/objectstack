@@ -81,7 +81,6 @@
       "create-objectstack",
       "@objectstack/connector-openapi",
       "@objectstack/verify",
-      "@object-ui/app-shell",
       "@object-ui/auth",
       "@object-ui/cli",
       "@object-ui/collaboration",
@@ -117,7 +116,6 @@
       "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
-      "@object-ui/sdui-parser",
       "@object-ui/types",
       "object-ui"
     ]

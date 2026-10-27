@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { uiTurboConfigPath } from '../workspace-root.mjs';
+import { UI_TSC_BUILT_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -269,7 +270,9 @@ describe('this repository', () => {
   const tscPackages = discoverTscPackages(repoRoot) as Array<{ name: string; dir: string }>;
 
   it('finds the tsc-built packages', () => {
-    expect(tscPackages.length).toBeGreaterThanOrEqual(12);
+    // A floor against an empty walk, not a census: about two thirds of the 11
+    // measured on objectstack 6a7c0fe3, so retiring a package leaves it green.
+    expect(tscPackages.length).toBeGreaterThanOrEqual(UI_TSC_BUILT_PACKAGE_FLOOR);
   });
 
   it.each(tscPackages.map((p) => [p.name, p.dir] as const))(

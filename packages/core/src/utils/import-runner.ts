@@ -85,6 +85,16 @@ export interface ImportRowResult {
   error?: string;
   code?: string;
   /**
+   * [#25582] Every cell error of a failed row, one element per failed cell in
+   * column order, each `{ field, code, message }` (`ImportRowResultSchema.errors`),
+   * so one import names every bad cell instead of one per re-import. Filled
+   * only from `coerceRow`'s cell errors, where `field` / `code` / `error` above
+   * are element 0. ⛔ Never on a validate-verdict row or a refused write: their
+   * `error` is not element 0's message, and the spec names cell errors as the
+   * list's only source.
+   */
+  errors?: ValidateDataIssue[];
+  /**
    * Findings this deployment ADMITS rather than rejects — today, ADR-0104
    * value shapes under a warn-first posture (#4633). The row is `ok`: the
    * write stores it and logs the same complaint. Present on dry-run rows,
@@ -1220,7 +1230,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         if (errors.length > 0) {
           const first = errors[0];
           errCount++;
-          results[i] = { row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message };
+          results[i] = {
+            row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message,
+            errors: errors.map(({ field, code, message }) => ({ field, code, message })),
+          };
         } else if (shared) {
           // [#26133] Another row of this import carries the same key.
           errCount++;

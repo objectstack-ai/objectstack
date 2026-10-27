@@ -57,6 +57,7 @@ import {
     packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
     unboundItemDraftAddress,
+    versionNotFoundError,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
@@ -164,8 +165,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
-import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -404,6 +405,12 @@ import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protoco
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
+// [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
+import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
+// [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
+import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
+// [#25467 cut 22] A row-less view name's expansion for the by-name read, and a container's expansion under its own name.
+import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2865,7 +2872,7 @@ export function addressPackages(packageId: string | undefined): ReadonlyArray<st
  * stored copy of a container displaced another package's item of each name
  * the copy expands, a withdrawn public form included.
  */
-function servedViewExpansion<E extends { packageId: string | undefined }>(
+export function servedViewExpansion<E extends { packageId: string | undefined }>(
     expansions: ReadonlyArray<{ item: Record<string, unknown>; container: E }>,
     name: string,
     packageId: string | undefined,
@@ -6247,7 +6254,7 @@ export interface StoredOverlayEntry {
  * list read serves under the name, and the stored container row it derives
  * from.
  */
-interface RowlessExpandedView {
+export interface RowlessExpandedView {
     item: Record<string, unknown>;
     container: StoredOverlayEntry;
 }
@@ -9330,44 +9337,12 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         packageId?: string,
     ): Promise<{ data: unknown; degraded: boolean; errors: string[] }> {
-        const services = this.getServicesRegistry?.();
-        const metadataService: any = services?.get('metadata');
-        if (!metadataService || typeof metadataService.get !== 'function') {
-            return { data: undefined, degraded: false, errors: [] };
-        }
-        // ADR-0048 — thread the caller's package id so a single-item fetch is
-        // package-scoped. Passed positionally to BOTH reads, so whatever the
-        // occupant of the `metadata` slot makes of a third argument today is
-        // unchanged by which of the two methods answers.
-        const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
-            let answer: { data: unknown; degraded: boolean; errors: string[] };
-            if (typeof metadataService.getDiagnosed === 'function') {
-                const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                answer = {
-                    data: diagnosed?.data,
-                    degraded: diagnosed?.degraded === true,
-                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
-                };
-            } else {
-                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
-            }
-            // [#23645] A stored object row's copy is not a code layer. See the header.
-            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
-                ? { ...answer, data: undefined }
-                : answer;
+        // [#25467 cut 20] The body moved to `protocol-metadata-service-read.ts` (see `MetadataServiceReadHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof readItemFromMetadataService> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-
-        const primary = await read(type);
-        if (primary.data !== undefined && primary.data !== null) return primary;
-        const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        if (!alt) return { data: undefined, degraded: primary.degraded, errors: primary.errors };
-        const secondary = await read(alt);
-        if (secondary.data !== undefined && secondary.data !== null) return secondary;
-        return {
-            data: undefined,
-            degraded: primary.degraded || secondary.degraded,
-            errors: [...primary.errors, ...secondary.errors],
-        };
+        return readItemFromMetadataService.call(host, type, name, packageId);
     }
 
     /**
@@ -10334,33 +10309,15 @@ export class ObjectStackProtocolImplementation implements
     private async resolveRowlessExpandedView(
         request: { type: string; name: string; packageId?: string },
     ): Promise<RowlessExpandedView | undefined> {
-        if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
-        let records: any[] = [];
-        // [#21967] Naming a package, the package-less rows in scope stand in,
-        // read as the list scoped to that package reads them (the
-        // package-agnostic read, filtered back to the package-less rows).
-        let standInRows: any[] = [];
-        try {
-            records = await this.readActiveOverlayRows(
-                { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
-            );
-            if (request.packageId) {
-                standInRows = (await this.readActiveOverlayRows({ type: request.type }))
-                    .filter((row) => (row?.package_id ?? null) === null);
-            }
-        } catch (error) {
-            // [#5532] The list read's rule: only an unprovisioned store means
-            // "no rows". Any other failure is not answered as "nothing expands
-            // this name".
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const rows = [...records, ...standInRows];
-        if (this.namesWithOwnStoredRow(rows, request.packageId).has(request.name)) return undefined;
-        return servedViewExpansion(
-            this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, rows)),
-            request.name,
-            request.packageId,
-        );
+        // [#25467 cut 22] The body moved to `protocol-view-expansion-names.ts` (see `ViewExpansionNamesHost`).
+        const host: ThisParameterType<typeof resolveRowlessExpandedView> = {
+            expandStoredViewContainers: (...a) => this.expandStoredViewContainers(...a),
+            namesWithOwnStoredRow: (...a) => this.namesWithOwnStoredRow(...a),
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return resolveRowlessExpandedView.call(host, request);
     }
 
     /**
@@ -18190,34 +18147,11 @@ export class ObjectStackProtocolImplementation implements
         container: Record<string, any>,
         ownPackageId: string | undefined,
     ): Record<string, unknown>[] {
-        const ownName = typeof container.name === 'string' && container.name !== '' ? container.name : undefined;
-        if (ownName === undefined) return [];
-        const under = `${object}.${ownName}`;
-        const expandAt = under;
-        const list = container.list;
-        const bare = !!list && typeof list === 'object' && !(typeof list.name === 'string' && list.name !== '');
-        const source = bare ? { ...container, list: { ...list, name: ownName } } : container;
-        const bareSpelled = `${expandAt}.${ownName}`;
-        const underIsShipped = this.isShippedByAnotherPackage(type, under, ownPackageId);
-        return expandViewContainer(expandAt, source).map((vi) => {
-            const item: Record<string, any> = { ...vi, object };
-            const name = String(item.name);
-            const fromBare = bare
-                && item.viewKind === 'list'
-                && item.config?.name === ownName
-                && name.startsWith(bareSpelled)
-                && /^(_\d+)?$/.test(name.slice(bareSpelled.length));
-            if (fromBare) {
-                const authored = { ...item.config };
-                delete authored.name;
-                item.config = authored;
-                if (!underIsShipped) {
-                    item.name = under;
-                    delete item._diagnostics;
-                }
-            }
-            return item;
-        });
+        // [#25467 cut 22] The body moved to `protocol-view-expansion-names.ts` (see `ViewExpansionNamesHost`).
+        const host: ThisParameterType<typeof expandUnderOwnName> = {
+            isShippedByAnotherPackage: (...a) => this.isShippedByAnotherPackage(...a),
+        };
+        return expandUnderOwnName.call(host, type, object, container, ownPackageId);
     }
 
     /**
@@ -23107,6 +23041,9 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof applySeedBodies> = {
             get engine() { return readEngine(); },
             getMetaItem: (...a) => this.getMetaItem(...a),
+            // [#25779] The `field-files` service, so a published seed's files
+            // are stored as the boot seed's are.
+            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
         };
         return applySeedBodies.call(host, bodies);
     }
@@ -27226,7 +27163,8 @@ export class ObjectStackProtocolImplementation implements
      * earlier history row whose body differs from the to side's by this
      * diff's own equality, a body-less (delete) row comparing as `{}`, and
      * absent (`null`) when no earlier row differs. An explicit version on
-     * either side is used as named. Returns `{ added, removed, changed }`
+     * either side is used as named, and must have a history row of this
+     * item (a delete tombstone counts, compared as `{}`). Returns `{ added, removed, changed }`
      * keyed by JSON pointer-style paths for primitive leaves; nested
      * objects/arrays are reported as a single change record.
      *
@@ -27243,13 +27181,22 @@ export class ObjectStackProtocolImplementation implements
      *         application refusal in the author's own words, classified at the
      *         producer and NOT the 503 below. See {@link
      *         metadataReadFailureError}.
+     * @throws {@link versionNotFoundError} — 404 / `VERSION_NOT_FOUND`
+     *         (#26462), when an explicit `fromVersion` or `toVersion` has no
+     *         history row of this item, an item with no history at all
+     *         included: the rollback door's refusal of the same number. A
+     *         missing side compared as empty answered "no change" or
+     *         "everything removed" (ADR-0110 D3). The default range is
+     *         never refused.
      * @throws {@link metadataStoreUnavailableError} — 503 /
      *         `SERVICE_UNAVAILABLE` (#8833), when the `sys_metadata_history`
      *         read failed for any reason other than the table not being
      *         provisioned yet, carrying the driver error on `cause`. The one
      *         non-throwing failure is that unprovisioned table, where "no
      *         history rows" is the truth rather than an unknown, so a minimal
-     *         deployment still gets its benign empty diff. Without that
+     *         deployment still gets its benign answer: the default range's
+     *         empty diff, and for a named version the 404 miss above, as
+     *         for any item with no history. Without that
      *         asymmetry an outage would be indistinguishable from "these two
      *         versions are identical" (ADR-0110 D3).
      */
@@ -27416,7 +27363,19 @@ export class ObjectStackProtocolImplementation implements
 
         if (request.toVersion !== undefined) {
             toVersion = request.toVersion;
-            toBody = byVersion.get(request.toVersion) ?? null;
+            // [#26462] ADR-0110 D3 — a named version with no row is a MISS,
+            // never an empty side: compared as `{}` it answered "no change"
+            // (both missing, or an item with no history at all) or
+            // "everything removed" with a 200. Refused as the rollback door
+            // refuses the same number. The read is keyed by (type, name), so
+            // another item's version is this item's miss too. A delete
+            // tombstone HAS a row (a `null` body, not `undefined`) and stays
+            // served.
+            const named = byVersion.get(request.toVersion);
+            if (named === undefined) {
+                throw versionNotFoundError({ type: singularType, name: request.name }, request.toVersion);
+            }
+            toBody = named;
         } else {
             // [#20397] The default `to` side is the CURRENT ACTIVE ROW, and ONE
             // read of that row supplies both of its facts: the body compared and
@@ -27462,7 +27421,12 @@ export class ObjectStackProtocolImplementation implements
         }
         if (request.fromVersion !== undefined) {
             fromVersion = request.fromVersion;
-            fromBody = byVersion.get(request.fromVersion) ?? null;
+            // [#26462] The same miss on the from side — see the to side above.
+            const named = byVersion.get(request.fromVersion);
+            if (named === undefined) {
+                throw versionNotFoundError({ type: singularType, name: request.name }, request.fromVersion);
+            }
+            fromBody = named;
         } else if (toVersion !== null) {
             // [#20451] The default from side is the NEAREST EARLIER history row
             // whose body DIFFERS from the to side's, not the row immediately
@@ -28685,30 +28649,8 @@ export class ObjectStackProtocolImplementation implements
      * sealed overlays are still not served.
      */
     private reportSealedOverlayRows(rows: ReadonlyArray<{ type: string; name: string }>): void {
-        if (rows.length === 0) return;
-        const SAMPLE_PER_TYPE = 5;
-        const byType = new Map<string, string[]>();
-        for (const { type, name } of rows) {
-            const names = byType.get(type) ?? [];
-            names.push(name);
-            byType.set(type, names);
-        }
-        const detail = Array.from(byType.entries())
-            .map(([type, names]) => {
-                const shown = names.slice(0, SAMPLE_PER_TYPE);
-                const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
-                return `${type}×${names.length} (${shown.join(', ')}${more})`;
-            })
-            .join('; ');
-        console.warn(
-            `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
-            `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
-            `${detail}. No read serves them — the package's own definition is served. ` +
-            `Each row is kept at rest, untouched (an object's table and its columns stay as they are). To keep ` +
-            `the change, re-express it as a new item under a new ` +
-            `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
-            `stored row.`,
-        );
+        // [#25467 cut 21] The body moved to `protocol-sealed-overlay-report.ts`.
+        return reportSealedOverlayRows(rows);
     }
 
     // ==========================================

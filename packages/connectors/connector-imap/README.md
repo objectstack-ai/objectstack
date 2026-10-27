@@ -4,6 +4,8 @@ The IMAP connector of ObjectStack's inbound mail: a **read-only IMAP4rev1 sessio
 
 It registers no `connector_action` handlers and ships no plugin: nothing in a flow calls IMAP; the mailbox service does.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## What it provides
 
 - **`openImapSession({ account, credentials, timeoutMs?, maxLiteralBytes?, maxCommandBytes? })`** — connects, reads the greeting, learns the server's capabilities, resolves the credential and authenticates. The session it answers:

@@ -193,10 +193,11 @@
 //               run" is a failure, not a skip (AGENTS.md, "Absence must be
 //               loud"), and is declared per file in the baseline's `unjudged`
 //               count rather than passed over in silence.
-//   RECONCILED  in both directions. An entry whose count is now LOWER, or
-//               whose file is now clean or gone, is an error -- ratchet it
-//               down in the same PR. A ratchet that can only accrete rots
-//               into a list nobody reads.
+//   ONE-SIDED   an entry whose count is now LOWER, or whose file is now clean
+//               or gone, PASSES and is reported with the exact edit that
+//               ratchets it down (#26444) -- deleting or fixing a test file
+//               must not red a PR that never touched this gate. Until that
+//               edit lands, the old count stays the file's ceiling.
 //   MONOTONIC   the baseline key set only ever SHRINKS, measured against the
 //               merge base with origin/main. Counts alone cannot see the last
 //               move: a newly-added file matching its own count would sail
@@ -207,7 +208,7 @@
 // `check-engine-double-contract` gives: a generator would let a new silently
 // wrong double be admitted by "just run the update command", which is
 // precisely how a gate stops meaning anything. Ratcheting down is editing one
-// number by hand -- the failure output prints exactly what was measured.
+// number by hand -- the decrease report prints exactly what was measured.
 //
 // ## Extraction, and its honest limits
 //
@@ -676,23 +677,39 @@ function reconcile(measured, baselineFiles) {
           `${file}: ${kind} matcher count grew ${allowed[kind]} → ${now[kind]}. The file is ` +
           `grandfathered for its EXISTING matchers only.`,
         );
-      } else if (now[kind] < allowed[kind]) {
-        errors.push(
-          `${file}: ${kind} count fell ${allowed[kind]} → ${now[kind]} — ratchet DOWN: set it to ` +
-          `${now[kind]} in ${BASELINE_PATH} (delete the entry when both counts reach 0).`,
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * The decrease direction, as a REPORT rather than an error (#26444): a fallen
+ * count, or a file that is clean or gone, passes. Each line is the hand edit that
+ * ratchets the entry down — until it lands, the old count stays the ceiling.
+ */
+function reconcileDown(measured, baselineFiles) {
+  const lines = [];
+  for (const [file, v] of measured) {
+    if (!baselineFiles[file]) continue;
+    const now = countsOf(v);
+    const allowed = countsOf(baselineFiles[file]);
+    for (const kind of ['silent', 'unjudged']) {
+      if (now[kind] < allowed[kind]) {
+        lines.push(
+          `${file}: ${kind} count fell ${allowed[kind]} → ${now[kind]}. Passing; set it to ` +
+          `${now[kind]} in ${BASELINE_PATH} (delete the entry when both counts reach 0) — until ` +
+          `then ${allowed[kind]} stays this file's ceiling.`,
         );
       }
     }
   }
   for (const file of Object.keys(baselineFiles)) {
     if (!measured.has(file)) {
-      errors.push(
-        `${file}: baselined file is clean or gone — ratchet DOWN: delete its entry from ` +
-        `${BASELINE_PATH}.`,
-      );
+      lines.push(`${file}: baselined file is clean or gone. Passing; delete its entry from ${BASELINE_PATH}.`);
     }
   }
-  return errors;
+  return lines;
 }
 
 function monotonicity(baselineFiles) {
@@ -858,11 +875,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the conjoining fixture — discovery and verdict': 16,
   '#8615: the captured-filter arm': 17,
   'the dispatch-gates declaration (#13163\'s landing obligation)': 6,
+  'the ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 4;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -970,8 +988,17 @@ function selfTest() {
   expect('an unbaselined silent matcher is an error', reconcile(fakeMeasured, {}).length === 1);
   expect('a matching baseline entry passes', reconcile(fakeMeasured, { 'a.test.ts': { silent: 1 } }).length === 0);
   expect('a grown count is an error', reconcile(fakeMeasured, { 'a.test.ts': { silent: 0 } }).length === 1);
-  expect('a fallen count is an error (ratchet down)', reconcile(fakeMeasured, { 'a.test.ts': { silent: 2 } }).length === 1);
-  expect('a stale entry is an error', reconcile(new Map(), { 'gone.test.ts': { silent: 1 } }).length === 1);
+  expect('a fallen count PASSES (one-sided, #26444)', reconcile(fakeMeasured, { 'a.test.ts': { silent: 2 } }).length === 0);
+  expect('a clean/gone entry PASSES (one-sided, #26444)', reconcile(new Map(), { 'gone.test.ts': { silent: 1 } }).length === 0);
+
+  // ── The ratchet is ONE-SIDED: a decrease passes and is reported (#26444) ──
+  battery('the ratchet is ONE-SIDED: a decrease passes and is reported (#26444)');
+  expect('a fallen count is reported once', reconcileDown(fakeMeasured, { 'a.test.ts': { silent: 2 } }).length === 1);
+  expect('a clean/gone entry is reported once', reconcileDown(new Map(), { 'gone.test.ts': { silent: 1 } }).length === 1);
+  expect('a matching entry reports nothing', reconcileDown(fakeMeasured, { 'a.test.ts': { silent: 1 } }).length === 0);
+  expect('a grown count is not a decrease', reconcileDown(fakeMeasured, { 'a.test.ts': { silent: 0 } }).length === 0);
+  expect('the report names the old count as the ceiling it leaves',
+    reconcileDown(fakeMeasured, { 'a.test.ts': { silent: 3 } })[0]?.includes('3 stays'));
 
   // -- the dispatch-gates declaration (#13163's landing obligation) ---------
   //
@@ -1083,7 +1110,7 @@ function selfTest() {
     '    parameter callbacks capturing their filter — by name and by access path — are\n' +
     '    discovered and judged, while an unresolvable root, a computed filter and an\n' +
     '    inverted survivor filter are each declined for their own recorded reason; the\n' +
-    '    ledger reconciles in both directions.',
+    '    ledger reconciles one-sided (a decrease passes and is reported).',
   );
 
   return SELF_TEST_VERDICT;
@@ -1132,6 +1159,12 @@ if (!invokedDirectly) {
       `${file}: ADDED to the baseline (not present at ${mono.base}). The grandfather list is ` +
       `not a mute button — it only ever shrinks.`,
     );
+  }
+
+  const down = reconcileDown(measured, baselineFiles);
+  if (down.length > 0) {
+    console.log(`↓ where-matcher conformance: ${down.length} baselined count(s) fell (passing, reported):`);
+    for (const line of down) console.log(`  • ${line}`);
   }
 
   const silent = [...measured.values()].reduce((a, v) => a + v.silent, 0);

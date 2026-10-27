@@ -27,9 +27,16 @@ const codes = (node: SchemaElement): string[] =>
   validateTree(node, manifest).diagnostics.map((d) => d.code);
 
 const EVERY_NODE = [
-  'id', 'className', 'style', 'visible', 'visibleWhen', 'visibleOn', 'hidden',
-  'hiddenOn', 'disabled', 'disabledOn', 'bind', 'testId', 'children',
+  'id', 'className', 'style', 'visible', 'visibleWhen', 'hidden',
+  'disabled', 'bind', 'testId', 'children',
 ];
+// The retired node-level dialects (#25926) left the list: each draws ONE
+// `unknown-prop` that names its canonical key (`retired-visibility-dialects.ts`).
+const RETIRED_DIALECTS = [
+  ['visibleOn', 'visibleWhen'],
+  ['hiddenOn', 'hidden'],
+  ['disabledOn', 'disabled'],
+] as const;
 // `type` is the one `every-node` entry with no attribute form: on a node it
 // IS the tag, so a node cannot carry it without being the component under test.
 // It is pinned through the list below, not through `validateTree`.
@@ -39,6 +46,12 @@ describe('base props — one list, two scopes (objectui#11008, #11044)', () => {
   it.each(EVERY_NODE)('every-node `%s` draws no unknown-prop', (key) => {
     const node = { type: 'leaf', [key]: key === 'children' ? [] : 'x' } as SchemaElement;
     expect(codes(node)).not.toContain('unknown-prop');
+  });
+
+  it.each(RETIRED_DIALECTS)('the retired `%s` draws one unknown-prop naming `%s`', (key, canonical) => {
+    const diags = validateTree({ type: 'leaf', [key]: 'x' } as SchemaElement, manifest).diagnostics;
+    expect(diags.map((d) => d.code)).toEqual(['unknown-prop']);
+    expect(diags[0]!.message).toContain(`"${canonical}"`);
   });
 
   it.each(WHERE_UNDECLARED)('undeclared `%s` draws no unknown-prop', (key) => {
@@ -51,7 +64,7 @@ describe('base props — one list, two scopes (objectui#11008, #11044)', () => {
     expect(validateTree({ type: 'labelled', label: 'ok' } as SchemaElement, manifest).diagnostics).toEqual([]);
   });
 
-  it('the list is the 20 entries, `type` alone having no attribute type', () => {
+  it('the list is the 17 entries, `type` alone having no attribute type', () => {
     expect(SDUI_BASE_PROPS.map((p) => p.name)).toEqual(['type', ...EVERY_NODE, ...WHERE_UNDECLARED]);
     expect(SDUI_BASE_PROPS.filter((p) => p.tsType === null).map((p) => p.name)).toEqual(['type']);
     expect(SDUI_BASE_PROPS.filter((p) => p.scope === 'every-node').map((p) => p.name)).toEqual(['type', ...EVERY_NODE]);

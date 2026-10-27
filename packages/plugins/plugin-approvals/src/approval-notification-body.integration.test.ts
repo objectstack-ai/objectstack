@@ -39,15 +39,17 @@
  *
  * ## And how it names the record (#23978)
  *
- * Ruling B of #23556 / #23594 names the record an approval notification is
- * about by its object's label and its id (`Deal D_123`), with no title, through
- * `nameSubjectRecord`. `approval.requested` used it; every other body that
+ * Every body names the record an approval notification is about by its
+ * object's label, the way `approval.requested` did; every other body that
  * names the record built `<object_name>/<record_id>`, so an approver read the
  * API name and a slash in the reminder, the SLA breach, the escalation, the
  * hand-off, both send-back sentences and both out-of-office sentences. The same
  * battery pins the record's name in each of those bodies, and a control: a
  * record of an object whose schema has no label is named by the object's API
- * name and the id, the helper's own fallback.
+ * name, the helper's own fallback. [#26181 ruling A′] The record itself is
+ * named by its title as the recipient is served it (here every recipient: no
+ * field-visibility source is composed), once ruling B's id
+ * (`notification-subject-title-per-recipient` pins the narrowing).
  *
  * ## And whom the out-of-office bodies name (#24065)
  *
@@ -343,29 +345,30 @@ describe('every approval notification carries its text in body', () => {
     expect([sentBack.audience, sentBack.payload?.body]).toEqual([['u_sub'], SEND_BACK]);
     // [#24753] The rejection note follows the outcome sentence, which names the record.
     const rejected = one('approval.rejected', 'rejected');
-    expect([rejected.audience, rejected.payload?.body]).toEqual([['u_sub'], `Your Deal D_rejected was rejected.\n\n${REJECTION}`]);
+    expect([rejected.audience, rejected.payload?.body]).toEqual([['u_sub'], `Your Deal rejected was rejected.\n\n${REJECTION}`]);
   });
 
-  it('[#23978] every body that names the record names it by its object label and its id, as approval.requested does', () => {
-    // Ruling B of #23556 / #23594: label and id, no title — one form for every
-    // body, the one `approval.requested` already sends. The pin is the record's
-    // name in each body, not the rest of the sentence around it.
+  it('[#23978 / #26181] every body that names the record names it by its object label and its title, as approval.requested does', () => {
+    // One form for every body, the one `approval.requested` sends: the
+    // object's label and the record's title as its recipient is served it
+    // (ruling A′, which re-ruled #23556 / #23594 B's id). The pin is the
+    // record's name in each body, not the rest of the sentence around it.
     const NAMED: Record<string, string> = {
-      'approval.requested@thread': 'Deal D_thread',
-      'approval.reminder@thread': 'Deal D_thread',
-      'approval.sla_breached@sla_notify': 'Deal D_sla_notify',
-      'approval.sla_breached@sla_notify>submitter': 'Deal D_sla_notify',
-      'approval.escalated@sla_reassign': 'Deal D_sla_reassign',
-      'approval.reassigned@thread': 'Deal D_thread',
-      'approval.returned@budget': 'Deal D_budget',
-      'approval.returned@rework': 'Deal D_rework',
-      'approval.ooo_substituted@ooo': 'Deal D_ooo',
-      'approval.ooo_skipped@ooo': 'Deal D_ooo',
-      'approval.approved@approved': 'Deal D_approved',
-      'approval.rejected@rejected': 'Deal D_rejected',
+      'approval.requested@thread': 'Deal thread',
+      'approval.reminder@thread': 'Deal thread',
+      'approval.sla_breached@sla_notify': 'Deal sla_notify',
+      'approval.sla_breached@sla_notify>submitter': 'Deal sla_notify',
+      'approval.escalated@sla_reassign': 'Deal sla_reassign',
+      'approval.reassigned@thread': 'Deal thread',
+      'approval.returned@budget': 'Deal budget',
+      'approval.returned@rework': 'Deal rework',
+      'approval.ooo_substituted@ooo': 'Deal ooo',
+      'approval.ooo_skipped@ooo': 'Deal ooo',
+      'approval.approved@approved': 'Deal approved',
+      'approval.rejected@rejected': 'Deal rejected',
       // The control: the object's schema has no label, so the record is named
-      // by the object's API name and the id.
-      'approval.reminder@bare': 'crm_memo D_bare',
+      // by the object's API name and its title.
+      'approval.reminder@bare': 'crm_memo bare',
     };
     const offenders = Object.entries(NAMED).flatMap(([site, name]) => {
       const bodies = emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));

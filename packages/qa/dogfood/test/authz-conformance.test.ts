@@ -98,7 +98,8 @@ const tripwireKey = (surface: string): string => `${surface}(${TRANSPORT_WIRED_M
 // them with one number is the mistake this declaration exists to prevent: it
 // reads working tripwires as holes and gate pins as route enumerations. The
 // taxonomy was established by the reach census
-// (`authz-probe-blind-spot.census.ts`) and lived there as PROSE; it lives here
+// (`authz-probe-blind-spot.census.ts`, retired after commit 67461403) and
+// lived there as PROSE; it lives here
 // now, as data on the probe it describes, because a comment cannot be checked
 // and a `kind` can.
 //
@@ -144,7 +145,7 @@ interface Probe {
    * registrar bodies into modules of their own, so they read every file on the
    * registrar list (`packages/rest/src/rest-server-registrar-files.ts`,
    * imported above) and a transport wired in a moved body still trips them.
-   * `file` stays the one file the entry NAMES — what the probe-table census and
+   * `file` stays the one file the entry NAMES — what `authz-probe-blind-spot.test.ts` and
    * the matrix header count — and the minted key is unchanged.
    */
   alsoReads?: readonly string[];
@@ -200,8 +201,9 @@ const PROBES: readonly Probe[] = [
   // stayed 80. Only the headline split moved, earlier and unrelatedly: 50/30
   // became 51/29 when `registerUiEndpoints`, the one route in that file
   // resolving no identity, was guarded. Recorded so the next reader does not
-  // re-derive a figure that has now been checked; the full reading lives in
-  // `authz-probe-blind-spot.census.ts`, the authority on this population.
+  // re-derive a figure that has now been checked; the full reading is in
+  // `authz-probe-blind-spot.census.ts` at commit 67461403 (the census was
+  // retired after it; its derived successor is `authz-probe-blind-spot.test.ts`).
   //
   // What these two probes supply is the POPULATION; the classification stays a
   // reviewed row.
@@ -337,8 +339,8 @@ const PROBES: readonly Probe[] = [
   //
   // ⚠️ It is re-declared TRIPWIRE, NOT deleted, and the difference matters:
   // deleting it would make this gate see LESS. As a declared tripwire its zero
-  // is a CHECKED reading rather than an accident — the census carries a
-  // positive control from this same file so a zero from a moved or emptied
+  // is a CHECKED reading rather than an accident — `authz-probe-blind-spot.test.ts`
+  // holds a positive control from this same file so a zero from a moved or emptied
   // file cannot pass as "nothing found" — and the day a `/data` route is
   // mounted here again the key appears and the surface is UNCLASSIFIED, which
   // is exactly a tripwire's promise.
@@ -352,7 +354,8 @@ const PROBES: readonly Probe[] = [
   // ⚠️ The live spelling this pattern watches for exists one file away, in
   // `current-user-endpoints.ts` (3 mounts, none of them `/data`), which this
   // table does not name. Naming it is a POPULATION decision and is deliberately
-  // not taken here — see the census's population-source record.
+  // not taken here — see the retired census's population-source record
+  // (`authz-probe-blind-spot.census.ts` at commit 67461403).
   {
     kind: 'TRIPWIRE',
     file: 'packages/plugins/plugin-hono-server/src/hono-plugin.ts',
@@ -715,7 +718,8 @@ function checkLedgerPopulationBaselineWith(
 // ⛔ The exemption is not an escape hatch for a probe that has gone blind.
 // Re-declaring a ROUTE_ENUMERATION probe as TRIPWIRE to clear a red is only
 // honest when its population really is gone AND the zero is backed by a
-// positive control from that same file (the reach census holds one per file) —
+// positive control from that same file (`authz-probe-blind-spot.test.ts` holds
+// one per TRIPWIRE file) —
 // the hono probe above is written that way, dated evidence and all.
 function checkProbeInstrumentIntegrity(probes: readonly Probe[]): string[] {
   const problems: string[] = [];
@@ -1622,8 +1626,7 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     expect(hits(MECHANICS.re, src)).toEqual([]);
     expect(hits(ROUTES.re, src)).toEqual([]);
     // [#23050 slice 3] …and on every file `RestServer`'s registrars live in:
-    // 0 over the list, whose length is pinned so a module added to it makes this
-    // re-read. The control is that both probes really READ the list — their
+    // 0 over the list. The control is that both probes really READ the list — their
     // text is every file on it, in order — so the zero is not a list ignored.
     // [#23050 slice 4] Length 4 → 5 (`sharing-routes.ts`), still 0 over it.
     // [#23050 slice 5] Length 5 → 6 (`analytics-routes.ts`), still 0 over it.
@@ -1639,7 +1642,8 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     // [#23050 slice 13c] Length 15 → 16 (`meta-item-write-routes.ts`), still 0 over it.
     // [#23050 slice 13d] Length 16 → 17 (`meta-item-history-routes.ts`), still 0 over it.
     // [#23050 slice 13e] Length 17 → 18 (`meta-object-state-routes.ts`), still 0 over it.
-    expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+    // [#26524] The length pin is gone: the list is the authority, and a module
+    // added to it is read by both probes with no edit here.
     expect(REST_SERVER_REGISTRAR_PATHS[0]).toBe(REST_SERVER);
     const listed = REST_SERVER_REGISTRAR_PATHS.map((file) => readFileSync(join(REPO_ROOT, file), 'utf8'));
     for (const probe of [MECHANICS, ROUTES]) {
@@ -1813,10 +1817,18 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
 // reads ZERO against the very file that carries it. The control leg below
 // pins that failure, because a zero from an instrument that cannot see the
 // shape is not a reading of absence.
+//
+// ⛔ ONLY THE GROUP COUNT IS STATED AND PINNED (ruling 6433001130 on #26410).
+// The docblock used to state each ledger's ROW count too, and this pin held it:
+// every route added inside an existing family or domain then had to edit the
+// matrix docblock or red `main`, though the claim the docblock makes is at
+// family / domain granularity and a new row changes nothing it says. A new
+// family or domain still moves the stated figure here, alongside the
+// `discover()` classification it needs anyway.
 
 const MATRIX_FILE = 'authz-conformance.matrix.ts';
 
-/** One figure pair the matrix docblock states, and how its ledger spells a row. */
+/** One figure the matrix docblock states, and how its ledger spells a row. */
 interface DocblockLedgerClaim {
   /** Repo-relative ledger path, exactly as the docblock backticks it. */
   file: string;
@@ -1886,22 +1898,15 @@ function flattenLineComments(src: string): string {
  * Every figure the (already-folded) docblock states for one ledger.
  *
  * Anchored on the backticked ledger PATH immediately followed by the
- * parenthesised pair — not on the bare numbers, which also appear in the dated
+ * parenthesised group count — not on the bare numbers, which also appear in the dated
  * drift note one paragraph down and must not be pinned as present-tense
  * claims. Every match is returned so the caller can refuse a SECOND copy: an
  * unpinned duplicate is exactly how a third carrier of a stale figure appears.
  */
-function claimedFigures(flat: string, claim: DocblockLedgerClaim): { rows: number; groups: number }[] {
+function claimedFigures(flat: string, claim: DocblockLedgerClaim): { groups: number }[] {
   const path = claim.file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp('`' + path + '` \\((\\d+) rows / (\\d+) ' + claim.groupNoun + '\\)', 'g');
-  return allMatchPairs(flat, re);
-}
-
-function allMatchPairs(flat: string, re: RegExp): { rows: number; groups: number }[] {
-  const out: { rows: number; groups: number }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(flat)) !== null) out.push({ rows: Number(m[1]), groups: Number(m[2]) });
-  return out;
+  const re = new RegExp('`' + path + '` \\((\\d+) ' + claim.groupNoun + '\\)', 'g');
+  return allMatches(flat, re).map((n) => ({ groups: Number(n) }));
 }
 
 /** Disagreements between the docblock's stated figures and the ledgers, on folded text. */
@@ -1911,7 +1916,7 @@ function checkFoldedDocblockFigures(flat: string): string[] {
     const claimed = claimedFigures(flat, claim);
     if (claimed.length === 0) {
       problems.push(
-        `${claim.file}: the docblock states no (N rows / M ${claim.groupNoun}) figure for it — the pin has lost its subject`,
+        `${claim.file}: the docblock states no (N ${claim.groupNoun}) figure for it — the pin has lost its subject`,
       );
       continue;
     }
@@ -1928,9 +1933,6 @@ function checkFoldedDocblockFigures(flat: string): string[] {
       continue;
     }
     for (const c of claimed) {
-      if (c.rows !== actual.rows) {
-        problems.push(`${claim.file}: docblock says ${c.rows} rows, the table holds ${actual.rows}`);
-      }
       if (c.groups !== actual.groups) {
         problems.push(
           `${claim.file}: docblock says ${c.groups} ${claim.groupNoun}, the table holds ${actual.groups}`,
@@ -1983,31 +1985,13 @@ describe("#17111 — the matrix docblock's ledger figures are pinned to the ledg
     expect(checkDocblockFigures(matrixText())).toEqual([]);
   });
 
-  it('a stale ROW count is RED — the #14503 drift, replayed', () => {
+  it('a stale GROUP count is RED — the #20102 drift (a family leaving), replayed', () => {
     // Doctored from the MEASURED value, so this case hand-types no count of
     // its own — the thing the card was filed about.
-    const { rows, groups } = measureLedgerTable(REST);
+    const { groups } = measureLedgerTable(REST);
     const flat = flattenLineComments(matrixText());
-    const doctored = flat.replace(
-      `(${rows} rows / ${groups} families)`,
-      `(${rows + 3} rows / ${groups} families)`,
-    );
+    const doctored = flat.replace(`\`${REST.file}\` (${groups} families)`, `\`${REST.file}\` (${groups + 1} families)`);
     expect(doctored, 'the doctoring must land, or this case proves nothing').not.toBe(flat);
-    expect(
-      checkFoldedDocblockFigures(doctored).some((p) =>
-        p.includes(`docblock says ${rows + 3} rows, the table holds ${rows}`),
-      ),
-    ).toBe(true);
-  });
-
-  it('a stale GROUP count is RED too — both halves of the pair are pinned', () => {
-    const { rows, groups } = measureLedgerTable(REST);
-    const flat = flattenLineComments(matrixText());
-    const doctored = flat.replace(
-      `(${rows} rows / ${groups} families)`,
-      `(${rows} rows / ${groups + 1} families)`,
-    );
-    expect(doctored).not.toBe(flat);
     expect(
       checkFoldedDocblockFigures(doctored).some((p) =>
         p.includes(`docblock says ${groups + 1} families, the table holds ${groups}`),
@@ -2018,9 +2002,9 @@ describe("#17111 — the matrix docblock's ledger figures are pinned to the ledg
   it('DELETING the figure is RED — the pin cannot be silenced by dropping its subject', () => {
     // Otherwise the cheapest way to green this gate would be to remove the
     // sentence, which is the claim, not the defect.
-    const { rows, groups } = measureLedgerTable(REST);
+    const { groups } = measureLedgerTable(REST);
     const flat = flattenLineComments(matrixText());
-    const doctored = flat.replace(`\`${REST.file}\` (${rows} rows / ${groups} families)`, `\`${REST.file}\``);
+    const doctored = flat.replace(`\`${REST.file}\` (${groups} families)`, `\`${REST.file}\``);
     expect(doctored).not.toBe(flat);
     expect(
       checkFoldedDocblockFigures(doctored).some((p) => p.includes('the pin has lost its subject')),
@@ -2028,8 +2012,8 @@ describe("#17111 — the matrix docblock's ledger figures are pinned to the ledg
   });
 
   it('a SECOND present-tense copy of a figure is RED — a new carrier cannot arrive unpinned', () => {
-    const { rows, groups } = measureLedgerTable(REST);
-    const one = `\`${REST.file}\` (${rows} rows / ${groups} families)`;
+    const { groups } = measureLedgerTable(REST);
+    const one = `\`${REST.file}\` (${groups} families)`;
     const flat = flattenLineComments(matrixText());
     const doctored = flat.replace(one, `${one} and again ${one}`);
     expect(doctored).not.toBe(flat);

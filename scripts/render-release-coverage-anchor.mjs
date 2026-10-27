@@ -2,7 +2,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // render-release-coverage-anchor — composes the anchor-issue body for
-// `.github/workflows/release-coverage-patrol.yml` (#10803).
+// the `release-coverage-patrol` job of `.github/workflows/fleet-patrols.yml` (#10803).
 //
 //   node scripts/render-release-coverage-anchor.mjs             # reads the env
 //   node scripts/render-release-coverage-anchor.mjs --self-test
@@ -40,7 +40,7 @@ const PREAMBLE = [
   `${MARKER} — machine-findable marker for this generated view.`,
   '',
   '**Generated view — not a second tracker.** This body is rewritten IN PLACE by the scheduled '
-  + 'patrol workflow (`.github/workflows/release-coverage-patrol.yml`) on every run, and the edit '
+  + 'patrol workflow (the `release-coverage-patrol` job of `.github/workflows/fleet-patrols.yml`) on every run, and the edit '
   + 'history is the archive. **Report-only**: every finding is patrol input, never a gate verdict. '
   + 'This sweep never writes release prose — it cannot, and the gate\'s own header explains why (a '
   + 'curated section is a judgement about what is user-facing, read out of the per-package '
@@ -67,7 +67,7 @@ const HEARTBEAT_NOTE =
  *
  * ## Why the schedule is an INPUT and not a literal here
  *
- * `release-coverage-patrol.yml` declares the cron, and it is the only caller.
+ * `fleet-patrols.yml`'s `release-coverage-patrol` job declares the cron, and it is the only caller.
  * Restating it in this file would be a second declaration of one fact, free to
  * drift into publishing a deadline nobody schedules — which is this card's own
  * defect with a timestamp on it. The workflow passes its own `cron:` down

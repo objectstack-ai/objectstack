@@ -1,5 +1,132 @@
 # @objectstack/plugin-mcp-server
 
+## 18.2.0
+
+### Patch Changes
+
+- 65145d3: refactor(core)!: `resolveLocalizationContext` takes the organization as `organizationId`; the `tenantId` key is retired
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/core#ResolveLocalizationInput.tenantId) the retired member is a key of a published runtime TypeScript input with no Zod schema, no spec declaration and no stored shape; the compiler reports it at every object-literal call that still spells it, and nothing exists for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveLocalizationContext` from `@objectstack/core`. The key that names the organization to localize for is renamed. There is no alias and no deprecation window.
+  
+  `ResolveLocalizationInput.tenantId` always meant the **organization** id: the settings service stores and reads `localization` under the organization (ADR-0131 D8), and the direct `sys_setting` fallback reads that organization's rows. The name did not say so, and an environment id passed there type-checked. It matched no organization's settings, so every non-UTC organization silently resolved its timezone as `UTC`, and the date boundaries cut from it moved with it. The key is now `organizationId`, and the resolver reads no other spelling at run time.
+  
+  - FROM `ResolveLocalizationInput.tenantId` TO `ResolveLocalizationInput.organizationId`: pass the caller's organization id under the new key, `resolveLocalizationContext({ ql, settings, organizationId, userId })`. Never pass an environment id.
+  
+  **Who moves.** A caller that builds the input as an object literal with `tenantId` gets a compile error (excess property) and makes the one-key fix above. A caller that builds it some other way, such as spreading an object that holds `tenantId` or passing a variable typed wider than the input, does not get that error: its `tenantId` is ignored and the resolver localizes as for a caller with no organization, so grep for `tenantId` beside `resolveLocalizationContext`. In this repository the four callers (`@objectstack/core`'s request execution context, `@objectstack/mcp`, `@objectstack/plugin-audit` and `@objectstack/plugin-hono-server`) are migrated here and behave as before.
+  
+  **Not moved.** The settings service's own scope argument, `{ tenantId, userId }` on `get` / `getMany`, keeps its spelling. It is a separate surface with its own callers. The resolver passes the organization id there as before.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- bb85f5f: fix(mcp,runtime)!: the stateless `/api/v1/mcp` surface answers `GET` and `DELETE` with `405` and `Allow: POST`, so an MCP client stops re-opening a GET stream that ends at once
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A transport verb answer on the MCP HTTP surface: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the 405 body is the MCP SDK transport's own. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the MCP HTTP transport (`MCPServerRuntime.handleHttpRequest`, `@objectstack/mcp`), and on the standalone server's `/api/v1/mcp` route (`createDispatcherPlugin`, `@objectstack/runtime`).
+  
+  - **Before.** The transport is stateless (no session id) and closes its per-request server when the request ends. A `GET` still reached the SDK's stream handler, which answered `200 text/event-stream` and then lost the stream when the server closed. An MCP client reads a GET stream that ends as a dropped connection and opens another one: claude-code re-opened it 2–3 times a second for as long as a session stayed connected. A `DELETE` answered `200` and ended nothing, because no session exists. Every other verb answered `405` with `Allow: GET, POST, DELETE`.
+  - **Now.** Every verb but `POST` that reaches the transport (`OPTIONS` with CORS off; with CORS on the CORS middleware's `204` answers first on both doors) answers `405` with `Allow: POST` and the JSON-RPC body `{"jsonrpc":"2.0","error":{"code":-32000,"message":"Method not allowed."},"id":null}`, before a server is built. This is the Streamable HTTP transport's answer for a server that offers no GET stream and does not end sessions. The MCP SDK client treats a `405` on GET as "no stream offered" and does not retry it.
+  - **The standalone server.** `createDispatcherPlugin` mounts `/api/v1/mcp` for `GET`, `POST` and `DELETE`, and now also declares it a path whose domain decides every verb (the declaration `/mcp/skill` and `/keys` already carry). Before, a `PUT`, a `PATCH` or an `OPTIONS` with CORS off matched no route there and the HTTP adapter answered it itself: `405` with `Allow: DELETE, GET, HEAD, POST` and a `METHOD_NOT_ALLOWED` envelope, to an anonymous caller too. Now those verbs reach the dispatcher like the mounted ones: an anonymous caller gets `401`, a signed-in one the transport's `405` with `Allow: POST`. A `createHonoApp` host already handed every verb to the dispatcher, so both doors now answer every verb alike.
+  - **Unchanged.** `POST` (JSON-RPC: `initialize`, `tools/list`, `tools/call`, …) answers exactly as before. An anonymous caller is refused `401` before any verb answer, on every verb and on both doors.
+  - **Who sees it.** A client that opens the GET stream on `/api/v1/mcp` now gets `405` instead of a `200` stream that ends at once. Nothing was ever sent on that stream. On the standalone server, an anonymous `PUT`, `PATCH` or `OPTIONS` (CORS off; with CORS on the CORS middleware's `204` answers `OPTIONS` first on both doors) on `/api/v1/mcp` now gets `401` instead of `405`.
+  
+  **The remedy.** None needed for an MCP client: it stops opening the stream. A probe or health check that read `GET /api/v1/mcp` as `200` should send a `POST initialize` instead.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

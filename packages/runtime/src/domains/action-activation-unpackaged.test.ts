@@ -141,7 +141,7 @@ function boot(opts: { writeError?: Error } = {}): Harness {
         },
         isActionEnabled: (name: string) => projection.isEnabled(name),
         describeDisabledAction: (name: string) => projection.describeDisabled(name),
-        setActionActive: (row: any) => projection.setActive(row),
+        setActionActive: (row: any, options?: any) => projection.setActive(row, options),
     };
     projection.attach(new ObjectStoreActionActivationStore(ql));
 

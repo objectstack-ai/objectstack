@@ -204,3 +204,30 @@ describe('POST /api/v1/packages: the no-protocol-service fallback runs the same 
         expect(d.registry.getPackage(COMPATIBLE.id)).toBeDefined();
     });
 });
+
+describe('[#26480] POST /api/v1/packages: a package AHEAD of this runtime is told to upgrade, never to migrate', () => {
+    /** The card's reproduction: a floor major one above the running protocol. */
+    const NEW_MAJOR = PROTOCOL_MAJOR + 1;
+    const AHEAD = { ...INCOMPATIBLE, id: 'com.example.qa-p-future', engines: { protocol: `^${NEW_MAJOR}` } };
+
+    for (const arm of ['protocol service', 'no-protocol-service fallback'] as const) {
+        it(`${arm}: the same 422 OS_PROTOCOL_INCOMPATIBLE, with no migrateCommand and the runtime upgrade named`, async () => {
+            const d = door(arm === 'protocol service' ? {} : { protocol: null });
+            const r: any = await install(d, AHEAD);
+            expect(r.response.status).toBe(422);
+            const error = r.response.body.error;
+            expect(error.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+            expect(error.httpStatus).toBe(422);
+            expect(ApiErrorSchema.safeParse(error).success).toBe(true);
+            expect(error.details).toEqual({
+                requiredRange: `^${NEW_MAJOR}`,
+                rangeSource: 'engines.protocol',
+                protocolVersion: PROTOCOL_VERSION,
+                targetMajor: NEW_MAJOR,
+            });
+            expect(error.message).not.toContain('migrate meta');
+            expect(error.message).toMatch(new RegExp(`upgrade the runtime to protocol ${NEW_MAJOR}`, 'i'));
+            expect(d.registry.getPackage(AHEAD.id)).toBeUndefined();
+        });
+    }
+});

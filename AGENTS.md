@@ -159,11 +159,11 @@ The Studio/Console UI lives in this workspace under `ui/` (`@object-ui/*`; the C
 and `ui/AGENTS.md` adds that tree's own rules to this file's. `pnpm console:build` builds the Console and copies its
 dist into `packages/console/` (`packages/console/build-dist.sh`). ⛔ Never hand-edit `packages/console/dist/`.
 
-**Moving the pin has a second half: regenerate the committed manifest** — `pnpm objectui:build`, then
-`node scripts/gen-sdui-manifest-node.mjs`, which reads objectui's BUILT tree at the pin (never an npm install, whose
-version string names an older commit) and takes no arguments; `scripts/check-sdui-manifest.mjs` reds until you do.
-`objectui:bump` and `objectui:refresh` print the step, and the console build ships that same tracked file in
-`packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
+**A registry change has a second half: regenerate the committed manifest** with
+`node scripts/gen-sdui-manifest-node.mjs`, which builds the registry under `ui/`, enumerates it from `ui/apps/console`
+(never an npm install) and takes no arguments; commit what it writes. CI's `Build & E2E UI` runs it too and fails
+when the committed `sdui.manifest.json` differs, the merge queue's combined tree included, and the console build
+ships that same tracked file in `packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
 `pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
@@ -520,11 +520,11 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — eight contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
-   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI` and
-   `Build & E2E UI`. A check outside those eight is advisory and rides through, and an advisory red
+   set** — nine contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
+   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`
+   and `Build & E2E UI`. A check outside those nine is advisory and rides through, and an advisory red
    that lands rides `main`'s merge ref into every later PR until stanched. A required context is
-   matched by check-run name, so a rename detaches its gate silently — treat those eight names as contract.
+   matched by check-run name, so a rename detaches its gate silently — treat those nine names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
    `Temporal Conformance (live PG + MySQL)` — read by the publish lane before

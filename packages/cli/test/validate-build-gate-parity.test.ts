@@ -158,6 +158,18 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // before its named-export merge), which no rule is ever handed. `os lint` is
   // not an author-time door under the ruling and does not run it.
   'refuseUnbuiltStack',
+  // [#25779] Seed files: each `seedFile(path)` a seed record names must name a
+  // file under the config's directory, of a type its extension or the
+  // reference tells. Not a registry rule: it reads the filesystem. `os build`
+  // then writes the bytes it read into the artifact (`placeSeedFiles`, below).
+  'collectSeedFiles',
+  // ADR-0141 D2, author side: every `manifest.dependencies` range of the
+  // packages one install act delivers, judged by the install's own predicate
+  // (`checkDeclaredDependencies`). Not a registry rule: an in-artifact range is
+  // judged against a SIBLING package's `manifest.version`, so it is
+  // cross-package by construction, and the per-package stack a rule is handed
+  // sees one side only. Both doors refuse the same errors at the same step.
+  'checkDependencyRanges',
 ];
 
 /**
@@ -284,8 +296,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // classification, for the same reasons — it raises nothing, and it hands
   // back the `docs` array and `packages` value it was given when it has
   // nothing to move.
+  // [#25779] `placeSeedFiles` writes the seed file bytes `collectSeedFiles` —
+  // a gate in SHARED_NON_REGISTRY_GATES above — already read and judged into
+  // their datasets' `files` maps. It refuses nothing and reports nothing; with
+  // no artifact, `os validate` has nowhere to put them.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
-    ['placeCollectedDocs'],
+    ['placeCollectedDocs', 'placeSeedFiles'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',
@@ -329,6 +345,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'formatConversionNotice',
       'formatZodErrors',
       'formatPermissionSetNameCollisions',
+      'formatDependencyRangeDiagnostic',
       'formatUnknownAuthoringKey',
       'JSON_FULL_LIST_REMEDY',
       'renderCapabilityMessage',

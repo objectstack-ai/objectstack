@@ -37,6 +37,11 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error — plain-JS gate script, intentionally untyped (`allowJs: false`)
 import { readDesignerPairs } from '../../../../../scripts/check-i18n-designer-table-parity.mjs';
 import { t, type SupportedLocale } from '../metadata-admin/i18n';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 /** Local annotation, since the import above is untyped — the call site stays checked. */
 const readTables: (root: string) => Map<string, Map<string, string>> = readDesignerPairs;

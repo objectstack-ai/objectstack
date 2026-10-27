@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/i18n",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
@@ -32,6 +32,11 @@
       "types": "./dist/locales/*.d.ts",
       "import": "./dist/locales/*.js",
       "default": "./dist/locales/*.js"
+    },
+    "./namespaces/studio": {
+      "types": "./dist/namespaces/studio/index.d.ts",
+      "import": "./dist/namespaces/studio/index.js",
+      "default": "./dist/namespaces/studio/index.js"
     }
   },
   "scripts": {

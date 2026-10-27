@@ -2,7 +2,8 @@
 
 > **Protocol 18 update (2026-10-12, ADR-0131 C5, #22340):** The per-type overlay opt-in on `MetadataTypeRegistryEntry` is spelled `allowEnvironmentOverlay` from protocol 18 (`packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay`). [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 retired the per-organization overlay axis, so the key now names the one scope it governs — whether an environment may overlay an item of this type that a managed package ships. The old key `allowOrgOverride` stays on the registry entry schema only as a tombstone that refuses at parse with the new name in its prescription: no second key, no alias, no conversion. The lines below that name `allowOrgOverride` describe the field as it was spelled when they were written and are preserved verbatim.
 
-**Status:** Proposed
+**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-29). Phases 1, 4 and 4.3 implemented (`packages/spec/src/shared/protection.zod.ts`, `allowEnvironmentOverlay` per ADR-0131 C5/D6); Phase 2 (L4 frozen paths + provenance), Phase 3 (L2 + RBAC unlock) and Phase 5 (solution stack) pending.
+**Shares its number with**: [`0010-nl-to-flow-authoring`](./0010-nl-to-flow-authoring.md) (Natural-Language → Flow Authoring) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0010-metadata-protection-model`.
 **Date:** 2026-05-29
 **Supersedes:** —
 **Builds on:** ADR-0005 (Metadata Customization Overlay), ADR-0008 (Metadata Repository & Change Log), ADR-0009 (Execution-Pinned Metadata)
