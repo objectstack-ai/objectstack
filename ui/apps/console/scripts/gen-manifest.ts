@@ -23,7 +23,7 @@
 import { writeFileSync } from 'node:fs';
 import { ComponentRegistry } from '@object-ui/core';
 import { nodeSlotsFor } from '@object-ui/types';
-import { assertFullyLoaded, generateBlockList, generateDts, manifestFromConfigs, type RegistryConfigLike } from '../src/index.js';
+import { assertFullyLoaded, generateBlockList, generateDts, manifestFromConfigs, type RegistryConfigLike } from '@objectstack/sdui-parser';
 
 export function buildArtifacts(outDir: string): void {
   const configs = ComponentRegistry.getPublicConfigs() as unknown as RegistryConfigLike[];

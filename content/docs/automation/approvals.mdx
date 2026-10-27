@@ -565,9 +565,13 @@ or that report the decision to anyone but the submitter.
 **The decision tells the submitter.** When a decision ends the approval, the
 submitter of the request it decides gets one notification: `approval.approved`
 ("Request approved") or `approval.rejected` ("Request rejected"). Its body
-names the record (`Deal D_123`) and the outcome, followed by the decider's
-comment when they wrote one, and it links to that request in the Approvals
-Inbox. There is one topic per outcome, so a delivery preference can mute
+names the record and the outcome, followed by the decider's comment when they
+wrote one, and it links to that request in the Approvals Inbox. Like every
+approval notification, it names the record by its object's label and its
+title as that recipient may read it (`Deal Acme renewal`), and by its id
+(`Deal D_123`) when the title is empty or the recipient's field-level security
+hides the title field. The one-tap email action pages always name the record
+by its id, because they are opened with a token rather than a session. There is one topic per outcome, so a delivery preference can mute
 approvals and keep rejections.
 
 "Ends the approval" means the process, not the step. A co-sign vote that

@@ -87,7 +87,7 @@ pnpm changeset publish         # Publish to npm (CI only)
 
 | Path | Purpose |
 | --- | --- |
-| `packages/*` | 37 published packages (`@object-ui/*`), plus the private `vscode-extension`, `test-support` (test-only, never released) and `runner` (workspace demo app, never released) |
+| `packages/*` | 36 published packages (`@object-ui/*`), plus the private `vscode-extension`, `test-support` (test-only, never released) and `runner` (workspace demo app, never released) |
 | `apps/console` | Full ObjectUI console app (Vite + React) |
 | `apps/site` | Public docs site at <https://www.objectui.org> (fumadocs) |
 | `examples/*` | Runnable examples and the schema catalog — see [`examples/README.md`](./examples/README.md) |

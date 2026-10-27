@@ -29,8 +29,7 @@ import { describe, it, expect } from 'vitest';
 import type { ValidationResult as SpecKernelValidationResult } from '@objectstack/spec/kernel';
 import type { ValidationResult as SpecContractsValidationResult } from '@objectstack/spec/contracts';
 
-import type { ManifestValidationResult } from '../types.js';
-import { validateTree } from '../validate.js';
+import { validateTree, type ManifestValidationResult } from '@objectstack/sdui-parser';
 
 describe('validateTree still returns the manifest-shaped result', () => {
   it('returns diagnostics / requires / bindings, not a `valid` flag', () => {
@@ -50,22 +49,17 @@ type Extends<A, B> = [A] extends [B] ? true : false;
 type IsAny<T> = 0 extends 1 & T ? true : false;
 type HasKey<T, K extends string> = K extends keyof T ? true : false;
 
-describe('the spec ValidationResults are plugin-manifest results, this one is not', () => {
-  it('is pinned at compile time', () => {
-    // Load-bearing imports: the day the spec retires either name, this file
-    // stops compiling and the convention can be revisited.
-    type _KernelIsReal = Assert<Equal<IsAny<SpecKernelValidationResult>, false>>;
-    type _ContractsIsReal = Assert<Equal<IsAny<SpecContractsValidationResult>, false>>;
+// Load-bearing imports: the day the spec retires either name, this file stops
+// compiling and the convention can be revisited. Exported so the strict
+// `noUnusedLocals` of tsconfig.test.json reads them as used.
+export type _KernelIsReal = Assert<Equal<IsAny<SpecKernelValidationResult>, false>>;
+export type _ContractsIsReal = Assert<Equal<IsAny<SpecContractsValidationResult>, false>>;
 
-    type _SpecCarriesAValidFlag = Assert<HasKey<SpecKernelValidationResult, 'valid'>>;
-    type _ThisOneDoesNot = Assert<Equal<HasKey<ManifestValidationResult, 'valid'>, false>>;
-    type _ThisOneCarriesRequires = Assert<HasKey<ManifestValidationResult, 'requires'>>;
+export type _SpecCarriesAValidFlag = Assert<HasKey<SpecKernelValidationResult, 'valid'>>;
+export type _ThisOneDoesNot = Assert<Equal<HasKey<ManifestValidationResult, 'valid'>, false>>;
+export type _ThisOneCarriesRequires = Assert<HasKey<ManifestValidationResult, 'requires'>>;
 
-    // Not assignable in either direction — sharing the name was never a
-    // narrowing or a widening, it was two subjects under one word.
-    type _NotAssignable = Assert<Equal<Extends<ManifestValidationResult, SpecKernelValidationResult>, false>>;
-    type _NorTheOtherWay = Assert<Equal<Extends<SpecKernelValidationResult, ManifestValidationResult>, false>>;
-
-    expect(true).toBe(true);
-  });
-});
+// Not assignable in either direction — sharing the name was never a narrowing
+// or a widening, it was two subjects under one word.
+export type _NotAssignable = Assert<Equal<Extends<ManifestValidationResult, SpecKernelValidationResult>, false>>;
+export type _NorTheOtherWay = Assert<Equal<Extends<SpecKernelValidationResult, ManifestValidationResult>, false>>;

@@ -54,7 +54,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { DETAIL_SECTION_NODE_INPUTS } from '../DetailSectionNode';
 
 // Module scope, not a hook (AGENTS.md 测试纪律): importing the package index

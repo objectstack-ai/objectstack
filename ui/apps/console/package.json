@@ -120,6 +120,6 @@
     "zod": "^4.6.5"
   },
   "dependencies": {
-    "@object-ui/sdui-parser": "workspace:*"
+    "@objectstack/sdui-parser": "workspace:*"
   }
 }

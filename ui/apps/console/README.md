@@ -35,7 +35,7 @@ pnpm test
 of the registry this build ships. A host serving `dist` registers it as its
 deployment manifest, and the metadata save door judges page sources against it
 (ADR-0080 §5). The step (`pnpm build:sdui-manifest`) runs after `vite build`,
-calls `buildArtifacts` from `packages/sdui-parser/scripts/gen-manifest.ts` over
+calls `buildArtifacts` from `apps/console/scripts/gen-manifest.ts` over
 the registry `dev/manifest-registry.ts` loads, and needs the workspace packages
 built first (turbo's `^build` does that).
 

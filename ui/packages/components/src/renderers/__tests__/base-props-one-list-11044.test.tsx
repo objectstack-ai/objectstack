@@ -9,7 +9,7 @@
 /**
  * The parser tier's base props, held on the live registry (objectui#11044).
  *
- * `SDUI_BASE_PROPS` (`@object-ui/sdui-parser`) is the one list both
+ * `SDUI_BASE_PROPS` (`@objectstack/sdui-parser`) is the one list both
  * `validateTree` and the generated JSX types read. This file holds it against
  * the two things it answers to:
  *
@@ -38,8 +38,8 @@
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
 import { BaseSchema } from '@object-ui/types/zod';
-import { inputTypeArms, manifestFromConfigs, SDUI_BASE_PROPS, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, Manifest, SchemaElement } from '@object-ui/sdui-parser';
+import { inputTypeArms, manifestFromConfigs, SDUI_BASE_PROPS, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, Manifest, SchemaElement } from '@objectstack/sdui-parser';
 
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // §测试纪律 — an unbounded module load must not be billed to a bounded window).

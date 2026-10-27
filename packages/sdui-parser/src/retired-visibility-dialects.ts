@@ -1,3 +1,8 @@
+/*! Moved into @objectstack/sdui-parser from @object-ui/sdui-parser
+ * (objectstack#25712); this file keeps the licence it was written under.
+ * MIT License. Copyright (c) 2024 ObjectQL. The full permission notice ships
+ * as LICENSE-MIT beside this package's manifest. */
+
 /**
  * ObjectUI — the retired node-level visibility dialects
  * `visibleOn` / `hiddenOn` / `disabledOn` (ADR-0089, ADR-0049)

@@ -499,7 +499,7 @@ async function selfTest() {
   const dropped = [
     { label: 'typecheck loses a lane from needs:', file: 'lint.yml', member: 'typecheck-consumers', from: '      - typecheck-consumers\n', to: '' },
     { label: 'lint loses a lane from needs:', file: 'lint.yml', member: 'lint-pm-dispatch-gates', from: '      - lint-pm-dispatch-gates\n', to: '' },
-    { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter]\n', to: '    needs: [filter]\n' },
+    { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter, test-plan]\n', to: '    needs: [filter, test-plan]\n' },
     {
       label: 'dogfood-gate loses the CLI pass from needs:',
       file: 'ci.yml',
@@ -528,7 +528,7 @@ async function selfTest() {
   const phantom = [
     { label: 'typecheck needs a job that was deleted', file: 'lint.yml', from: '      - typecheck-consumers\n', to: '      - typecheck-consumers\n      - typecheck-ghost\n', ghost: 'typecheck-ghost' },
     { label: 'lint needs a job that was deleted', file: 'lint.yml', from: '      - lint-pm-dispatch-gates\n', to: '      - lint-pm-dispatch-gates\n      - lint-ghost\n', ghost: 'lint-ghost' },
-    { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter]\n', to: '    needs: [test, filter, test-ghost]\n', ghost: 'test-ghost' },
+    { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter, test-plan]\n', to: '    needs: [test, filter, test-plan, test-ghost]\n', ghost: 'test-ghost' },
     {
       label: 'dogfood-gate needs a job that was deleted',
       file: 'ci.yml',

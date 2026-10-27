@@ -6,6 +6,8 @@
 
 It implements the **`IMetadataService`** contract from `@objectstack/spec` and acts as the single source of truth that all other packages depend on.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Architecture Overview
 
 ```

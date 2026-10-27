@@ -6,8 +6,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ComponentRegistry } from '@object-ui/core';
-import { SchemaRenderer } from '@object-ui/react';
-import { compile, manifestFromConfigs } from '../index.js';
+import { SchemaRenderer } from '../SchemaRenderer';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 
 const Kids = ({ nodes }: { nodes?: unknown[] }) => (
   <>{(nodes ?? []).map((n, i) => (typeof n === 'string' ? n : <SchemaRenderer key={i} schema={n as any} />))}</>

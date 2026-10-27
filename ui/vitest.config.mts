@@ -510,7 +510,7 @@ export default defineConfig({
       '@object-ui/i18n': path.resolve(__dirname, './packages/i18n/src'),
       '@object-ui/core': path.resolve(__dirname, './packages/core/src'),
       '@object-ui/react-runtime': path.resolve(__dirname, './packages/react-runtime/src'),
-      '@object-ui/sdui-parser': path.resolve(__dirname, './packages/sdui-parser/src'),
+      '@objectstack/sdui-parser': path.resolve(__dirname, '../packages/sdui-parser/src'),
       '@object-ui/types/zod': path.resolve(__dirname, './packages/types/src/zod/index.zod.ts'),
       '@object-ui/types': path.resolve(__dirname, './packages/types/src'),
       '@object-ui/react': path.resolve(__dirname, './packages/react/src'),

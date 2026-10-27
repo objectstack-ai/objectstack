@@ -69,7 +69,7 @@ vi.mock('@object-ui/plugin-detail', async (importOriginal) => ({
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererProvider } from '@object-ui/react';
 import { ObjectGanttSchema } from '@object-ui/types/zod';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import type { DataSource } from '@object-ui/types';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // test-discipline section).

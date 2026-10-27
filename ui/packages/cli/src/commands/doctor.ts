@@ -65,7 +65,7 @@ export type DoctorDiagnosticLevel = 'ok' | 'warn' | 'error';
 /**
  * One `objectui doctor` check result.
  *
- * `Doctor`-prefixed, like its level: `@object-ui/sdui-parser` publishes
+ * `Doctor`-prefixed, like its level: `@objectstack/sdui-parser` publishes
  * `Diagnostic` for a parser finding, and the flow designer's `DiagnosticLevel`
  * is `'error' | 'warning'` with no `ok` verdict — different things, and one
  * exported name has one authority (objectui#6349, batch 6).
