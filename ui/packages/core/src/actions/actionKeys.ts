@@ -246,6 +246,7 @@ export const SPEC_ACTION_KEYS = [
   // key, which is the only thing the inventory is consulted for.
   'description',
   'disabled',
+  'disabledReason',
   'errorMessage',
   // No `execute`: its spec-17 tombstone (`retiredKey()`, objectstack#3855) aged
   // out of `ActionSchema` at objectstack#25767 — the spec now refuses it as an

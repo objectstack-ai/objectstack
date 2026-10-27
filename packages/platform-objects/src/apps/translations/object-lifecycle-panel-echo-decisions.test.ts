@@ -1228,7 +1228,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // row labels, authored in all three locales.
       // 688 since ADR-0142: `queue` and `assignment_rule` joined the registry,
       // each with its type-level display pair, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(688);
+      // 689 since #26619: the action form's `disabledReason` row (why a greyed
+      // action is unavailable) — one row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(689);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

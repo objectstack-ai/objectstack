@@ -117,11 +117,7 @@ import {
 import {
   type MediaColumnMoveScan,
 } from './media-column-move.js';
-import {
-  undeliveredStorageAttributes,
-  formatAttribute,
-  type UndeliveredAttribute,
-} from './builtin-column-collision.js';
+import { type undeliveredStorageAttributes } from './builtin-column-collision.js';
 import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
@@ -167,7 +163,10 @@ import {
 // `detectManagedDrift`, `planMediaColumnMove`, `reconcileAndWarnDrift`, `applyMigrationEntries`).
 // [#25521 cut 12] And the canonical-encoding convergence schema sync runs at init (the SQLite
 // backfills, and the MySQL widening's column reads and ALTER runner, `runWideningAlters`).
-import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, runWideningAlters, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
+// [#25521 cut 17] And the data-lifecycle rotation sub-banner's shard path (`ensureRotation`, `rotationShardKey`,
+// `rotationColumnList`), the builtin-column collision warning (`warnBuiltinColumnCollisions`) and the DDL-free
+// federated registration `registerExternalObject`.
+import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
 // and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
@@ -1650,7 +1649,7 @@ export function isMultiValuedColumn(type: string, field: { multiple?: unknown } 
  * table, and inventing `'string'` for it here would answer `$empty` with a row
  * nobody declared.
  */
-function declaredValueShapes(fields: Record<string, unknown> | undefined): Record<string, ValueShapeFieldDef> {
+export function declaredValueShapes(fields: Record<string, unknown> | undefined): Record<string, ValueShapeFieldDef> {
   const shapes: Record<string, ValueShapeFieldDef> = {};
   for (const [name, field] of Object.entries(fields ?? {})) {
     const type = (field as { type?: unknown } | null | undefined)?.type;
@@ -10465,13 +10464,8 @@ export class SqlDriver implements IDataDriver {
    * lexicographically = chronologically, which `ensureRotation` relies on.
    */
   protected rotationShardKey(nowMs: number, unit: 'day' | 'week' | 'month'): string {
-    const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
-    if (unit === 'month') return ymd(nowMs).slice(0, 6);
-    if (unit === 'week') {
-      const dow = (new Date(nowMs).getUTCDay() + 6) % 7; // Monday = 0
-      return ymd(nowMs - dow * 86_400_000);
-    }
-    return ymd(nowMs);
+    // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts`; it reads no member of the driver.
+    return rotationShardKey(nowMs, unit);
   }
 
   /**
@@ -10497,79 +10491,26 @@ export class SqlDriver implements IDataDriver {
     return this.ensureRotation(tableName, objectDef, policy, nowMs);
   }
 
-  protected async ensureRotation(
+  protected ensureRotation(
     tableName: string,
     obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     policy: { shards: number; unit: 'day' | 'week' | 'month' },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
-    const current = `${tableName}__r${this.rotationShardKey(nowMs, policy.unit)}`;
-
-    // Physical inventory: the base name (table before adoption, view after)
-    // and every existing shard.
-    const esc = tableName.replace(/[\\%_]/g, '\\$&');
-    const raw: any = await this.knex.raw(
-      `SELECT name, type FROM sqlite_master WHERE name = ? OR (name LIKE ? ESCAPE '\\')`,
-      [tableName, `${esc}\\_\\_r%`],
-    );
-    const rows: Array<{ name: string; type: string }> = Array.isArray(raw) ? raw : raw?.rows ?? [];
-    const baseType = rows.find((r) => r.name === tableName)?.type as 'table' | 'view' | undefined;
-    const shardNames = new Set(
-      rows.map((r) => r.name).filter((n) => n !== tableName && /__r\d{6,8}$/.test(n)),
-    );
-
-    // Adopt a legacy pre-rotation table: its whole history becomes the
-    // current shard (coarse, but safe — it then ages out of the window).
-    if (baseType === 'table') {
-      if (!shardNames.has(current)) {
-        await this.knex.schema.renameTable(tableName, current);
-      } else {
-        // Partial-failure recovery: both exist — merge, then drop the base.
-        await this.knex.raw(`INSERT INTO "${current}" SELECT * FROM "${tableName}"`);
-        await this.knex.schema.dropTable(tableName);
-      }
-      shardNames.add(current);
-    }
-    shardNames.add(current);
-
-    // Time-based window: retain shards whose period falls inside the last
-    // `shards × unit` (ends at the current period); everything older is the
-    // O(1) reclaim. Count-based retention would silently stretch the window
-    // when rotation cadence has gaps.
-    const unitMs = { day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000 }[policy.unit];
-    const oldestRetainedKey = this.rotationShardKey(nowMs - (Math.max(1, policy.shards) - 1) * unitMs, policy.unit);
-    const parsed = [...shardNames].sort((a, b) => b.localeCompare(a));
-    const keyOf = (n: string) => n.slice(tableName.length + 3);
-    const retained = parsed.filter((n) => keyOf(n) >= oldestRetainedKey);
-    const dropped = parsed.filter((n) => keyOf(n) < oldestRetainedKey);
-
-    // Column-sync every retained shard (creates the current one; adds any
-    // newly declared columns to older shards so the UNION stays uniform).
-    for (const shard of retained) {
-      await this.ensureShardTable(shard, obj, tableName);
-      this.aliasShardBookkeeping(tableName, shard);
-    }
-
-    for (const d of dropped) {
-      await this.knex.schema.dropTableIfExists(d);
-    }
-
-    // Rebuild the read view over the retained set, newest shard first. An
-    // explicit column list (not `*`) keeps the view stable when old shards
-    // carry orphaned columns.
-    const cols = this.rotationColumnList(obj);
-    await this.knex.raw(`DROP VIEW IF EXISTS "${tableName}"`);
-    await this.knex.raw(
-      `CREATE VIEW "${tableName}" AS ` + retained.map((s) => `SELECT ${cols} FROM "${s}"`).join(' UNION ALL '),
-    );
-
-    this.rotationStateByTable.set(tableName, { shards: retained, current });
-    if (dropped.length > 0) {
-      (this.logger as { info?: (msg: string) => void }).info?.(
-        `[sql-driver] rotated ${tableName}: ${retained.length} shard(s) live, dropped ${dropped.join(', ')}`,
-      );
-    }
-    return { object: tableName, current, shards: retained, dropped };
+    // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readRotationStateByTable = () => this.rotationStateByTable;
+    const host: ThisParameterType<typeof ensureRotation> = {
+      aliasShardBookkeeping: (...a) => this.aliasShardBookkeeping(...a),
+      ensureShardTable: (...a) => this.ensureShardTable(...a),
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      rotationColumnList: (...a) => this.rotationColumnList(...a),
+      rotationShardKey: (...a) => this.rotationShardKey(...a),
+      get rotationStateByTable() { return readRotationStateByTable(); },
+    };
+    return ensureRotation.call(host, tableName, obj, policy, nowMs);
   }
 
   /**
@@ -10621,34 +10562,12 @@ export class SqlDriver implements IDataDriver {
     builtinColumns: ReadonlySet<string>,
     phase: 'create' | 'alter' | 'shard',
   ): string[] {
-    const where = {
-      create: `while creating table "${tableName}"`,
-      alter: `while syncing existing table "${tableName}"`,
-      shard: `while syncing shard "${tableName}"`,
-    }[phase];
-
-    const warned: string[] = [];
-    for (const [field, declaration] of Object.entries(fields ?? {})) {
-      if (!builtinColumns.has(field)) continue;
-      const undelivered: UndeliveredAttribute[] = undeliveredStorageAttributes(
-        field,
-        declaration as Record<string, unknown>,
-      );
-      // Declared, colliding, and yet nothing was lost — the honoured half only.
-      if (undelivered.length === 0) continue;
-
-      this.logger.warn(
-        `[sql-driver] ${where}: declared field '${field}' asks for storage the platform's own ` +
-          `'${field}' column does not provide — ${undelivered.map(formatAttribute).join('; ')}. ` +
-          `The platform emits id/created_at/updated_at itself, so THOSE attributes are not applied; ` +
-          `the rest of the declaration (label, help text, the ADR-0113 write contract, and everything ` +
-          `other layers read) is honoured as written. Drop the storage attribute(s) named above, or ` +
-          `rename the field if you meant a column of your own.`,
-        { table: tableName, field, phase, undelivered: undelivered.map((a) => a.key) },
-      );
-      warned.push(field);
-    }
-    return warned;
+    // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof warnBuiltinColumnCollisions> = {
+      get logger() { return readLogger(); },
+    };
+    return warnBuiltinColumnCollisions.call(host, tableName, fields, builtinColumns, phase);
   }
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
@@ -10753,9 +10672,8 @@ export class SqlDriver implements IDataDriver {
 
   /** Quoted, deterministic column list for the rotation view. */
   protected rotationColumnList(obj: { fields?: Record<string, any> }): string {
-    const builtin = ['id', 'created_at', 'updated_at'];
-    const declared = Object.keys(obj.fields ?? {}).filter((f) => !builtin.includes(f));
-    return [...builtin, ...declared].map((c) => `"${c}"`).join(', ');
+    // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts`; it reads no member of the driver.
+    return rotationColumnList(obj);
   }
 
   /**
@@ -10864,93 +10782,50 @@ export class SqlDriver implements IDataDriver {
     tenancy?: any;
     external?: { remoteName?: string; remoteSchema?: string; columnMap?: Record<string, string> };
   }): void {
-    const key = schema.name;
-    const remoteName = schema.external?.remoteName || schema.name;
-    const remoteSchema = schema.external?.remoteSchema;
-    this.physicalTableByObject[key] = remoteName;
-    this.objectByPhysicalTable[remoteName] = key;
-    if (remoteSchema) {
-      if (this.isSqlite) {
-        this.logger.warn(
-          `[sql-driver] external object "${key}" declares remoteSchema="${remoteSchema}" but SQLite has no schema namespace; ignoring (treating "${remoteName}" as a bare table).`,
-        );
-      } else {
-        this.physicalSchemaByObject[key] = remoteSchema;
-      }
-    }
-
-    // External columnMap (ADR-0015) is declared as { remoteColumn -> localField }.
-    // Keep it for read-output remap, and invert to { localField -> remoteColumn }
-    // for WHERE/ORDER BY/write translation. Absent => managed-identical behavior.
-    const columnMap = schema.external?.columnMap;
-    if (columnMap && typeof columnMap === 'object' && Object.keys(columnMap).length > 0) {
-      const fieldToCol: Record<string, string> = {};
-      const colToField: Record<string, string> = {};
-      for (const [remoteCol, localField] of Object.entries(columnMap)) {
-        if (typeof localField === 'string' && localField) {
-          fieldToCol[localField] = remoteCol;
-          colToField[remoteCol] = localField;
-        }
-      }
-      this.fieldColumnByObject[key] = fieldToCol;
-      this.columnFieldByObject[key] = colToField;
-    }
-
-    const jsonCols: string[] = [];
-    const mediaCols: string[] = [];
-    const booleanCols: string[] = [];
-    const numericCols: string[] = [];
-    const numericValueCols: string[] = [];
-    const fractionalCols: string[] = [];
-    const dateCols: string[] = [];
-    const datetimeCols: string[] = [];
-    const timeCols: string[] = [];
-    const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
-
-    const tenantField = this.computeAndRecordTenantField(key, schema);
-    if (schema.fields) {
-      for (const [name, field] of Object.entries<any>(schema.fields)) {
-        const type = field.type || 'string';
-        if (this.isJsonField(type, field)) jsonCols.push(name);
-        // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
-        // legacy-encoding repair runs on a deployment that has not moved too.
-        if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
-        // [commit d46deba19] SCALAR only — the house spelling its three neighbours in
-        // this block already carry, and this line was the single omission. See
-        // {@link booleanFields}: every reader of this registry presents its
-        // entry as ONE JS boolean, which for a multi-valued (JSON) column
-        // collapses the parsed array to `true`. [#17469] The exclusion asks
-        // {@link isMultiValuedColumn}, so "excluded from the scalar registries"
-        // and "stored as a JSON column" stay the SAME population.
-        if ((type === 'boolean' || type === 'toggle') && !isMultiValuedColumn(type, field)) booleanCols.push(name);
-        if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
-        // [#16318] The authorable half only — see {@link numericValueFields}.
-        if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
-        // [#20387, #21042] See {@link fractionalNumericFields}: the predicate's
-        // `'fractional'` class, scalar only by the predicate's own reading.
-        if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') fractionalCols.push(name);
-        if (type === 'date') dateCols.push(name);
-        if (type === 'datetime') datetimeCols.push(name);
-        if (type === 'time') timeCols.push(name);
-        if (type === 'auto_number' || type === 'autonumber') {
-          const fmt = resolveAutonumberFormat(field);
-          autoNumberCols.push({ name, format: fmt, tokens: parseAutonumberFormat(fmt), tenantField });
-        }
-      }
-    }
-    this.jsonFields[key] = jsonCols;
-    // [#20444] The declared value shapes `$empty` expands — see {@link valueShapeFields}.
-    this.valueShapeFields[key] = declaredValueShapes(schema.fields);
-    this.mediaFields[key] = mediaCols;
-    this.booleanFields[key] = booleanCols;
-    this.numericFields[key] = numericCols;
-    this.numericValueFields[key] = numericValueCols;
-    this.fractionalNumericFields[key] = fractionalCols;
-    this.autoNumberFields[key] = autoNumberCols;
-    this.tenantFieldByTable[key] = tenantField;
-    if (dateCols.length) this.dateFields[key] = new Set(dateCols);
-    if (datetimeCols.length) this.datetimeFields[key] = new Set(datetimeCols);
-    if (timeCols.length) this.timeFields[key] = new Set(timeCols);
+    // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readAutoNumberFields = () => this.autoNumberFields;
+    const readBooleanFields = () => this.booleanFields;
+    const readColumnFieldByObject = () => this.columnFieldByObject;
+    const readDateFields = () => this.dateFields;
+    const readDatetimeFields = () => this.datetimeFields;
+    const readFieldColumnByObject = () => this.fieldColumnByObject;
+    const readFractionalNumericFields = () => this.fractionalNumericFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readJsonFields = () => this.jsonFields;
+    const readLogger = () => this.logger;
+    const readMediaFields = () => this.mediaFields;
+    const readNumericFields = () => this.numericFields;
+    const readNumericValueFields = () => this.numericValueFields;
+    const readObjectByPhysicalTable = () => this.objectByPhysicalTable;
+    const readPhysicalSchemaByObject = () => this.physicalSchemaByObject;
+    const readPhysicalTableByObject = () => this.physicalTableByObject;
+    const readTenantFieldByTable = () => this.tenantFieldByTable;
+    const readTimeFields = () => this.timeFields;
+    const readValueShapeFields = () => this.valueShapeFields;
+    const host: ThisParameterType<typeof registerExternalObject> = {
+      get autoNumberFields() { return readAutoNumberFields(); },
+      get booleanFields() { return readBooleanFields(); },
+      get columnFieldByObject() { return readColumnFieldByObject(); },
+      computeAndRecordTenantField: (...a) => this.computeAndRecordTenantField(...a),
+      get dateFields() { return readDateFields(); },
+      get datetimeFields() { return readDatetimeFields(); },
+      get fieldColumnByObject() { return readFieldColumnByObject(); },
+      get fractionalNumericFields() { return readFractionalNumericFields(); },
+      isJsonField: (...a) => this.isJsonField(...a),
+      get isSqlite() { return readIsSqlite(); },
+      get jsonFields() { return readJsonFields(); },
+      get logger() { return readLogger(); },
+      get mediaFields() { return readMediaFields(); },
+      get numericFields() { return readNumericFields(); },
+      get numericValueFields() { return readNumericValueFields(); },
+      get objectByPhysicalTable() { return readObjectByPhysicalTable(); },
+      get physicalSchemaByObject() { return readPhysicalSchemaByObject(); },
+      get physicalTableByObject() { return readPhysicalTableByObject(); },
+      get tenantFieldByTable() { return readTenantFieldByTable(); },
+      get timeFields() { return readTimeFields(); },
+      get valueShapeFields() { return readValueShapeFields(); },
+    };
+    return registerExternalObject.call(host, schema);
   }
 
   /**

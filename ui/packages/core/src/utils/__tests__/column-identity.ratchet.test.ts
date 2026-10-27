@@ -284,7 +284,7 @@ describe('column identity dual-read ratchet (#3104)', () => {
     const CONVERGED = [
       'core/src/utils/expand-fields.ts',
       'plugin-list/src/ListView.tsx',
-      'plugin-grid/src/ObjectGrid.tsx',
+      'plugin-grid/src/objectGridGenerateColumns.tsx',
       'plugin-detail/src/RelatedList.tsx',
       'plugin-detail/src/renderers/record-details.tsx',
       'plugin-detail/src/renderers/record-related-list.tsx',

@@ -342,6 +342,45 @@ export class MaskedValueWriteError extends Error {
 }
 
 /**
+ * [#26641] `explain` was asked about ANOTHER user, by an id no `sys_user` row
+ * has → `404 RECORD_NOT_FOUND`, naming the id.
+ *
+ * The explainer builds the explained principal through the authorization
+ * resolver, which synthesises the baseline anchor and sets for ANY id. So an
+ * id that names nobody (a typo, a deleted user, an id from another deployment)
+ * was explained as a baseline member and answered `200 allowed: true`: a
+ * verdict about a person who does not exist. As with an unknown object
+ * ({@link ExplainObjectNotFoundError}), nothing can be evaluated, so the honest
+ * answer is a refusal, not a verdict.
+ *
+ * `RECORD_NOT_FOUND` at 404 is the standard catalog's pair for "the record with
+ * this id does not exist", the answer `GET /data/sys_user/ID` gives for the
+ * same id, so it needs no ledger row. The REST door serves it through its
+ * classified-refusal arm, which keeps a declared 4xx `code` and `status`.
+ *
+ * Only a caller already admitted to explain someone else reaches this check,
+ * so it tells nobody new which ids exist: an anonymous caller is refused 401
+ * at the door and a caller who may not explain others gets their 403 before
+ * any existence read. The prefix is not the `[Security] Access denied`
+ * matcher, and the class carries both `status` and `statusCode`, for the
+ * reasons the classes above record.
+ */
+export class ExplainUserNotFoundError extends Error {
+  readonly code = 'RECORD_NOT_FOUND';
+  readonly status = 404;
+  readonly statusCode = 404;
+  readonly userId: string;
+  constructor(userId: string) {
+    super(
+      `[Security] Unknown user: explain was asked about user '${userId}', but no sys_user record has that id. `
+      + `No principal was evaluated, so this is NOT an access decision.`,
+    );
+    this.name = 'ExplainUserNotFoundError';
+    this.userId = userId;
+  }
+}
+
+/**
  * [#18253] `explain` was asked about an object name that no declaration on this
  * runtime answers to → `404 OBJECT_NOT_FOUND`.
  *
