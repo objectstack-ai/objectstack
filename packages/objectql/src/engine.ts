@@ -14122,8 +14122,10 @@ export class ObjectQL implements IObjectQLEngine {
    * and is refused by the write.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
-   * stored row above, the master-detail headers, and the related rows a
-   * traversing rule names (see the `previewRelatedForRow` block below).
+   * stored row above, the master-detail headers, the related rows a
+   * traversing rule names (see the `previewRelatedForRow` block below), and
+   * [#26684] on an insert, the write's reference check on each id the caller
+   * supplied, behind the same write-gate probe as the related rows.
    * Validation itself is in-process, which is what makes row-by-row dry run
    * of a large import affordable.
    */
@@ -14528,7 +14530,10 @@ export class ObjectQL implements IObjectQLEngine {
       ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
       : undefined;
 
-    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
+    // [#26684] Judged one row after another, as the write's validation loop
+    // judges them: a row's admission (the reference check below) is awaited
+    // before the next row reads what the earlier rows added.
+    const judgeRow = async (row: Record<string, unknown>, i: number): Promise<NonNullable<ValidateDataResponse['results']>[number]> => {
       const warnings: ValidateDataIssue[] = [];
       // Warn-first admissions are the posture signal the caller came for, so
       // they are reported — into this row's own bucket, never into the
@@ -14584,6 +14589,17 @@ export class ObjectQL implements IObjectQLEngine {
           related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
         }));
+        // [#26684] The insert's admit step, run as `insert()` runs it: after
+        // the rules, the reference check on the ids the caller supplied
+        // (`rawRows`, before the defaults — the write's `suppliedPerRow`), so
+        // a row the write refuses on a dangling reference is refused here
+        // with the same finding, and is not counted toward a later row's
+        // parent summary. ⛔ Behind the same write-gate probe as the related
+        // read above: the probe on a `lookup` target is elevated, so a caller
+        // the probe refuses learns nothing about which ids exist.
+        if (mode === 'insert' && mayWrite) {
+          await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
+        }
       } catch (e) {
         if (e instanceof ValidationError) {
           return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
@@ -14600,7 +14616,9 @@ export class ObjectQL implements IObjectQLEngine {
       // when nothing would be taken.
       const droppedFields = droppedFieldEvents(object, computedStrip.droppedPerRow[i]!, readonlyDroppedPerRow[i]!);
       return { valid: true, errors: [], warnings, ...(droppedFields.length > 0 ? { droppedFields } : {}) };
-    });
+    };
+    const results: NonNullable<ValidateDataResponse['results']> = [];
+    for (let i = 0; i < rows.length; i++) results.push(await judgeRow(rows[i]!, i));
 
     return {
       object,
