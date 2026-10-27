@@ -278,14 +278,12 @@ describe('page:header showStar retirement — the D2 conversion', () => {
 });
 
 describe('page:header showStar retirement — the ADR-0087 ledger row', () => {
-  it('declares ONE key under major 18, beside the one this row lost before it', () => {
+  it('declares ONE key under major 18, beside the two this row lost before it', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain(REGISTERED_KEY);
     const all = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
-    // `ui/PageHeaderProps:icon` (17.0.0) was the third key here until spec
-    // 18.2: the major-17 table aged out one major on (objectstack#25767,
-    // ADR-0087), leaving the two 18 rows.
     expect(all.filter((k) => k.startsWith('ui/PageHeaderProps:')).sort()).toEqual([
       'ui/PageHeaderProps:breadcrumb',
+      'ui/PageHeaderProps:icon',
       REGISTERED_KEY,
     ]);
   });

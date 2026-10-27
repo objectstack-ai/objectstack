@@ -574,15 +574,30 @@ describe('migration chain (ADR-0087 D3)', () => {
     // floor to 16 and retired `step11`–`step16` with it, so the oldest hop the
     // chain still guarantees is FLOOR → FLOOR + 1 and the shapes are that
     // hop's. Written against the constant rather than the literal 16: the next
-    // floor move should re-point this replay, not delete it.
+    // floor move should re-point this replay, not delete it. #25767 re-pointed
+    // it once already: the two conversions it used to replay
+    // (`action-execute-to-target`, `field-conditionalRequired-to-requiredWhen`)
+    // aged out with their 16.x kits, so it replays two that step 17 still
+    // graduates.
     const OLDEST_HOP = MIGRATION_SUPPORT_FLOOR + 1;
     const oldShape = () => ({
-      actions: [{ name: 'convert', label: 'Convert', type: 'script', execute: 'convertHandler' }],
-      objects: [
+      sharingRules: [
         {
-          name: 'crm_task',
-          label: 'Task',
-          fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
+          name: 'share_open_deals',
+          type: 'criteria',
+          object: 'crm_deal',
+          accessLevel: 'full',
+          condition: 'record.status == "open"',
+          sharedWith: { type: 'business_unit', value: 'bu_sales' },
+        },
+      ],
+      flows: [
+        {
+          name: 'lead_lookup',
+          nodes: [
+            { id: 'n1', type: 'start' },
+            { id: 'n2', type: 'get_record', config: { object: 'lead', recordId: '{leadId}' } },
+          ],
         },
       ],
     });
@@ -590,18 +605,17 @@ describe('migration chain (ADR-0087 D3)', () => {
     it('migrates the oldest supported major\'s shapes to canonical', () => {
       const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
 
-      const action = (result.stack.actions as any[])[0];
-      expect(action).not.toHaveProperty('execute');
-      expect(action.target).toBe('convertHandler');
-      const field = (result.stack.objects as any[])[0].fields.due_date;
-      expect(field).not.toHaveProperty('conditionalRequired');
-      expect(field.requiredWhen).toBe('record.stage == "closed"');
+      const rule = (result.stack.sharingRules as any[])[0];
+      expect(rule.accessLevel).toBe('edit');
+      const config = (result.stack.flows as any[])[0].nodes[1].config;
+      expect(config).not.toHaveProperty('object');
+      expect(config.objectName).toBe('lead');
 
       // Two mechanical rewrites, named — a count alone would survive one of
       // them being replaced by an unrelated conversion firing on this shape.
       expect([...new Set(result.applied.map((a) => a.conversionId))].sort()).toEqual([
-        'action-execute-to-target',
-        'field-conditionalRequired-to-requiredWhen',
+        'flow-node-crud-object-alias',
+        'sharing-rule-access-level-full-to-edit',
       ]);
       // Semantic TODOs are advisory per-major and always surfaced for the hop,
       // whatever the stack contains.
@@ -626,7 +640,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       const result = applyMetaMigrations(oldShape(), MIGRATION_SUPPORT_FLOOR, OLDEST_HOP);
       expect(result.hops).toHaveLength(1);
       expect(result.hops[0]!.toMajor).toBe(OLDEST_HOP);
-      expect((result.hops[0]!.stack.actions as any[])[0].target).toBe('convertHandler');
+      expect((result.hops[0]!.stack.sharingRules as any[])[0].accessLevel).toBe('edit');
     });
   });
 

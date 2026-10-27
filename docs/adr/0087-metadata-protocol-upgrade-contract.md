@@ -1372,14 +1372,16 @@ conversions, so it is applied by hand or by a release that still carries it.
 17 and its entry files stay, and `os migrate meta --from 16` keeps replaying 16 → 18.
 Each step still lists every surviving conversion it graduated — the 12 conversions
 with `toMajor: 17` and `retiredAfter: 17.7.0` stay listed under step 17 — and its
-semantic to-dos. Moving the floor is its own release-policy decision (D3, "revisitable
+semantic to-dos; only the edits of the conversions that aged out are no longer
+applied by the replay. Moving the floor is its own release-policy decision (D3, "revisitable
 per major"), not a by-product of kit aging.
 
 **What was removed at 18 (this amendment's own diff).**
 
 - 50 D2 conversions with `retiredAfter` at or below 16.x (5 at 15.0.0, 45 at 16.1.0),
-  with their fixture pairs and the comments that named them. No surviving chain
-  entry linked one of them (`conversionIds` ∩ the 50 = ∅).
+  with their fixture pairs and the comments that named them. No semantic entry
+  linked one of them, but step 17's graduated list named the 45 at 16.1.0; those
+  ids left the list with their conversions (the step and its entries stay).
 - 55 tombstones whose key was already `[RETIRED]` at `@objectstack/spec@17.0.0` and
   whose container is `strictObject` — the ones whose deletion yields a refusal. 58
   tombstones in the same age class sit in containers that **strip** unknown keys

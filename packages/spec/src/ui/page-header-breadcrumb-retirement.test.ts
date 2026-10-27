@@ -275,10 +275,8 @@ describe('page:header breadcrumb retirement — the ADR-0087 ledger row', () => 
   it('declares ONE key under major 18', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain(REGISTERED_KEY);
     const all = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
-    // `ui/PageHeaderProps:icon` (17.0.0) stood first in this list until spec
-    // 18.2: the major-17 table aged out one major on (objectstack#25767,
-    // ADR-0087), so the row's surviving keys are the two 18 rows.
     expect(all.filter((k) => k.startsWith('ui/PageHeaderProps:'))).toEqual([
+      'ui/PageHeaderProps:icon',
       REGISTERED_KEY,
       // #23650 retired the row's third key the same way.
       'ui/PageHeaderProps:showStar',
