@@ -22,9 +22,10 @@
  * ## Reverse verification — predicted before running
  *
  * Drop the accumulation (judge every row against the stored row again): the
- * acceptance case and both engine-door cases go red, each with both rows
- * created; the non-primary, refused-row and single-write cases stay green in
- * both directions, because they pin what the accumulation must NOT do.
+ * acceptance case, both engine-door cases and the preview case go red, each
+ * admitting both primary rows; the non-primary, refused-row, single-write and
+ * stored-primary cases stay green in both directions, because they pin what
+ * the accumulation must NOT do.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -216,6 +217,18 @@ describe('[#25579] the two engine doors a bulk create reaches', () => {
     expectRuleRefusal(await refusalOf(engine.insert('xt_supplier_contact', { id: 'k2', name: 'Li', supplier: 's1', is_primary: true })));
     expect((await contacts()).map((c) => c.id)).toEqual(['k1']);
     expect(await primaryCount()).toBe(1);
+  });
+
+  it('a multi-row insert preview (`validate`) answers what the write answers, and writes nothing', async () => {
+    const { engine, contacts, primaryCount } = await boot();
+    const preview = await engine.validate('xt_supplier_contact', [
+      { id: 'k1', name: 'Zhang', supplier: 's1', is_primary: true },
+      { id: 'k2', name: 'Li', supplier: 's1', is_primary: true },
+      { id: 'k3', name: 'Wang', supplier: 's1', is_primary: false },
+    ], { mode: 'insert' });
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, false, true]);
+    expect(await contacts()).toEqual([]);
+    expect(await primaryCount()).toBe(0);
   });
 
   it('a batch after a stored primary refuses every primary row in it', async () => {
