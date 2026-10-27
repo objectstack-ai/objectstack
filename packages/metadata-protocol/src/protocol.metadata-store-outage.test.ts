@@ -635,8 +635,9 @@ describe('[#5840] the narrowness is the design — three things it deliberately 
 // outage split and not a blanket "listCommits now throws". The baseline entry
 // `packages/metadata-protocol/src/protocol.ts::listCommits` is removed in the
 // same PR, and its gate is shrink-only, so a lap with the limb restored and the
-// entry already removed must ALSO fail `check-durability-degradation-log-level`
-// — the ledger and the code are pinned to each other in both directions.
+// entry already removed must ALSO fail `check-durability-degradation-log-level`.
+// Only that direction reds: the ledger is one-sided since #26444, so a stale
+// entry left behind after the fix passes and is reported, not failed.
 
 /** One `sys_metadata_commit` row, in the driver's snake_case wire shape. */
 function commitRow(id: string, createdAt: string, operation = 'apply') {
