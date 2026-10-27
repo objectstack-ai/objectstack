@@ -38,7 +38,7 @@ import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
-import { RelatedListStackSlot } from './relatedListEmptyFold';
+import { RelatedListStackSlot } from '../RelatedListEmptyFold';
 import {
   describeRelatedListActionRefusals,
   placeAuthoredRelatedListActions,
@@ -213,7 +213,7 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    */
   const ariaProps = useRecordAriaProps(schema.aria);
   // Whether this list is empty, for its stack's empty fold (#25895,
-  // `relatedListEmptyFold.tsx`), as `RelatedList` reports it. A read in flight
+  // `RelatedListEmptyFold.tsx`), as `RelatedList` reports it. A read in flight
   // (`null`) after a first answer keeps that answer, so a refetch does not
   // unfold and refold the stack around it. Here, with the other hooks, for the
   // reason given above.
@@ -604,7 +604,7 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
   const onNew = createWithheldByAuthor ? undefined : handlers?.onCreate;
   /**
    * May this list fold into its stack's empty line when it has no records
-   * (#25895, `relatedListEmptyFold.tsx`)? Only when that line can carry
+   * (#25895, `RelatedListEmptyFold.tsx`)? Only when that line can carry
    * everything its row offers, which is New alone: an `add` picker, child
    * toolbar actions or an authoring notice keep the list's own row.
    */

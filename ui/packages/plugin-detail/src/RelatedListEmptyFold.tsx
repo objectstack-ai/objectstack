@@ -45,7 +45,7 @@
 import * as React from 'react';
 import { Plus } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
-import { useDetailTranslation } from '../useDetailTranslation';
+import { useDetailTranslation } from './useDetailTranslation';
 
 /** What one list of a stack tells the others. */
 export interface EmptyFoldMemberState {
