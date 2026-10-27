@@ -341,7 +341,7 @@
  *
  * ## Adopting this in a sibling repo
  *
- * Copy FIVE files, unchanged — this one, `.github/workflows/board-snapshot.yml`,
+ * Copy FIVE files, unchanged — this one, `.github/workflows/fleet-patrols.yml` (its `board-snapshot` job),
  * `scripts/ci/board-snapshot-r2-upload.sh` (the workflow's R2 step runs it),
  * `scripts/pm/check-half-states.mjs` (the proxy re-exec plan and the repo
  * resolver are imported from it, so a copy without it installs an archiver that

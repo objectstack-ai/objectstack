@@ -1,6 +1,6 @@
 # ADR-0014 — `record` Form Field Type
 
-- **Status:** Accepted
+**Status**: Accepted
 - **Date:** 2026-04-17
 - **Supersedes:** —
 - **Related:** ADR-0005 (Metadata Customization Overlay), Prime Directive #1 (Zod First)

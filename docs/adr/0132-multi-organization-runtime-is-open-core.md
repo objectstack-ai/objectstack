@@ -1,6 +1,6 @@
 # ADR-0132: The multi-organization runtime is open core — single-database organization isolation ships open; only the entitlement stays commercial
 
-- **Status**: Accepted (2026-09-07) — accepted by the merge that landed it on `main`
+**Status**: Accepted (2026-09-07) — accepted by the merge that landed it on `main`
   ([#16215](https://github.com/objectstack-ai/objectstack/pull/16215), commit `c677cda816`), which
   is itself the acceptance act for a governed surface (Prime Directive #14).
 - **Deciders**: ObjectStack maintainer, 2026-09-06, live chat, verbatim and untranslated: the
