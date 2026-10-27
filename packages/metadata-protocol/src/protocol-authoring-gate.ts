@@ -49,7 +49,7 @@
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
-import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
+import type { RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -67,11 +67,13 @@ export interface AuthoringGateHost {
     assertRuntimeAuthoringRules: ObjectStackProtocolImplementation['assertRuntimeAuthoringRules'];
     readonly authoringChannel: ObjectStackProtocolImplementation['authoringChannel'];
     readonly authoringGates: ObjectStackProtocolImplementation['authoringGates'];
+    collectBatchPendingDeclarations: ObjectStackProtocolImplementation['collectBatchPendingDeclarations'];
     credentialChannelFor: ObjectStackProtocolImplementation['credentialChannelFor'];
     defaultRecordPageSaveRefusal: ObjectStackProtocolImplementation['defaultRecordPageSaveRefusal'];
     readonly engine: ObjectStackProtocolImplementation['engine'];
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
+    getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
@@ -167,9 +169,33 @@ export async function runAuthoringGate(
     });
 }
 
+/**
+ * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
+ * collections every judgement of the shared rules is made against.
+ */
+type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>;
+
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
-    this: Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>,
+    this: RuntimeRulesHost,
+    evt: Parameters<typeof judgeRuntimeAuthoringRules>[0],
+): Promise<RuntimeAuthoringIssue[]> {
+    const verdict = await judgeRuntimeAuthoringRules.call(this, evt);
+    if (verdict.error) throw verdict.error;
+    return verdict.advisories;
+}
+
+/**
+ * [#26707] The judgement {@link assertRuntimeAuthoringRules} enforces, handed
+ * back instead of thrown: the gate's {@link RuntimeAuthoringVerdict}, its
+ * refusal (`error`) beside its advisories. The assert above is this function
+ * plus the throw, so a caller that only needs to KNOW the verdict — the draft
+ * read's publish verdict ({@link draftPublishVerdict}) — reads the same
+ * collections, the same host facts and the same early returns as the publish
+ * that enforces it, and there is no second account of either.
+ */
+export async function judgeRuntimeAuthoringRules(
+    this: RuntimeRulesHost,
     evt: {
     type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
     /**
@@ -211,7 +237,8 @@ export async function assertRuntimeAuthoringRules(
      * round trip for a secret it still holds.
      */
     restoredCredentialPaths?: () => Promise<readonly string[]>;
-}): Promise<RuntimeAuthoringIssue[]> {
+}): Promise<RuntimeAuthoringVerdict> {
+    const clean: RuntimeAuthoringVerdict = { error: null, advisories: [] };
     // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
     //
     // This line used to read `if (this.environmentId === undefined)
@@ -250,21 +277,24 @@ export async function assertRuntimeAuthoringRules(
     // #6710 re-keyed this activation and left that one on the retired
     // proxy, which cost the ADR-0090 D11 object posture gate every
     // host-config deployment until #7674 finished the move.
-    if (this.authoringChannel === 'package-author') return [];
+    if (this.authoringChannel === 'package-author') return clean;
     if (evt.state !== 'active') {
         // [#26188] D1: no rule gates a draft. The one finding a draft does hear
         // is a hierarchy scope this runtime cannot enforce, as a warning on the
         // 2xx; it needs no collection read, so the draft keeps paying none.
         // A `migrate-stored` pass heals storage and hears nothing (see below).
-        if (evt.source === 'migrate-stored') return [];
+        if (evt.source === 'migrate-stored') return clean;
         const hierarchyResolverMounted = this.hierarchyResolverMounted();
-        return evaluateRuntimeAuthoringGate({
-            type: PLURAL_TO_SINGULAR[evt.type] ?? evt.type,
-            name: evt.name,
-            state: evt.state,
-            body: evt.body,
-            ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
-        }).advisories;
+        return {
+            error: null,
+            advisories: evaluateRuntimeAuthoringGate({
+                type: PLURAL_TO_SINGULAR[evt.type] ?? evt.type,
+                name: evt.name,
+                state: evt.state,
+                body: evt.body,
+                ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
+            }).advisories,
+        };
     }
     // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
     // into the current dialect. It is not an author publishing anything —
@@ -280,7 +310,7 @@ export async function assertRuntimeAuthoringRules(
     // no caller can spell its way past the gate. `duplicatePackage` is
     // deliberately NOT here — it mints brand-new rows under new names, and
     // a copy of a broken flow is a new broken flow.
-    if (evt.source === 'migrate-stored') return [];
+    if (evt.source === 'migrate-stored') return clean;
     const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
 
     // Resolution context. Best-effort: a host without a registry (a
@@ -420,6 +450,39 @@ export async function assertRuntimeAuthoringRules(
         // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
     });
-    if (verdict.error) throw verdict.error;
-    return verdict.advisories;
+    return verdict;
+}
+
+/** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
+export async function draftPublishVerdict(
+    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo'>,
+    draft: { type: string; name: string; body: unknown; packageId: string | null },
+): Promise<RuntimeAuthoringIssue[]> {
+    const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
+    // The closure "Publish all" judges this draft against: its package's other
+    // drafts, collected by the batch door's own collector from the batch door's
+    // own listing. A package-unbound draft has no batch; its publish is the
+    // per-item door's, which states none.
+    let pending: RuntimePendingDeclarations | undefined;
+    if (draft.packageId) {
+        const repo = this.getOverlayRepo();
+        if (typeof repo.listDrafts === 'function') {
+            pending = await this.collectBatchPendingDeclarations(await repo.listDrafts({ packageId: draft.packageId }));
+        }
+    }
+    // The promotion's restored-credential read: the stored draft holds no
+    // credential the write-only channel holds, so the gate is told where one is.
+    const channel = this.credentialChannelFor(singular);
+    const verdict = await judgeRuntimeAuthoringRules.call(this, {
+        type: singular,
+        name: draft.name,
+        state: 'active',
+        body: draft.body,
+        packageId: draft.packageId,
+        ...(pending !== undefined ? { pending } : {}),
+        ...(channel
+            ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: draft.body }) }
+            : {}),
+    });
+    return (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
 }

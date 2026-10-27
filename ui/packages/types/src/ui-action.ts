@@ -873,6 +873,16 @@ export interface UIActionSchema {
    * the author's predicate and lives on the action.
    */
   disabled?: SpecAction['disabled'];
+
+  /**
+   * The reason the control gives while its declared {@link disabled} predicate
+   * is TRUE (`ActionSchema.disabledReason`, objectstack#26619): its hover title
+   * and accessible description, or a menu item's second line. Without it the
+   * renderers say "Not available for this record". Display copy only, never a
+   * condition. DERIVED from the spec: an `I18nLabel`, a string or an inline
+   * per-locale map, the renderers collapse to the active language.
+   */
+  disabledReason?: SpecAction['disabledReason'];
   
   /** Expression controlling enabled state (e.g., "hasPermission('edit')") */
   enabled?: string;

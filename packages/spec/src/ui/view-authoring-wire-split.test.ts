@@ -228,8 +228,13 @@ describe('the wire door accepts what the platform itself writes', () => {
     ).toBe(false);
   });
 
-  it('an undeclared aux key still rides on the wire member (`.strip()`, as before)', () => {
-    accept(ViewMetadataSchema, { ...RECORD, someFutureStudioAuxKey: 1 });
+  // [#26711] It used to ride through `.strip()` and was not stored: the save
+  // stores the parsed body (#20051). A new console key is declared on the
+  // member with its meaning, as #20456 did, or it is refused here by name.
+  it('an undeclared aux key is refused by name on the wire member', () => {
+    const issues = reject(ViewMetadataSchema, { ...RECORD, someFutureStudioAuxKey: 1 });
+    expect(issues).toContain('"code":"unrecognized_keys"');
+    expect(issues).toContain('someFutureStudioAuxKey');
   });
 
   // ── the acceptance criteria named in the scope addendum ──────────────────

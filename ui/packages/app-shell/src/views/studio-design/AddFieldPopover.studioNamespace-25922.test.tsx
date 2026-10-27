@@ -6,8 +6,8 @@
  *
  * The Data pillar's "Add field" popover mixes both homes on one screen: its
  * field labels (`designer.field.label` / `.apiName` / `.type`) moved into the
- * namespace, its title and buttons (`engine.studio.*`) are still in the
- * app-shell table. It takes its locale from `useMetadataLocale()`, the hook
+ * namespace, its Cancel button (`engine.studio.cancel`) is still in the
+ * app-shell table (its title and Create button followed in slice S4). It takes its locale from `useMetadataLocale()`, the hook
  * every designer component uses, so this is the path a real screen takes:
  *
  *   - zh: the namespace's `zh` catalogue is NOT resident when the screen first
@@ -40,7 +40,7 @@ afterEach(cleanup);
 /** Keys this screen renders from the namespace. */
 const MOVED = ['designer.field.label', 'designer.field.type'] as const;
 /** A key this screen renders from the app-shell table. */
-const TABLE = 'engine.studio.data.addField';
+const TABLE = 'engine.studio.cancel';
 
 function Screen({ lang }: { lang: string }) {
   return (

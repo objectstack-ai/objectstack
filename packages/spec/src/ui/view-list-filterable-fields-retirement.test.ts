@@ -368,6 +368,10 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
     // both took this key over from `striped` when its 16.x tombstone aged out.
     'packages/spec/src/ui/view-union-retirement-prescription.test.ts',
     'packages/lint/src/lint-liveness-properties.test.ts',
+    // [#26711] The closed view write door's pin authors the key on the inline
+    // list view to assert the live tombstone still raises its own prescription
+    // there, not a bare unrecognized-key refusal.
+    'packages/spec/src/ui/view-wire-unknown-key-refusal.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement payload on purpose.
