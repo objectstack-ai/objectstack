@@ -1674,11 +1674,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // record with nothing to recall. `resolveApprovalLock` is the one rule this
   // page and the DetailView band share; `approvalReadAnswered` below hands the
   // band the same `answered` this call reads.
+  //
+  // The list serves a request only to its participants, so a reader outside
+  // the slate reads it empty while a locking approval runs (objectstack#25934).
+  // For them the open approval is the server's record lock: `{ locked: true }`
+  // says a pending request from a locking node exists, which is rule 1's input
+  // exactly. No lock answer (no approvals service answers its route 501) is no
+  // open approval, so rule 2 is unchanged.
+  const lockedForReader = !approvals.pendingRequest && approvals.recordLock?.locked === true;
   const { pending: approvalPending, locked: approvalLocked } = resolveApprovalLock({
     readAnswered: approvals.answered,
     openApproval: approvals.pendingRequest
       ? { locked: recordLockedByApproval(approvals.pendingRequest) }
-      : null,
+      : lockedForReader ? { locked: true } : null,
     recordStatus: (pageRecord as any)?.approval_status,
   });
   // How far the pending node's tally has got (objectstack#4478). Multi-approver
@@ -1701,7 +1709,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   //
   // This gates the AFFORDANCE only. `canEdit` / `approvalLocked` below are
   // untouched by it, and the recall endpoint authorizes the recall itself.
-  const approvalIsSubmitter = isSubmitterOf(approvals.pendingRequest, user?.id);
+  //
+  // A lock the viewer knows only from the record lock is one whose request they
+  // cannot read, and the submitter can always read their own: `false`, so the
+  // band offers this reader no recall.
+  const approvalIsSubmitter = lockedForReader
+    ? false
+    : isSubmitterOf(approvals.pendingRequest, user?.id);
   // Does this page mount the pending request's declared decision bar
   // (objectui#3055)?
   const approvalBarMounted = approvals.available && !!approvals.pendingRequest;

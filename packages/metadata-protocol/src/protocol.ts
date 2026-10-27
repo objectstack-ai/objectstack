@@ -406,6 +406,8 @@ import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 // [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
 import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
+// [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
+import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -28658,30 +28660,8 @@ export class ObjectStackProtocolImplementation implements
      * sealed overlays are still not served.
      */
     private reportSealedOverlayRows(rows: ReadonlyArray<{ type: string; name: string }>): void {
-        if (rows.length === 0) return;
-        const SAMPLE_PER_TYPE = 5;
-        const byType = new Map<string, string[]>();
-        for (const { type, name } of rows) {
-            const names = byType.get(type) ?? [];
-            names.push(name);
-            byType.set(type, names);
-        }
-        const detail = Array.from(byType.entries())
-            .map(([type, names]) => {
-                const shown = names.slice(0, SAMPLE_PER_TYPE);
-                const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
-                return `${type}×${names.length} (${shown.join(', ')}${more})`;
-            })
-            .join('; ');
-        console.warn(
-            `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
-            `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
-            `${detail}. No read serves them — the package's own definition is served. ` +
-            `Each row is kept at rest, untouched (an object's table and its columns stay as they are). To keep ` +
-            `the change, re-express it as a new item under a new ` +
-            `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
-            `stored row.`,
-        );
+        // [#25467 cut 21] The body moved to `protocol-sealed-overlay-report.ts`.
+        return reportSealedOverlayRows(rows);
     }
 
     // ==========================================

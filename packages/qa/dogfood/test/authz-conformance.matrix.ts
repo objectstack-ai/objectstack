@@ -24,7 +24,7 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (80 rows
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (81 rows
 // / 18 families) and `packages/runtime/src/route-ledger.ts` (105 rows / 23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
@@ -58,7 +58,9 @@
 // `family: packages`, which survives on the publish row. (91 → 83 rows and
 // 19 → 18 families later, when #20102 retired the whole `reports` family;
 // 81 → 80 rows, families unmoved, when #25104 retired the `/docs` viewer
-// page, whose `openapi` family survives on the document row.)
+// page, whose `openapi` family survives on the document row; 80 → 81 rows,
+// families unmoved, when #26361 added the approval record-lock read, whose
+// `approvals` family the other approval rows already carry.)
 // Two stale figures in
 // one docblock with two entirely different causes is the failure mode the pin
 // above ends. Widening a regex instead was refused: it rots on the next

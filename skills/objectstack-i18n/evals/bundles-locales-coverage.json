@@ -50,6 +50,26 @@
         "must_contain": ["--no-objects-only", "os i18n check", "apps", "--strict"],
         "must_not_contain": ["messageFormat"]
       }
+    },
+    {
+      "id": 6,
+      "prompt": "Add zh-CN for the `pipeline_by_stage` report, the `sales_manager` permission set, the `regional_lead` position and the `deal_stage` picklist's option labels.",
+      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, never `permissionSets`), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist. `os i18n extract --no-objects-only` scaffolds all four.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["reports", "permissions", "positions", "picklists", "--no-objects-only"],
+        "must_not_contain": ["permissionSets", "report: {"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "In zh-CN the `contact` quick-create form still shows its English heading and the placeholder its `contact_details` section sets on `email`; the `home` page's `overview` tab and the `manager_review` step of the `expense_claim` flow are English too.",
+      "expected_output": "Each key spelled as its source: `objects.contact._views.quick_create.title` (a form's own heading), `objects.contact._sections.contact_details.fields.email.placeholder` (that form's override; `helpText` there, `help` at `fields.email`), `pages.home.components.{tabs_id}.items.overview.label` (by the item's `value`), `flows.expense_claim.approvals.manager_review.label` (the node id). Not a view `label`, an object `_tabs` key or a screen `title`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_views", "title", "_sections", "fields", "items", "approvals"],
+        "must_not_contain": ["stepLabel", "_tabs.overview"]
+      }
     }
   ]
 }

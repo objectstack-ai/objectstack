@@ -89,12 +89,7 @@ import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
-  VALUE_SHAPES_MIGRATION_ID,
-  ORGANIZATION_OWNERSHIP_MIGRATION_ID,
-  ORGANIZATION_OWNERSHIP_SHAPE_GENERATION,
-  organizationOwnershipShapeGenerationOf,
   isDataMigrationFlagVerified,
-  hasMovedFileColumns,
   renderOperationMessage,
   SystemFieldName,
 } from '@objectstack/spec/system';
@@ -152,6 +147,10 @@ import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, se
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
 import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Verdict, resolveEnginePosture, wallExemptedOperation } from './engine-driver-options.js';
+// [#25522 cut 13] The `sys_migration` flag reads, the certification question a
+// driver is handed, and the admitted-violation tally and boot advisory; the
+// methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
+import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -322,7 +321,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
-import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -395,7 +394,7 @@ import {
  * could actually be consulted to reach it (#4769). Both negatives keep the
  * gate closed; only the conclusive one is worth remembering.
  */
-interface MigrationFlagRead {
+export interface MigrationFlagRead {
   verified: boolean;
   conclusive: boolean;
   /**
@@ -11929,22 +11928,13 @@ export class ObjectQL implements IObjectQLEngine {
    * no such seam is left alone.
    */
   private supplyTenantKeyCertifiedResolver(driver: IDataDriver): void {
-    const sink = driver as unknown as {
-      setTenantKeyCertifiedResolver?: (resolve: () => Promise<boolean>) => void;
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof supplyTenantKeyCertifiedResolver> = {
+      isOrganizationOwnershipCertified: (...a) => this.isOrganizationOwnershipCertified(...a),
+      get logger() { return readLogger(); },
     };
-    if (typeof sink.setTenantKeyCertifiedResolver !== 'function') return;
-    try {
-      sink.setTenantKeyCertifiedResolver(() => this.isOrganizationOwnershipCertified());
-    } catch (e: any) {
-      // A driver that did not take the resolver answers "not certified": it
-      // keeps the two forms distinct and REPORTS a destructive recreate_index,
-      // which is never applied unattended (safe-only boot reconcile, the
-      // artifact gate, `os migrate apply --allow-destructive`).
-      this.logger.debug('Driver declined the ADR-0131 certification resolver', {
-        driverName: driver.name,
-        error: e?.message ?? String(e),
-      });
-    }
+    return supplyTenantKeyCertifiedResolver.call(host, driver);
   }
 
   /**
@@ -11958,25 +11948,13 @@ export class ObjectQL implements IObjectQLEngine {
    * asking reports it (`SqlDriver.isTenantKeyCertified`).
    */
   async isOrganizationOwnershipCertified(): Promise<boolean> {
-    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
-    try {
-      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
-        context: { isSystem: true } as ExecutionContext,
-      });
-      if (!row || row.id !== ORGANIZATION_OWNERSHIP_MIGRATION_ID) return false;
-      const verified = isDataMigrationFlagVerified({
-        id: ORGANIZATION_OWNERSHIP_MIGRATION_ID,
-        last_run_at: String(row.last_run_at ?? ''),
-        verified_at: row.verified_at == null ? null : String(row.verified_at),
-        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-      });
-      return verified && organizationOwnershipShapeGenerationOf(row.details) >= ORGANIZATION_OWNERSHIP_SHAPE_GENERATION;
-    } catch (error) {
-      // A store whose ledger table does not exist yet has no certificate.
-      if (isMissingTableError(error, DATA_MIGRATION_FLAG_OBJECT)) return false;
-      throw error;
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof isOrganizationOwnershipCertified> = {
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+    };
+    return isOrganizationOwnershipCertified.call(host);
   }
 
   /**
@@ -11987,13 +11965,11 @@ export class ObjectQL implements IObjectQLEngine {
    * second copy of them is a second way to read a different row.
    */
   private readFileReferencesFlagRow(): Promise<MigrationFlagRead> {
-    return this.readMigrationFlagRowMemoized(
-      'fileReferencesMigrationVerified',
-      FILE_REFERENCES_MIGRATION_ID,
-      '[value-shape] this deployment has verified the file-as-reference migration — ' +
-        'media value shapes are enforced and released field files may be collected ' +
-        '(ADR-0104)',
-    );
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const host: ThisParameterType<typeof readFileReferencesFlagRow> = {
+      readMigrationFlagRowMemoized: (...a) => this.readMigrationFlagRowMemoized(...a),
+    };
+    return readFileReferencesFlagRow.call(host);
   }
 
   /**
@@ -12036,12 +12012,11 @@ export class ObjectQL implements IObjectQLEngine {
    * classes.
    */
   async isValueShapesMigrationVerified(): Promise<boolean> {
-    return this.readMigrationFlagMemoized(
-      'valueShapesMigrationVerified',
-      VALUE_SHAPES_MIGRATION_ID,
-      '[value-shape] this deployment has verified the value-shape scan — reference and ' +
-        'structured-JSON value shapes are enforced (ADR-0104)',
-    );
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const host: ThisParameterType<typeof isValueShapesMigrationVerified> = {
+      readMigrationFlagMemoized: (...a) => this.readMigrationFlagMemoized(...a),
+    };
+    return isValueShapesMigrationVerified.call(host);
   }
 
   /**
@@ -12123,43 +12098,15 @@ export class ObjectQL implements IObjectQLEngine {
     migrationId: string,
     verifiedLog?: string,
   ): Promise<MigrationFlagRead> {
-    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
-      return { verified: false, conclusive: false, columnsMoved: false };
-    }
-    try {
-      // [#20648] The row by primary key, through the single-row route. ⛔ Not
-      // `find` with `limit: 1`: the SQL driver reads that as page one of a
-      // walk, and this read runs at boot BEFORE `sys_migration` is registered
-      // with the driver — so every boot of an existing deployment printed the
-      // driver's "Paged read ... is NOT deterministic" warning for a lookup
-      // that cannot return two rows. `findOne` is the route it exempts.
-      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: migrationId },
-        context: { isSystem: true } as ExecutionContext,
-      });
-      if (!row || row.id !== migrationId) {
-        return { verified: false, conclusive: true, columnsMoved: false };
-      }
-      const flag = {
-        id: migrationId,
-        last_run_at: String(row.last_run_at ?? ''),
-        verified_at: row.verified_at == null ? null : String(row.verified_at),
-        // A non-numeric count must read as "not zero", not as 0 — a bad
-        // coercion lands on NaN, which fails the === 0 test.
-        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-        // [#15989] Read here so both questions come off ONE row: an absent or
-        // empty stamp is the JSON encoding, which is what every row written
-        // before the column step existed holds.
-        columns_moved_at: row.columns_moved_at == null ? null : String(row.columns_moved_at),
-      };
-      const verified = isDataMigrationFlagVerified(flag);
-      if (verified && verifiedLog) this.logger.info(verifiedLog);
-      return { verified, conclusive: true, columnsMoved: hasMovedFileColumns(flag) };
-    } catch {
-      // unreadable evidence → stay lenient, keep asking; and the columns read
-      // as NOT moved, which is the encoding every deployment already writes.
-      return { verified: false, conclusive: false, columnsMoved: false };
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof readMigrationFlagVerified> = {
+      get _registry() { return readRegistry(); },
+      findOne: (...a) => this.findOne(...a),
+      get logger() { return readLogger(); },
+    };
+    return readMigrationFlagVerified.call(host, migrationId, verifiedLog);
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -12229,24 +12176,14 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   private noteAdmittedValueShapeViolation(object: string, violation: AdmittedValueShapeViolation): void {
-    const migrationId =
-      violation.gate === 'media' ? FILE_REFERENCES_MIGRATION_ID : VALUE_SHAPES_MIGRATION_ID;
-    const existing = this.admittedValueShapeViolations.get(migrationId);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      this.admittedValueShapeViolations.set(migrationId, {
-        count: 1,
-        first: { object, field: violation.field, type: violation.type, detail: violation.detail },
-      });
-    }
-    // Two consumers of the same counterexample, answering different questions.
-    // The deviation marker goes first because it is the one that applies to
-    // EVERY verified deployment (#4797); the retraction below applies only to
-    // the narrow fresh-datastore case (#4769) and closes the gate outright
-    // there. Each is the other's backstop if one write fails.
-    this.recordObservedDeviation(migrationId);
-    this.retractCreationAttestation(migrationId);
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readAdmittedValueShapeViolations = () => this.admittedValueShapeViolations;
+    const host: ThisParameterType<typeof noteAdmittedValueShapeViolation> = {
+      get admittedValueShapeViolations() { return readAdmittedValueShapeViolations(); },
+      recordObservedDeviation: (...a) => this.recordObservedDeviation(...a),
+      retractCreationAttestation: (...a) => this.retractCreationAttestation(...a),
+    };
+    return noteAdmittedValueShapeViolation.call(host, object, violation);
   }
 
   /**
@@ -12504,46 +12441,20 @@ export class ObjectQL implements IObjectQLEngine {
    * that declares neither class of field.
    */
   async announceOpenMigrationGates(): Promise<void> {
-    if (this.migrationGatesAnnounced) return;
-    this.migrationGatesAnnounced = true;
-    try {
-      const mediaByEnv = mediaPostureSetByEnv();
-      const coveredByEnv = valueShapePostureSetByEnv();
-      if (mediaByEnv && coveredByEnv) return;
-
-      let media = false;
-      let covered = false;
-      for (const obj of this._registry.getAllObjects() as any[]) {
-        if (!media && !mediaByEnv && this.objectHasMediaField(obj)) media = true;
-        if (!covered && !coveredByEnv && this.objectHasCoveredValueField(obj)) covered = true;
-        if ((media || mediaByEnv) && (covered || coveredByEnv)) break;
-      }
-
-      // [#4769] Read the ledger, not the memo. This advisory runs once, at
-      // `kernel:bootstrapped`, and the fresh-datastore attestation may have
-      // written its rows moments earlier — after the boot's first write had
-      // already memoized "not verified". Reporting from that memo tells a
-      // brand-new deployment to run a migration whose gate is already closed.
-      // One query per applicable gate, once per boot.
-      if (media && !(await this.readMigrationFlagVerified(FILE_REFERENCES_MIGRATION_ID)).verified) {
-        this.logger.info(
-          '[value-shape] media values are checked but NOT enforced here, and released files are ' +
-            'never collected — this deployment has not verified its file migration. Run ' +
-            '`os migrate files-to-references` (dry run) to see what it would do, then `--apply` ' +
-            'to close the gate (ADR-0104).',
-        );
-      }
-      if (covered && !(await this.readMigrationFlagVerified(VALUE_SHAPES_MIGRATION_ID)).verified) {
-        this.logger.info(
-          '[value-shape] reference and structured-JSON values are checked but NOT enforced here — ' +
-            'this deployment has not verified its value-shape scan. Run `os migrate value-shapes` ' +
-            '(dry run) to see what it would report, then `--apply` to close the gate ' +
-            '(ADR-0104).',
-        );
-      }
-    } catch {
-      // An advisory must never be the reason a boot fails.
-    }
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readMigrationGatesAnnounced = () => this.migrationGatesAnnounced;
+    const writeMigrationGatesAnnounced = (v: ObjectQL['migrationGatesAnnounced']) => { this.migrationGatesAnnounced = v; };
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof announceOpenMigrationGates> = {
+      get migrationGatesAnnounced() { return readMigrationGatesAnnounced(); }, set migrationGatesAnnounced(v) { writeMigrationGatesAnnounced(v); },
+      get _registry() { return readRegistry(); },
+      objectHasMediaField: (...a) => this.objectHasMediaField(...a),
+      objectHasCoveredValueField: (...a) => this.objectHasCoveredValueField(...a),
+      readMigrationFlagVerified: (...a) => this.readMigrationFlagVerified(...a),
+      get logger() { return readLogger(); },
+    };
+    return announceOpenMigrationGates.call(host);
   }
   private migrationGatesAnnounced = false;
 
@@ -12564,17 +12475,12 @@ export class ObjectQL implements IObjectQLEngine {
    * counts describe a moment that has passed.
    */
   wasDatastoreCreatedFromEmpty(): boolean {
-    let created = 0;
-    let existing = 0;
-    let reporting = 0;
-    for (const driver of this.drivers.values()) {
-      const stats = (driver as any).getSchemaSyncStats?.();
-      if (!stats) continue;
-      reporting += 1;
-      created += Number(stats.created) || 0;
-      existing += Number(stats.existing) || 0;
-    }
-    return reporting > 0 && existing === 0 && created > 0;
+    // [#25522 cut 13] The body moved to `engine-migration-flags.ts` (see `MigrationFlagsHost`).
+    const readDrivers = () => this.drivers;
+    const host: ThisParameterType<typeof wasDatastoreCreatedFromEmpty> = {
+      get drivers() { return readDrivers(); },
+    };
+    return wasDatastoreCreatedFromEmpty.call(host);
   }
 
   async destroy() {

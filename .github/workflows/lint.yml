@@ -631,15 +631,14 @@ jobs:
       # and it is the only instrument on this gate's matching rules -- a clean
       # tree cannot tell a working rule from a weakened one.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file.
+      # Invoked through its `pnpm check:*` alias, so root `package.json` is the
+      # one definition of the command (#26086).
       - name: Docs anchors resolve to real headings
         id: docs-anchors-resolve-to-real-headings
         continue-on-error: true
         run: |
           pnpm check:doc-anchors
-          node scripts/check-system-context-census.mjs --self-test
-          node scripts/check-system-context-census.mjs
+          pnpm check:system-context-census
 
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
@@ -908,24 +907,20 @@ jobs:
       # tell a working matcher from a dead one, and the specifier FLOOR is the
       # other half (a dead matcher finds nothing, and nothing is what success
       # looks like — so it refuses with exit 2 rather than passing).
-      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file.
+      # Invoked through its `pnpm check:*` alias, so root `package.json` is the
+      # one definition of the command (#26086).
       # Scans ~2k non-test src files across 78 workspace packages, no spawns; ~1s.
       - name: Published src imports only declared workspace deps
         id: published-src-imports-only-declared
         continue-on-error: true
-        run: |
-          node scripts/check-undeclared-dep-imports.mjs --self-test
-          node scripts/check-undeclared-dep-imports.mjs
+        run: pnpm check:undeclared-dep-imports
 
       # Rationale: `scripts/check-keyed-text-bounds.mjs` header (#12147, #11374, #12058,
       # #12143).
       - name: Keyed text-family columns declare their bound (#12147)
         id: keyed-text-family-columns-declare
         continue-on-error: true
-        run: |
-          node scripts/check-keyed-text-bounds.mjs --self-test
-          node scripts/check-keyed-text-bounds.mjs
+        run: pnpm check:keyed-text-bounds
 
       # Rationale: `scripts/check-bash32-floor.mjs` header (#12221).
       - name: shell scripts hold the bash 3.2 floor
@@ -1968,9 +1963,7 @@ jobs:
       - name: Platform-object tenancy census matches the tree
         id: platform-object-tenancy-census-matches
         continue-on-error: true
-        run: |
-          node scripts/check-platform-object-tenancy-census.mjs --self-test
-          node scripts/check-platform-object-tenancy-census.mjs
+        run: pnpm check:platform-object-tenancy-census
 
       # ── THE LANE'S VERDICT (#23191): the last step, and the one that keeps a
       # red gate red. The EVERY GATE RUNS note above `jobs:` argues it. ─────
@@ -3593,7 +3586,7 @@ jobs:
       - name: Declared registry log level
         id: declared-registry-log-level
         continue-on-error: true
-        run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
+        run: pnpm check:registry-log-declared
 
       # The same defect one package down (#15484). `packages/rest`'s own fault
       # logging hands whole `Error` objects to `console.error`, and Node prints
@@ -3608,7 +3601,7 @@ jobs:
       - name: Declared REST fault-log level
         id: declared-rest-fault-log-level
         continue-on-error: true
-        run: node scripts/check-rest-log-declared.mjs --self-test && node scripts/check-rest-log-declared.mjs
+        run: pnpm check:rest-log-declared
 
       # The pairing half of the one above (#17865, ruling batch #128 item 4).
       # The `packages/rest` harness now runs at `OS_REST_LOG: 'silent'`, which
@@ -3623,7 +3616,7 @@ jobs:
       - name: Declared REST fault-log level — observers
         id: declared-rest-fault-log-level-observers
         continue-on-error: true
-        run: node scripts/check-rest-log-spy-declared.mjs --self-test && node scripts/check-rest-log-spy-declared.mjs
+        run: pnpm check:rest-log-spy-declared
 
       # Rationale: `scripts/check-live-db-isolation.mjs` header (#10382, #9350).
       - name: Live-server database isolation

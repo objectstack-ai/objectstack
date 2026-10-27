@@ -18,7 +18,8 @@
 - `visible` — CEL predicate (prefer the `P\`...\`` tagged template); when false the action is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
 - `confirmText` — set for any destructive or irreversible operation.
-- `successMessage` / `errorMessage` — author-controlled toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
+- `successMessage` / `errorMessage` — toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
+- Copy holes are `{{ }}`: `confirmText` reads `record`, `successMessage` `record` and `result` (the handler's answer); `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
 
 Predicates are **bare CEL** — `record.status == "converted"`, evaluated against
@@ -42,14 +43,14 @@ export const ReassignLeadAction = defineAction({
   disabled: P`record.status == "converted"`,
   params: [{ field: 'assigned_to', required: true }],
   undoable: true,                 // success toast offers Undo; Ctrl+Z works too
-  successMessage: 'Lead reassigned.',
+  successMessage: 'Lead {{ record.name }} reassigned.',
   errorMessage: "Couldn't reassign this lead — try again.",
 });
 ```
 
 ## Examples
 
-**Flow-typed action** (delegates to a screen flow):
+**Flow-typed action** (`onSuccess` hops once the run completes, not when it pauses at a screen; its URL template reads an `isOutput` variable as `${result.output.NAME}`):
 
 <!-- os:check -->
 ```typescript
@@ -67,6 +68,7 @@ export const ConvertLeadAction = defineAction({
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Are you sure you want to convert this lead?',
   successMessage: 'Lead converted successfully!',
+  onSuccess: { navigate: '/apps/crm/opportunity/record/${result.output.opportunity_id}' },
   refreshAfter: true,
 });
 ```
@@ -114,8 +116,7 @@ A server-side action `body` (and a registered function `handler`) receives a
 `recordId` is in scope), `api` (scoped cross-object CRUD), and the caller
 identity. Read the caller's active organization under the **blessed**
 `organizationId` name — the same value as the `organization_id` column and
-`current_user.organizationId` in RLS, so it matches hooks and seed data with
-zero relearning:
+`current_user.organizationId` in RLS:
 
 ```typescript
 // ✅ Blessed — identical to the hook surface (ctx.user / ctx.session)
@@ -143,8 +144,7 @@ When you have a **static** `target` URL (relative or absolute) you just want
 opened in a new tab, set `openIn: 'new-tab'` on a `type: 'url'` action. No
 handler, no synchronous pre-open. `openIn: 'self'` forces in-place navigation;
 omit it and external/absolute URLs open in a new tab while relative URLs
-navigate in place. objectui's `ActionRunner.executeUrl` reads `openIn` with
-priority over the legacy heuristic.
+navigate in place.
 
 <!-- os:check -->
 ```typescript
@@ -179,21 +179,18 @@ export const OpenInvoicePdfAction = defineAction({
   type: 'script',
   target: 'open_invoice_pdf',   // registered handler; skipped while newTabUrl is set
   opensInNewTab: true,
-  newTabUrl: '/api/v1/invoice/{recordId}/pdf',   // zero-roundtrip; endpoint self-auths
+  newTabUrl: '/api/v1/invoice/{recordId}/pdf',
   locations: ['record_header'],
 });
 ```
 
-> A printable document (an invoice) is a page that declares `print` — [Print pages](./pages.md#print-pages):
-> validated today, rendered once the console's print rendering ships.
+> A printable document (an invoice) is a page that declares `print` — [Print pages](./pages.md#print-pages).
 
 > ⚠️ **Never express new-tab behavior via `params`.** `params` is exclusively
 > `ActionParam[]` for collecting **user input**. Writing an object form like
 > `params: { newTab: true }` fails the zod build outright; the array form
 > `params: [{ name: 'newTab', type: 'checkbox' }]` *builds* but mis-renders as a
-> user-facing checkbox in the param-collection dialog. Use `openIn` (static) or
-> `opensInNewTab`/`newTabUrl` (async) instead — these are static execution
-> options, not inputs.
+> user-facing checkbox in the param-collection dialog. Use one of the two mechanisms above.
 
 ## Action Parameter Patterns
 
