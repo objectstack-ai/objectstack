@@ -27,20 +27,20 @@
  *   read in the mentioned user's own envelope, with their organization claim
  *   vetted — the stand-in admits whatever envelope it is handed.
  * - plugin-security's object-level read grant on `sys_comment`, played by a
- *   second middleware: a caller whose resolved envelope holds the
- *   `org_member` position (what a `member` membership projects to) may read
- *   comments, and any other caller's read is refused the way the real layer
- *   refuses it — a throw. It stands in for "the baseline set this position
- *   distributes grants read on comments". DAVE's membership projects to a
- *   position it does not cover, so he reads the open record and not its
- *   comments.
+ *   second middleware: a caller whose envelope holds the `comment_reader`
+ *   position may read comments, and any other caller's read is refused the way
+ *   the real layer refuses it — a throw. It stands in for "the set this
+ *   position distributes grants read on comments". ALICE, CAROL and BOB hold
+ *   the position, each in their own organization; DAVE, a member of ORG_A like
+ *   CAROL, does not — so he reads the open record and not its comments.
  * - the `messaging` service, played by a recorder of `emit()` calls (the
  *   inbox materialisation is service-messaging's to pin).
  *
  * plugin-security also owns the two grant tables the resolver reads beside
  * `sys_member` (`sys_user_position`, `sys_user_permission_set`). They are
- * registered here with the columns the resolver reads and left EMPTY — no
- * user holds a position or a permission set, so membership alone decides the
+ * registered here with the columns the resolver reads. `sys_user_position`
+ * carries the `comment_reader` assignments above and nothing else, and
+ * `sys_user_permission_set` is left EMPTY, so membership alone decides the
  * wall. Unregistered, the resolver refuses (an unreadable authorization store
  * is an outage, not a denial) and the gate withholds every notification.
  */
@@ -68,10 +68,8 @@ const CAROL = { id: 'u_carol', email: 'carol@a.test' };
 const BOB = { id: 'u_bob', email: 'bob@b.test' };
 /** A fellow member of ORG_A who reads every non-confidential task there, and holds no read on comments. */
 const DAVE = { id: 'u_dave', email: 'dave@a.test' };
-/** DAVE's membership role: projected verbatim to a position the comment grant does not cover. */
-const NO_COMMENT_READ_ROLE = 'task_viewer';
-/** The position whose holders the comment stand-in lets read comments. */
-const COMMENT_READER_POSITION = 'org_member';
+/** The position whose holders the comment stand-in lets read comments — assigned through `sys_user_position`. */
+const COMMENT_READER_POSITION = 'comment_reader';
 
 type Posture = 'single' | 'isolated' | 'group';
 const tenancy: { posture: Posture } = { posture: 'isolated' };
@@ -135,7 +133,7 @@ function standIns(): Plugin {
 const authorContext = () => ({
   userId: ALICE.id,
   tenantId: ORG_A,
-  positions: ['org_member'],
+  positions: ['org_member', COMMENT_READER_POSITION],
   permissions: [],
   accessible_org_ids: [ORG_A],
 });
@@ -227,13 +225,15 @@ describe('@mention notifications reach only mentioned users who can read the com
     for (const u of [ALICE, CAROL, BOB, DAVE]) {
       await engine.insert('sys_user', { id: u.id, name: u.id, email: u.email }, { context: SYS });
     }
-    for (const [user, org, role] of [
-      [ALICE, ORG_A, 'member'],
-      [CAROL, ORG_A, 'member'],
-      [BOB, ORG_B, 'member'],
-      [DAVE, ORG_A, NO_COMMENT_READ_ROLE],
-    ] as const) {
-      await engine.insert('sys_member', { user_id: user.id, organization_id: org, role }, { context: SYS });
+    for (const [user, org] of [[ALICE, ORG_A], [CAROL, ORG_A], [BOB, ORG_B], [DAVE, ORG_A]] as const) {
+      await engine.insert('sys_member', { user_id: user.id, organization_id: org, role: 'member' }, { context: SYS });
+    }
+    for (const [user, org] of [[ALICE, ORG_A], [CAROL, ORG_A], [BOB, ORG_B]] as const) {
+      await engine.insert(
+        'sys_user_position',
+        { user_id: user.id, organization_id: org, position: COMMENT_READER_POSITION },
+        { context: SYS },
+      );
     }
     openTask = (await engine.insert(TASK, { name: 'open', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
     confidentialTask = (
