@@ -111,7 +111,7 @@ App manifest for marketplace installation
 | **flows** | `string[]` | optional (default: `[]`) | Flow names provided |
 | **hasSeedData** | `boolean` | optional (default: `false`) | Whether app includes seed data |
 | **seedData** | `Record<string, any>[]` | optional (default: `[]`) | Seed data records |
-| **dependencies** | `string[]` | optional (default: `[]`) | Required app dependencies |
+| **dependencies** | `never` | optional | [REMOVED] `AppManifest.dependencies` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0141 D8) — nothing read it: it listed bare ids with no version range, and no install path consulted it. Delete the key. Declare each dependency with its range in the package's `manifest.dependencies` (`{ 'com.acme.core': '^1.0.0' }`), which the pre-install check enforces. |
 
 
 ---

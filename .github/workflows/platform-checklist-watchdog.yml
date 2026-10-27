@@ -192,24 +192,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Kept as this job's own step rather than folded into the composite
-      # below. ⛔ No longer because a gate cannot see it:
-      # `scripts/check-node-version.mjs` reads `.github/actions/**` too since
-      # #19229, so its census follows a setup-node step wherever it is written.
-      # Kept because the pin is already here and moving it buys nothing.
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
       # `pnpm` itself is the requirement, NOT the workspace. The gate is invoked
       # through its PACKAGE SCRIPT (`pnpm check:platform-checklist`), which is a
       # pinned property of this file — an inlined `node scripts/...` copy would
       # drift from the script the maintainer's cadence documentation names, and
       # would silently drop the `checklist-select --self-test` leg the alias runs
       # first.
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          install: 'false'
 
       # No `pnpm install`. Both halves of the alias import `node:` builtins and
       # repo-local modules only — no npm dependency — so installing the

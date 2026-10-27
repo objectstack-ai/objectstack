@@ -448,7 +448,9 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            // Revealed on keyboard focus too, as in the details
+                            // body (objectstack#25883).
+                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity"
                             aria-label={t('detail.editInlineHint')}
                             onClick={(e) => {
                               e.stopPropagation();
