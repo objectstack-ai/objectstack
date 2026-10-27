@@ -6195,8 +6195,11 @@ export type ObjectKanbanPropsParsed = z.infer<typeof ObjectKanbanPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectCalendar` keeps reading as a
- * backward-compat fallback (`getCalendarConfig`; read points recorded in
- * `liveness/page.json`, row `regions`) and that `ObjectView`/`ListView` emit on their runtime handoff. Read, but
+ * stored-document fallback (`getCalendarConfig`; read points recorded in
+ * `liveness/page.json`, row `regions`). `ObjectView`/`ListView` hand the
+ * binding off in the `calendar` block, not flat (objectstack#25923), and the
+ * flat keys live on `plugin-calendar`'s own hand-off type, not on
+ * `@object-ui/types`' `ObjectCalendarSchema`. Read, but
  * NOT authorable — one composition key per concept (Prime Directive #12, the
  * `body` → `children` precedent on {@link PageContainerProps}): the authored
  * spelling is the `calendar` object.
@@ -6209,9 +6212,9 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'titleField'],
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
-      + 'endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff '
-      + '`ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is '
-      + 'not a second authorable spelling (one key per concept, Prime Directive #12).',
+      + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
+      + 'off in that block too; the flat spelling is only a stored-document fallback the renderer still '
+      + 'reads, not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
 ];
 
@@ -7522,21 +7525,22 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
 /**
- * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads and that
- * `ObjectView` / `ListView` EMIT when they flatten `options.gantt` — objectui's
- * own `FLAT_GANTT_CONFIG_KEYS` (read points recorded in `liveness/page.json`,
- * row `regions`). Read, but
+ * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads as a
+ * stored-document fallback — objectui's own `FLAT_GANTT_CONFIG_KEYS` (read
+ * points recorded in `liveness/page.json`, row `regions`). `ObjectView` /
+ * `ListView` hand the binding off in the `gantt` block, not flat
+ * (objectstack#25923). Read, but
  * NOT authorable, for the reason the map's twin set above records: objectui#6469
  * inherited the objectui#5018 ruling for this block, so the `gantt` block is the
  * authoring shape, it is taken WHOLE when present, and every flat key beside it
  * is named as ignored in a dev warning.
  *
- * The flat branch is the HOT path for this block — a hand-authored `gantt` block
- * reaching the renderer through either view layer has already been flattened —
- * which is exactly why the prescription matters here: an author who learned the
- * flat spelling from a view config (or from `@object-ui/types`'
- * `ObjectGanttSchema`, which declares the whole flat face) writes it on an SDUI
- * node next, where nothing flattens anything.
+ * The block branch is the path both view layers take — they hand the `gantt`
+ * block on whole — and the flat branch is only the stored-document fallback.
+ * The prescription still matters: an author who met the flat spelling in an
+ * older stored document writes it on an SDUI node next. The flat keys live on
+ * `plugin-gantt`'s package-local hand-off type (`ObjectGanttFlatFields`), not
+ * on `@object-ui/types`' `ObjectGanttSchema`, which declares only the block.
  *
  * Membership is `GanttConfigSchema`'s own shape plus the legacy singular
  * `dependencyField` alias the flat branch still reads beside `dependenciesField`
@@ -7561,9 +7565,10 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'endDateField', 'viewMode'],
     prescription:
       'Write this as a key of the `gantt` config object instead — `gantt: { startDateField, endDateField, '
-      + 'titleField, ... }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
-      + 'produce when they flatten `options.gantt`, not a second authoring spelling: whenever a `gantt` '
-      + 'block is present the renderer takes it WHOLE and names every flat key beside it as ignored. The '
+      + 'titleField, ... }`. `ObjectView`/`ListView` hand the binding off in that block too; the flat '
+      + 'top-level spelling is only a stored-document fallback the renderer still reads, not a second '
+      + 'authoring spelling: whenever a `gantt` block is present the renderer takes it WHOLE and names '
+      + 'every flat key beside it as ignored. The '
       + 'legacy singular `dependencyField` is `dependenciesField` inside that block.',
   },
 ];
@@ -7631,7 +7636,7 @@ function objectGanttMarker() {
  * `mobileReadOnly`.
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
- * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
+ * stored-document fallback — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
  * `label` → the OBJECT's label → `objectName`); a row cap — the reload's `$top`
  * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` (one
@@ -7642,7 +7647,7 @@ function objectGanttMarker() {
  * reads, `search` and `searchableFields` (sent as `$search` / `$searchFields`),
  * which `ListView` writes onto the node it generates from its toolbar Search
  * box (its `case 'gantt'` arm) — a host-generated key pair in the same position
- * as the flatten product, and not declared here.
+ * as the flat fallback spellings, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
  * contract is already the SPEC's — the renderer validates it against

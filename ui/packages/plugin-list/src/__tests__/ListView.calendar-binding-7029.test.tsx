@@ -97,8 +97,15 @@ async function calendarProps(schema: Record<string, any>) {
     </SchemaRendererProvider>,
   );
   await waitFor(() => expect(captured.length).toBeGreaterThan(0));
-  return captured[captured.length - 1].schema;
+  // objectstack#25923 — the binding goes out as the node's own `calendar` block,
+  // never flat (the spec refuses the five flat on `object-calendar`). The rows
+  // below read the block; this guard reds if a flat spelling comes back.
+  const node = captured[captured.length - 1].schema;
+  for (const key of CALENDAR_FLAT_KEYS) expect(node, `flat ${key} on the node`).not.toHaveProperty(key);
+  return node.calendar ?? {};
 }
+
+const CALENDAR_FLAT_KEYS = ['startDateField', 'endDateField', 'titleField', 'colorField', 'allDayField'] as const;
 
 const queryViewOption = (name: string) =>
   screen.queryByRole('tab', { name }) ?? screen.queryByRole('button', { name });

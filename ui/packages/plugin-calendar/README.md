@@ -321,12 +321,14 @@ of its own — the only lever there is `sourceView`, pointed at a view that
 declares the block (objectui#8170).
 
 The same five keys written flat on the node are **not** a second way to author
-this. That flat spelling is the runtime handoff — `ObjectView` and `ListView`
-emit it on the node they build, and `getCalendarConfig` falls back to it only
-when the node has no `calendar` block — so `ObjectCalendarSchema` declares it
-because the renderer reads it. `@objectstack/spec` refuses it at authoring with
-`unrecognized_keys` and names the `calendar` block in the same diagnostic (one
-key per concept, its Prime Directive #12).
+this. `@objectstack/spec` refuses them at authoring with `unrecognized_keys` and
+names the `calendar` block in the same diagnostic (one key per concept, its
+Prime Directive #12), and since objectstack#25923 `ObjectCalendarSchema` does
+not declare them flat either: `ObjectView` and `ListView` emit the `calendar`
+block on the node they build. `getCalendarConfig` still falls back to the flat
+spelling when a node has no `calendar` block, for a host that mounts the
+renderer directly; that read is typed on this package's own hand-off type,
+`ObjectCalendarHandoff`, not on the published schema.
 
 ```typescript
 import type { ObjectCalendarSchema } from '@object-ui/types';

@@ -2583,6 +2583,9 @@ const pt = {
       invitationDescription: "Use o e-mail para o qual o convite foi enviado.",
       invitationSignUpButton: "Criar conta e participar",
       invitationSignInDivider: "ou entre com uma conta existente",
+      invitationPreviewTitle: "{{inviter}} convidou você para participar de {{organization}}",
+      invitationPreviewTitleNoInviter: "Você foi convidado para participar de {{organization}}",
+      invitationPreviewDescription: "Use o e-mail para o qual o convite foi enviado ({{email}}).",
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2595,6 +2598,7 @@ const pt = {
       description: "Digite suas informações para começar",
       invitationTitle: "Crie uma conta para participar",
       invitationDescription: "Cadastre-se com o e-mail para o qual o convite foi enviado. Ele só pode ser aceito com esse endereço.",
+      invitationPreviewDescription: "Cadastre-se com o e-mail para o qual o convite foi enviado ({{email}}). Ele só pode ser aceito com esse endereço.",
       nameLabel: "Nome",
       namePlaceholder: "João Silva",
       emailLabel: "E-mail",

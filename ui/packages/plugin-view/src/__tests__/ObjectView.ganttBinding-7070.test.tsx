@@ -79,6 +79,21 @@ async function renderGanttView(view: Record<string, unknown>) {
   return rendered[rendered.length - 1];
 }
 
+/**
+ * The emitted binding. objectstack#25923: it goes out as the node's own `gantt`
+ * block, never flat (the spec refuses every `GanttConfig` key flat on
+ * `object-gantt`), and only once BOTH dates are declared — the condition the
+ * renderer's flat branch applied before it drew. The guard reds if a flat
+ * spelling comes back.
+ */
+const blockOf = (node: any): Record<string, any> => {
+  for (const key of ['startDateField', 'endDateField', 'titleField', 'progressField', 'dependenciesField']) {
+    expect(node, `flat ${key} on the node`).not.toHaveProperty(key);
+  }
+  return node.gantt ?? {};
+};
+const AXIS = { startDateField: 'planned_start', endDateField: 'planned_end' } as const;
+
 describe('ObjectView.generateViewSchema — gantt restates only a DECLARED binding (objectui#7070)', () => {
   it('invents NO date binding for a gantt view that declares no config', async () => {
     const schema = await renderGanttView({});
@@ -86,8 +101,8 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
     // Both used to be fabricated here. Absent bindings are the only route to
     // `ObjectGantt`'s refusal screen — measured to exist before this deletion,
     // and pinned in `plugin-gantt/src/ObjectGantt.unconfiguredRefusal-7070`.
-    expect(schema.startDateField).toBeUndefined();
-    expect(schema.endDateField).toBeUndefined();
+    expect(blockOf(schema).startDateField).toBeUndefined();
+    expect(blockOf(schema).endDateField).toBeUndefined();
   });
 
   it('invents no date binding for an EMPTY gantt block', async () => {
@@ -99,8 +114,8 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
     // job a declared-config control exists to do. Written the wrong way, THIS
     // case would have passed while measuring nothing at all.
     const schema = await renderGanttView({ gantt: {} });
-    expect(schema.startDateField).toBeUndefined();
-    expect(schema.endDateField).toBeUndefined();
+    expect(blockOf(schema).startDateField).toBeUndefined();
+    expect(blockOf(schema).endDateField).toBeUndefined();
   });
 
   it('OMITS `progress` / `dependencies` rather than inventing them — the retirement #7070 left a slot for (objectui#7499)', async () => {
@@ -123,13 +138,13 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
     // and no diagnostic. Omission keeps the legitimate absence rendering
     // exactly as before and stops inventing the name.
     const schema = await renderGanttView({});
-    expect(schema.progressField).toBeUndefined();
-    expect(schema.dependenciesField).toBeUndefined();
+    expect(blockOf(schema).progressField).toBeUndefined();
+    expect(blockOf(schema).dependenciesField).toBeUndefined();
     // Absent, not present-and-undefined. `getGanttConfig`'s flat branch reads
-    // `schema.dependenciesField || schema.dependencyField`, so whether the key
+    // `blockOf(schema).dependenciesField || schema.dependencyField`, so whether the key
     // is PRESENT is a different fact about this config than what it holds.
-    expect(Object.keys(schema)).not.toContain('progressField');
-    expect(Object.keys(schema)).not.toContain('dependenciesField');
+    expect(Object.keys(blockOf(schema))).not.toContain('progressField');
+    expect(Object.keys(blockOf(schema))).not.toContain('dependenciesField');
   });
 
   it('CONTROL: a DECLARED `progressField` / `dependenciesField` still passes verbatim (objectui#7499)', async () => {
@@ -137,19 +152,19 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
     // see the pair on the rendered schema, so reading `undefined` above is a
     // measurement rather than a probe that never had anything to find.
     const schema = await renderGanttView({
-      gantt: { progressField: 'percent_done', dependenciesField: 'depends_on' },
+      gantt: { ...AXIS, progressField: 'percent_done', dependenciesField: 'depends_on' },
     });
-    expect(schema.progressField).toBe('percent_done');
-    expect(schema.dependenciesField).toBe('depends_on');
+    expect(blockOf(schema).progressField).toBe('percent_done');
+    expect(blockOf(schema).dependenciesField).toBe('depends_on');
   });
 
   it('CONTROL: declaring ONE of the pair leaves the other absent, not fabricated (objectui#7499)', async () => {
     // The class predicate's mixed case, the one the floors used to erase: a
     // view that declares progress but not dependencies got `'dependencies'`
     // handed down anyway.
-    const schema = await renderGanttView({ gantt: { progressField: 'percent_done' } });
-    expect(schema.progressField).toBe('percent_done');
-    expect(schema.dependenciesField).toBeUndefined();
+    const schema = await renderGanttView({ gantt: { ...AXIS, progressField: 'percent_done' } });
+    expect(blockOf(schema).progressField).toBe('percent_done');
+    expect(blockOf(schema).dependenciesField).toBeUndefined();
   });
 
   it('CONTROL: forwards a declared gantt block unchanged', async () => {
@@ -157,14 +172,19 @@ describe('ObjectView.generateViewSchema — gantt restates only a DECLARED bindi
       gantt: { startDateField: 'planned_start', endDateField: 'planned_end', titleField: 'subject' },
     });
     expect(schema.type).toBe('object-gantt');
-    expect(schema.startDateField).toBe('planned_start');
-    expect(schema.endDateField).toBe('planned_end');
-    expect(schema.titleField).toBe('subject');
+    expect(blockOf(schema).startDateField).toBe('planned_start');
+    expect(blockOf(schema).endDateField).toBe('planned_end');
+    expect(blockOf(schema).titleField).toBe('subject');
   });
 
-  it('CONTROL: a partially declared axis keeps its declared half and only that', async () => {
-    const schema = await renderGanttView({ gantt: { startDateField: 'planned_start' } });
-    expect(schema.startDateField).toBe('planned_start');
-    expect(schema.endDateField).toBeUndefined();
+  it('CONTROL: a partially declared axis hands no block, and the full axis floors `titleField` (objectstack#25923)', async () => {
+    // Before objectstack#25923 the declared half went out flat, and the
+    // renderer's flat branch, needing both dates, refused it; the block is held
+    // back under that same condition, so the outcome on screen is unchanged.
+    expect((await renderGanttView({ gantt: { startDateField: 'planned_start' } })).gantt).toBeUndefined();
+    // …an axis-less config hands nothing either…
+    expect((await renderGanttView({ gantt: { progressField: 'percent_done' } })).gantt).toBeUndefined();
+    // …and with both dates the block carries the flat branch's own `'name'` floor.
+    expect(blockOf(await renderGanttView({ gantt: { ...AXIS } }))).toEqual({ ...AXIS, titleField: 'name' });
   });
 });

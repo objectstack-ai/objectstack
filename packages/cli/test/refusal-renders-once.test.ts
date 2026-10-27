@@ -216,20 +216,22 @@ const FILES = commandFiles(COMMANDS_DIR);
 const SCANS = FILES.map((file) => ({ file: relative(PKG_ROOT, file), scan: scanRefusalPairs(file, readFileSync(file, 'utf8')) }));
 
 /**
- * Floors, measured on `fd5a1cd597`: 65 command modules, 57 of them calling a
- * refusal printer, and `this.error` raised from 3 (`os datasource introspect`,
- * `list-tables`, `validate`) once `init.ts` and `compile.ts` stopped. A scan
- * that silently finds nothing reports zero pairs, and zero passes every
- * assertion below; these are what notice. A drop below them is a broken
- * detector or a deliberate removal — say which when you lower one.
+ * Vacuity floors, not counts of today. A scan that silently finds nothing
+ * reports zero pairs, and zero passes every assertion below; these are what
+ * notice. Each sits at about two thirds of its measured count, so deleting a
+ * command is an ordinary green change while a walk or scan that resolves
+ * nothing is not. `this.error` is raised from only 3 modules (`os datasource
+ * introspect`, `list-tables`, `validate`), too few for a fraction, so that
+ * floor only says the population is not empty. Raise one only alongside a
+ * reason that the smaller number is impossible.
  */
-const FILE_FLOOR = 60;
-const PRINTER_FILE_FLOOR = 50;
-const ERROR_FILE_FLOOR = 3;
+const FILE_FLOOR = 48; // measured 72 on 2026-10-27 (`185512cc`)
+const PRINTER_FILE_FLOOR = 42; // measured 64 on 2026-10-27 (`185512cc`)
+const ERROR_FILE_FLOOR = 1; // non-empty: measured 3 on 2026-10-27 (`185512cc`)
 
 describe('no command renders a refusal and also raises it with this.error', () => {
   it('the population is not vacuous — the floors hold', () => {
-    expect(FILES.length, 'fewer command modules than this pin was written over').toBeGreaterThanOrEqual(FILE_FLOOR);
+    expect(FILES.length, 'fewer command modules than the vacuity floor').toBeGreaterThanOrEqual(FILE_FLOOR);
     expect(SCANS.filter((s) => s.scan.printerCalls > 0).length, 'refusal printers not found').toBeGreaterThanOrEqual(PRINTER_FILE_FLOOR);
     expect(SCANS.filter((s) => s.scan.errorCalls > 0).length, '`this.error` not found').toBeGreaterThanOrEqual(ERROR_FILE_FLOOR);
   });

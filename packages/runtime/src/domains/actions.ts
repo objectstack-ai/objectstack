@@ -82,6 +82,7 @@ import {
     refuseUngrantedActivationWrite,
     refuseUngrantedActivationAuthoring,
     readActivationBody,
+    activationWriteContext,
     ACTION_ACTIVATION_SUBJECT,
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -255,12 +256,17 @@ async function handleActionActivationWrite(
     }
     try {
         // An action no package ships carries NO package key: absent is the
-        // ledger's one spelling for it, and the store writes `null`.
-        await ql.setActionActive({
-            name: actionName,
-            ...(packageId !== undefined ? { packageId } : {}),
-            active: enabled,
-        });
+        // ledger's one spelling for it, and the store writes `null`. The write
+        // runs for the caller, elevated, so the row and its audit row name the
+        // administrator who switched the action (`activationWriteContext`).
+        await ql.setActionActive(
+            {
+                name: actionName,
+                ...(packageId !== undefined ? { packageId } : {}),
+                active: enabled,
+            },
+            { context: activationWriteContext(context) },
+        );
     } catch (err: unknown) {
         // A failed write must never read as a successful flip, and its code and
         // status must say the same thing (ADR-0112). The one shared rule

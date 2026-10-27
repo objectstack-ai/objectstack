@@ -30,7 +30,10 @@
  * (`?redirect=/accept-invitation/ID`) is greeted for that invitation instead
  * of as a returning user, and, where sign-up is offered, gets app-shell's
  * `InvitationSignUpPrompt` above the form in place of the small "Sign up"
- * link — the same prompt `DefaultLoginPage` shows (#25886).
+ * link — the same prompt `DefaultLoginPage` shows (#25886). The greeting
+ * names the organization and the inviter when the signed-out invitation
+ * preview answers, with the masked invited address as the one to use (#26473,
+ * app-shell's `useInvitationPreview`); otherwise it keeps the generic copy.
  *
  * Layout (objectui#12600): one 400 px column — brand mark, the card, a footer.
  * The card carries this page's own two-line header, so `<LoginForm>` renders
@@ -60,6 +63,8 @@ import {
   needsBootstrapProbe,
   useBootstrapStatus,
   InvitationSignUpPrompt,
+  invitationArrivalCopy,
+  useInvitationPreview,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
@@ -153,6 +158,11 @@ export function LoginPage() {
     hasBootstrapped && !user && needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
+  const invitationPreview = useInvitationPreview(redirect);
+  const invitationCopy = invitationRedirect
+    ? invitationArrivalCopy('login', invitationPreview, t)
+    : null;
 
   // Detect SSO hand-off so we can surface the relying-party host.
   const ssoTarget = useMemo(() => {
@@ -327,15 +337,13 @@ export function LoginPage() {
             <>
               <div className="mb-5">
                 <h1 className="text-xl font-semibold tracking-tight text-foreground">
-                  {invitationRedirect
-                    ? t('auth.login.invitationTitle', { defaultValue: 'Accept your invitation' })
+                  {invitationCopy
+                    ? invitationCopy.title
                     : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
                 </h1>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  {invitationRedirect
-                    ? t('auth.login.invitationDescription', {
-                        defaultValue: 'Use the email address the invitation was sent to.',
-                      })
+                  {invitationCopy
+                    ? invitationCopy.description
                     : t('auth.login.welcomeDescription', {
                         defaultValue: 'Sign in to continue your work',
                       })}

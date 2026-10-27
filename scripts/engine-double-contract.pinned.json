@@ -732,6 +732,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.diff-missing-version.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-missing-version.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.diff-missing-version.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts",
       "verb": "delete",
       "pinned": 1

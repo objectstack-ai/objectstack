@@ -151,8 +151,8 @@ beforeEach(() => {
 describe('1 · a block key named like a node key no longer overrides the node (objectui#6152 round 14)', () => {
   const ARMS: Array<[(typeof KINDS)[number], Record<string, unknown>, (node: Record<string, any>) => void]> = [
     ['object-kanban', { options: { kanban: { groupByField: 'owner', objectName: HIJACK } } }, (n) => expect(n.groupBy).toBe('owner')],
-    ['object-calendar', { options: { calendar: { startDateField: 'due', objectName: HIJACK } } }, (n) => expect(n.startDateField).toBe('due')],
-    ['object-gantt', { options: { gantt: { startDateField: 'due', endDateField: 'due', objectName: HIJACK } } }, (n) => expect(n.startDateField).toBe('due')],
+    ['object-calendar', { options: { calendar: { startDateField: 'due', objectName: HIJACK } } }, (n) => expect(n.calendar?.startDateField).toBe('due')],
+    ['object-gantt', { options: { gantt: { startDateField: 'due', endDateField: 'due', objectName: HIJACK } } }, (n) => expect(n.gantt?.startDateField).toBe('due')],
     ['object-tree', { options: { tree: { parentField: 'parent', objectName: HIJACK } } }, (n) => expect(n.parentField).toBe('parent')],
     ['object-grid', { options: { grid: { objectName: HIJACK } } }, () => {}],
   ];
@@ -178,10 +178,11 @@ describe('2 · the declared keys keep their route (objectui#6152 round 14)', () 
 
   it('calendar: `colorField` and `allDayField` reach the calendar, from either nesting', async () => {
     const top = await generatedNode('object-calendar', { calendar: { startDateField: 'due', colorField: 'stage', allDayField: 'amount' } });
-    expect([top.colorField, top.allDayField]).toEqual(['stage', 'amount']);
+    // objectstack#25923 — the five ride the node's own `calendar` block, never flat.
+    expect([top.calendar?.colorField, top.calendar?.allDayField]).toEqual(['stage', 'amount']);
     cleanup();
     const bag = await generatedNode('object-calendar', { options: { calendar: { startDateField: 'due', colorField: 'stage', allDayField: 'amount' } } });
-    expect([bag.colorField, bag.allDayField]).toEqual(['stage', 'amount']);
+    expect([bag.calendar?.colorField, bag.calendar?.allDayField]).toEqual(['stage', 'amount']);
   });
 
   it('gantt: EVERY key the spec declares on the block reaches the gantt, the block winning over the bag per key', async () => {
@@ -192,7 +193,10 @@ describe('2 · the declared keys keep their route (objectui#6152 round 14)', () 
     const block = Object.fromEntries(declared.map((k) => [k, `BLOCK_${k}`]));
     const bag = Object.fromEntries(declared.map((k) => [k, `BAG_${k}`]));
     const node = await generatedNode('object-gantt', { gantt: block, options: { gantt: { ...bag, onlyInTheBag: 'x' } } });
-    for (const k of declared) expect(node[k], k).toBe(`BLOCK_${k}`);
+    // objectstack#25923 — they reach it as the node's own `gantt` block, never flat.
+    for (const k of declared) expect(node.gantt?.[k], k).toBe(`BLOCK_${k}`);
+    for (const k of declared) expect(k in node, `flat ${k}`).toBe(false);
+    expect('onlyInTheBag' in node.gantt).toBe(false);
     expect('onlyInTheBag' in node).toBe(false);
   });
 });
@@ -229,12 +233,15 @@ describe('3 · the retired keys reach nothing (objectui#6152 round 14)', () => {
 
   it('calendar: `defaultView` is not lifted, from either nesting, and an undeclared key is not forwarded', async () => {
     const top = await generatedNode('object-calendar', { calendar: { startDateField: 'due', defaultView: 'week', zzzUndeclared: 1 } });
-    expect(top.startDateField).toBe('due');
-    expect('defaultView' in top).toBe(false);
-    expect('zzzUndeclared' in top).toBe(false);
+    expect(top.calendar?.startDateField).toBe('due');
+    for (const where of [top, top.calendar]) {
+      expect('defaultView' in where).toBe(false);
+      expect('zzzUndeclared' in where).toBe(false);
+    }
     cleanup();
     const bag = await generatedNode('object-calendar', { options: { calendar: { startDateField: 'due', defaultView: 'week' } } });
     expect('defaultView' in bag).toBe(false);
+    expect('defaultView' in bag.calendar).toBe(false);
   });
 
   it('gallery: a bag `imageField` binds no cover on the node; `coverField` does, nested', async () => {

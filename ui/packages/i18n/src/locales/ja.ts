@@ -2536,6 +2536,9 @@ const ja = {
       invitationDescription: "招待を受け取ったメールアドレスをご利用ください。",
       invitationSignUpButton: "アカウントを作成して参加",
       invitationSignInDivider: "または既存のアカウントでサインイン",
+      invitationPreviewTitle: "{{inviter}} さんから {{organization}} への招待が届いています",
+      invitationPreviewTitleNoInviter: "{{organization}} への招待が届いています",
+      invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）をご利用ください。",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2548,6 +2551,7 @@ const ja = {
       description: "情報を入力して始めましょう",
       invitationTitle: "アカウントを作成して参加する",
       invitationDescription: "招待を受け取ったメールアドレスで登録してください。招待はそのアドレスでのみ承諾できます。",
+      invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）で登録してください。招待はそのアドレスでのみ承諾できます。",
       nameLabel: "名前",
       namePlaceholder: "田中太郎",
       emailLabel: "メールアドレス",

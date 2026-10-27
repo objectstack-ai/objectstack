@@ -19,7 +19,9 @@
  * is greeted for that invitation instead of as a returning user, and, where
  * sign-up is offered, gets `InvitationSignUpPrompt` (`./invitationArrival`)
  * above the form in place of the small "Sign up" link (#25886). The console's
- * own login page does the same.
+ * own login page does the same. The greeting names the organization and the
+ * inviter when the signed-out invitation preview answers (#26473,
+ * `useInvitationPreview`), and keeps the generic copy when it does not.
  */
 
 import { useEffect, useState } from 'react';
@@ -39,7 +41,11 @@ import { AuthPageLayout } from './AuthPageLayout.js';
 import { signInRefusalMessages } from './signInRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
-import { InvitationSignUpPrompt } from './invitationArrival.js';
+import {
+  InvitationSignUpPrompt,
+  invitationArrivalCopy,
+  useInvitationPreview,
+} from './invitationArrival.js';
 
 const RouterLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <Link to={href} className={className}>{children}</Link>
@@ -120,6 +126,8 @@ export function LoginPage() {
   // did not come from an invitation; see `./signUpOffer`.
   const invitationRedirect = isInvitationRedirect(redirect);
   const bootstrap = useBootstrapStatus(!user && needsBootstrapProbe(authConfig, invitationRedirect));
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
+  const invitationPreview = useInvitationPreview(redirect);
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
 
   // Carry `?redirect=` into the sign-up link: it is how `/register` knows the
@@ -195,16 +203,15 @@ export function LoginPage() {
 
   if (!invitationRedirect) return <AuthPageLayout>{form}</AuthPageLayout>;
 
+  const invitationCopy = invitationArrivalCopy('login', invitationPreview, t);
+
   return (
     <AuthPageLayout>
       <div
         data-testid="login-invitation-arrival"
         className="mx-auto flex w-full flex-col justify-center space-y-6 sm:max-w-[400px]"
       >
-        <AuthFormHeader
-          title={t('auth.login.invitationTitle')}
-          description={t('auth.login.invitationDescription')}
-        />
+        <AuthFormHeader title={invitationCopy.title} description={invitationCopy.description} />
         {invitationSignUpUrl ? <InvitationSignUpPrompt registerUrl={invitationSignUpUrl} /> : null}
         {form}
       </div>
