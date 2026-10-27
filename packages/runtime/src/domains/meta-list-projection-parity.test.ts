@@ -226,6 +226,8 @@ const BUNDLE: Record<string, any> = {
         positions: { sales_rep: { label: '销售代表' } },
         permissions: { crm_sales_user: { label: '销售用户' } },
         reports: { opps_by_stage: { label: '各阶段商机' } },
+        // [#26690] A doc book's title and section titles.
+        books: { help_center: { label: '帮助中心', groups: { start: { label: '开始' } } } },
     },
 };
 
@@ -688,6 +690,12 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         // [#25788] So is a report — the list the console's report index reads.
         const zhReports = await read('/meta/reports', {}, { 'accept-language': 'zh-CN' });
         expect(zhReports.items?.find((r: any) => r.name === 'opps_by_stage')?.label).toBe('各阶段商机');
+        // [#26690] So is a doc book — the list the console's docs sidebar is built from.
+        const zhBooks = await read('/meta/books', {}, { 'accept-language': 'zh-CN' });
+        const zhHelp = zhBooks.items?.find((b: any) => b.name === 'help_center');
+        expect([zhHelp?.label, zhHelp?.groups?.map((g: any) => g.label)]).toEqual(['帮助中心', ['开始']]);
+        const enHelp = (await read('/meta/book', {}, { 'accept-language': 'en-US' })).items?.find((b: any) => b.name === 'help_center');
+        expect([enHelp?.label, enHelp?.groups?.map((g: any) => g.label)]).toEqual(['Help Centre', ['Start']]);
     });
 });
 
@@ -1005,6 +1013,7 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
         expect((await read('/meta/position/sales_rep', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售代表');
         expect((await read('/meta/permission/crm_sales_user', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售用户');
         expect((await read('/meta/report/opps_by_stage', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('各阶段商机');
+        expect((await read('/meta/book/help_center', {}, { 'accept-language': 'zh-CN' })).item?.groups?.[0]?.label).toBe('开始');
         const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
         expect(zhDoc.item?.label).toBe('入门');
         expect(text(zhDoc)).not.toContain('"translations"');
@@ -1235,6 +1244,18 @@ describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route Re
         const member = await bootRest('non-holder').read('/meta/book/admin_guide/tree');
         expect({ status: member.status, code: member.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
         expect(text(await bootRest('holder').read('/meta/book/admin_guide/tree'))).toContain('crm_admin_runbook');
+    });
+
+    it('[#26690] the tree serves the request locale: a zh-CN reader gets the book title and section titles, an en-US reader the authored ones', async () => {
+        for (const [transport, boot] of [['rest', bootRest], ['dispatcher', bootDispatcher]] as const) {
+            const zh = served(await boot('holder').read('/meta/book/help_center/tree', {}, { 'accept-language': 'zh-CN' }), transport) as any;
+            expect([zh?.label, zh?.groups?.map((g: any) => g.label)], transport).toEqual(['帮助中心', ['开始']]);
+            // The entry beneath keeps its own `doc.translations` localization.
+            expect(zh?.groups?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['入门']);
+            const en = served(await boot('holder').read('/meta/book/help_center/tree', {}, { 'accept-language': 'en-US' }), transport) as any;
+            expect([en?.label, en?.groups?.map((g: any) => g.label)], transport).toEqual(['Help Centre', ['Start']]);
+            expect(en?.groups?.[0]?.entries?.map((e: any) => e.label), transport).toEqual(['Getting started']);
+        }
     });
 });
 
