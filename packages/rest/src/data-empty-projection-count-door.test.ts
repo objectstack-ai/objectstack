@@ -15,7 +15,7 @@
  * | `GET ?$count=maybe`, `?$count=1`, `?count=` (with `$top`) | 200, `total` reported | 400 naming the spelling |
  * | `POST {"select":""}`, `{"fields":[]}` | 200, every column | 400 naming the key |
  * | `POST {"count":"maybe"}` | 400 `VALIDATION_FAILED` (the body schema) | unchanged |
- * | `GET /:id?select=`, `?select=,` | 200, every column | `VALIDATION_ERROR` naming `select`, at this route's 404 (it rewrites every 400, as for `?select=nope`) |
+ * | `GET /:id?select=`, `?select=,` | 200, every column | `VALIDATION_ERROR` naming `select`, at this route's 404 (it rewrote every 400, as for `?select=nope`); 400 since #26816 |
  * | `GET ?$select=label`, `?$count=true` / `false`, absent; `GET /:id?select=label` | 200 | unchanged |
  *
  * The per-spelling pin with a recording engine is `metadata-protocol`'s
@@ -168,12 +168,12 @@ describe('[#26644] an empty projection and an unrecognised count flag on the Dat
   });
 
   it("GET by id: VALIDATION_ERROR naming `select`, at the status this route gives every projection refusal — no read", async () => {
-    // This route's catch rewrites every 400 into a 404 (`crud-routes.ts`: "a
-    // bad id is a miss"), so its projection refusals already answer 404 — an
-    // unknown `select` field included. The empty projection joins that answer
-    // rather than inventing a second one here; the code is what differs.
+    // The same status as an unknown `select` field; the code is what differs.
+    // That status is 400 since #26816 (the catch used to rewrite every 400
+    // into a 404; `data-record-read-malformed-query-door.test.ts`).
     const unknownField = await byId({ select: 'nope' });
     expect(unknownField.body.code, JSON.stringify(unknownField.body)).toBe('INVALID_FIELD');
+    expect(unknownField.status).toBe(400);
     const before = reads.n;
     for (const select of ['', ',']) {
       const res = await byId({ select });

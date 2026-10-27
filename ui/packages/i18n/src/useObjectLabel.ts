@@ -623,6 +623,21 @@ export function useObjectLabel() {
     },
 
     /**
+     * Resolve the translated reason a greyed action gives — its declared
+     * `disabledReason` (objectstack#26619), shown while its `disabled`
+     * predicate is TRUE. Convention:
+     * `{ns}.objects.{objectName}._actions.{actionName}.disabledReason`; with no
+     * key object, `{ns}.globalActions.{actionName}.disabledReason`. Falls back
+     * to the metadata's literal string; undefined when nothing resolves, so the
+     * caller shows its own default reason.
+     */
+    actionDisabledReason: (objectName: string | undefined, actionName: string, fallback?: string) => {
+      const fb = fallback ?? '';
+      const resolved = resolve(actionSuffixes(objectName, actionName, 'disabledReason'), fb);
+      return resolved || undefined;
+    },
+
+    /**
      * Resolve a translated copy of an action's post-success RESULT DIALOG
      * (`title` / `description` / `acknowledge` + per-field labels).
      * Convention: `{ns}.objects.{objectName}._actions.{actionName}.resultDialog.*`;

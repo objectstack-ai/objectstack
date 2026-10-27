@@ -389,6 +389,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                                 return prot.getMetaItems(request);
                             },
                             requestLocale: (i18n) => this.extractLocale(req, i18n),
+                            // [#26690] The book's own labels, from the bundle's `books` group.
+                            resolveI18nService: () => this.resolveI18nService(environmentId, req),
                         },
                         { name: req.params.name, packageId },
                     );

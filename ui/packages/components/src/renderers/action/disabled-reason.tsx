@@ -31,6 +31,13 @@
  *   and the menu's roving focus skips a disabled item, so the keyboard never
  *   reaches it.
  *
+ * The text is the action's declared `disabledReason` (objectstack#26619), its
+ * `I18nLabel` map collapsed to the active language, and the generic
+ * `actions.notAvailableForRecord` sentence when the action declares none (or
+ * declares a blank one). These four renderers read the action as authored, so
+ * an inline locale map is the translation they honour; the surfaces that run
+ * actions through `useActionTextLocalizer` hand them the bundle's sentence.
+ *
  * Which `disabled` earns the reason is each caller's to say, and the answer is
  * the same at all four: only the DECLARED `disabled` predicate, evaluated true.
  * That verdict is a fact about the record. The host's forwarded `disabled` and
@@ -45,12 +52,12 @@
  */
 
 import React from 'react';
-import { useSafeTranslate } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../ui';
 
 /** A reason to show, with the ids the control's ARIA attributes point at. */
 export interface DisabledReason {
-  /** The localized reason text. */
+  /** The localized reason text: the declared reason, else the generic one. */
   text: string;
   /** Id of the element holding the reason — the control's description. */
   id: string;
@@ -62,15 +69,23 @@ export interface DisabledReason {
  * The reason for a control, or `undefined` when it gives none.
  *
  * `disabledByPredicate` is the caller's DECLARED-`disabled` verdict alone, never
- * the OR it hands the control's `disabled` prop. A hook, so call it with the
- * other hooks, ahead of any early return.
+ * the OR it hands the control's `disabled` prop. `declaredReason` is the
+ * action's `disabledReason` as authored (a string or an inline locale map). A
+ * hook, so call it with the other hooks, ahead of any early return.
  */
-export function useDisabledReason(disabledByPredicate: boolean): DisabledReason | undefined {
+export function useDisabledReason(
+  disabledByPredicate: boolean,
+  declaredReason?: unknown,
+): DisabledReason | undefined {
   const tt = useSafeTranslate();
+  const { language } = useObjectTranslation();
   const id = React.useId();
   if (!disabledByPredicate) return undefined;
+  const declared = pickLocalized(declaredReason, language);
   return {
-    text: tt('actions.notAvailableForRecord', 'Not available for this record'),
+    text: declared.trim() !== ''
+      ? declared
+      : tt('actions.notAvailableForRecord', 'Not available for this record'),
     id: `${id}-reason`,
     labelId: `${id}-label`,
   };

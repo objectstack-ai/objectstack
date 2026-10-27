@@ -1141,9 +1141,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const answer = await createMetaBookTreeAnswer(
                 {
                     ...metaItemReadGateSources(deps, _context, protocol),
+                    // [#26690] The translation I/O the item and list reads use: the
+                    // tree translates its book (the bundle's `books` group) the same way.
+                    ...metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
                     listTreeInput: (type, scopedPackageId) =>
                         Promise.resolve(protocol.getMetaItems!({ type, ...(scopedPackageId ? { packageId: scopedPackageId } : {}) })),
-                    requestLocale: (i18n) => metaRequestLocale({ headers: _context.request?.headers, query }, i18n),
                 },
                 { name: decodeMetaNameSegment(parts[1]), packageId },
             );

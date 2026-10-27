@@ -3926,7 +3926,8 @@ export function createMetaLayeredAnswer(
 // ── THE book tree ─────────────────────────────────────────────────────────────
 
 /** Everything {@link createMetaBookTreeAnswer} reads, supplied by the transport. */
-export interface MetaBookTreeSources extends MetaReadGateAudienceSources {
+export interface MetaBookTreeSources
+    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'> {
     /**
      * One list read of `type` for the tree, env-wide, scoped to `packageId` when
      * the request names one (`?package=`, ADR-0048). A THROW propagates: an
@@ -3972,7 +3973,13 @@ export type MetaBookTreeAnswer =
  *     (fail closed when holdings cannot be resolved, ADR-0049).
  *  4. Every doc (the same package scope), collapsed to the request's locale and
  *     reduced to the header the tree renders.
- *  5. The tree, its ENTRIES narrowed by each doc's effective audience, so a
+ *  5. [#26690] The book itself in the request's locale — its `label` and each
+ *     group's `label` from the bundle's `books` group — through
+ *     {@link translateMetaDocument}, the table every `/meta/book` read
+ *     translates through, so the tree and the list the console's sidebar
+ *     draws cannot disagree. Translated AFTER the gate: the audience is
+ *     judged on the book as stored, and a label is not an access input.
+ *  6. The tree, its ENTRIES narrowed by each doc's effective audience, so a
  *     reader never sees an entry that would refuse them on fetch.
  */
 export async function createMetaBookTreeAnswer(
@@ -4003,5 +4010,7 @@ export async function createMetaBookTreeAnswer(
             tags: d.tags,
             packageId: d._packageId,
         }));
-    return { ok: true, tree: audience.readableTree(book, docs) };
+    // A book has no packaged base (`PACKAGED_BASE_ACCESSORS`), so the protocol is never asked for.
+    const served = await translateMetaDocument({ ...sources, resolveProtocol: async () => undefined }, 'book', book);
+    return { ok: true, tree: audience.readableTree(served as typeof book, docs) };
 }
