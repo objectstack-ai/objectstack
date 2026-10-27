@@ -68,6 +68,7 @@ export {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  QUEUE_FIELD_DEF,
   injectedSystemColumnDefs,
   platformProvisionsStorage,
   resolveInjectedColumnProvenance,

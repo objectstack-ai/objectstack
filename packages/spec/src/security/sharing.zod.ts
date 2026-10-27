@@ -49,7 +49,8 @@ export const SharingRuleType = z.enum([
  * making it byte-equivalent to `edit`. An admin picking it in Setup was told
  * they had granted delete rights and had not; a level that validates and then
  * silently does nothing is an authoring trap (ADR-0078, ADR-0049) — the same
- * reason `ShareRecipientType` below dropped `queue` / `guest`.
+ * reason `ShareRecipientType` below dropped `guest`, and kept `queue` out until
+ * its implementation landed (ADR-0142 D7).
  *
  * This is also where the industry model lands: record sharing widens WHICH
  * ROWS a principal reaches, never WHICH VERBS they may use. Salesforce sharing
@@ -93,6 +94,15 @@ export const SharingLevel = enumWithRetiredValues([
  * - `unit_and_subordinates` — a business unit plus every descendant unit's
  *   members (ADR-0057 D5 subtree widening).
  * - `business_unit` — exactly one business unit's members (no subtree).
+ * - `queue` — every member of an ownership queue (ADR-0142 D7), named by its
+ *   machine name: a declared queue (`QueueSchema`) or an organization's
+ *   `sys_queue` row. Expanded rule-wide through the queue service, the one
+ *   expander every queue consumer reads, and re-materialised when the
+ *   queue's membership moves (a `sys_queue_member` write, or a write to a
+ *   membership table one of its members reads). It shares the rule's
+ *   criteria records with the queue's people; it does NOT confer the
+ *   sitting-record access a queue's members have on the records whose
+ *   `queue` column names it — that is the owner match's own path.
  * - `field` — the RECORD-RELATIVE recipient (maintainer ruling 2026-09-02,
  *   #14103): `value` names a user-typed field ON THE RECORD, and each record
  *   the rule's criteria match is shared with the user or users that column
@@ -120,8 +130,9 @@ export const SharingLevel = enumWithRetiredValues([
  * Removed (never enforced): `group` (renamed → `team`) and `guest` — anonymous
  * access is served by the public-form grant and share links, not sharing rules;
  * a guest recipient that silently no-ops is an authoring trap (ADR-0078). The
- * runtime contract additionally reserves `queue` (no `sys_queue` yet) — it is
- * deliberately NOT authorable until the implementation lands.
+ * authorable enum and the runtime `SharingRuleRecipientType` union are the same
+ * seven members since `queue` was re-admitted with its implementation
+ * (ADR-0142 D7).
  */
 export const ShareRecipientType = z.enum([
   'user',
@@ -129,6 +140,7 @@ export const ShareRecipientType = z.enum([
   'position',
   'unit_and_subordinates',
   'business_unit',
+  'queue',
   'field',
 ]);
 
@@ -203,7 +215,8 @@ const BaseSharingRuleSchema = strictObject(
   {
     type: ShareRecipientType,
     value: z.string().describe(
-      'The recipient principal: the id or code of the user / team / position / business unit — or, for ' +
+      'The recipient principal: the id or code of the user / team / position / business unit, the machine ' +
+      'name of a queue — or, for ' +
       "`type: 'field'`, the snake_case name of a user-typed field on the record whose value names the " +
       'user or users to share each matched record with',
     ),
@@ -217,6 +230,24 @@ const BaseSharingRuleSchema = strictObject(
     // spelled as a value — exactly what the ruling's ⛔ on a `manager` member
     // refuses). Scoped to `field`, so nothing that parsed before parses
     // differently: the other members' `value` stays the opaque string it was.
+    //
+    // [ADR-0142 D7] A `queue` recipient's `value` is a queue MACHINE NAME — the
+    // one name the queue is referenced by everywhere (D1) — so it carries the
+    // same snake_case grammar. A queue id or label would resolve nowhere and
+    // share with nobody.
+    if (recipient.type === 'queue') {
+      if (!/^[a-z][a-z0-9_]*$/.test(recipient.value)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value'],
+          message:
+            `\`sharedWith.value\` must name a queue by its machine name when \`type\` is 'queue' ` +
+            `(got ${JSON.stringify(recipient.value)}). A queue name is snake_case (\`support_intake\`): ` +
+            "the name a stack's `queues` entry declares or an organization's `sys_queue` row carries.",
+        });
+      }
+      return;
+    }
     if (recipient.type !== 'field') return;
     if (!/^[a-z_][a-z0-9_]*$/.test(recipient.value)) {
       ctx.addIssue({
@@ -269,7 +300,8 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
  * `@objectstack/formula` compiler at seed / `defineRule` time, and ENFORCED:
  * records matching the criteria materialise `sys_record_share` grants for the
  * resolved recipients. Supported recipients: `user` / `team` / `position` /
- * `unit_and_subordinates` / `business_unit` (ADR-0057 D5; ADR-0090 D3) — every
+ * `unit_and_subordinates` / `business_unit` (ADR-0057 D5; ADR-0090 D3) / `queue`
+ * (ADR-0142 D7) — every
  * authorable recipient expands at runtime (`plugin-sharing` `expandRecipient`)
  * — plus `field`, the record-relative recipient (#14103): resolved per matched
  * record from a user-typed column on it. Its services half, #15072, landed:

@@ -38,6 +38,11 @@ export const PUBLIC_FORM_SERVER_MANAGED_FIELDS: ReadonlySet<string> = new Set([
   // stamped a forged value moves the row behind another department's wall, and
   // a denylist entry added after the column ships is a hole with a release in it.
   'owning_business_unit_id',
+  // Queue anchor (ADR-0142 D3): with `owner_id` empty, a forged value parks
+  // the row in a queue the visitor chose — readable and editable by its
+  // members. A guest never supplies it; the endpoint doors refuse it in the
+  // ownership gate's guest branch, this door strips it.
+  'queue',
   // Tenant anchors — a forged value lands the row in another tenant.
   'organization_id',
   'tenant_id',

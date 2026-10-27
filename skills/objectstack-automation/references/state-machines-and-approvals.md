@@ -244,7 +244,7 @@ an id that does not exist gets.
 | `department` | A department + all descendant departments |
 | `manager`    | The submitter's manager (`sys_user.manager_id`) |
 | `field`      | User id read from a record field (`value` = field name). Resolved against the record's **live** state at node entry, so a field written mid-flow routes correctly; a multi-select user field fans out into one approver per user |
-| `queue`      | ⛔ Declared but never resolved — the slot routes to nobody. Do not author |
+| `queue`      | Members of ownership queue `value` at node entry; an empty queue adds nobody |
 | `expression` | A **CEL expression** resolved at node entry (`value` = the expression) — see **Dynamic approvers** below. Only `current.*` / `trigger.*` / `vars.*` roots are available; the optional `resolveAs: 'user'(default) \| 'department' \| 'position' \| 'team'` re-expands each resolved id through the graph |
 
 ### Dynamic approvers (`type: 'expression'`)
