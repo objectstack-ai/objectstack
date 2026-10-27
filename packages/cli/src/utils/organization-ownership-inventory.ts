@@ -758,6 +758,13 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_mailbox', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
   { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
+  // Ownership queues (`@objectstack/plugin-sharing`, ADR-0142): an organization
+  // authors its queues and their members, and the assignment engine writes its
+  // cursor, each under that organization. A member and a cursor name their
+  // queue or rule by name, not by id, so no parent anchors them.
+  { object: 'sys_queue', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_queue_member', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its queue by name, not by id; ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_assignment_cursor', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its rule by name, not by id; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 

@@ -23,7 +23,8 @@
  * order the report observed them ahead of the declared fields; the declared
  * fields are `task.object.ts`'s, with the author's own `created_at`; the
  * companion is the `hidden` + `system` text column the engine provisions. Its
- * size is the report's 25 — pinned, so a drift in either source is loud.
+ * size is the report's 25 plus the hidden ownership `queue` column injected
+ * since (ADR-0142 D3) — pinned, so a drift in either source is loud.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
@@ -87,7 +88,7 @@ function servedTaskFields(): Record<string, Record<string, unknown>> {
 /** The showcase Tasks default list's columns (`task.view.ts`). */
 const TASK_COLUMNS = ['title', 'project', 'assignee', 'status', 'priority', 'due_date', 'progress'];
 
-const HIDDEN = ['organization_id', 'owning_business_unit_id', '__search'];
+const HIDDEN = ['organization_id', 'owning_business_unit_id', 'queue', '__search'];
 const BUSINESS_REST = ['estimate_hours', 'done', 'start_date', 'end_date', 'location', 'cover', 'labels', 'notes', 'sync_status', 'sync_error'];
 const SYSTEM = ['created_by', 'updated_at', 'updated_by', 'owner_id', 'created_at'];
 
@@ -136,9 +137,9 @@ afterEach(() => {
 });
 
 describe('objectui#11810 — the filter field list: no hidden field, the view’s columns first, system fields last', () => {
-  it('the fixture is the reported shape: 25 fields, hidden system columns first (lit control)', () => {
+  it('the fixture is the reported shape: 25 fields plus `queue`, hidden system columns first (lit control)', () => {
     const served = servedTaskFields();
-    expect(Object.keys(served)).toHaveLength(25);
+    expect(Object.keys(served)).toHaveLength(26);
     expect(Object.keys(served)[0]).toBe('organization_id');
     for (const name of HIDDEN) expect(served[name]?.hidden, name).toBe(true);
   });

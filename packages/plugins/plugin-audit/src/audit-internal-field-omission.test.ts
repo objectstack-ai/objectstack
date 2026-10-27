@@ -40,8 +40,10 @@ import {
   SysVerification,
 } from '@objectstack/platform-objects/identity';
 import { SysEmail, SysIdentityEmail } from '@objectstack/platform-objects/audit';
+import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import { SECRET_MASK } from '@objectstack/objectql/core';
 import { installAuditWriters } from './audit-writers.js';
+import { KEY_MATERIAL_COPY_COLUMNS } from './key-material-copy.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 type Row = Record<string, unknown>;
@@ -351,5 +353,99 @@ describe('[#24625] the ledger CRUD mirror masks a mail log\'s body columns', () 
     await engine.insert('mail_body_control', { body_text: 'control-body' }, SYS);
     const created = parse(ledgerRows(storeFor, 'mail_body_control').filter((r) => r.action === 'create')[0].new_value);
     expect(created.body_text).toBe('control-body');
+  });
+});
+
+/**
+ * The key-material columns `key-material-copy.ts` lists are omitted from every
+ * ledger copy, as an `internal` field is. Same in-memory boot as above, over
+ * the REAL definitions; a control column proves the mirror still records the
+ * row, and a write of only the material still records that a change happened.
+ */
+describe('the ledger CRUD mirror omits encrypted key-material columns', () => {
+  const MATERIAL_CENSUS: Array<{ def: ObjectDef; material: string[]; control: string }> = [
+    { def: SysSecret as unknown as ObjectDef, material: ['ciphertext'], control: 'kms_key_id' },
+    { def: SysSetting as unknown as ObjectDef, material: ['value_enc'], control: 'locked_reason' },
+    { def: SysPlatformSetting as unknown as ObjectDef, material: ['value_enc'], control: 'locked_reason' },
+  ];
+
+  it('the writer-owned list is exactly the census, and each listed column is declared by its object', () => {
+    expect([...KEY_MATERIAL_COPY_COLUMNS.entries()].map(([o, c]) => [o, [...c]])).toEqual(
+      MATERIAL_CENSUS.map(({ def, material }) => [def.name, material]),
+    );
+    for (const { def, material } of MATERIAL_CENSUS) {
+      for (const column of material) expect(def.fields, `${def.name}.${column} is declared`).toHaveProperty(column);
+    }
+  });
+
+  describe.each(MATERIAL_CENSUS.map((c) => [c.def.name, c] as const))('%s', (_name, { def, material, control }) => {
+    it('create, update and delete record the control column and none of the material', async () => {
+      const { engine, storeFor } = await boot(def);
+      const created = await engine.insert(def.name, seedRow(def, material, control, 'create'), SYS);
+      const id = String(created.id);
+      const changed = seedRow(def, material, control, 'update');
+      const patch: Row = { [control]: changed[control] };
+      for (const column of material) patch[column] = changed[column];
+      await engine.update(def.name, patch, { where: { id }, ...SYS } as any);
+      await engine.delete(def.name, { where: { id }, ...SYS } as any);
+
+      const rows = ledgerRows(storeFor, def.name);
+      const one = (a: string) => {
+        const hit = rows.filter((r) => r.action === a);
+        expect(hit, `one ${a} row`).toHaveLength(1);
+        return hit[0];
+      };
+      const sides = {
+        createNew: parse(one('create').new_value),
+        updateOld: parse(one('update').old_value),
+        updateNew: parse(one('update').new_value),
+        deleteOld: parse(one('delete').old_value),
+      };
+      expect(sides.createNew[control]).toBe('control-create');
+      expect(sides.updateOld[control]).toBe('control-create');
+      expect(sides.updateNew[control]).toBe('control-update');
+      expect(sides.deleteOld[control]).toBe('control-update');
+      for (const column of material) {
+        for (const [side, snapshot] of Object.entries(sides)) {
+          expect(snapshot, `${def.name}.${column} on ${side}`).not.toHaveProperty(column);
+        }
+      }
+
+      const atRest = JSON.stringify([...rows, ...activityRows(storeFor, def.name)]);
+      for (const column of material) {
+        for (const phase of ['create', 'update']) {
+          expect(atRest, `${def.name}.${column} (${phase}) at rest`).not.toContain(marker(def.name, column, phase));
+        }
+      }
+      expect(activityRows(storeFor, def.name).length, 'the activity mirror ran').toBeGreaterThan(0);
+    });
+
+    it('a write of ONLY the material still records its row, with neither value', async () => {
+      const { engine, storeFor } = await boot(def);
+      const created = await engine.insert(def.name, seedRow(def, material, control, 'create'), SYS);
+      const column = material[0];
+      await engine.update(def.name, { [column]: marker(def.name, column, 'rotate') }, { where: { id: String(created.id) }, ...SYS } as any);
+
+      const updates = ledgerRows(storeFor, def.name).filter((r) => r.action === 'update');
+      expect(updates, 'the change is recorded').toHaveLength(1);
+      expect(parse(updates[0].old_value)).not.toHaveProperty(column);
+      expect(parse(updates[0].new_value)).not.toHaveProperty(column);
+      const atRest = JSON.stringify([...ledgerRows(storeFor, def.name), ...activityRows(storeFor, def.name)]);
+      expect(atRest).not.toContain(marker(def.name, column, 'create'));
+      expect(atRest).not.toContain(marker(def.name, column, 'rotate'));
+    });
+  });
+
+  it('a column of the same name on an object the list does not name is still recorded (control)', async () => {
+    const { engine, storeFor } = await boot(SysSecret as unknown as ObjectDef);
+    const other = {
+      name: 'key_material_control', label: 'Control',
+      fields: { id: f('id', 'text', { primaryKey: true }), ciphertext: f('ciphertext', 'text'), value_enc: f('value_enc', 'text') },
+    };
+    engine.registry.registerObject(other as any, 'com.objectstack.test.key-material-control');
+    await engine.insert('key_material_control', { ciphertext: 'control-a', value_enc: 'control-b' }, SYS);
+    const created = parse(ledgerRows(storeFor, 'key_material_control').filter((r) => r.action === 'create')[0].new_value);
+    expect(created.ciphertext).toBe('control-a');
+    expect(created.value_enc).toBe('control-b');
   });
 });

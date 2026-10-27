@@ -88,6 +88,11 @@ export type { PageBlockSpan } from './renderers/layout/page-block-span';
 export { usePageRegionPosture } from './renderers/layout/page-region-posture';
 export type { PageRegionPosture } from './renderers/layout/page-region-posture';
 
+// The count channel a `page:tabs` panel opens to the blocks inside it
+// (objectstack#26613): the `list-view` block in `@object-ui/plugin-list`
+// reports the records its query matched, and the tab's badge shows the sum.
+export { usePageTabCountReporter } from './renderers/layout/containers';
+
 // `page:header`'s action row: a record's declared `record_header` /
 // `record_more` actions and the host's system actions, through the one
 // resolver `page:header` draws them with (objectui#12906). Exported for the

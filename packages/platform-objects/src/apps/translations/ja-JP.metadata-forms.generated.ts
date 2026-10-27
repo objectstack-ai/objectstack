@@ -1895,6 +1895,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "フィルターとチャート",
         description: "レポートレベルのフィルターとチャート表示。"
+      },
+      period_and_export: {
+        label: "期間とエクスポート",
+        description: "レポートの既定の期間と、表をダウンロードできる形式。"
       }
     },
     fields: {
@@ -1983,6 +1987,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "チャート",
         helpText: "チャート設定（type, legend, colors）"
+      },
+      dateRange: {
+        label: "日付範囲",
+        helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
+      },
+      exportOptions: {
+        label: "エクスポートオプション",
+        helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
       }
     }
   },
@@ -2428,6 +2440,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   sharing_rule: {
     label: "共有ルール",
     description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
+  },
+  queue: {
+    label: "キュー",
+    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します"
+  },
+  assignment_rule: {
+    label: "割り当てルール",
+    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます"
   },
   agent: {
     label: "AI エージェント",

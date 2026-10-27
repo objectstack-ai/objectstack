@@ -82,6 +82,9 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   // `'capabilities'`, a store nothing reads.
   capabilities: 'capability',
   sharingRules: 'sharing_rule',
+  // [ADR-0142 D1/D5] Ownership queues and the assignment rules that route into them.
+  queues: 'queue',
+  assignmentRules: 'assignment_rule',
   apis: 'api',
   webhooks: 'webhook',
   agents: 'agent',

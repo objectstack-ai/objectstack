@@ -99,6 +99,11 @@ const GATED_AT: Readonly<Record<string, string>> = {
   // shape: the stack authors it at `sharingRules:` as a flat array of the
   // registry's own `.strict()` `SharingRuleSchema`, so it is gated from the start.
   sharing_rule: 'sharingRules',
+  // [ADR-0142 D1/D5] `queue` and `assignment_rule` joined the same way: code-only,
+  // CLOSED from their first day, authored at `queues:` / `assignmentRules:` as
+  // flat arrays of the registry's own `strictObject` shapes.
+  queue: 'queues',
+  assignment_rule: 'assignmentRules',
   agent: 'agents',
   tool: 'tools',
   skill: 'skills',

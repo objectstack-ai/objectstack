@@ -1895,6 +1895,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "筛选与图表",
         description: "条件与图表展示"
+      },
+      period_and_export: {
+        label: "时间段与导出",
+        description: "报表的默认时间段，以及其表格可下载的格式"
       }
     },
     fields: {
@@ -1983,6 +1987,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "图表",
         helpText: "图表类型与配置"
+      },
+      dateRange: {
+        label: "日期范围",
+        helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
+      },
+      exportOptions: {
+        label: "导出选项",
+        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
       }
     }
   },
@@ -2428,6 +2440,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   sharing_rule: {
     label: "共享规则",
     description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
+  },
+  queue: {
+    label: "队列",
+    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列"
+  },
+  assignment_rule: {
+    label: "分配规则",
+    description: "软件包声明的规则，把新记录分配到某个队列或某个人"
   },
   agent: {
     label: "AI 代理",

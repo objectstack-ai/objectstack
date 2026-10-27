@@ -995,6 +995,10 @@ const en = {
     addRecord: 'Add record',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: 'View all',
+    // objectstack#26613 — the capped list's footer link, with the records the list holds.
+    viewAllCount: 'View all {{count}} records',
+    viewAllCount_one: 'View {{count}} record',
+    viewAllCount_other: 'View all {{count}} records',
     tabs: 'Tabs',
     allRecords: 'All Records',
     // objectui#13405 — the synthetic trailing tab a `showAllRecords` user-filter bar adds.
@@ -3489,6 +3493,7 @@ const en = {
     build: {
       title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
+      inStudio: 'New in Studio',
     },
     template: {
       title: 'Start with a template',
@@ -3648,6 +3653,8 @@ const en = {
     recordAccessDeniedDescription: 'You don’t have permission to view records of this type. Contact your administrator if you think you should have access.',
     recordLoadFailed: 'Couldn’t load this record',
     recordLoadFailedDescription: 'Something went wrong while loading it. Check your connection and try again.',
+    recordAccessEnded: 'Decision recorded',
+    recordAccessEndedDescription: 'Your approval step is complete, so your access to this record has ended.',
     pageNotFound: 'Page Not Found',
     pageNotFoundDescription: 'The page "{{name}}" could not be found. It may have been removed or renamed.',
     dashboardNotFound: 'Dashboard Not Found',

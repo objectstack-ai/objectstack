@@ -354,7 +354,8 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // the `dashboard` bucket: the string is defined once, not once per
   // presentation.
   dataset: 'dataset',
-  // Report copy (`reports.<r>.label` / `.description`) — the author's own
+  // Report copy (`reports.<r>.label` / `.description`, and a joined report's
+  // block headings at `reports.<r>.blocks.<b>.*`) — the author's own
   // reports, listed by these two strings on the app's report index and headed
   // by the label on the report page, so it keeps its own bucket and reports as
   // `i18n/missing-report` rather than folding into `dashboard`.

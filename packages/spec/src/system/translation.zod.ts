@@ -125,6 +125,21 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
   help: z.string().optional().describe('Translated help text'),
   placeholder: z.string().optional().describe('Translated placeholder text for form inputs'),
   options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map'),
+  /**
+   * The field's own `inlineTitle` — the heading of the inline child grid a
+   * `master_detail` / `lookup` field with `inlineEdit` draws on its PARENT's
+   * form. The field lives on the child object, so the address is the child's:
+   * `objects.<child>.fields.<field>.inlineTitle`. Overlaid by
+   * `translateObject` on the served child object, which is what the console's
+   * inline-subform pass copies the heading from.
+   *
+   * No fallback to the child object's translated plural label: an authored
+   * `inlineTitle` with no entry here keeps its authored text, because a
+   * bundle translates an attribute and never swaps another attribute in over
+   * authored text. An absent `inlineTitle` already renders the child's
+   * (translated) label.
+   */
+  inlineTitle: z.string().optional().describe("Translated inline master-detail grid title — overlays the field's own `inlineTitle`"),
 }).describe('Translation data for a single field'));
 
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
@@ -763,7 +778,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same fourteen a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same fifteen a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -1140,6 +1155,10 @@ const appTranslationDataShape = () => ({
    *
    *   reports.<name>.label        → the report's own `label`
    *   reports.<name>.description  → the report's own `description`
+   *   reports.<name>.blocks.<block_name>.label / .description
+   *                               → a joined report block's own `label` /
+   *                                 `description`, keyed by the block's
+   *                                 required `name`
    *
    * The two strings the console's report index lists each report by, and the
    * report page's heading. Overlaid by `translateReport` (`i18n-resolver.ts`)
@@ -1148,9 +1167,9 @@ const appTranslationDataShape = () => ({
    * O), so, as on a dashboard, the catalog yields to a label or description
    * an org has re-authored on top of the packaged report (ADR-0029 D9.2a).
    *
-   * The face stops at those two strings. A report's selection (`dataset`,
-   * `rows`, `columns`, `values`) is machine names whose display copy is the
-   * dataset's, translated at `datasets.<dataset_name>`.
+   * The face stops at those strings. A report's selection (`dataset`,
+   * `rows`, `columns`, `values`), and a block's, is machine names whose
+   * display copy is the dataset's, translated at `datasets.<dataset_name>`.
    *
    * ⚠️ `label` and `description` are `I18nLabelSchema` at the authoring site,
    * so a report's copy may already be an inline `{ en, 'zh-CN' }` map.
@@ -1164,6 +1183,22 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe("Translated report label — overlays the report's own `label`"),
     description: z.string().optional().describe("Translated report description — overlays the report's own `description`"),
+    /**
+     * A joined report's block copy, keyed by the block's `name`
+     * (`JoinedReportBlockSchema.name`, required). The heading and caption the
+     * joined renderer draws above each block; without this slot a localized
+     * report showed a translated title over block headings left in the
+     * authoring language. Overlaid by `translateReport`, block by block, under
+     * the same packaged-base rule as the report's own two strings.
+     */
+    blocks: z.record(z.string(), strictObject({
+      surface: 'this joined report block translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', heading: 'label' },
+    }, {
+      label: z.string().optional().describe("Translated block label — overlays the joined report block's own `label`"),
+      description: z.string().optional().describe("Translated block description — overlays the joined report block's own `description`"),
+    })).optional().describe('Joined report block translations keyed by block name'),
   })).optional().describe('Report translations keyed by report name'),
 
   /**
@@ -2224,7 +2259,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same fourteen groups as
+ * the item takes the PER-APP face, the same fifteen groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
