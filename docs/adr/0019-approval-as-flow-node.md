@@ -1,6 +1,7 @@
 # ADR-0019: Collapse Approval into Flow — one engine, approval as a durable-pause node
 
 **Status**: Accepted (2026-05-31) — fully implemented (A1–A5)
+**Shares its number with**: [`0019-app-as-consumer-unit`](./0019-app-as-consumer-unit.md) (App as the Consumer-Facing Unit) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0019-approval-as-flow-node`.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0018](./0018-unified-node-action-registry.md) (open action registry — approval becomes a consumer), [ADR-0009](./0009-execution-pinned-metadata.md) (execution pinning — reconcile to one mechanism), [ADR-0012](./0012-notification-platform.md) (outbox / `notify`), [ADR-0010](./0010-nl-to-flow-authoring.md) + [ADR-0011](./0011-actions-as-ai-tools.md) (AI authoring — the design center)
 **Revises**: ADR-0018's premise that Approval stays a separate paradigm with its own closed `ApprovalActionType` enum, and the "Workflow-Rule → Flow compiler" (M5) — both dropped here (greenfield, no legacy).

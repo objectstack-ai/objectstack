@@ -204,6 +204,37 @@
 // still exits 0. So an empty corpus-wide index is a hard failure in the main
 // run, and `--self-test` pins measured floors on both the index and the scan.
 //
+// ## The sixth thing it checks: a stem-qualified citation names ONE record (#26076)
+//
+// The collision allowlist above tolerates `ADR-0057` meaning one of two
+// records; it cannot make it mean one. #5992's route B — slug-qualified
+// references — is the spelling that can, and it is now a grammar this file
+// RESOLVES rather than a convention it hopes for: a citation may carry the
+// record's FILENAME STEM, `ADR-0057-system-data-lifecycle-and-retention` (the
+// file without `.md`, prefixed `ADR-`), optionally pinned to a version,
+// `ADR-0006-project-environment-split.v4`. Structural, like the `.vN` rule and
+// the cross-repo qualifier: every record has one, nothing here lists it, and
+// `ls docs/adr | grep 0057-system` finds the file.
+//
+// Prose glues words to ids too (`ADR-0104-conforming`, `ADR-0010-stamps` —
+// measured across the tree when this landed: every glued suffix was ONE word,
+// none was two), so the suffix is judged against the registry, never trusted:
+// an exact stem is QUALIFIED and resolves to that one record (counted on the OK
+// line); a single word that is no stem is prose and the citation stays BARE;
+// two or more words that are no stem, or a `.vN` with no such file, are
+// MALFORMED — someone tried to qualify and missed — and that is red, naming the
+// stems the number actually has. The decision-letter layer follows the same
+// split: a bare `ADR-0057 D4` is checked against the UNION of both 0057
+// records' letters (all a bare id allows), a qualified one against that
+// record's alone.
+//
+// Anchor shards may carry the qualified form too, and then the anchored file
+// must spell it; the "ambiguous anchor" note below lists only the shards still
+// on a bare shared number — migrating each is amortised as its file is touched
+// (the #5992 ruling's own schedule). The index at `docs/adr/README.md`
+// (`scripts/adr-index.mjs`, report-only) lists the shared numbers side by side
+// with these spellings, and each colliding record's header names its sibling.
+//
 // ## Where the registry lives (#6957)
 //
 // `scripts/adr-anchors/` — **one JSON file per anchor**, named after the path it
@@ -267,12 +298,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // to prevent. Pinned instead is the part that does not move with the list: the
   // 20 structural cases ran AND at least one row was actually audited.
   'Live tree: green as shipped, red under ablation': 21,
+  'Stem-qualified citations name ONE record (#26076)': 21,
   'the sharded registry\'s assembly (#6957)': 13,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -285,8 +317,14 @@ const MAP_PATH = ANCHORS_DIR;
 const ADR_DIR = 'docs/adr';
 const SELF_PATH = 'scripts/check-adr-anchors.mjs';
 
-/** An ADR id as written in code comments: `ADR-0090`. */
-const ADR_ID = /^ADR-(\d{4})$/;
+/**
+ * An ADR id as written in an anchor shard: `ADR-0090` — or, on a number two
+ * records share, STEM-QUALIFIED: `ADR-0057-system-data-lifecycle-and-retention`
+ * (the record's filename without `.md`, prefixed `ADR-`), optionally pinned to a
+ * version, `ADR-0006-project-environment-split.v4`. {@link resolveQualified}
+ * judges the second group against the registry.
+ */
+const ADR_ID = /^ADR-(\d{4})((?:-[a-z0-9]+)+(?:\.v\d+)?)?$/;
 
 /**
  * A decision-record filename.
@@ -306,8 +344,13 @@ const ADR_FILENAME = /^(\d{4})-([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.v(\d+))?\.md$/;
  * Kept explicit rather than pattern-matched: the directory IS the decision
  * registry, so a file that is not a record should have to say so once, here,
  * instead of slipping past the number audit because its name did not parse.
+ *
+ * `README.md` is the script-generated index (`scripts/adr-index.mjs`): it LISTS
+ * the records and is not one. (`PRIORITIZATION.md`, the retired review that used
+ * to sit here, left when the index arrived; its one live rule moved into the
+ * index's conventions block.)
  */
-const NON_RECORD_FILES = new Set(['PRIORITIZATION.md']);
+const NON_RECORD_FILES = new Set(['README.md']);
 
 /**
  * The slug prefix that marks a record as a TOMBSTONE — a file whose whole content
@@ -337,8 +380,13 @@ const TOMBSTONE_SLUG_PREFIX = 'withdrawn-';
  *
  * Only qualifiers in {@link CROSS_REPO_QUALIFIERS} exempt a citation; every other
  * preceding word (`see`, `cf.`, `per`) is noise and the id must still resolve.
+ *
+ * The third group is whatever kebab text is GLUED to the number — a stem
+ * qualifier (`ADR-0057-system-data-lifecycle-and-retention`, optionally `.vN`)
+ * or plain prose (`ADR-0104-conforming`). {@link resolveQualified} tells the two
+ * apart against the live registry; the regex deliberately does not.
  */
-const ADR_CITATION = /(?:([A-Za-z0-9_./-]+)[ \t]+)?ADR-(\d{4})/g;
+const ADR_CITATION = /(?:([A-Za-z0-9_./-]+)[ \t]+)?ADR-(\d{4})((?:-[a-z0-9]+)+(?:\.v\d+)?)?/g;
 
 /**
  * Words that, immediately before an id, say "this number belongs to ANOTHER
@@ -351,6 +399,99 @@ const ADR_CITATION = /(?:([A-Za-z0-9_./-]+)[ \t]+)?ADR-(\d{4})/g;
  * cannot hide a BARE id that was meant to be ours.
  */
 const CROSS_REPO_QUALIFIERS = new Set(['objectui', 'object-ui', 'cloud']);
+
+/**
+ * Judge the kebab text glued to a cited number — #5992's route B, the spelling
+ * that makes a shared number name ONE record (#26076; the header's sixth section).
+ *
+ * The unambiguous id is the record's own filename stem prefixed `ADR-`:
+ * `ADR-0057-system-data-lifecycle-and-retention`. Structural, like the `.vN`
+ * version rule and the cross-repo qualifier: every record has one, no list in
+ * this file learns it, and `ls docs/adr | grep 0057-system` finds the file.
+ *
+ * The suffix is judged, never trusted, because prose glues words to ids too
+ * (`ADR-0104-conforming`, `ADR-0010-stamps` — measured across the tree, every
+ * glued suffix was ONE word):
+ *
+ *   - exactly a known stem, or `.vN` of a version file that exists → QUALIFIED;
+ *   - a single kebab word that is no stem → prose, the citation stays BARE;
+ *   - two or more words that are no stem, or a `.vN` with no such file →
+ *     MALFORMED: somebody tried to qualify and missed, and the gate says so.
+ *
+ * @param {string} number  `0057`
+ * @param {string} suffix  `-system-data-lifecycle-and-retention`, `-conforming`, `-x.v4`, or `` (none)
+ * @param {Set<string>} stems  every `NNNN-slug` under docs/adr/
+ * @param {Set<string>} versioned  every `NNNN-slug.vN` that is a file
+ * @returns {{ kind: 'bare' } | { kind: 'qualified' | 'malformed', stem: string, version: string | null }}
+ */
+function resolveQualified(number, suffix, stems, versioned) {
+  if (!suffix) return { kind: 'bare' };
+  const m = /^(-[a-z0-9]+(?:-[a-z0-9]+)*)(?:\.v(\d+))?$/.exec(suffix);
+  if (!m) return { kind: 'bare' };
+  const stem = `${number}${m[1]}`;
+  const version = m[2] ?? null;
+  if (version !== null) {
+    return versioned.has(`${stem}.v${version}`)
+      ? { kind: 'qualified', stem, version }
+      : { kind: 'malformed', stem, version };
+  }
+  if (stems.has(stem)) return { kind: 'qualified', stem, version: null };
+  const words = m[1].slice(1).split('-').length;
+  return words >= 2 ? { kind: 'malformed', stem, version: null } : { kind: 'bare' };
+}
+
+/**
+ * Audit the stem-qualified citations: a MALFORMED one is red (it names no
+ * record, and its author plainly meant one), a QUALIFIED one is counted so the
+ * OK line can say how much of the shared-number debt is already paid.
+ *
+ * Pure over the citation rows, like {@link auditCitedNumbers} — the bare rows
+ * are that function's business and pass through here untouched.
+ *
+ * @param {{ file: string, number: string, qualifier: string, suffix?: string }[]} citations
+ * @param {Set<string>} stems
+ * @param {Set<string>} versioned
+ * @param {Map<string, Set<string>>} stemsByNumber  number → the stems claiming it
+ * @returns {{ errors: string[], resolved: number }}
+ */
+function auditQualifiedCitations(citations, stems, versioned, stemsByNumber) {
+  const errors = [];
+  let resolved = 0;
+  /** `ADR-NNNN<suffix>` → files citing it, for suffixes that name no record. */
+  const bad = new Map();
+  for (const { file, number, qualifier, suffix } of citations) {
+    if (CROSS_REPO_QUALIFIERS.has(qualifier)) continue; // another repo's registry, another repo's stems
+    const r = resolveQualified(number, suffix ?? '', stems, versioned);
+    if (r.kind === 'qualified') {
+      resolved++;
+      continue;
+    }
+    if (r.kind !== 'malformed') continue;
+    const key = `ADR-${number}${suffix}`;
+    if (!bad.has(key)) bad.set(key, new Set());
+    bad.get(key).add(file);
+  }
+  for (const key of [...bad.keys()].sort()) {
+    const number = key.slice(4, 8);
+    const files = [...bad.get(key)].sort();
+    const shown = files.slice(0, 8);
+    const have = [...(stemsByNumber.get(number) ?? [])].sort();
+    errors.push(
+      `${key} is cited by ${files.length} file(s) but names no record stem under ${ADR_DIR}/ —\n` +
+        shown.map((f) => `        ${f}`).join('\n') +
+        (files.length > shown.length ? `\n        … and ${files.length - shown.length} more` : '') +
+        '\n      A stem-qualified id is the record\'s filename without `.md`, prefixed `ADR-`, spelled exactly' +
+        (have.length
+          ? `; the stem(s) under ${number} today: ${have.map((s) => `ADR-${s}`).join(', ')}.`
+          : `; nothing under ${ADR_DIR}/ carries the number ${number} at all.`) +
+        '\n      Fix: copy the stem from `ls ' +
+        ADR_DIR +
+        '/`, or cite the bare number when that number names one record. ⛔ Not a fix: dropping the ' +
+        'suffix on a number two records share — that is the ambiguity the qualified form exists to end.',
+    );
+  }
+  return { errors, resolved };
+}
 
 /**
  * ⛔ SHRINK-ONLY. ADR numbers that are cited in this repo but have no record
@@ -447,7 +588,10 @@ const RELEASE_OWNED_CITATIONS = [
 /**
  * ⛔ SHRINK-ONLY. The number collisions that already existed when this audit
  * was written (#5992). Every entry is a navigation tax being paid daily, kept
- * only because the maintainer ruled renumbering an accepted record out.
+ * only because the maintainer ruled renumbering an accepted record out. Since
+ * #26076 the tax has an exit that is not renumbering: cite the record by its
+ * stem (`ADR-NNNN-<slug>`, resolved by `resolveQualified`) and the citation
+ * names ONE record; the entry stays while bare citations of the number remain.
  *
  * **Adding an entry is not the fix for a red build.** If this gate just told you
  * your new record collides, the fix is the next free number — it names the one
@@ -508,14 +652,20 @@ const { anchors, errors: registryErrors } = loadAnchors(ROOT);
  *
  * @param {string[]} filenames
  * @param {{ number: string, decisions: string[], why: string }[]} allowlist
- * @returns {{ records: Set<string>, nonDecisions: Set<string>, errors: string[] }}
+ * @returns {{ records: Set<string>, nonDecisions: Set<string>, errors: string[], stems: Set<string>, versioned: Set<string>, stemsByNumber: Map<string, Set<string>> }}
  *   `records` is the set of numbers that name a real record, as the citation audit
  *   needs it; `nonDecisions` is the subset of those whose every claimant is a
- *   tombstone, as the anchor loop needs it (#7329).
+ *   tombstone, as the anchor loop needs it (#7329); `stems`, `versioned` and
+ *   `stemsByNumber` are what the stem-qualified citation audit resolves against
+ *   (#26076).
  */
 function auditAdrDirectory(filenames, allowlist) {
   const errors = [];
   const records = new Set();
+  /** Every `NNNN-slug` stem, for stem-qualified citations (#26076). */
+  const stems = new Set();
+  /** Every `NNNN-slug.vN` that is a file, for version-pinned citations. */
+  const versioned = new Set();
   /** number → set of decision stems claiming it. */
   const stemsByNumber = new Map();
   /** number → set of those stems that are tombstones. */
@@ -535,11 +685,13 @@ function auditAdrDirectory(filenames, allowlist) {
       );
       continue;
     }
-    const [, number, slug] = m;
+    const [, number, slug, version] = m;
     records.add(number);
     const stem = `${number}-${slug}`;
     if (!stemsByNumber.has(number)) stemsByNumber.set(number, new Set());
     stemsByNumber.get(number).add(stem);
+    stems.add(stem);
+    if (version) versioned.add(`${stem}.v${version}`);
     if (slug.startsWith(TOMBSTONE_SLUG_PREFIX)) {
       if (!tombstoneStemsByNumber.has(number)) tombstoneStemsByNumber.set(number, new Set());
       tombstoneStemsByNumber.get(number).add(stem);
@@ -606,7 +758,7 @@ function auditAdrDirectory(filenames, allowlist) {
     }
   }
 
-  return { records, nonDecisions, errors };
+  return { records, nonDecisions, errors, stems, versioned, stemsByNumber };
 }
 
 /**
@@ -619,13 +771,24 @@ function auditAdrDirectory(filenames, allowlist) {
  * @param {Set<string>} nonDecisions  the subset that are tombstones
  * @returns {string|null} why it may not, or null if it may
  */
-function anchorIdProblem(adr, records, nonDecisions) {
+function anchorIdProblem(adr, records, nonDecisions, stems = new Set(), versioned = new Set()) {
   const m = ADR_ID.exec(adr);
-  if (!m) return `"${adr}" is not an ADR id (expected e.g. ADR-0090).`;
+  if (!m) {
+    return (
+      `"${adr}" is not an ADR id (expected e.g. ADR-0090, or — on a number two records share — the ` +
+      'stem-qualified form, e.g. ADR-0057-system-data-lifecycle-and-retention).'
+    );
+  }
   // Anchoring a never-written or deleted record sends the next author to a
   // dead end (cf. ADR-0001, whose record was deleted in the 2026-02-11
   // permission-protocol rewrite and never restored).
   if (!records.has(m[1])) return `${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`;
+  if (m[2] && resolveQualified(m[1], m[2], stems, versioned).kind !== 'qualified') {
+    return (
+      `${adr} is stem-qualified but names no record under ${ADR_DIR}/ — the stem is the record's filename ` +
+      `without \`.md\`, prefixed \`ADR-\`; copy it from \`ls ${ADR_DIR}/${m[1]}-*\` (#26076).`
+    );
+  }
   if (nonDecisions.has(m[1])) {
     return (
       `${adr} names a WITHDRAWN record, not a decision — nothing may be anchored to it (#7329).\n` +
@@ -657,7 +820,7 @@ function citationsIn(file, text) {
     const raw = (m[1] ?? '').toLowerCase();
     // `objectstack-ai/cloud` qualifies as `cloud`; trailing punctuation dropped.
     const qualifier = raw.replace(/^.*\//, '').replace(/[^a-z0-9-]+$/, '');
-    out.push({ file, number: m[2], qualifier });
+    out.push({ file, number: m[2], qualifier, suffix: m[3] ?? '' });
   }
   return out;
 }
@@ -799,7 +962,8 @@ const SUB_DECISION_LETTERED = /^([a-z])\.[ \t]+\S/;
  * mode this whole file is written against.
  */
 const DECISION_CITATION = new RegExp(
-  '(?:([A-Za-z0-9_./-]+)[ \\t]+)?ADR-(\\d{4})[ \\t]*(?:\\r?\\n[ \\t]*(?:\\*|//|#)?[ \\t]*)?D' + DECISION_LETTER,
+  '(?:([A-Za-z0-9_./-]+)[ \\t]+)?ADR-(\\d{4})((?:-[a-z0-9]+)+(?:\\.v\\d+)?)?[ \\t]*(?:\\r?\\n[ \\t]*(?:\\*|//|#)?[ \\t]*)?D' +
+    DECISION_LETTER,
   'g',
 );
 
@@ -856,17 +1020,21 @@ function decisionIndexFor(text) {
  *
  * @param {string[]} filenames
  * @param {(name: string) => string} read
+ * @param {{ byStem?: boolean }} [options]  `byStem: true` keys the index by
+ *   `NNNN-slug` instead of by number — the stem-qualified citation's view, in
+ *   which versions of one stem still union and two stems under one number no
+ *   longer do (#26076).
  * @returns {Map<string, Set<string>>}
  */
-function buildDecisionIndex(filenames, read) {
+function buildDecisionIndex(filenames, read, { byStem = false } = {}) {
   const index = new Map();
   for (const name of [...filenames].sort()) {
     if (!name.endsWith('.md') || NON_RECORD_FILES.has(name)) continue;
     const m = ADR_FILENAME.exec(name);
     if (!m) continue; // already reported by auditAdrDirectory
-    const number = m[1];
-    if (!index.has(number)) index.set(number, new Set());
-    for (const letter of decisionIndexFor(read(name))) index.get(number).add(letter);
+    const key = byStem ? `${m[1]}-${m[2]}` : m[1];
+    if (!index.has(key)) index.set(key, new Set());
+    for (const letter of decisionIndexFor(read(name))) index.get(key).add(letter);
   }
   return index;
 }
@@ -885,7 +1053,7 @@ function letterCitationsIn(file, text) {
   for (const m of text.matchAll(DECISION_CITATION)) {
     const raw = (m[1] ?? '').toLowerCase();
     const qualifier = raw.replace(/^.*\//, '').replace(/[^a-z0-9-]+$/, '');
-    out.push({ file, number: m[2], letter: 'D' + m[3], qualifier });
+    out.push({ file, number: m[2], suffix: m[3] ?? '', letter: 'D' + m[4], qualifier });
   }
   return out;
 }
@@ -913,31 +1081,47 @@ function letterCitationsIn(file, text) {
  * @param {Set<string>} nonDecisions  the subset that are tombstones
  * @returns {{ errors: string[], unverifiable: Map<string, Set<string>>, unverifiableCount: number, resolved: number }}
  */
-function auditDecisionLetters(citations, index, records, nonDecisions) {
+function auditDecisionLetters(
+  citations,
+  index,
+  records,
+  nonDecisions,
+  stemIndex = new Map(),
+  stems = new Set(),
+  versioned = new Set(),
+) {
   const errors = [];
   let unverifiableCount = 0;
-  /** `ADR-NNNN Dk` → sorted files citing it, for letters that name no decision. */
+  /** `ADR-NNNN[-stem] Dk` → { files, declared, tombstone }, for letters that name no decision. */
   const bad = new Map();
   /** same key → files, for citations into a record with no decision letters at all. */
   const unverifiable = new Map();
   let resolved = 0;
 
-  const note = (map, row) => {
-    const key = `ADR-${row.number} ${row.letter}`;
-    if (!map.has(key)) map.set(key, new Set());
-    map.get(key).add(row.file);
+  const noteBad = (key, file, declared, tombstone) => {
+    if (!bad.has(key)) bad.set(key, { files: new Set(), declared, tombstone });
+    bad.get(key).files.add(file);
   };
 
   for (const row of citations) {
     if (CROSS_REPO_QUALIFIERS.has(row.qualifier)) continue; // another repo's registry
     if (!records.has(row.number)) continue; // auditCitedNumbers owns the dangling-number fact
+    // A stem-qualified citation is checked against THAT record's letters; a bare
+    // one against the union its number declares — on a shared number, all a bare
+    // id can do (#26076). A malformed qualifier is auditQualifiedCitations' fact.
+    const q = resolveQualified(row.number, row.suffix ?? '', stems, versioned);
+    if (q.kind === 'malformed') continue;
+    const id =
+      q.kind === 'qualified' ? `ADR-${q.stem}${q.version === null ? '' : `.v${q.version}`}` : `ADR-${row.number}`;
+    const key = `${id} ${row.letter}`;
     if (nonDecisions.has(row.number)) {
-      note(bad, row);
+      noteBad(key, row.file, [], true);
       continue;
     }
-    const declared = index.get(row.number);
+    const declared = q.kind === 'qualified' ? stemIndex.get(q.stem) : index.get(row.number);
     if (!declared || declared.size === 0) {
-      note(unverifiable, row);
+      if (!unverifiable.has(key)) unverifiable.set(key, new Set());
+      unverifiable.get(key).add(row.file);
       unverifiableCount++;
       continue;
     }
@@ -945,20 +1129,19 @@ function auditDecisionLetters(citations, index, records, nonDecisions) {
       resolved++;
       continue;
     }
-    note(bad, row);
+    noteBad(key, row.file, [...declared].sort(), false);
   }
 
   for (const key of [...bad.keys()].sort()) {
-    const [, number, letter] = /^ADR-(\d{4}) (D.+)$/.exec(key);
-    const files = [...bad.get(key)].sort();
+    const { files: fileSet, declared, tombstone } = bad.get(key);
+    const [id, letter] = key.split(' ');
+    const files = [...fileSet].sort();
     const shown = files.slice(0, 8);
-    const declared = [...(index.get(number) ?? [])].sort();
-    const tombstone = nonDecisions.has(number);
     errors.push(
       `${key} is cited by ${files.length} file(s), but ` +
         (tombstone
-          ? `ADR-${number} is a WITHDRAWN record — it makes no decisions, so no "${letter}" of it can exist (#7329).`
-          : `ADR-${number} declares no ${letter} —\n        it decides: ${declared.join(', ')}`) +
+          ? `${id} is a WITHDRAWN record — it makes no decisions, so no "${letter}" of it can exist (#7329).`
+          : `${id} declares no ${letter} —\n        it decides: ${declared.join(', ')}`) +
         '\n' +
         shown.map((f) => `        ${f}`).join('\n') +
         (files.length > shown.length ? `\n        … and ${files.length - shown.length} more` : '') +
@@ -967,7 +1150,7 @@ function auditDecisionLetters(citations, index, records, nonDecisions) {
         'does not say what the code says it says, and every gate above this one calls it green (#8386, #9255, ' +
         'the family this layer was commissioned for).\n' +
         `      Fix, in order of preference: (a) cite the letter that decides this — the list above is what ` +
-        `ADR-${number} actually decides; (b) if the decision moved to another record, cite that record; (c) if ` +
+        `${id} actually decides; (b) if the decision moved to another record, cite that record; (c) if ` +
         'the decision is real but unwritten, it needs an ADR, not a citation.\n' +
         '      ⛔ Not a fix: loosening this check. A letter that resolves to nothing is the defect it exists ' +
         'to name.',
@@ -1021,7 +1204,10 @@ function collectCitations() {
     // `--untracked` so a NEW file citing a nonexistent record goes red before it
     // is committed, not after CI has it. Ignored paths (`node_modules/`, `dist/`)
     // stay excluded either way.
-    out = execFileSync('git', ['grep', '--untracked', '-IonE', '([A-Za-z0-9_./-]+[ \t]+)?ADR-[0-9]{4}'], {
+    // The glued-suffix group rides along so a stem-qualified citation reaches
+    // `citationsIn` whole — `-o` prints the match and nothing after it.
+    const pattern = '([A-Za-z0-9_./-]+[ \t]+)?ADR-[0-9]{4}(-[a-z0-9]+)*(\\.v[0-9]+)?';
+    out = execFileSync('git', ['grep', '--untracked', '-IonE', pattern], {
       cwd: ROOT,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
@@ -1051,14 +1237,17 @@ function collectCitations() {
   return citations;
 }
 
-/** Anchor ids whose number names two decisions — reported, never failed. */
+/**
+ * Anchor ids whose BARE number names two decisions — reported, never failed. A
+ * stem-qualified id names one record and is not listed (#26076).
+ */
 function ambiguousAnchorRefs(anchorList, allowlist) {
   const ambiguous = new Set(allowlist.map((e) => e.number));
   const hits = [];
   for (const entry of anchorList ?? []) {
     for (const adr of entry?.adrs ?? []) {
       const m = ADR_ID.exec(adr);
-      if (m && ambiguous.has(m[1])) hits.push(`${entry.file} → ${adr}`);
+      if (m && !m[2] && ambiguous.has(m[1])) hits.push(`${entry.file} → ${adr}`);
     }
   }
   return hits;
@@ -1092,7 +1281,14 @@ try {
 }
 
 /** Decision records that actually exist, by number: `0090` → `0090-permission-model-...md`. */
-const { records, nonDecisions, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
+const {
+  records,
+  nonDecisions,
+  errors: numberErrors,
+  stems,
+  versioned,
+  stemsByNumber,
+} = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
 
 const errors = [...registryErrors, ...numberErrors];
 let checked = 0;
@@ -1100,18 +1296,29 @@ let checked = 0;
 // #6634 — every `ADR-NNNN` written anywhere in the tracked tree resolves to a
 // record, not just the ~30 ids registered in adr-anchors/.
 const citations = collectCitations();
+// #26076 — a stem-qualified citation (`ADR-0057-system-data-lifecycle-and-retention`)
+// names ONE record even on a number two records share; one that names no stem is red.
+const { errors: qualifiedErrors, resolved: qualifiedResolved } = auditQualifiedCitations(
+  citations,
+  stems,
+  versioned,
+  stemsByNumber,
+);
+errors.push(...qualifiedErrors);
 errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS, RELEASE_OWNED_CITATIONS));
 
 // #9592 — and one layer down: the `Dk` half of every `ADR-NNNN Dk` citation on
 // the ANCHORED surface must name a decision the cited record actually makes.
-const decisionIndex = buildDecisionIndex(adrFiles, (name) => readFileSync(join(ROOT, ADR_DIR, name), 'utf8'));
+const readRecord = (name) => readFileSync(join(ROOT, ADR_DIR, name), 'utf8');
+const decisionIndex = buildDecisionIndex(adrFiles, readRecord);
+const stemDecisionIndex = buildDecisionIndex(adrFiles, readRecord, { byStem: true });
 const letterCitations = collectAnchorLetterCitations(anchors);
 const {
   errors: letterErrors,
   unverifiable: unverifiableLetters,
   unverifiableCount: unverifiableLetterCount,
   resolved: resolvedLetters,
-} = auditDecisionLetters(letterCitations, decisionIndex, records, nonDecisions);
+} = auditDecisionLetters(letterCitations, decisionIndex, records, nonDecisions, stemDecisionIndex, stems, versioned);
 errors.push(...letterErrors);
 
 // A shape scanner degrades SILENTLY — a heading-style change turns every record
@@ -1162,7 +1369,7 @@ for (const entry of anchors) {
     // Resolution — the id parses, names a record, and that record is a DECISION
     // rather than a tombstone (#7329). All three live in `anchorIdProblem` so
     // `--self-test` drives the real judgement.
-    const problem = anchorIdProblem(adr, records, nonDecisions);
+    const problem = anchorIdProblem(adr, records, nonDecisions, stems, versioned);
     if (problem) {
       errors.push(`${shard}: ${problem}`);
       continue;
@@ -1192,7 +1399,8 @@ if (errors.length) {
 console.log(
   `check-adr-anchors: OK (${checked} anchored file(s), every governing ADR still referenced; ` +
     `${records.size} decision number(s), each naming one decision or an allowlisted pair; ` +
-    `${citations.length} citation(s) across ${new Set(citations.map((c) => c.file)).size} file(s) resolve; ` +
+    `${citations.length} citation(s) across ${new Set(citations.map((c) => c.file)).size} file(s) resolve, ` +
+    `${qualifiedResolved} of them stem-qualified to one record; ` +
     `${resolvedLetters} decision-letter citation(s) on the anchored surface name a decision the record makes).`,
 );
 
@@ -1215,14 +1423,16 @@ if (unverifiableLetters.size) {
 }
 
 // Reported, never failed. These anchors are correct — the number they name is
-// the ambiguous thing, and #5992's route B (slug-qualified references) is the
-// separate change that fixes it. Printing them keeps the size of that debt
-// visible instead of leaving it to be rediscovered.
+// the ambiguous thing. #5992's route B (slug-qualified references) is now a
+// spelling this file resolves (`resolveQualified`, #26076); migrating each
+// anchor is amortised as its file is touched, and printing the rest keeps the
+// size of that debt visible instead of leaving it to be rediscovered.
 const ambiguous = ambiguousAnchorRefs(anchors, KNOWN_NUMBER_COLLISIONS);
 if (ambiguous.length) {
   console.log(
-    `check-adr-anchors: note — ${ambiguous.length} anchor reference(s) name an ADR number that two records ` +
-      'share (#5992, allowlisted):',
+    `check-adr-anchors: note — ${ambiguous.length} anchor reference(s) name a BARE ADR number that two records ` +
+      'share (#5992, allowlisted). The unambiguous spelling is the record\'s filename stem, `ADR-NNNN-<slug>` ' +
+      '(#26076): write it in the shard AND in the anchored file, and the entry leaves this list:',
   );
   for (const hit of ambiguous) console.log(`  · ${hit}`);
 }
@@ -1266,7 +1476,7 @@ function selfTest() {
   const audit = (files, allowlist = []) => auditAdrDirectory(files, allowlist);
   const joined = (errs) => errs.join('\n');
 
-  const BASE = ['0001-alpha.md', '0002-beta.md', 'PRIORITIZATION.md'];
+  const BASE = ['0001-alpha.md', '0002-beta.md', 'README.md'];
   const PAIR = [{ number: '0002', decisions: ['0002-beta', '0002-gamma'], why: 'synthetic' }];
 
   try {
@@ -1280,8 +1490,8 @@ function selfTest() {
       );
       assert(
         'companion-doc-is-not-audited',
-        !joined(e).includes('PRIORITIZATION'),
-        'PRIORITIZATION.md must be skipped as a non-record, not reported as unparseable',
+        !joined(e).includes('README'),
+        'README.md (the generated index) must be skipped as a non-record, not reported as unparseable',
       );
     }
 
@@ -2009,6 +2219,144 @@ function selfTest() {
           'ablation-fabricated-letter-is-not-excused-as-unverifiable',
           red.unverifiableCount === 0,
           'a record that HAS an index must never route a bad letter to the cannot-verify branch',
+        );
+      }
+    }
+
+    // ---- stem-qualified citations name ONE record (#26076) -------------------
+    //
+    // #5992's route B. A bare number two records share is "one of two"; the
+    // record's filename stem, prefixed `ADR-`, is one. The regex captures any
+    // kebab text glued to a number and the judgement is made against the
+    // registry, so the cases pin the three verdicts (qualified / bare /
+    // malformed) and the three consumers (number audit, anchor ids, letters).
+    battery('Stem-qualified citations name ONE record (#26076)');
+    {
+      const id = (n, s = '') => 'ADR-' + n + s;
+      const FILES = ['0001-alpha.md', '0002-beta.md', '0002-gamma.md', '0003-delta.md', '0003-delta.v2.md', 'README.md'];
+      const PAIR2 = [{ number: '0002', decisions: ['0002-beta', '0002-gamma'], why: 'synthetic' }];
+      const { stems, versioned, stemsByNumber, records, nonDecisions } = audit(FILES, PAIR2);
+      const rows = (text, file = 'src/x.ts') => citationsIn(file, text);
+      const q = (number, suffix) => resolveQualified(number, suffix, stems, versioned);
+
+      assert(
+        'directory-audit-returns-every-stem',
+        stems.has('0002-beta') && stems.has('0002-gamma') && stems.has('0003-delta') && stems.size === 4,
+        `got {${[...stems].join(',')}}`,
+      );
+      assert(
+        'directory-audit-returns-version-files',
+        versioned.has('0003-delta.v2') && versioned.size === 1,
+        `got {${[...versioned].join(',')}}`,
+      );
+      {
+        const parsed = rows(
+          `${id('0002', '-beta')} and ${id('0003', '-delta.v2')} and ${id('0001', '-conforming')} and bare ${id('0001')}`,
+        );
+        assert(
+          'citation-parser-captures-the-glued-suffix',
+          parsed.length === 4 &&
+            parsed[0].suffix === '-beta' &&
+            parsed[1].suffix === '-delta.v2' &&
+            parsed[2].suffix === '-conforming' &&
+            parsed[3].suffix === '',
+          `got ${JSON.stringify(parsed)}`,
+        );
+      }
+      assert(
+        'exact-stem-is-qualified',
+        q('0002', '-beta').kind === 'qualified' && q('0002', '-beta').stem === '0002-beta',
+        JSON.stringify(q('0002', '-beta')),
+      );
+      assert(
+        'existing-version-is-qualified',
+        q('0003', '-delta.v2').kind === 'qualified' && q('0003', '-delta.v2').version === '2',
+        JSON.stringify(q('0003', '-delta.v2')),
+      );
+      assert('one-word-prose-suffix-is-bare', q('0001', '-conforming').kind === 'bare', JSON.stringify(q('0001', '-conforming')));
+      assert('multi-word-unknown-suffix-is-malformed', q('0002', '-beta-typo').kind === 'malformed', JSON.stringify(q('0002', '-beta-typo')));
+      assert('missing-version-is-malformed', q('0003', '-delta.v9').kind === 'malformed', JSON.stringify(q('0003', '-delta.v9')));
+      assert('no-suffix-is-bare', q('0002', '').kind === 'bare', JSON.stringify(q('0002', '')));
+      {
+        const green = auditQualifiedCitations(
+          rows(`${id('0002', '-beta')} · ${id('0002', '-gamma')} · ${id('0001', '-conforming')} · ${id('0002')}`),
+          stems,
+          versioned,
+          stemsByNumber,
+        );
+        assert(
+          'qualified-citations-are-green-and-counted',
+          green.errors.length === 0 && green.resolved === 2,
+          `got resolved=${green.resolved}, errors:\n${joined(green.errors)}`,
+        );
+        const red = auditQualifiedCitations(rows(`${id('0002', '-beta-typo')}`, 'packages/spec/src/a.ts'), stems, versioned, stemsByNumber);
+        assert('malformed-qualified-citation-is-red', red.errors.length === 1, `expected exactly 1 error, got ${red.errors.length}:\n${joined(red.errors)}`);
+        const msg = joined(red.errors);
+        assert(
+          'malformed-message-names-the-stems-the-number-has',
+          msg.includes('0002-beta') && msg.includes('0002-gamma') && msg.includes('packages/spec/src/a.ts'),
+          `message must list the stems under the number and the citing file:\n${msg}`,
+        );
+        const cross = auditQualifiedCitations(rows(`ObjectUI ${id('0002', '-beta-typo')}`), stems, versioned, stemsByNumber);
+        assert('cross-repo-qualified-citation-is-not-judged', cross.errors.length === 0, `another registry's stem is not ours to judge, got:\n${joined(cross.errors)}`);
+      }
+      {
+        const ok = anchorIdProblem(id('0002', '-gamma'), records, nonDecisions, stems, versioned);
+        assert('anchor-accepts-a-qualified-id-that-resolves', ok === null, `got: ${ok}`);
+        const bad = anchorIdProblem(id('0002', '-gamma-typo'), records, nonDecisions, stems, versioned) ?? '';
+        assert('anchor-refuses-a-qualified-id-that-resolves-to-nothing', /names no record/.test(bad), `got: ${bad}`);
+        const hits = ambiguousAnchorRefs([{ file: 'a.ts', adrs: [id('0002')] }, { file: 'b.ts', adrs: [id('0002', '-beta')] }], PAIR2);
+        assert('ambiguity-note-lists-bare-not-qualified-anchors', hits.length === 1 && hits[0].startsWith('a.ts'), `got ${JSON.stringify(hits)}`);
+      }
+      {
+        const text = {
+          '0001-alpha.md': '',
+          '0002-beta.md': '### D1 — one\n',
+          '0002-gamma.md': '### D2 — two\n',
+          '0003-delta.md': '',
+          '0003-delta.v2.md': '',
+          'README.md': '',
+        };
+        const byNumber = buildDecisionIndex(FILES, (n) => text[n]);
+        const byStem = buildDecisionIndex(FILES, (n) => text[n], { byStem: true });
+        const lrows = (t, file = 'src/x.ts') => letterCitationsIn(file, t);
+        const parsed = lrows(`${id('0002', '-beta')} D1`);
+        assert(
+          'letter-citation-parser-captures-the-glued-suffix',
+          parsed.length === 1 && parsed[0].suffix === '-beta' && parsed[0].letter === 'D1',
+          JSON.stringify(parsed),
+        );
+        const bare = auditDecisionLetters(lrows(`${id('0002')} D2`), byNumber, records, nonDecisions, byStem, stems, versioned);
+        assert('bare-letter-on-a-shared-number-resolves-against-the-union', bare.errors.length === 0 && bare.resolved === 1, `got:\n${joined(bare.errors)}`);
+        const qualified = auditDecisionLetters(
+          lrows(`${id('0002', '-beta')} D2`, 'packages/spec/src/a.ts'),
+          byNumber,
+          records,
+          nonDecisions,
+          byStem,
+          stems,
+          versioned,
+        );
+        assert(
+          'qualified-letter-resolves-against-that-stem-only',
+          qualified.errors.length === 1 && qualified.errors[0].includes('0002-beta D2') && qualified.errors[0].includes('D1'),
+          `the other record's letter must not excuse it, got:\n${joined(qualified.errors)}`,
+        );
+        const fine = auditDecisionLetters(lrows(`${id('0002', '-beta')} D1`), byNumber, records, nonDecisions, byStem, stems, versioned);
+        assert('qualified-letter-that-the-stem-declares-is-green', fine.errors.length === 0 && fine.resolved === 1, `got:\n${joined(fine.errors)}`);
+      }
+      {
+        // Live: every grandfathered pair is citable unambiguously today, by the
+        // stems the allowlist itself names.
+        const live = audit(readdirSync(join(ROOT, ADR_DIR)), KNOWN_NUMBER_COLLISIONS);
+        const pairs = KNOWN_NUMBER_COLLISIONS.flatMap((c) =>
+          c.decisions.map((stem) => ({ file: 'probe', number: c.number, suffix: stem.slice(4), qualifier: '' })),
+        );
+        const r = auditQualifiedCitations(pairs, live.stems, live.versioned, live.stemsByNumber);
+        assert(
+          'live-every-allowlisted-pair-is-citable-by-stem',
+          r.errors.length === 0 && r.resolved === pairs.length && pairs.length >= 2,
+          `got resolved=${r.resolved} of ${pairs.length}:\n${joined(r.errors)}`,
         );
       }
     }

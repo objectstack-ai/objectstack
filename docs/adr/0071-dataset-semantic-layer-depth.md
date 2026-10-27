@@ -1,8 +1,6 @@
 # ADR-0071: Dataset semantic-layer depth — multi-hop joins
 
-## Status
-
-Proposed. (Refocused — see **Correction** below. The first merged draft also
+**Status**: Proposed. (Refocused — see **Correction** below. The first merged draft also
 proposed matrix/across pivoting; a code check found that already implemented, so
 this ADR now covers only the remaining gap: multi-hop joins.) **Multi-hop to-one joins (≤3 hops / 4 objects) have since been implemented & are live — header pending formal update.**
 

@@ -604,10 +604,24 @@ jobs:
       # The `--self-test` in the pnpm script provokes that red path on synthetic
       # directories every run, because a collision is rare enough that nobody
       # would otherwise see the gate fail before it mattered.
+      #
+      # #26076: the same step also REPORTS on the generated ADR index
+      # (docs/adr/README.md, `scripts/adr-index.mjs`). Report-only by the
+      # maintainer's ruling (门禁不加): `--report` prints a `::warning::` for a
+      # stale index or a record without the one `**Status**:` spelling and
+      # exits 0 whatever it finds, so the INDEX never reds this step. The
+      # generator's own `--self-test` runs with the flag like every other
+      # script's (check-self-test-wired: an unrun self-test is a phantom check)
+      # — that verifies the script, not the records. `pnpm adr:index`
+      # regenerates; `--check` is the gate's spelling for the day a maintainer
+      # names one.
       - name: ADR anchors + number uniqueness (governed code names its decision)
         id: adr-anchors-number-uniqueness-governed-code
         continue-on-error: true
-        run: pnpm check:adr-anchors
+        run: |
+          pnpm check:adr-anchors
+          node scripts/adr-index.mjs --self-test
+          pnpm adr:index:report
 
       # @objectstack/verify stand-in erasure guard (#6399). The third and
       # narrowest member of the slot-lookup and query-options erasure ratchets
