@@ -53,6 +53,45 @@
  * `objectShapes` walker and the same `rejectedEnvelopeKeys` probe defined here,
  * so the two iterations cannot drift into judging the property differently;
  * only the SET each walks differs, which is the whole point of the split.
+ *
+ * ## History: the closure tally this file used to pin
+ *
+ * The closure `describe` below once ended in two hand-typed numbers — the
+ * closed count and the registered total — bumped by hand every time a metadata
+ * kind joined or left the registry. They now state the rule they protected
+ * instead: the set of registered types whose schema is not closed, computed from
+ * the registry, equals `STILL_STRIP`. Adding a closed kind changes no test. The
+ * bump log is kept here as history, because each entry records why a kind landed
+ * on the side it did:
+ *
+ * - 25 → 24 on 2026-08-02: `validation` left the registry entirely (#4509,
+ *   ADR-0088 retirement), taking an already-closed schema with it. The closure
+ *   ratio was unchanged — one fewer registered type, not one fewer closed one.
+ * - 24 → 25 on 2026-08-04: `api` JOINED the registry (#5271, part of #5206),
+ *   the first new registered kind since the campaign ended. It declared the
+ *   protection envelope (so `UNDECLARED_ENVELOPE` stayed empty) but went onto
+ *   `STILL_STRIP` — measured, see that list's note: the same schema parsed
+ *   stored rows carrying `packageId` / `state`, so closing it broke the
+ *   load-time backstop and the publish gate. Closed count unchanged at 23.
+ * - 25 → 26 on 2026-08-08: `capability` JOINED the registry (#5961), under the
+ *   same template `api` used. Unlike `api` it landed CLOSED —
+ *   `CapabilityDeclarationSchema` is only an AUTHORING surface, so `strict()`
+ *   cost nothing: nothing re-parses a stored `sys_capability` row through it
+ *   (`bootstrapDeclaredCapabilities` reads named fields off the body via
+ *   `capabilityRowFields`), which is exactly the property `api` lacked. Closed
+ *   23 → 24; `STILL_STRIP` did not grow.
+ * - 24 → 25 CLOSED on 2026-08-08: `api` closed (#5384). The registered total
+ *   did not move — only the posture did. #5309 (PR #6576) gave the stored
+ *   envelope a layer of its own (`peelStoredEnvelope`), so nothing re-parses a
+ *   stored `api` row through this schema either, and the conversion became an
+ *   ordinary #4001 one. `STILL_STRIP` shrank to `view` alone, which IS the end
+ *   state — its open members are wire shapes with nowhere else to live.
+ * - 26 → 27 on 2026-09-30: `picklist` JOINED the registry, closed (a
+ *   `strictObject` authoring surface).
+ * - 27 → 28 on 2026-10-19: `sharing_rule` JOINED the registry (ADR-0131 D6,
+ *   regime C), closed — `SharingRuleSchema` is `.strict()` and an authoring
+ *   surface only. This was the last bump: closed 27 of 28 when the counts were
+ *   replaced by the rule.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -483,8 +522,8 @@ describe('each bound entry IS its stack collection\'s schema', () => {
  *
  * ## `view` is the end state, not the last item of debt
  *
- * 24 of 25 are closed and the 25th will not be, for a reason worth stating so
- * nobody "finishes the job" by force. The registered `view` schema is a UNION
+ * Every other registered type is closed and `view` will not be, for a reason
+ * worth stating so nobody "finishes the job" by force. The registered `view` schema is a UNION
  * over the runtime shapes a `view` body really takes, and THREE of its four
  * members are deliberately `.strip()`:
  *
@@ -609,51 +648,20 @@ describe('registered-type closure is derived, not tallied', () => {
     expect(types).toContain(type);
     expect(
       topLevelPosture(getMetadataTypeSchema(type)),
-      `'${type}' is now strict — remove it from STILL_STRIP and update the count.`,
+      `'${type}' is now strict — remove it from STILL_STRIP.`,
     ).toBe('strip');
   });
 
-  it('reports the campaign number so a reader never has to count', () => {
-    const closed = types.filter((t) => !STILL_STRIP.has(t));
-    expect(closed.length + STILL_STRIP.size).toBe(types.length);
-    // 25 → 24 on 2026-08-02: `validation` left the registry entirely (#4509,
-    // ADR-0088 retirement), taking an already-closed schema with it. The
-    // campaign's closure ratio is unchanged — one fewer registered type, not
-    // one fewer closed one.
-    //
-    // 24 → 25 on 2026-08-04: `api` JOINED the registry (#5271, part of #5206),
-    // the first new registered kind since the campaign ended. It declares the
-    // protection envelope (so `UNDECLARED_ENVELOPE` stays empty) but goes onto
-    // STILL_STRIP — measured, see that list's note: the same schema parses
-    // stored rows carrying `packageId` / `state`, so closing it breaks the
-    // load-time backstop and the publish gate. Closed count is therefore
-    // unchanged at 23 while the registered total moves to 25.
-    //
-    // 25 → 26 on 2026-08-08: `capability` JOINED the registry (#5961), under
-    // the same template `api` used. Unlike `api` it lands CLOSED —
-    // `CapabilityDeclarationSchema` is only an AUTHORING surface, so
-    // `strict()` cost nothing: nothing re-parses a stored `sys_capability` row
-    // through it (`bootstrapDeclaredCapabilities` reads named fields off the
-    // body via `capabilityRowFields`), which is exactly the property `api`
-    // lacks. So the closed count moves with the total, 23 → 24, and
-    // `STILL_STRIP` does not grow.
-    //
-    // 24 → 25 CLOSED on 2026-08-08: `api` closed (#5384). The registered total
-    // does not move — only the posture does. The property `capability` had and
-    // `api` lacked above turned out not to be a permanent difference: #5309
-    // (PR #6576) gave the stored envelope a layer of its own
-    // (`peelStoredEnvelope`), so nothing re-parses a stored `api` row through
-    // this schema either, and the conversion became an ordinary #4001 one.
-    // `STILL_STRIP` shrinks to `view` alone, which IS the end state — its open
-    // members are wire shapes with nowhere else to live (see that list's note).
-    //
-    // 26 → 27 on 2026-09-30: `picklist` JOINED the registry, closed (a
-    // `strictObject` authoring surface), so the closed count moves with it.
-    //
-    // 27 → 28 on 2026-10-19: `sharing_rule` JOINED the registry (ADR-0131 D6,
-    // regime C), closed — `SharingRuleSchema` is `.strict()` and an authoring
-    // surface only — so the closed count moves with it.
-    expect(closed.length).toBe(27);
-    expect(types.length).toBe(28);
+  it('the open set, computed from the registry, IS `STILL_STRIP` — no count to bump', () => {
+    // The rule the old `closed 27 / types 28` pin stood in for, stated directly:
+    // every registered type is closed except the named exceptions. A new closed
+    // kind changes nothing here; a new open one, or an exception that closed,
+    // reds with the offending names. History of the old counts: file header.
+    expect(types.length).toBeGreaterThan(0);
+    const open = types.filter((t) => topLevelPosture(getMetadataTypeSchema(t)) !== 'strict');
+    expect(
+      [...open].sort(),
+      'the registered types whose schema is not closed must be exactly STILL_STRIP',
+    ).toEqual([...STILL_STRIP].sort());
   });
 });
