@@ -473,8 +473,14 @@ export function selfTest() {
   // 6. The gate is wired to run. A gate nothing invokes is this repo's most
   //    carded defect class, and renaming a step silently detaches it.
   const workflow = readFileSync('.github/workflows/lint.yml', 'utf8');
-  check(workflow.includes('node scripts/check-scripts-symbol-anchors.mjs'), 'lint.yml must invoke this gate');
-  check(workflow.includes('node scripts/check-scripts-symbol-anchors.mjs --self-test'), 'lint.yml must invoke this gate\'s --self-test');
+  //    CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so pin
+  //    the step AND the alias: shared resolver self-test, this self-test, sweep.
+  check(/^\s*run: pnpm check:scripts-symbol-anchors\s*$/m.test(workflow), 'lint.yml must run this gate through `pnpm check:scripts-symbol-anchors`');
+  const alias = JSON.parse(readFileSync('package.json', 'utf8')).scripts?.['check:scripts-symbol-anchors'];
+  check(
+    alias === 'node scripts/symbol-anchors.mjs --self-test && node scripts/check-scripts-symbol-anchors.mjs --self-test && node scripts/check-scripts-symbol-anchors.mjs',
+    `root package.json's check:scripts-symbol-anchors must run the resolver's and this gate's --self-test, then the sweep -- got ${JSON.stringify(alias)}`,
+  );
 
   // 7. The census declaration is intact, and its three instruments stay
   //    ordered — the ordering IS the reading (raw counts code, comment prose

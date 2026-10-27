@@ -108,48 +108,40 @@ concurrency:
 # ─────────────────────────────────────────────────────────────────────────────
 # ⭐ GATE INVOCATION IDIOM — stated ONCE, here. The steps below point at it.
 #
-# Most gate steps in this file run their script directly:
+# A gate step runs its root `package.json` alias:
 #
-#     run: node scripts/check-<thing>.mjs
+#     run: pnpm check:<thing>
 #
-# rather than through a `pnpm check:*` alias. That is a deliberate in-repo
-# idiom with its own justification, not a workaround:
+# so `package.json` holds the one definition of the command, and a fix to the
+# alias is a fix to CI (#26091, #26086). A gate that is new, or whose step is
+# being rewired, gets a `check:*` key and CI calls that key. The gates that pin
+# their own wiring (check-aggregator-roster, check-ci-filter-parity,
+# check-doc-frontmatter, check-docs-nav-label, check-system-context-census)
+# assert both halves in their self-tests: this file runs `pnpm check:<thing>`,
+# and the root alias is exactly `--self-test` then the gate. So the step and the
+# alias cannot drift apart without a red.
 #
-#   * Many gate steps in this file already use it — it is the local precedent.
-#   * `scripts/pm/dispatch-gates.mjs` derives gate families from EITHER
-#     spelling, so the direct form loses no discovery.
-#   * It adds no key to the root manifest.
-#   * It is pinned rather than incidental: check-aggregator-roster,
-#     check-ci-filter-parity and check-doc-frontmatter each assert in their own
-#     self-test that `node <self>` appears in THIS file, so silently rewiring
-#     one of them to an alias reddens its gate.
+# A step still runs `node scripts/…` directly in three cases, and only these:
 #
-# ⚠️ It is NOT because root `package.json` is off limits. This file used to say
-# that, in one shape or another, at nineteen separate sites, and it is FALSE.
-# The declared territory of the #9465 @changesets/cli v3 lane inside that file
-# is scoped by the lane's own parenthetical, verbatim from the issue body:
+#   * it runs a DIFFERENT invocation from any alias: other arguments
+#     (`--base "$MERGE_BASE"`, `--advisory`, `--census`), or one leg only (the
+#     self-test half of a gate whose scan runs elsewhere). An alias is a copy
+#     only when it is the same command, and a copy is what this rule removes;
+#   * its job sets up no pnpm (an install-free job elsewhere, such as
+#     check-links.yml or board-snapshot.yml, keeps the direct form);
+#   * it predates this rule and its script has no alias yet. Those steps are
+#     not swept (#25919 「存量不横扫」); each gains an alias when its step is
+#     next rewired. Their comments say "invoked as `node` rather than through a
+#     `pnpm check:*` alias" and point here.
 #
-#     root `package.json` (the `@changesets/cli` range and the `version` script)
+# `scripts/pm/dispatch-gates.mjs` derives gate families from either spelling,
+# so neither form loses discovery.
 #
-# That parenthetical is SCOPING, not illustrative: one dependency range and one
-# script key. It does not cover the file, and it does not cover a new `check:*`
-# key — so adding `check:<thing>` to the root manifest would have been allowed
-# all along. The steps below take the direct form on the merits listed above;
-# they are not fenced out of the alternative.
-#
-# Stated once here, and POINTED AT rather than restated, because the over-broad
-# reading propagates by copying — measured, not supposed. A dev agent wrote the
-# same sentence into a new comment and a new script's docblock and said plainly:
-# "I copied the phrasing from neighbouring comments instead of checking it."
-# The count was 15 sites when #10894 was filed on 2026-08-21 and 19 by
-# 2026-08-24, four of them added AFTER the card was filed and two of those
-# within ninety minutes of it being picked up. Nineteen CORRECTED copies would
-# re-arm the identical mechanism: a claim that reads as verified because it
-# reads exactly like the verified ones beside it. So there is one statement of
-# this idiom — this one — and every step refers to it.
-#
-# Changing this note? It is prose, and no gate can red on a wrong sentence
-# here; that is precisely how nineteen wrong ones accumulated. Check any claim
+# ⚠️ Root `package.json` was never off limits. The #9465 @changesets/cli v3
+# lane's territory in that file is one dependency range and one script key,
+# verbatim from that issue: root `package.json` (the `@changesets/cli` range
+# and the `version` script). A new `check:*` key was always allowed; the
+# opposite reading once spread to nineteen comments by copying. Check any claim
 # about the #9465 fence against #9465's own body before you write it down.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1867,9 +1859,7 @@ jobs:
       - name: Docs frontmatter parses
         id: docs-frontmatter-parses
         continue-on-error: true
-        run: |
-          node scripts/check-doc-frontmatter.mjs --self-test
-          node scripts/check-doc-frontmatter.mjs
+        run: pnpm check:doc-frontmatter
 
       # The docs site's short sidebar label (`navTitle`) reaches the PAGE TREE
       # and nothing else (#12311). A doc page's `title` serves the SERP title,
@@ -1894,15 +1884,12 @@ jobs:
       # an upgrade does the gate says migrate instead of letting ours become the
       # thing nobody migrated.
       #
-      # Invoked as `node` rather than a `pnpm check:*` alias: see the GATE
-      # INVOCATION IDIOM note at the top of this file. Filesystem read plus one
-      # type-stripped import; sub-second.
+      # Runs its root alias, per the GATE INVOCATION IDIOM note at the top of
+      # this file. Filesystem read plus one type-stripped import; sub-second.
       - name: Docs nav label stays out of the title surfaces
         id: docs-nav-label-stays-out-of-the-title
         continue-on-error: true
-        run: |
-          node scripts/check-docs-nav-label.mjs --self-test
-          node scripts/check-docs-nav-label.mjs
+        run: pnpm check:docs-nav-label
 
       # #13548 tenant-audit census. `content/docs/permissions/tenant-audit-census.mdx`
       # carries the population `SqlDriver.auditMissingTenant` acts on: every
@@ -2094,9 +2081,9 @@ jobs:
       # job's check-run is advisory with no signal anywhere (#5617), while a
       # failing step here is read by everyone — and enforcement later needs
       # only the flag flip, not a Settings change.
-      # Invoked as `node` rather than a `pnpm check:*` alias, same as the
-      # frontmatter step above: see the GATE INVOCATION IDIOM note at the top of
-      # this file.
+      # Invoked as `node` rather than a `pnpm check:*` alias (it has none yet,
+      # and its scan runs `--advisory`): see the GATE INVOCATION IDIOM note at
+      # the top of this file.
       - name: Route spellings taught in prose match the ledgers (advisory)
         id: route-spellings-taught-in-prose-match
         continue-on-error: true
@@ -2488,69 +2475,30 @@ jobs:
       # #13788 (1,647 platform-checklist citations) joins by registering its own
       # corpus — ⛔ not by forking the resolver.
       #
-      # Invoked as `node` rather than a pnpm alias per the GATE INVOCATION IDIOM
-      # at the top of this file; the gate's own --self-test asserts BOTH lines
-      # below are present, so rewiring it silently reddens it.
-      #
-      # ⚠️ The two self-tests go through a `run_self_test` COLLECTOR, not a bare
-      # sequence. Under `bash -e` the first non-zero exit aborts the step, so a
-      # chained second self-test is neither green nor red — it never runs
-      # (#10814). The collector runs both unconditionally and fails at the end
-      # naming every one that broke.
-      #
-      # ⛔ AND THE PRODUCTION SWEEP IS A SEPARATE STEP, which is not cosmetic.
-      # `check-step-collectors` drives this very block under a real `bash -e`
-      # with a STUB planted at each collected command's script path, and holds
-      # "all green => every command runs" as an equality. A trailing
-      # `node scripts/check-adr-symbol-anchors.mjs` in the same block re-invokes
-      # that same stub, so the harness counts 3 executions against 2 collected
-      # commands and the gate reds (3/2) — which is exactly what it did here.
-      # Both existing collectors in this file carry self-tests ONLY, for the
-      # same reason. Keep the sweep out of the collector block.
-      - name: Symbol-anchor gate self-tests
-        id: symbol-anchor-gate-self-tests
-        continue-on-error: true
-        run: |
-          failed=""
-          run_self_test() {
-            echo "-- $*"
-            if "$@"; then
-              echo "PASS  $*"
-            else
-              echo "FAIL  $*"
-              failed="${failed}  $*"$'\n'
-            fi
-            return 0
-          }
-          run_self_test node scripts/symbol-anchors.mjs --self-test
-          run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
-          run_self_test node scripts/check-scripts-symbol-anchors.mjs --self-test
-          run_self_test node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
-          if [ -n "$failed" ]; then
-            echo ""
-            echo "Symbol-anchor self-tests — the following FAILED:"
-            printf "%s" "$failed"
-            exit 1
-          fi
-
+      # Each corpus runs its root alias, per the GATE INVOCATION IDIOM note at
+      # the top of this file: `pnpm check:<corpus>-symbol-anchors` is the shared
+      # resolver's `--self-test`, then the corpus's own `--self-test`, then its
+      # sweep. One step per corpus, each with an `id:` and `continue-on-error`,
+      # so a red corpus never hides the other two — the job the `run_self_test`
+      # collector that used to precede these steps did (#10814). The shared
+      # resolver's self-test (~0.2 s) runs in each step; a red there reds all
+      # three, which is what a broken resolver means. Each corpus gate's own
+      # --self-test asserts its step and its alias, so rewiring one silently
+      # reddens it.
       - name: ADR symbol anchors resolve (no line numbers survive)
         id: adr-symbol-anchors-resolve-no-line-numbers
         continue-on-error: true
-        run: node scripts/check-adr-symbol-anchors.mjs
+        run: pnpm check:adr-symbol-anchors
 
       # The SECOND corpus (#15765), and it is a `defineCorpus` registration over
-      # `scripts/**` comment prose — ⛔ not a second resolver. Its own sweep is a
-      # separate step for the same `check-step-collectors` reason stated above:
-      # a production sweep inside the collector block re-invokes the stub the
-      # harness plants and the count comes out 4/3.
+      # `scripts/**` comment prose — ⛔ not a second resolver.
       - name: scripts/** symbol anchors resolve (no line citations on tracked targets survive)
         id: scripts-symbol-anchors-resolve-no-line
         continue-on-error: true
-        run: node scripts/check-scripts-symbol-anchors.mjs
+        run: pnpm check:scripts-symbol-anchors
 
       # The THIRD corpus (#17065) — `packages/spec/src/**` doc blocks, again a
-      # `defineCorpus` registration and ⛔ not a second resolver. Separate sweep
-      # step for the same `check-step-collectors` reason stated above.
+      # `defineCorpus` registration and ⛔ not a second resolver.
       #
       # ⭐ Its exit contract is a PINNED DAY-ONE RESIDUAL, not a clean tree: the
       # census (7 findings across 6 of 1,317 files, taken in reporting mode
@@ -2562,7 +2510,7 @@ jobs:
       - name: packages/spec/src/** doc-block symbol anchors resolve (no NEW line citations on tracked targets)
         id: packages-spec-src-doc-block-symbol-anchors
         continue-on-error: true
-        run: node scripts/check-spec-docblock-symbol-anchors.mjs
+        run: pnpm check:spec-docblock-symbol-anchors
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
@@ -3519,9 +3467,7 @@ jobs:
       - name: Aggregator roster gate
         id: aggregator-roster-gate
         continue-on-error: true
-        run: |
-          node scripts/check-aggregator-roster.mjs --self-test
-          node scripts/check-aggregator-roster.mjs
+        run: pnpm check:aggregator-roster
 
       # Rationale: `scripts/ci/lane-verdict.mjs` header (#23191). The verdict
       # every lane above and below ends with reads each gate's `outcome`, never
@@ -3652,9 +3598,7 @@ jobs:
       - name: CI filter parity (cross-package Layer C)
         id: ci-filter-parity-cross-package-layer-c
         continue-on-error: true
-        run: |
-          node scripts/check-ci-filter-parity.mjs --self-test
-          node scripts/check-ci-filter-parity.mjs
+        run: pnpm check:ci-filter-parity
 
       # The READING half of the gate above (#10046). `--union-into` appends the
       # cross-package scans to the `turbo ls` document ci.yml is about to shard,
@@ -4129,7 +4073,7 @@ jobs:
       #
       # ⛔ The manifest alias is NOT the verdict. It runs `--self-test` and
       # nothing else — the shape every credential-needing gate in this manifest
-      # uses (`check:pm-half-states`, `check:pm-closed-card-sweep`), because a
+      # uses (`check:pm-half-states`, for one), because a
       # live mode needs a board and a credential. Wiring the alias ALONE would
       # run the self-test twice and scan nothing. Both spellings are here on
       # purpose, self-test first: `check-self-test-wired` requires CI to run the

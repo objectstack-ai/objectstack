@@ -331,8 +331,14 @@ export function selfTest() {
   // 4. The gate is wired to run. A gate nothing invokes is this repo's most
   //    carded defect class, and renaming a step silently detaches it.
   const workflow = readFileSync('.github/workflows/lint.yml', 'utf8');
-  check(workflow.includes('node scripts/check-adr-symbol-anchors.mjs'), 'lint.yml must invoke this gate');
-  check(workflow.includes('node scripts/check-adr-symbol-anchors.mjs --self-test'), 'lint.yml must invoke this gate\'s --self-test');
+  //    CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so pin
+  //    the step AND the alias: shared resolver self-test, this self-test, sweep.
+  check(/^\s*run: pnpm check:adr-symbol-anchors\s*$/m.test(workflow), 'lint.yml must run this gate through `pnpm check:adr-symbol-anchors`');
+  const alias = JSON.parse(readFileSync('package.json', 'utf8')).scripts?.['check:adr-symbol-anchors'];
+  check(
+    alias === 'node scripts/symbol-anchors.mjs --self-test && node scripts/check-adr-symbol-anchors.mjs --self-test && node scripts/check-adr-symbol-anchors.mjs',
+    `root package.json's check:adr-symbol-anchors must run the resolver's and this gate's --self-test, then the sweep -- got ${JSON.stringify(alias)}`,
+  );
 
   // 5. The census declaration is intact, INCLUDING the one-way error direction
   //    the ruling ordered recorded (point 5).

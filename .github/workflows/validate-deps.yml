@@ -81,8 +81,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --prefer-offline
 
+      # Through its root alias, so its --self-test runs first (#26091).
       - name: Verify Changesets "fixed" group covers every public package
-        run: node scripts/check-changeset-fixed.mjs
+        run: pnpm check:changeset-fixed
 
       # pnpm overrides pin what THIS workspace resolves, but they do not ship
       # with published packages — downstream installs see only the declared
