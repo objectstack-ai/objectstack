@@ -23,31 +23,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
       # Restore-only: scheduled runs read main's store cache; the per-push
       # workflows own saving it.
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          save-store: 'false'
 
       # The spec package sits at the root of the workspace graph (no workspace
       # deps) and its suite reads src/ directly, so no build step is needed —

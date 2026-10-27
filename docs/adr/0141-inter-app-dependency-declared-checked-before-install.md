@@ -513,6 +513,17 @@ other two on the runtime card:
 The resolver-side `ResolvedPackageDependencySchema` (`@objectstack/spec/kernel`) is unaffected: it is a resolution outcome,
 not a declaration, and `PackageDependencySchema`'s own header already tells the two apart.
 
+**Addendum (2026-10-27, #25792 item 6) — items 2 and 3 decided on the measured count: both retire.** Measured at
+`origin/main` `6390fe52ce`: `PackageDependencySchema.optional` has **0** readers and **0** writers outside `packages/spec`,
+and `AppManifestSchema.dependencies` has **0** readers and **0** writers there, with no parse of `AppManifestSchema` at all
+(this repository's `packages/`, `ui/`, `examples/` and `apps/`; HotCRM at `9464673`, whose three module manifests declare
+the record, the live control). Inside `packages/spec` the only authors were the two schemas and three of their own tests.
+Each key is a `retiredKey()` tombstone now (`marketplace/PackageDependency:optional` and `system/AppManifest:dependencies`
+in `RETIRED_KEYS_BY_MAJOR[18]`), with the D3 record `dependency-unread-spellings-retired` and no D2 conversion, because
+neither shape is a stack collection member. The projection above therefore carries `packageId` = the key and
+`versionRange` = the value, nothing else: item 1's conversion writes no `optional`, and `manifest.dependencies` is the
+one way to declare a dependency.
+
 ---
 
 ## Consequences

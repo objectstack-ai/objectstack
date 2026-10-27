@@ -252,9 +252,6 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': 'Permission sets',
   'engine.position.holders.unknown': 'The server did not count the holders for you (no active organization, or no read on position assignments).',
   'engine.position.grants.none': 'None',
-  'engine.position.grants.byName': '(by name)',
-  'engine.position.grants.byNameHint':
-    'Granted because this permission set has the same name as the position. The position does not list it, but holders get it.',
   // objectstack#26187 — the Setup position page's read-only previews of the
   // permission sets the position names (`PositionPermissionSetsSection.tsx`).
   'engine.position.sets.title': 'Permission sets',
@@ -4083,8 +4080,6 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': '权限集',
   'engine.position.holders.unknown': '服务器未为你统计持有人数（没有当前组织，或无权读取岗位分配）。',
   'engine.position.grants.none': '无',
-  'engine.position.grants.byName': '（同名）',
-  'engine.position.grants.byNameHint': '因与岗位同名而授予。岗位定义未列出它，但持有人会获得它。',
   'engine.position.sets.title': '权限集',
   'engine.position.sets.hint': '此岗位列出的每个权限集授予的权限，按列出顺序显示。打开权限集可修改它。',
   'engine.position.sets.empty': '此岗位未列出任何权限集。',

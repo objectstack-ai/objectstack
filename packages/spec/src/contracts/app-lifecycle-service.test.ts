@@ -14,7 +14,6 @@ describe('App Lifecycle Service Contract', () => {
     views: ['contact_list', 'deal_board'],
     flows: ['new_deal_notification'],
     hasSeedData: true,
-    dependencies: [],
   };
 
   it('should allow a minimal IAppLifecycleService implementation with all required methods', () => {

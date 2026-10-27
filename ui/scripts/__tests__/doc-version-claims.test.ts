@@ -534,6 +534,25 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  * Two sites moved under the first rule and one under the second; the surviving numbers in
  * this header are all of the second kind.
  *
+ * ## What objectstack#26421 changed: the anchor follows the version FILE
+ *
+ * objectui#6400's anchor read literal `node-version:` lines in `.github/workflows`, and
+ * floored them at 15. objectstack#26419 moved the setup of about forty jobs into one
+ * composite action, `.github/actions/setup-workspace`, whose setup-node step reads
+ * `node-version-file: .nvmrc`; the jobs it could not reach read `.nvmrc` the same way. One
+ * literal line was left (a registry canary that checks nothing out), so this file went red
+ * over a CI whose Node had not moved - the truth had moved from forty literals into one
+ * file that `check:node-version` already holds the remaining literals to.
+ *
+ * So the anchor now reads both spellings setup-node accepts, in both places they live: a
+ * literal `node-version:` and a `node-version-file:` reference, across `.github/workflows`
+ * and `.github/actions`, the reference resolved to the major of the file it names. A
+ * `.nvmrc` that disagrees with a leftover literal is a split vote; a reference to a file
+ * nobody can read is an UNKNOWN declaration, named, never agreement. The census cross-check
+ * counts both keys over the same file list, the floor was re-based on readings of both
+ * trees (`ANCHOR_DECLARATION_FLOOR` carries them), and the two-direction fixture gained a
+ * `.nvmrc` arm run through the same comparison the corpus runs.
+ *
  * ## The census that set the design (measured on d46b40324, the merge of PR #3698)
  *
  * The dispatch expected the bare-claim count to be zero, since #3688 and #3698 had just
@@ -969,7 +988,8 @@ interface KnownClaim {
   /**
    * Only legal on an `anchored` entry, and the objectui#6400 counterpart to `skeletonDep`:
    * the GitHub-Actions key (`node-version`) whose declarations across `.github/workflows`
-   * ARE this claim's anchor, read and compared on every run. Present means checked; absent
+   * and `.github/actions` - literal, or through its `-file` reference since
+   * objectstack#26421 - ARE this claim's anchor, read and compared on every run. Present means checked; absent
    * means the entry rests on a reviewer re-running the command its `why` describes.
    *
    * The field exists because that reviewer arrangement was measured to rot. The entry this
@@ -1027,7 +1047,7 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     claim: 'Node 22.x',
     kind: 'anchored',
     workflowVersionKey: 'node-version',
-    why: "Anchored on the node-version declarations in .github/workflows and ASSERTED against them by the workflow-version assertion below, which re-reads them on every run and demands this page state their major (objectui#6400). Written by objectui#6307, which replaced an invented consumer floor (`**Node.js** 20+`) on this page. The sentence around it states what CI EXERCISES, not what a reader's project requires - no manifest in this tree declares a consumer engines.node, so a floor here would be a number nobody measured. The declaration count this reason used to quote left it in objectui#6400: it had already drifted, and a count no run re-takes is what that card is about.",
+    why: "Anchored on the node-version declarations in .github/workflows and .github/actions - literal, or read from .nvmrc through node-version-file (objectstack#26421) - and ASSERTED against them by the workflow-version assertion below, which re-reads them on every run and demands this page state their major (objectui#6400). Written by objectui#6307, which replaced an invented consumer floor (`**Node.js** 20+`) on this page. The sentence around it states what CI EXERCISES, not what a reader's project requires - no manifest in this tree declares a consumer engines.node, so a floor here would be a number nobody measured. The declaration count this reason used to quote left it in objectui#6400: it had already drifted, and a count no run re-takes is what that card is about.",
   },
   {
     file: 'content/docs/guide/building-crud-app.md',
@@ -1043,14 +1063,14 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     // between the toolchain name and the number, and `SEP` is a character class.
     claim: 'node-version: 20',
     kind: 'anchored',
-    why: "Not a version this page teaches - the sentence CITES node-version: 20 as the value this page's own copied YAML block had fossilised at, and says in the same breath that every workflow declares 22 instead. Anchored on .github/workflows, where NO node-version declaration reads 20 and every one of them reads 22: the sentence therefore goes false exactly when the workflows move off 22, which is when it should. Deliberately phrased without a declaration COUNT - counts in this ledger's reasons are what objectui#6400 is open about.",
+    why: "Not a version this page teaches - the sentence CITES node-version: 20 as the value this page's own copied YAML block had fossilised at, and says in the same breath that every workflow declares 22 instead. Anchored on .github/workflows and .github/actions, where NO node-version declaration reads 20 and every one of them reads 22, literally or through .nvmrc: the sentence therefore goes false exactly when the workflows move off 22, which is when it should. Deliberately phrased without a declaration COUNT - counts in this ledger's reasons are what objectui#6400 is open about.",
   },
   {
     file: 'content/docs/guide/ci-cd-pipeline.md',
     claim: 'Node 22.x',
     kind: 'anchored',
     workflowVersionKey: 'node-version',
-    why: "The Node this repository's CI runs, anchored on the node-version declarations in .github/workflows and ASSERTED against them by the workflow-version assertion below (objectui#6400) rather than restated here. Both halves of the reason this replaces were false by the time anyone read them: it named a declaration count the tree had since doubled, in a spelling one lane does not use, and it credited this page's own pin test with covering the line - ci-cd-pipeline-doc.test.ts contains no node-version and no 22 at all (control, same file: 28 lines matching ci.yml, as of objectui#6400 - not an occurrence count, which reads one higher). Nothing re-measured either half, which is the whole reason the count moved into a run.",
+    why: "The Node this repository's CI runs, anchored on the node-version declarations in .github/workflows and .github/actions (literal, or through node-version-file: .nvmrc since objectstack#26421) and ASSERTED against them by the workflow-version assertion below (objectui#6400) rather than restated here. Both halves of the reason this replaces were false by the time anyone read them: it named a declaration count the tree had since doubled, in a spelling one lane does not use, and it credited this page's own pin test with covering the line - ci-cd-pipeline-doc.test.ts contains no node-version and no 22 at all (control, same file: 28 lines matching ci.yml, as of objectui#6400 - not an occurrence count, which reads one higher). Nothing re-measured either half, which is the whole reason the count moved into a run.",
   },
   {
     file: 'content/docs/guide/layout.md',
@@ -1095,7 +1115,7 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     claim: 'Node 22.x',
     kind: 'anchored',
     workflowVersionKey: 'node-version',
-    why: 'Same anchor, same assertion and same objectui#6307 rewrite as the building-crud-app.md entry above: the node-version declarations in .github/workflows are re-read and compared on every run (objectui#6400). This page carried the same invented floor in two bullets, `**Node.js** 20+` and `**pnpm** 9+`, and both were invisible to this scan until SEP admitted emphasis markers.',
+    why: 'Same anchor, same assertion and same objectui#6307 rewrite as the building-crud-app.md entry above: the node-version declarations in .github/workflows and .github/actions, literal or through .nvmrc, are re-read and compared on every run (objectui#6400, objectstack#26421). This page carried the same invented floor in two bullets, `**Node.js** 20+` and `**pnpm** 9+`, and both were invisible to this scan until SEP admitted emphasis markers.',
   },
   {
     file: 'content/docs/guide/quick-start.md',
@@ -1681,15 +1701,51 @@ const skeletonChecks: SkeletonCheck[] = KNOWN_CLAIMS.flatMap((entry) => {
  * reads the plugin manifests and for the same reason - the doc sentence restates something
  * this tree already states machine-readably, so a reviewer should not be the thing that
  * re-reads it.
+ *
+ * Since objectstack#26421 it is one of TWO directories the anchor reads; see
+ * `ANCHOR_YAML_DIRS` below.
  */
 const WORKFLOWS_DIR = path.relative(repoRoot, rootWorkflowsDir);
 
-/** One `<key>: <value>` declaration found in one workflow file. */
+/**
+ * The root every anchor path is resolved against: the git root GitHub checks out, where
+ * `.github/` and the `.nvmrc` a `node-version-file:` names both live. Not `repoRoot`,
+ * which is the objectui tree (`ui/` under the monorepo). Taken from `rootWorkflowsDir` so
+ * `helpers/root-ci` stays the one answer to where the root workflows are.
+ */
+const ANCHOR_ROOT = path.resolve(rootWorkflowsDir, '..', '..');
+
+/**
+ * The YAML the anchor is read from, relative to `ANCHOR_ROOT` (objectstack#26421): the
+ * workflows, and the local composite actions they call. A job whose setup moved into
+ * `./.github/actions/setup-workspace` declares its Node in THAT action's `action.yml`, so
+ * reading the workflows alone would read the composite's lanes as gone. Workflows are read
+ * one level deep, as GitHub runs them; actions recursively, one `action.yml` per action.
+ */
+const ANCHOR_YAML_DIRS = { workflows: '.github/workflows', actions: '.github/actions' } as const;
+
+/** How failure text names those two directories, relative to the objectui tree like WORKFLOWS_DIR. */
+const ANCHOR_DIRS_LABEL = `${WORKFLOWS_DIR} and ${path.relative(
+  repoRoot,
+  path.join(ANCHOR_ROOT, ANCHOR_YAML_DIRS.actions),
+)}`;
+
+/** One `<key>: <value>` or `<key>-file: <path>` declaration found in one anchor YAML file. */
 interface WorkflowDeclaration {
+  /** The YAML file, relative to `ANCHOR_ROOT`: `.github/workflows/ci.yml`. */
   file: string;
   line: number;
-  /** The value as written, with any surrounding quotes removed: `22.x`, `22`, `20.11.1`. */
+  /**
+   * The value as written, with any surrounding quotes removed: `22.x`, `22`, `20.11.1`.
+   * For a `<key>-file:` declaration, the first line of the file it names, which is the
+   * value `actions/setup-node` reads from it.
+   */
   spelling: string;
+  /**
+   * The version file a `<key>-file:` declaration names (`.nvmrc`), or null for a literal
+   * `<key>:` line. Carried so a failure says where a value came from, not only what it is.
+   */
+  via: string | null;
   /** The major that value states, or null when it states none. */
   major: number | null;
 }
@@ -1740,8 +1796,8 @@ function parseWorkflowVersionLine(line: string, key: string): string | null {
   return value.replace(/^(['"])(.*)\1$/, '$2');
 }
 
-/** Every `.yml` / `.yaml` file in a workflow directory, in a stable order. */
-function workflowFiles(dir: string): string[] {
+/** Every `.yml` / `.yaml` file directly in one directory, by name, in a stable order. */
+function yamlFilesIn(dir: string): string[] {
   try {
     return fs
       .readdirSync(dir)
@@ -1752,72 +1808,150 @@ function workflowFiles(dir: string): string[] {
   }
 }
 
+/** Every `action.yml` / `action.yaml` at any depth under one directory, in a stable order. */
+function actionFilesUnder(dir: string, prefix = ''): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...actionFilesUnder(path.join(dir, entry.name), rel));
+    else if (/^action\.ya?ml$/.test(entry.name)) found.push(rel);
+  }
+  return found;
+}
+
 /**
- * Every declaration of `key` across a workflow directory.
+ * Every YAML file the anchor reads under `root`, relative to it: the workflows first, then
+ * the composite actions (`ANCHOR_YAML_DIRS`). One list, so the parser and the key-only
+ * counter below can never be handed two different populations.
+ */
+function anchorYamlFiles(root: string): string[] {
+  return [
+    ...yamlFilesIn(path.join(root, ANCHOR_YAML_DIRS.workflows)).map(
+      (name) => `${ANCHOR_YAML_DIRS.workflows}/${name}`,
+    ),
+    ...actionFilesUnder(path.join(root, ANCHOR_YAML_DIRS.actions)).map(
+      (name) => `${ANCHOR_YAML_DIRS.actions}/${name}`,
+    ),
+  ];
+}
+
+/**
+ * The value a version FILE states, read the way `actions/setup-node` reads its
+ * `node-version-file`: the first line that is neither blank nor a `#` comment, trimmed. A
+ * file that is missing or states nothing comes back as a spelling `majorOf` cannot read, so
+ * it is REPORTED as an unreadable declaration rather than dropped - a reference to a version
+ * file nobody can read is a lane whose Node this tree does not state.
+ */
+function versionFileValue(root: string, ref: string): string {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.resolve(root, ref), 'utf8');
+  } catch {
+    return `(no such file: ${ref})`;
+  }
+  const first = text
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line !== '' && !line.startsWith('#'));
+  return first === undefined ? `(empty file: ${ref})` : first;
+}
+
+/**
+ * Every declaration of `key` across the anchor YAML under `root` - in BOTH spellings
+ * `actions/setup-node` accepts (objectstack#26421):
+ *
+ *   - `<key>: <value>`, the literal, read off the line as before;
+ *   - `<key>-file: <path>`, a reference, resolved against `root` (GitHub's checkout root,
+ *     where setup-node resolves it too) and read through `versionFileValue`.
+ *
+ * Both land in one list as declarations of the same anchor, so a tree that moved its lanes
+ * from literals onto `.nvmrc` keeps every lane in the anchor, and a `.nvmrc` that disagrees
+ * with a remaining literal is a split vote like any other.
  *
  * Deliberately UNCACHED. The obvious memo keyed on the directory would be wrong for the
- * fixture below, which writes a workflow directory, reads it, writes another lane into the
- * same directory and reads it again to produce the red direction - a cache keyed on a path
- * whose CONTENTS change inside one test hands back the first answer twice and turns the
- * red half of a two-direction proof green. Three checks over thirty small files is not a
- * cost worth that trap.
+ * fixture below, which writes a workflow tree, reads it, changes a lane or the version file
+ * in place and reads it again to produce the red direction - a cache keyed on a path whose
+ * CONTENTS change inside one test hands back the first answer twice and turns the red half
+ * of a two-direction proof green. Three checks over forty small files is not a cost worth
+ * that trap.
  */
 function workflowVersionDeclarations(
   key: string,
-  dir: string = path.join(repoRoot, WORKFLOWS_DIR),
+  root: string = ANCHOR_ROOT,
 ): WorkflowDeclaration[] {
+  const fileKey = `${key}-file`;
   const found: WorkflowDeclaration[] = [];
-  for (const name of workflowFiles(dir)) {
-    const lines = fs.readFileSync(path.join(dir, name), 'utf8').split('\n');
+  for (const file of anchorYamlFiles(root)) {
+    const lines = fs.readFileSync(path.join(root, file), 'utf8').split('\n');
     for (let i = 0; i < lines.length; i++) {
-      const value = parseWorkflowVersionLine(lines[i], key);
-      if (value === null) continue;
-      found.push({ file: name, line: i + 1, spelling: value, major: majorOf(value) });
+      const literal = parseWorkflowVersionLine(lines[i], key);
+      if (literal !== null) {
+        found.push({ file, line: i + 1, spelling: literal, via: null, major: majorOf(literal) });
+        continue;
+      }
+      const ref = parseWorkflowVersionLine(lines[i], fileKey);
+      if (ref === null) continue;
+      const value = versionFileValue(root, ref);
+      found.push({ file, line: i + 1, spelling: value, via: ref, major: majorOf(value) });
     }
   }
   return found;
 }
 
 /**
- * The same files read by a counter that knows nothing but the KEY - the independent half of
- * the census cross-check. Should `parseWorkflowVersionLine` ever stop recognising a
+ * The same files read by a counter that knows nothing but the KEYS - the independent half
+ * of the census cross-check. Should `parseWorkflowVersionLine` ever stop recognising a
  * spelling that is in the tree, these two lists stop being the same list and the assertion
- * says so, rather than the anchor quietly shrinking by one lane.
+ * says so, rather than the anchor quietly shrinking by one lane. Since objectstack#26421 the
+ * caller hands it both keys, the literal and its `-file` reference, because the parser
+ * reads both.
  *
  * It skips whole-line YAML comments, which declare nothing: the root workflows quote a
  * commented setup example in `half-state-patrol.yml`'s usage block, and counting that
  * would read the parser's correct silence on it as a lost lane (objectstack#25712).
  */
 function workflowKeyMentions(
-  key: string,
-  dir: string = path.join(repoRoot, WORKFLOWS_DIR),
+  keys: readonly string[],
+  root: string = ANCHOR_ROOT,
 ): { file: string; line: number }[] {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp('(?:^|\\s)' + escaped + '\\s*:');
+  const res = keys.map(
+    (key) => new RegExp('(?:^|\\s)' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:'),
+  );
   const found: { file: string; line: number }[] = [];
-  for (const name of workflowFiles(dir)) {
-    const lines = fs.readFileSync(path.join(dir, name), 'utf8').split('\n');
+  for (const file of anchorYamlFiles(root)) {
+    const lines = fs.readFileSync(path.join(root, file), 'utf8').split('\n');
     for (let i = 0; i < lines.length; i++) {
       if (/^\s*#/.test(lines[i])) continue;
-      if (re.test(lines[i])) found.push({ file: name, line: i + 1 });
+      if (res.some((re) => re.test(lines[i]))) found.push({ file, line: i + 1 });
     }
   }
   return found;
 }
 
-/** Spelling to the files declaring it - so a failure message carries the measurement. */
+/**
+ * Spelling to the files declaring it - so a failure message carries the measurement. A value
+ * read through a version file is labelled with that file (`.nvmrc -> "22"`), so a split vote
+ * between `.nvmrc` and a leftover literal names both sides.
+ */
 function spellingCensus(declarations: WorkflowDeclaration[]): string {
   const bySpelling = new Map<string, string[]>();
   for (const declaration of declarations) {
-    const bucket = bySpelling.get(declaration.spelling);
-    if (bucket === undefined) bySpelling.set(declaration.spelling, [declaration.file]);
+    const label =
+      declaration.via === null
+        ? JSON.stringify(declaration.spelling)
+        : `${declaration.via} -> ${JSON.stringify(declaration.spelling)}`;
+    const bucket = bySpelling.get(label);
+    if (bucket === undefined) bySpelling.set(label, [declaration.file]);
     else bucket.push(declaration.file);
   }
   return [...bySpelling.entries()]
-    .map(
-      ([spelling, files]) =>
-        `${JSON.stringify(spelling)} in ${files.length} (${[...new Set(files)].join(', ')})`,
-    )
+    .map(([label, files]) => `${label} in ${files.length} (${[...new Set(files)].join(', ')})`)
     .join('; ');
 }
 
@@ -1869,6 +2003,100 @@ const workflowVersionChecks: WorkflowVersionCheck[] = KNOWN_CLAIMS.flatMap((entr
     },
   ];
 });
+
+/**
+ * What one workflow-anchored entry gets wrong against its anchor, as failure lines - empty
+ * when the page and the anchor agree. A function rather than the body of the assertion
+ * below so the fixture can hand it a planted tree and watch it go red (objectstack#26421):
+ * the comparison the corpus runs and the comparison the fixture proves are then one piece
+ * of code, not two that could drift apart.
+ */
+function workflowVersionFailures(check: WorkflowVersionCheck): string[] {
+  // The downward ratchet already names a literal that left the tree, and reporting it
+  // twice would read as two problems. The coverage floors below are what stop this skip
+  // from becoming the way out.
+  if (check.absent) return [];
+
+  if (check.declarations.length === 0) {
+    return [
+      `${check.entry.file} :: workflowVersionKey names ${check.key}, which nothing in ` +
+        `${ANCHOR_DIRS_LABEL} declares, as a literal or through ${check.key}-file - there ` +
+        `is no anchor to read, so this entry cannot rest on one: point the field at the key ` +
+        `the workflows use, or reclassify`,
+    ];
+  }
+
+  const unreadable = check.declarations.filter((d) => d.major === null);
+  if (unreadable.length > 0) {
+    return [
+      `${check.entry.file} :: ${unreadable.length} ${check.key} declaration(s) state a ` +
+        `value with no readable major, so this anchor is not unanimous and not split, ` +
+        `it is UNKNOWN: ` +
+        unreadable
+          .map(
+            (d) =>
+              `${d.file}:${d.line} ${d.via === null ? '' : `${d.via} -> `}` +
+              JSON.stringify(d.spelling),
+          )
+          .join('; '),
+    ];
+  }
+
+  const majors = new Set(check.declarations.flatMap((d) => (d.major === null ? [] : [d.major])));
+  if (majors.size > 1) {
+    return [
+      `${check.entry.file} :: ${ANCHOR_DIRS_LABEL} do not agree on ${check.key}, so there ` +
+        `is no single version for the docs to state: ${spellingCensus(check.declarations)}` +
+        ` - finish the bump across the lanes and the version file first, then update the page`,
+    ];
+  }
+
+  const [anchorMajor] = [...majors];
+  const failures: string[] = [];
+  for (const stated of check.stated) {
+    if (stated.major === null) {
+      failures.push(
+        `${check.entry.file}:${stated.line} :: the literal ` +
+          `${JSON.stringify(stated.literal)} states no version this can read, so NOTHING ` +
+          `was compared - fix the key, or drop workflowVersionKey and let the entry rest ` +
+          `on a reviewer again`,
+      );
+      continue;
+    }
+    if (stated.major === anchorMajor) continue;
+    failures.push(
+      `${check.entry.file}:${stated.line}  the page states ` +
+        `${JSON.stringify(stated.literal)} (major ${stated.major}); every ${check.key} ` +
+        `declaration in ${ANCHOR_DIRS_LABEL} states major ${anchorMajor} - ` +
+        spellingCensus(check.declarations),
+    );
+  }
+  return failures;
+}
+
+/**
+ * The vacuity floor on the anchor: how many `node-version` declarations, literal or
+ * through `node-version-file:`, the anchor must hold before a green over it means anything
+ * (objectstack#26421).
+ *
+ * It was 15 literal `node-version:` lines in `.github/workflows` until objectstack#26421,
+ * and that floor was a reading of one SHAPE of the tree, not of the anchor: the
+ * `setup-workspace` composite moved most jobs' Node into `.github/actions` and onto
+ * `.nvmrc`, which left one literal line and reddened this file over a CI whose Node had not
+ * moved. Readings it is set from, both taken with this parser:
+ *
+ *   - `main` at 9a0108cd: 59 declarations, all literal, all major 22;
+ *   - objectstack#26419's head 2cb5ee1f merged onto it: 23 - one literal
+ *     (`scaffold-e2e.yml`'s registry canary, which checks nothing out) and 22
+ *     `node-version-file: .nvmrc` references, 21 in workflows and one in the composite.
+ *
+ * Set well under the smaller of the two on purpose. Each further job moved INTO the
+ * composite removes a reference from the count by design, and a floor tight to today's
+ * count would make the next such move a ui test edit again, the blocker this card was. What
+ * the floor has to catch is a COLLAPSE - a parser or a file walk that stopped reading - and
+ * a collapse falls to zero or near it, not from 23 to 18.
+ */
+const ANCHOR_DECLARATION_FLOOR = 10;
 
 /**
  * The manifest that IS this workspace's toolchain declaration, and the anchor source for
@@ -2797,66 +3025,7 @@ describe('doc version claims - the plugin-skeleton assertion', () => {
 
 describe('doc version claims - the workflow-version assertion', () => {
   it('pins every workflow-anchored claim to the version .github/workflows declares', () => {
-    const failures: string[] = [];
-
-    for (const check of workflowVersionChecks) {
-      // The downward ratchet already names a literal that left the tree, and reporting it
-      // twice would read as two problems. The coverage floors below are what stop this
-      // skip from becoming the way out.
-      if (check.absent) continue;
-
-      if (check.declarations.length === 0) {
-        failures.push(
-          `${check.entry.file} :: workflowVersionKey names ${check.key}, which nothing in ` +
-            `${WORKFLOWS_DIR} declares - there is no anchor to read, so this entry cannot ` +
-            `rest on one: point the field at the key the workflows use, or reclassify`,
-        );
-        continue;
-      }
-
-      const unreadable = check.declarations.filter((d) => d.major === null);
-      if (unreadable.length > 0) {
-        failures.push(
-          `${check.entry.file} :: ${unreadable.length} ${check.key} declaration(s) state a ` +
-            `value with no readable major, so this anchor is not unanimous and not split, ` +
-            `it is UNKNOWN: ` +
-            unreadable.map((d) => `${d.file}:${d.line} ${JSON.stringify(d.spelling)}`).join('; '),
-        );
-        continue;
-      }
-
-      const majors = new Set(
-        check.declarations.flatMap((d) => (d.major === null ? [] : [d.major])),
-      );
-      if (majors.size > 1) {
-        failures.push(
-          `${check.entry.file} :: ${WORKFLOWS_DIR} does not agree on ${check.key}, so there ` +
-            `is no single version for the docs to state: ${spellingCensus(check.declarations)}` +
-            ` - finish the bump across the lanes first, then update the page`,
-        );
-        continue;
-      }
-
-      const [anchorMajor] = [...majors];
-      for (const stated of check.stated) {
-        if (stated.major === null) {
-          failures.push(
-            `${check.entry.file}:${stated.line} :: the literal ` +
-              `${JSON.stringify(stated.literal)} states no version this can read, so NOTHING ` +
-              `was compared - fix the key, or drop workflowVersionKey and let the entry rest ` +
-              `on a reviewer again`,
-          );
-          continue;
-        }
-        if (stated.major === anchorMajor) continue;
-        failures.push(
-          `${check.entry.file}:${stated.line}  the page states ` +
-            `${JSON.stringify(stated.literal)} (major ${stated.major}); every ${check.key} ` +
-            `declaration in ${WORKFLOWS_DIR} states major ${anchorMajor} - ` +
-            spellingCensus(check.declarations),
-        );
-      }
-    }
+    const failures = workflowVersionChecks.flatMap(workflowVersionFailures);
 
     expect(
       failures,
@@ -2869,7 +3038,9 @@ describe('doc version claims - the workflow-version assertion', () => {
         `and not about the page.\n\n` +
         `What this deliberately does NOT judge (objectui#6400):\n` +
         `  - the SPELLING. '22' and '22.x' are one anchor here - see majorOf for why a ` +
-        `spelling comparison has no correct branch available to it.\n` +
+        `spelling comparison has no correct branch available to it - nor WHERE a lane ` +
+        `states it: a literal and a node-version-file reference to .nvmrc are one anchor ` +
+        `too (objectstack#26421).\n` +
         `  - the neighbouring content/docs/guide/ci-cd-pipeline.md :: node-version: 20 ` +
         `entry, which CITES a value the workflows do not declare. Its sentence is true ` +
         `exactly when this comparison would be false, so it cannot share this field; it ` +
@@ -2888,9 +3059,10 @@ describe('doc version claims - the workflow-version assertion', () => {
     for (const check of workflowVersionChecks) {
       expect(
         check.declarations.length,
-        `implausibly few ${check.key} declarations were read from ${WORKFLOWS_DIR} - the ` +
-          `anchor is thinner than the claims it backs, or the parser stopped reading them`,
-      ).toBeGreaterThanOrEqual(15);
+        `implausibly few ${check.key} declarations were read from ${ANCHOR_DIRS_LABEL}, ` +
+          `literal or through ${check.key}-file - the anchor is thinner than the claims it ` +
+          `backs, or the parser stopped reading them`,
+      ).toBeGreaterThanOrEqual(ANCHOR_DECLARATION_FLOOR);
     }
   });
 
@@ -2900,21 +3072,25 @@ describe('doc version claims - the workflow-version assertion', () => {
     // the tree it does not match at all, which subtracts a lane from the anchor and looks
     // exactly like a smaller CI. So the parser is measured against a counter that knows
     // only the key, on the same files, and they must name the same lines.
+    // Since objectstack#26421 the parser reads two keys - the literal and its `-file`
+    // reference - over two directories, so the counter is handed the same two keys and
+    // walks the same file list: one population, two independent readings of it.
     const parsed = workflowVersionDeclarations('node-version');
-    const mentions = workflowKeyMentions('node-version');
+    const mentions = workflowKeyMentions(['node-version', 'node-version-file']);
 
     expect(
       parsed.map((d) => `${d.file}:${d.line}`),
-      'the parser and a counter that knows only the KEY disagree about where node-version ' +
-        'is declared in .github/workflows - a spelling entered the tree that ' +
-        'parseWorkflowVersionLine cannot read, and the anchor lost it silently',
+      'the parser and a counter that knows only the KEYS disagree about where node-version ' +
+        `or node-version-file is declared in ${ANCHOR_DIRS_LABEL} - a spelling entered the ` +
+        'tree that parseWorkflowVersionLine cannot read, and the anchor lost it silently',
     ).toEqual(mentions.map((m) => `${m.file}:${m.line}`));
 
     expect(
       mentions.length,
-      'control for the agreement above: no node-version line was found in ' +
-        '.github/workflows at all, so two empty lists just agreed with each other',
-    ).toBeGreaterThanOrEqual(15);
+      'control for the agreement above: implausibly few node-version / node-version-file ' +
+        `lines were found in ${ANCHOR_DIRS_LABEL}, so two near-empty lists just agreed ` +
+        'with each other',
+    ).toBeGreaterThanOrEqual(ANCHOR_DECLARATION_FLOOR);
 
     expect(
       parsed.filter((d) => d.major === null),
@@ -2929,12 +3105,15 @@ describe('doc version claims - the workflow-version assertion', () => {
     // corpus reading: a green anchor assertion looks exactly like an assertion that
     // compared nothing, which is the failure objectui#6400 was filed about. objectui#6307
     // and objectui#6409 each left one of these behind for the same reason. Here the fixture
-    // is a workflow DIRECTORY, because that is this assertion's input.
+    // is a workflow TREE, because that is this assertion's input: since objectstack#26421 a
+    // root holding `.github/workflows/`, `.github/actions/` and the version file they name.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-version-claims-workflows-'));
+    const workflowsDir = path.join(dir, ANCHOR_YAML_DIRS.workflows);
+    fs.mkdirSync(workflowsDir, { recursive: true });
     try {
       const write = (name: string, value: string): void =>
         fs.writeFileSync(
-          path.join(dir, name),
+          path.join(workflowsDir, name),
           [
             'jobs:',
             '  build:',
@@ -2979,9 +3158,102 @@ describe('doc version claims - the workflow-version assertion', () => {
           .map((d) => d.file),
         'an unreadable value must survive into the declaration list so the assertion can ' +
           'name it - dropping it would shrink the anchor in silence',
-      ).toEqual(['d.yml']);
+      ).toEqual([`${ANCHOR_YAML_DIRS.workflows}/d.yml`]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    // The `.nvmrc` arm (objectstack#26421): the shape objectstack#26419 gives the real tree,
+    // where a lane states no Node of its own and setup-node reads it from the version file -
+    // once in a workflow and once in a composite action. Run through the SAME comparison the
+    // corpus assertion runs, against a page stating Node 22.x.
+    const nvmrcRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-version-claims-nvmrc-'));
+    try {
+      const put = (rel: string, text: string): void => {
+        fs.mkdirSync(path.dirname(path.join(nvmrcRoot, rel)), { recursive: true });
+        fs.writeFileSync(path.join(nvmrcRoot, rel), text, 'utf8');
+      };
+      const setupNode = (indent: string): string =>
+        [
+          `${indent}- uses: actions/setup-node@v4`,
+          `${indent}  with:`,
+          `${indent}    node-version-file: .nvmrc`,
+          '',
+        ].join('\n');
+      put(
+        `${ANCHOR_YAML_DIRS.workflows}/a.yml`,
+        'jobs:\n  build:\n    steps:\n' + setupNode('      '),
+      );
+      put(
+        `${ANCHOR_YAML_DIRS.actions}/setup/action.yml`,
+        'runs:\n  using: composite\n  steps:\n' + setupNode('    '),
+      );
+      put('.nvmrc', '22\n');
+
+      const page = (root: string): WorkflowVersionCheck => ({
+        entry: {
+          file: 'fixture/page.md',
+          claim: 'Node 22.x',
+          kind: 'anchored',
+          workflowVersionKey: 'node-version',
+          why: 'fixture',
+        },
+        key: 'node-version',
+        stated: [{ line: 1, literal: 'Node 22.x', major: claimMajor('Node 22.x') }],
+        absent: false,
+        declarations: workflowVersionDeclarations('node-version', root),
+      });
+
+      const throughFile = workflowVersionDeclarations('node-version', nvmrcRoot);
+      expect(
+        throughFile.map((d) => [d.file, d.via, d.spelling]),
+        'a node-version-file reference is a declaration of the anchor, read through the file ' +
+          'it names, in the workflows AND in a composite action - read neither and a tree ' +
+          'whose lanes moved onto .nvmrc has no anchor at all',
+      ).toEqual([
+        [`${ANCHOR_YAML_DIRS.workflows}/a.yml`, '.nvmrc', '22'],
+        [`${ANCHOR_YAML_DIRS.actions}/setup/action.yml`, '.nvmrc', '22'],
+      ]);
+      expect(workflowVersionFailures(page(nvmrcRoot)), 'page and .nvmrc agree').toEqual([]);
+
+      // The RED direction: `.nvmrc` moves and the page has not followed.
+      put('.nvmrc', 'v24\n');
+      const disagreeing = workflowVersionFailures(page(nvmrcRoot));
+      expect(
+        disagreeing,
+        'a page stating a Node .nvmrc no longer names must go red - otherwise the anchor ' +
+          'follows .nvmrc in name only',
+      ).toHaveLength(1);
+      expect(disagreeing[0]).toContain('fixture/page.md:1');
+      expect(disagreeing[0]).toContain('states major 24');
+      expect(disagreeing[0]).toContain('.nvmrc -> "v24"');
+
+      // A leftover literal that disagrees with `.nvmrc` is a split vote, not a pass.
+      put(
+        `${ANCHOR_YAML_DIRS.workflows}/b.yml`,
+        [
+          'jobs:',
+          '  canary:',
+          '    steps:',
+          '      - uses: actions/setup-node@v4',
+          '        with:',
+          "          node-version: '22'",
+          '',
+        ].join('\n'),
+      );
+      expect(workflowVersionFailures(page(nvmrcRoot))[0]).toContain('do not agree');
+
+      // And a version file nobody can read is REPORTED, never read as agreement.
+      put('.nvmrc', 'lts/*\n');
+      expect(workflowVersionFailures(page(nvmrcRoot))[0]).toContain('UNKNOWN');
+      fs.rmSync(path.join(nvmrcRoot, '.nvmrc'));
+      expect(
+        workflowVersionDeclarations('node-version', nvmrcRoot)
+          .filter((d) => d.major === null)
+          .map((d) => d.spelling),
+      ).toEqual(['(no such file: .nvmrc)', '(no such file: .nvmrc)']);
+    } finally {
+      fs.rmSync(nvmrcRoot, { recursive: true, force: true });
     }
 
     // The normalisation itself, at the unit level, including the values it must refuse
@@ -3007,6 +3279,9 @@ describe('doc version claims - the workflow-version assertion', () => {
   });
 
   it('reads a workflow version line, and refuses the lines beside it', () => {
+    expect(parseWorkflowVersionLine('          node-version-file: .nvmrc', 'node-version-file')).toBe(
+      '.nvmrc',
+    );
     expect(parseWorkflowVersionLine("          node-version: '22.x'", 'node-version')).toBe('22.x');
     expect(parseWorkflowVersionLine("          node-version: '22'", 'node-version')).toBe('22');
     expect(parseWorkflowVersionLine('          node-version: 22.x', 'node-version')).toBe('22.x');
@@ -3025,8 +3300,10 @@ describe('doc version claims - the workflow-version assertion', () => {
       '          python-version: 3.12',
       '        - uses: actions/setup-node@v4',
       '          cache: pnpm',
-      // A key that merely STARTS the same way.
+      // A key that merely STARTS the same way - and the version-FILE key, which is read
+      // under its own name, never as a literal (objectstack#26421).
       '          node-versions: 22',
+      '          node-version-file: .nvmrc',
       // Declares the key and no value.
       '          node-version:',
       '',

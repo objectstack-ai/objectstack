@@ -15,8 +15,9 @@
  *    (control) asks the plain list;
  *  - the holder count as served, and "—" — ⛔ never 0 — for a count the server
  *    did not serve (`null`) or a server that predates the key (absent);
- *  - the granted sets in served order, the same-named set the position-name
- *    fold grants marked "by name" (objectstack#24757), a declared set unmarked;
+ *  - the granted sets in served order, each a plain badge: every served set is
+ *    one the definition names, and none carries a "by name" mark — the
+ *    position-name fold is retired (objectstack#24757, objectstack#26022);
  *  - a click anywhere on the row opens the position; a click on the Active
  *    switch is the switch's, and a modified click is the browser's;
  *  - the served `description` shows in its own column right after Label, under
@@ -41,7 +42,6 @@ const POSITIONS: Record<string, unknown>[] = [
     _grantedPermissionSets: [
       { name: 'crm_sales_user', via: 'definition' },
       { name: 'forecasting', via: 'definition' },
-      { name: 'sales_manager', via: 'name' },
     ],
   },
   // The server served no count (a caller who may not read the assignments).
@@ -162,21 +162,16 @@ describe('the position list reads its two columns from the server (objectstack#2
     expect(count('auditor')).not.toHaveTextContent('0');
   });
 
-  it('lists the granted sets as served, the same-named set marked "by name" and the declared ones not', async () => {
+  it('lists the granted sets as served, each badge the set name alone', async () => {
     mount();
     expect(await screen.findByRole('columnheader', { name: t('engine.list.col._grantedPermissionSets', LOCALE) })).toBeInTheDocument();
     const cell = within(screen.getByTestId('metadata-row-sales_manager')).getByTestId('position-granted-sets');
     const badges = Array.from(cell.querySelectorAll('[data-via]'));
-    expect(badges.map((b) => [b.firstChild?.textContent, b.getAttribute('data-via')])).toEqual([
+    expect(badges.map((b) => [b.textContent, b.getAttribute('data-via')])).toEqual([
       ['crm_sales_user', 'definition'],
       ['forecasting', 'definition'],
-      ['sales_manager', 'name'],
     ]);
-    const byName = badges[2];
-    expect(byName).toHaveTextContent(t('engine.position.grants.byName', LOCALE));
-    expect(byName).toHaveAttribute('title', t('engine.position.grants.byNameHint', LOCALE));
-    expect(badges[0]).not.toHaveTextContent(t('engine.position.grants.byName', LOCALE));
-    expect(badges[0]).not.toHaveAttribute('title');
+    for (const badge of badges) expect(badge).not.toHaveAttribute('title');
 
     expect(within(screen.getByTestId('metadata-row-support_agent')).getByTestId('position-granted-sets'))
       .toHaveTextContent(t('engine.position.grants.none', LOCALE));
