@@ -1831,9 +1831,26 @@ export function ChatPane({
         : prev ?? { name: appName, materialized: true },
     );
   }, []);
+  // The chat's build card's own answer per built app (its label and whether it
+  // says the app is live), keyed by the app's machine name. The canvas header
+  // reads it instead of deriving a publish state of its own, so the two can
+  // never disagree, and it follows the card when the build is published.
+  const [buildResults, setBuildResults] = useState<Record<string, { label?: string; live: boolean }>>({});
+  const handleBuildResult = useCallback(
+    ({ appName, label, live }: { appName: string; label?: string; live: boolean }) => {
+      setBuildResults((prev) => {
+        const cur = prev[appName];
+        if (cur && cur.label === label && cur.live === live) return prev;
+        return { ...prev, [appName]: { ...(label ? { label } : {}), live } };
+      });
+    },
+    [],
+  );
+  const canvasBuild = canvasApp ? buildResults[canvasApp.name] : undefined;
   // A different conversation is a different build session — close the pane.
   useEffect(() => {
     setCanvasApp(null);
+    setBuildResults({});
   }, [conversationId]);
 
   const activeAgentLabel = useMemo<string>(() => {
@@ -2895,6 +2912,7 @@ export function ChatPane({
         // ADR-0045: build materialized → canvas leaves the draft overlay for
         // the real (unlisted) app; the reload shows live seed rows.
         onBuildMaterialized={handleBuildMaterialized}
+        onBuildResult={handleBuildResult}
         // objectui#11666 — mirrored onto the assistant bus (effect above).
         onPlanApprovalPendingChange={setPlanApprovalPending}
         previewDraftLabel={t('console.ai.previewDraft', { defaultValue: 'Preview' })}
@@ -2931,6 +2949,8 @@ export function ChatPane({
           </div>
           <LiveCanvas
             appName={canvasApp!.name}
+            appLabel={canvasBuild?.label}
+            live={canvasBuild?.live}
             appSegment={canvasApp!.segment}
             materialized={canvasApp!.materialized}
             path={canvasApp!.path}
@@ -2956,6 +2976,8 @@ export function ChatPane({
         >
           <LiveCanvas
             appName={canvasApp.name}
+            appLabel={canvasBuild?.label}
+            live={canvasBuild?.live}
             appSegment={canvasApp.segment}
             materialized={canvasApp.materialized}
             path={canvasApp.path}

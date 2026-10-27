@@ -206,8 +206,11 @@ export interface ChatBuildProgress {
   phase: ChatBuildPhase;
   /** Human label for the app being built (for the panel header). */
   appLabel?: string;
-  /** Artifacts drafted so far, cumulative. */
-  items: Array<{ type: string; name: string }>;
+  /**
+   * Artifacts drafted so far, cumulative. `label` is the artifact's display
+   * label when the frame carries one; the panel shows it in place of `name`.
+   */
+  items: Array<{ type: string; name: string; label?: string }>;
   /** Count of artifacts done and the rough total (for the progress bar). */
   done: number;
   total: number;
@@ -753,6 +756,15 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * but unlisted. Hosts switch the canvas to the real app URL.
    */
   onBuildMaterialized?: (appName: string) => void;
+  /**
+   * The finished build card's own answer about the app it built: the app's
+   * machine `appName`, the `label` the card shows, and whether the card says
+   * it is live (published). Fires when a build card finishes and again
+   * whenever that answer changes (on publish, for one), so a host that shows
+   * the same app elsewhere — the Live Canvas header — reads the card's state
+   * rather than deriving its own.
+   */
+  onBuildResult?: (result: { appName: string; label?: string; live: boolean }) => void;
   /**
    * objectui#11666 — reports whether this thread's NEWEST proposed plan is
    * still waiting for the user's approval: its card offers "Build it", i.e.
@@ -2037,6 +2049,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onPreviewDraft,
       onDraftArtifacts,
       onBuildMaterialized,
+      onBuildResult,
       onPlanApprovalPendingChange,
       publishDraftsLabel = 'Publish',
       publishedLabel = 'Published',
@@ -4176,8 +4189,13 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     buildChecklist = detectBuildChecklist(tools[i].result);
                   }
                 }
+                // A materialized build whose envelope says the app is already
+                // listed (`appHidden: false`) is published: ADR-0045 publish
+                // = live AND visible.
                 const buildIsLive =
                   publishedBuild !== undefined ||
+                  (builtAppDraft?.draftReview?.materialized === true &&
+                    builtAppDraft.draftReview.appHidden === false) ||
                   (builtAppDraft !== undefined &&
                     (builtPackageId !== undefined && pendingByPackage.has(builtPackageId)
                       ? pendingByPackage.get(builtPackageId) === 0
@@ -4261,6 +4279,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           getArtifactAction={getArtifactAction}
                           onPreviewDraftApp={onPreviewDraftApp}
                           previewDraftLabel={previewDraftLabel}
+                          onBuildResult={onBuildResult}
                           waitingLabel={L.connectionWaiting}
                           stalledLabel={L.connectionStalledLabel}
                           offlineLabel={L.connectionOfflineLabel}
@@ -5289,6 +5308,7 @@ function BuildProgressPanel({
   getArtifactAction,
   onPreviewDraftApp,
   previewDraftLabel = 'Preview',
+  onBuildResult,
   live = false,
   nextSteps,
   checklist,
@@ -5324,6 +5344,8 @@ function BuildProgressPanel({
   ) => (() => void) | null;
   onPreviewDraftApp?: (appName: string) => void;
   previewDraftLabel?: string;
+  /** {@link ChatbotEnhancedProps.onBuildResult}: this card's app, label and live state. */
+  onBuildResult?: ChatbotEnhancedProps['onBuildResult'];
   waitingLabel?: string;
   stalledLabel?: string;
   offlineLabel?: string;
@@ -5361,12 +5383,26 @@ function BuildProgressPanel({
   const stagedApp = items.find((it) => it.type === 'app');
   const builtApp = checklist?.app ?? stagedApp;
   const studioSegment = checklist?.packageId ?? appSegment;
+  // The card's own answer, handed to the host as the card shows it: the label
+  // its title names the app by and whether that title says the app is live.
+  const resultAppName = builtApp?.name;
+  const resultLabel = checklist?.app?.label ?? appLabel;
+  const resultLive = isDone && live;
+  React.useEffect(() => {
+    if (!onBuildResult || !resultAppName) return;
+    onBuildResult({
+      appName: resultAppName,
+      ...(resultLabel ? { label: resultLabel } : {}),
+      live: resultLive,
+    });
+  }, [onBuildResult, resultAppName, resultLabel, resultLive]);
   const showChecklist = isDone && checklist !== undefined;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : isDone ? 100 : 6;
   const groups = new Map<string, Array<{ name: string; display: string }>>();
   for (const it of items) {
     const arr = groups.get(it.type) ?? [];
-    arr.push({ name: it.name, display: it.name.replace(/_sample$/, '') });
+    // The frame's label when it carries one; the machine name otherwise.
+    arr.push({ name: it.name, display: it.label || it.name.replace(/_sample$/, '') });
     groups.set(it.type, arr);
   }
   const orderedTypes = [
@@ -5575,7 +5611,7 @@ function BuildProgressPanel({
           ) : null}
           <span data-testid="build-result-posture">
             {t('chatbot.build.draftPosture', {
-              defaultValue: 'Later changes are saved as drafts, and you publish them in Studio.',
+              defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
             })}
           </span>
         </p>

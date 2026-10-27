@@ -1787,6 +1787,7 @@ const de = {
       assistant: "Assistent",
       liveCanvas: "Live-Vorschau — {{app}} (Entwurf)",
       liveCanvasUnlisted: "Live-App — {{app}} (nicht gelistet bis zur Veröffentlichung)",
+      liveCanvasLive: "Live-App — {{app}}",
       loadingAgents: "Agenten werden geladen…",
       askAnything: "Fragen Sie irgendetwas…",
       askOrChangeApp: "Fragen Sie zu Ihren Daten oder lassen Sie mich diese App ändern…",
@@ -3720,7 +3721,7 @@ const de = {
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
-      draftPosture: "Spätere Änderungen werden als Entwurf gespeichert, und Sie veröffentlichen sie in Studio.",
+      draftPosture: "Spätere Änderungen werden als Entwurf gespeichert; mit „Veröffentlichen“ hier im Chat gehen sie live.",
       checksPassed: "Prüfungen bestanden {{passed}}/{{total}}",
     },
     changes: {
