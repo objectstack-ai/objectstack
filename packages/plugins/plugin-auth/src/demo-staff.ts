@@ -31,6 +31,20 @@
  *    is (never renamed, never re-passworded), and only its missing position and
  *    permission-set assignments are added.
  *
+ * ## Managers are linked in a second pass
+ *
+ * An entry's `manager` names another entry by address, and that entry may be
+ * declared after it, so the links are written only once every entry has had
+ * its turn — still on the same `kernel:ready`, so still before the seed. Each
+ * link goes through `applyUserManagerLink`, the one derivation behind
+ * `POST /api/v1/auth/admin/set-user-manager` (self-assignment, cycle, depth,
+ * cross-organization and directory-owned refusals included); this module adds
+ * no second copy of them. A link is written only when the account has NO
+ * manager: a manager someone set on it by hand (Setup → Users → Set Manager)
+ * is theirs, and a re-run leaves it as it is. A manager cleared by hand reads
+ * as no manager, so the next boot writes the declared one again; the
+ * declaration wins only over absence.
+ *
  * A refusal carries an ADR-0112 `code` and HTTP-equivalent `status` from the
  * standard catalog and is reported once, at `warn` — nothing claims to have
  * been persisted, the boot is visibly smaller by its demo accounts, and the
@@ -49,6 +63,8 @@
 
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { DemoStaffParsed } from '@objectstack/spec/system';
+
+import { applyUserManagerLink, type SetUserManagerEngine } from './admin-set-user-manager.js';
 
 /** The system context every read and write here runs under. */
 const SYSTEM_CTX = { context: { isSystem: true } } as const;
@@ -243,6 +259,13 @@ export interface DemoStaffOutcome {
   readonly failed: Array<{ email: string; message: string }>;
   /** Position and permission-set assignments this pass added. */
   readonly assignmentsAdded: number;
+  /** Declared managers this pass wrote as `sys_user.manager_id`. */
+  readonly managersLinked: number;
+  /**
+   * Addresses whose account already had a manager other than the declared one,
+   * left as they were: someone set it by hand, and a re-run never overwrites it.
+   */
+  readonly managersKept: string[];
 }
 
 async function findUserIdByEmail(engine: DemoStaffEngine, email: string): Promise<string | undefined> {
@@ -275,7 +298,14 @@ export async function provisionDemoStaff(
   deps: DemoStaffProvisioningDeps,
 ): Promise<DemoStaffOutcome> {
   const { engine, signUp, password } = deps;
-  const outcome: DemoStaffOutcome = { created: [], present: [], failed: [], assignmentsAdded: 0 };
+  const outcome: DemoStaffOutcome = {
+    created: [],
+    present: [],
+    failed: [],
+    assignmentsAdded: 0,
+    managersLinked: 0,
+    managersKept: [],
+  };
   let assignmentsAdded = 0;
   let organizationId: string | null | undefined;
 
@@ -345,5 +375,64 @@ export async function provisionDemoStaff(
       outcome.failed.push({ email, message: createdNow ? `its account was created, but ${message}` : message });
     }
   }
-  return { ...outcome, assignmentsAdded };
+  const managersLinked = await linkDemoStaffManagers(staff, engine, outcome);
+  return { ...outcome, assignmentsAdded, managersLinked };
+}
+
+/**
+ * The second pass: each declared `manager`, written once every entry has its
+ * account. Answers how many links it wrote; a link it could not write is
+ * reported on `outcome.failed` under the subordinate's address, never skipped
+ * in silence.
+ */
+async function linkDemoStaffManagers(
+  staff: readonly DemoStaffParsed[],
+  engine: DemoStaffEngine,
+  outcome: DemoStaffOutcome,
+): Promise<number> {
+  let linked = 0;
+  // The same engine the accounts were read through, under the set-manager
+  // write's own query shape (its reads carry their context in the query).
+  const linkDeps = { getDataEngine: () => engine as unknown as SetUserManagerEngine };
+  for (const entry of staff) {
+    if (!entry.manager) continue;
+    const email = entry.email.trim().toLowerCase();
+    const managerEmail = entry.manager.trim().toLowerCase();
+    try {
+      const rows = await engine.find(
+        SystemObjectName.USER,
+        { where: { email: { $in: addressSpellings([email]) } }, fields: ['id', 'manager_id'], limit: 1 },
+        SYSTEM_CTX,
+      );
+      const user = rows[0];
+      // No account: the first pass could not create it and already said so.
+      if (user?.id == null) continue;
+      const managerId = await findUserIdByEmail(engine, managerEmail);
+      if (!managerId) {
+        const declared = staff.some((other) => other.email.trim().toLowerCase() === managerEmail);
+        throw new Error(
+          `its manager ${managerEmail} has no account, so the manager link was not written: ` +
+            (declared
+              ? 'that demo account was not provisioned on this boot (its own line says why).'
+              : 'the address names no demoStaff entry. Declare that person in demoStaff, or correct the address.'),
+        );
+      }
+      const current = user.manager_id == null || user.manager_id === '' ? null : String(user.manager_id);
+      if (current === managerId) continue;
+      if (current !== null) {
+        outcome.managersKept.push(email);
+        continue;
+      }
+      const refusal = await applyUserManagerLink(linkDeps, String(user.id), managerId);
+      if (refusal) {
+        throw new Error(
+          `its manager link to ${managerEmail} was refused [${refusal.code}, ${refusal.reason}]: ${refusal.message}`,
+        );
+      }
+      linked++;
+    } catch (err) {
+      outcome.failed.push({ email, message: String((err as Error)?.message ?? err) });
+    }
+  }
+  return linked;
 }

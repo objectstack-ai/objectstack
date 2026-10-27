@@ -2522,11 +2522,17 @@ export class AuthPlugin implements Plugin {
     for (const failure of outcome.failed) {
       ctx.logger.warn(`[auth] demoStaff: ${failure.email} was not provisioned — ${failure.message}`);
     }
-    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0) {
+    if (outcome.managersKept.length > 0) {
+      ctx.logger.info(
+        `[auth] demoStaff: ${outcome.managersKept.join(', ')} already had a manager other than the declared one, ` +
+          'set by hand; it was left as it is.',
+      );
+    }
+    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0 || outcome.managersLinked > 0) {
       ctx.logger.info(
         `[auth] demoStaff: ${outcome.created.length} demo account(s) created, ${outcome.present.length} already ` +
-          `present, ${outcome.assignmentsAdded} assignment(s) added — they sign in with the development seed ` +
-          `password (${password}).`,
+          `present, ${outcome.assignmentsAdded} assignment(s) added, ${outcome.managersLinked} manager(s) linked — ` +
+          `they sign in with the development seed password (${password}).`,
       );
     } else {
       ctx.logger.debug(`[auth] demoStaff: all ${outcome.present.length} demo account(s) already present`);
