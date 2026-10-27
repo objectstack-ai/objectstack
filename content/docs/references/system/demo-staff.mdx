@@ -32,6 +32,7 @@ const result = DemoStaffSchema.parse(data);
 | **email** | `string` | ✅ | Sign-in address of the demo account |
 | **position** | `string` | optional | A position this application declares in `positions`, assigned to the demo account |
 | **permissionSets** | `string[]` | optional | Permission sets this application declares in `permissions`, granted to the demo account |
+| **manager** | `string` | optional | Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot |
 
 
 ---
