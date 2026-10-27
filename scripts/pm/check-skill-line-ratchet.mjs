@@ -1486,11 +1486,10 @@ export const CEILINGS = new Map([
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
-  // alternates between the two multi-lane repos, oldest-first inside a repo, with a
-  // 4-hour starvation guard). A seat charter is read per seat session like every
-  // entry above. Set at the landed line count read from this ratchet's own run
-  // (headroom 0, same convention as above); it is a NEW file, so this is an added
-  // row and no other row moves.
+  // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
+  // seat session like every entry above. Set at the landed line count read from
+  // this ratchet's own run (headroom 0, same convention as above); it is a NEW
+  // file, so this is an added row and no other row moves.
   // 7 → 8 (#25558): ruling D of director batch #10, comment 6378083450 —
   // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
   // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
