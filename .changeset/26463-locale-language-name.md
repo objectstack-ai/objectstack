@@ -18,7 +18,7 @@ Clause-②: no (narrowing) — the locale shape refuses values it used to accept
 
 Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in practice a language name, is refused on translation items, bundle keys, the i18n configuration, seed datasets and a user's `locale` column)
 
-<!-- adr-0087: already-registered translation-locale-non-tag-refused -->
+<!-- adr-0087: not-required (already-registered translation-locale-non-tag-refused) the 18.x D3 entry already prescribes rewriting a language name by hand, and its conversion already lists such a stored row as a TODO through LocaleSchema; this diff narrows the same shape and corrects that entry's subtag length -->
 
 **BREAKING** for an author or user who wrote a language name as a locale.
 
