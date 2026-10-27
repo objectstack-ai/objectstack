@@ -165,13 +165,13 @@ describe('ListView forwards an authored `navigation` down the gantt view-schema 
     expect(node.navigation?.mode).not.toBe('drawer');
   });
 
-  it('FORWARDS an authored `modal` — a second, non-`drawer` OVERLAY mode', async () => {
-    // Deliberately an overlay mode, so it lands on the same side of
-    // `ObjectGantt`'s `navIsOverlay` classification as the old fallback: a
-    // repair that had learned only to recognise "page" would pass the case
-    // above and fail this one.
-    const node = await viewSchema({ ...BASE, navigation: { mode: 'modal' } });
-    expect(node.navigation?.mode).toBe('modal');
+  it('FORWARDS an authored `new_window` — a second non-default mode', async () => {
+    // This row spelled `modal`, a second overlay mode, until objectstack#26677
+    // retired `modal`, `split` and `popover`. `new_window` is the live
+    // non-default left: a repair that had learned only to recognise "page"
+    // would still pass the case above and fail this one.
+    const node = await viewSchema({ ...BASE, navigation: { mode: 'new_window' } });
+    expect(node.navigation?.mode).toBe('new_window');
   });
 
   it('FORWARDS the whole authored block, not just `mode`', async () => {
@@ -187,9 +187,9 @@ describe('ListView forwards an authored `navigation` down the gantt view-schema 
     // to resolve, so naming it here described a read that is gone.
     const node = await viewSchema({
       ...BASE,
-      navigation: { mode: 'split', size: 'lg' },
+      navigation: { mode: 'drawer', size: 'lg' },
     });
-    expect(node.navigation).toEqual({ mode: 'split', size: 'lg' });
+    expect(node.navigation).toEqual({ mode: 'drawer', size: 'lg' });
   });
 
   it('REGRESSION GUARD: a gantt view authoring NO navigation gets no key — the `drawer` fallback stays reachable', async () => {

@@ -183,7 +183,8 @@ export const pageForm = defineForm({
               options: [
                 { label: 'Drawer (right-side peek)', value: 'drawer' },
                 { label: 'Full page', value: 'page' },
-                { label: 'Modal', value: 'modal' },
+                // `modal` was retired (#26677): a record opens in the drawer,
+                // which expands to the full page, or as the full page.
                 { label: 'Not clickable', value: 'none' },
               ],
               helpText: 'How clicking a record opens its detail',

@@ -210,7 +210,7 @@ const grid: ObjectGridBlockNode = {
 | `rowActions` / `bulkActions` | `string[]` | **Names** of actions, not definitions. |
 | `editable` / `singleClickEdit` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). |
 | `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). On by default when the grid renders editable. |
-| `navigation` | `NavigationConfig` | What a row click does, `{ mode: 'page' \| 'drawer' \| 'modal' \| 'split' \| 'none', … }`. |
+| `navigation` | `NavigationConfig` | What a row click does, `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none', … }`; a block written without `mode` opens the drawer. |
 | `operations` | `object` | Toggles the built-in CRUD/export/import affordances, e.g. `{ delete: false }`. |
 | `rowHeight`, `frozenColumns`, `resizable`, `reorderableColumns`, `showColumnTypeIcons`, `rowColor`, `conditionalFormatting`, `aggregations`, `exportOptions` | | The rest of the declared surface. (`className` is a base prop: it stays on the node, beside the bag.) |
 | `grouping` | `GroupingConfig` | Row grouping — **server-side**: group set, counts and aggregations come from the query, rows are paged per group; see [Grouping is server-side](#grouping-is-server-side). |
@@ -804,7 +804,7 @@ Note `onRowSelect` — the prop that reports a selection change is spelled that 
 there is no `onSelectionChange` on this component.
 
 The declarative alternative, which *is* metadata and survives a round trip through
-storage, is `navigation`: `{ mode: 'page' | 'drawer' | 'modal' | 'split' | 'none' }`
+storage, is `navigation`: `{ mode: 'drawer' | 'page' | 'new_window' | 'none' }`
 decides what a row click does without any host code.
 
 ### Withholding a row's Edit or Delete

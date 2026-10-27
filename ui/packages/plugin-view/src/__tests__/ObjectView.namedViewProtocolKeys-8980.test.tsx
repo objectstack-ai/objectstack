@@ -482,7 +482,7 @@ const FAMILIES: Record<string, Record<string, Sources>> = {
       host: { element: 'dropdown', fields: [{ field: 'owner' }] },
       node: { element: 'dropdown', fields: [{ field: 'node_field' }] },
     },
-    navigation: { named: { mode: 'drawer' }, host: { mode: 'modal' }, node: { mode: 'page' } },
+    navigation: { named: { mode: 'drawer' }, host: { mode: 'new_window' }, node: { mode: 'page' } },
   },
 };
 

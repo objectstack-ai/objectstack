@@ -456,20 +456,19 @@ Every list-type renderer (`ObjectGrid`, `ObjectTree`, `ObjectGantt`,
 `ObjectKanban`, `ObjectCalendar`, and since objectui#13458 `ListView`,
 `ObjectGallery`, `ObjectMap`, `ObjectTimeline`) mounts this component through
 `NavigationOverlay` from `@object-ui/components`, so an authored
-`navigation.mode` of `drawer` / `modal` / `split` / `popover` means the same
-thing on every view type (objectui#9299). ⛔ Do not re-wrap it in a shell of
+`navigation.mode: 'drawer'` means the same thing on every view type
+(objectui#9299; `modal`, `split` and `popover` were retired by
+objectstack#26677). ⛔ Do not re-wrap it in a shell of
 your own — that is exactly the fork this component exists to remove.
 
 ```tsx
-import type { ReactNode } from 'react';
-import { NavigationOverlay, useOverlayAnchor } from '@object-ui/components';
+import { NavigationOverlay } from '@object-ui/components';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
 import { useNavigationOverlay } from '@object-ui/react';
 import type { DataSource } from '@object-ui/types';
 
 declare const dataSource: DataSource;
 declare const objectSchema: { fields?: Record<string, unknown> };
-declare const myView: ReactNode;
 declare function saveField(field: string, value: unknown): Promise<void>;
 declare function deleteRecord(): Promise<void>;
 
@@ -478,17 +477,11 @@ function ContactsOverlay() {
     navigation: { mode: 'drawer' },
     objectName: 'contacts',
   });
-  // `popover` anchors to the element the click landed on; spread
-  // `anchorCaptureProps` on your own container, or call `captureAnchor(event)`
-  // at a click site that already has one.
-  const { anchorRef } = useOverlayAnchor();
 
   return (
     <NavigationOverlay
       {...navigation}
       title="Record Detail"
-      mainContent={myView}
-      popoverAnchorRef={anchorRef}
     >
       {(record) => (
         <RecordDetailPanel

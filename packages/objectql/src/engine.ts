@@ -796,9 +796,12 @@ export function writeFailureLogMeta(
 
 /**
  * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
- * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
- * delete runs the referential pass that refuses an organization still owning
- * rows and keeps every row's reference to it.
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. An organization is
+ * deleted one at a time, through plugin-auth's organization delete: its
+ * refusal of an organization that still owns records and its
+ * `beforeDeleteOrganization` clean-up of the organization's teams, team members
+ * and admin grants run there, once per organization. A delete matching
+ * organizations by a filter runs neither, and no caller needs one.
  */
 function organizationPredicateDeleteRefusal(): Error {
   const err: any = new Error(
@@ -806,9 +809,10 @@ function organizationPredicateDeleteRefusal(): Error {
       'Delete each organization by its id.',
   );
   err.developerMessage =
-    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
-    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
-    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: organizations are deleted one at a time, because ` +
+    "plugin-auth's organization delete refuses an organization that still owns records and removes its teams, " +
+    'team members and admin grants per organization, and a predicate delete runs neither. Delete each organization ' +
+    `by id (engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
   err.code = 'DELETE_RESTRICTED';
   err.status = 409;
   err.httpStatus = 409;
@@ -18206,8 +18210,9 @@ export class ObjectQL implements IObjectQLEngine {
    * required lookup that escalation is decided per ROW after the dependents
    * probe (#9688): a row that keeps another member takes the member removal,
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
-   * only those rows. Only runs for single-id deletes — multi/predicate
-   * deletes skip cascade (logged).
+   * only those rows. A by-id delete runs it for its one record; a predicate
+   * delete (`multi: true`) runs it for every row it matched ([#26871], see
+   * `delete()`'s predicate arm).
    *
    * [#22305] Two phases, so the walk knows its own set before it judges
    * anything:
@@ -19611,11 +19616,11 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
-      // [#24948] An organization is deleted by id or not at all. The predicate
-      // arm runs no referential cascade, so it could neither refuse an
-      // organization that still owns rows nor keep a single row from naming a
-      // deleted one; any delete not by id is refused here, whatever the driver
-      // offers, before any hook or write.
+      // [#24948] An organization is deleted by id or not at all: plugin-auth's
+      // organization delete refuses one that still owns records and removes its
+      // auth structure per organization, which a predicate delete would skip
+      // (see `organizationPredicateDeleteRefusal`). Any delete not by id is
+      // refused here, whatever the driver offers, before any hook or write.
       if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
         throw organizationPredicateDeleteRefusal();
       }
@@ -19823,7 +19828,64 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
                // `deleteMany` presence is part of the ladder verdict resolved above.
-               result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               //
+               // [#26871] A predicate delete honours `deleteBehavior` as the
+               // by-id branch does: a `restrict` refuses, a `cascade` (a
+               // `master_detail` by default) deletes the dependents, a
+               // `set_null` clears them. This arm used to go straight to
+               // `deleteMany`, so a flow's `delete_record` with `multi: true`
+               // skipped every declared rule the same delete done record by
+               // record honours.
+               //
+               // `planCascadeAtomicity` is the by-id branch's own question:
+               // `'none'` means no relation of the delete family points at
+               // this object, so the walk could write nothing and the arm keeps
+               // its single `deleteMany`, no rows read and no transaction.
+               const plan = this.planCascadeAtomicity(object);
+               if (plan === 'none') {
+                 result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               } else {
+                 // Otherwise: resolve the matched rows through the composed,
+                 // row-scoped AST, run `cascadeDeleteRelations` for each, then
+                 // delete exactly those rows by id. By id, not by re-running the
+                 // predicate: the walk's own writes (a `set_null` on a
+                 // self-reference) can move a row into or out of the predicate,
+                 // and the rows deleted must be the rows walked. The ids were
+                 // read under this caller's scope inside the same unit of work,
+                 // as the by-id branch deletes its id after reading its
+                 // pre-image under that scope. The unit of work is the by-id
+                 // branch's, for the same reasons (#7413).
+                 const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
+                   const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id'] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   for (const matchedId of matchedIds) {
+                     await this.cascadeDeleteRelations(object, matchedId, writeContext);
+                   }
+                   // The id set rides an `$in`; batched so one statement never
+                   // outgrows a driver's bind-parameter limit.
+                   const batchSize = 500;
+                   let removed = 0;
+                   for (let i = 0; i < matchedIds.length; i += batchSize) {
+                     const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };
+                     const count = await driver.deleteMany!(object, batchAst, writeOptions);
+                     // A non-count answer goes back as the driver gave it, so
+                     // the `isDeleteResultShape` check below refuses it.
+                     if (typeof count !== 'number') return count;
+                     removed += count;
+                   }
+                   return removed;
+                 };
+                 if (plan === 'atomic') {
+                   result = await this.transaction(
+                     async (trxCtx: any) => await runPredicateDelete(trxCtx as ExecutionContext),
+                     opCtx.context,
+                   );
+                 } else {
+                   this.warnCascadeNotAtomic(object);
+                   result = await runPredicateDelete(opCtx.context);
+                 }
+               }
                isPredicateWrite = true;
           }
 

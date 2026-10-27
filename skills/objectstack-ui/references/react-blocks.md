@@ -59,7 +59,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
 | `data` | `ViewData — { provider: 'object', object: string } binds an object` | binding | ✓ | The object this block binds to, written as the metadata-tier data source: data={{ provider: 'object', object: '…' }}. Any ViewData provider is accepted (a 'value' provider renders static rows); nothing stamps the object on a react page, so this prop is required. |
-| `navigation` | `{ mode: 'page' \| 'drawer' \| 'modal' \| 'split' \| 'none' }` | binding |  | What a row click does. Use { mode: "none" } when you handle clicks via onRowClick. |
+| `navigation` | `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none' }` | binding |  | What a row click does. Use { mode: "none" } when you handle clicks via onRowClick. |
 | `fields` | `string[]` | binding |  | Limit/order the columns shown (defaults to the object list fields). |
 | `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
 | `filters` | `FilterArray e.g. ['status','=','active']` | controlled |  | ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: ["and", […], […]]). |

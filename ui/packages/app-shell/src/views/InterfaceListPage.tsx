@@ -324,9 +324,11 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
   // 'drawer' (default) = right-side peek panel rendering the record's detail
   // page; 'page' = full-page navigate to the record route; 'none' = not
   // clickable. Restores record-opening on interface pages (previously a no-op)
-  // and makes it author-configurable.
-  const recordAction: 'drawer' | 'page' | 'modal' | 'none' =
-    cfg.recordAction === 'page' || cfg.recordAction === 'modal' || cfg.recordAction === 'none'
+  // and makes it author-configurable. `modal` was retired from the spec's
+  // `recordAction` (objectstack#26677): the drawer, which expands to the full
+  // page, is the one overlay.
+  const recordAction: 'drawer' | 'page' | 'none' =
+    cfg.recordAction === 'page' || cfg.recordAction === 'none'
       ? cfg.recordAction
       : 'drawer';
   const recordUrl = React.useCallback(
@@ -349,9 +351,9 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       const id = record?.id ?? record?._id;
       const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
       if (isMod && id != null) { window.open(recordUrl(id), '_blank'); return; }
-      // Overlay modes are URL-driven (?recordId=…) so the drawer is shareable
-      // and survives refresh — same convention as ObjectView.
-      if ((recordAction === 'drawer' || recordAction === 'modal') && id != null) {
+      // The drawer is URL-driven (?recordId=…) so it is shareable and
+      // survives refresh — same convention as ObjectView.
+      if (recordAction === 'drawer' && id != null) {
         setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('recordId', String(id)); return n; });
         return;
       }

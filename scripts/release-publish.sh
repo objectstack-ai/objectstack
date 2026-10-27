@@ -60,6 +60,21 @@ set -euo pipefail
 #   recomputes it and overrides whatever we export.
 unset npm_config_globalconfig NPM_CONFIG_GLOBALCONFIG
 
+# No published tarball may carry tooling material (objectui#4846): a test, a
+# mock, a benchmark that imports `vitest`, a `*.tsbuildinfo`. objectui ran this
+# scan in its own `changeset:publish`; the ruling on objectui#4846 (comment
+# 5307574139) put it on the publish path, where a red scan stops the publish
+# while stopping it is still free. `--no-build` because `pnpm run release` has
+# just built what is about to be packed, so the scan reads exactly those
+# artifacts; a published package with nothing built is a finding, never a pass.
+#
+# Before npm's record starts, on purpose: the scan's own `npm pack --dry-run`
+# runs must not land in the record that `release-verify-npm.mjs` reads back.
+if ! node ui/scripts/check-published-dist-tooling.mjs --no-build; then
+  echo "::error::check-published-dist-tooling found tooling material in (or no build output for) a published @object-ui package. Refusing to publish; the scan above names each package and file."
+  exit 1
+fi
+
 # Keep npm's own answer for every package.
 #
 #   `changeset publish` (@changesets/cli 3.0.3, its pnpm branch) counts a

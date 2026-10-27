@@ -8,8 +8,9 @@
 
 /**
  * objectui#10636 — the console `ObjectView`'s record-count footer
- * (`data-testid="record-count-footer"`, drawn beside the record in split
- * navigation) read `1 records` in `en` at one record. It rendered one key,
+ * (`data-testid="record-count-footer"`, drawn beside the record in the split
+ * pane — a READER's preference since objectstack#26677, `os:record-open-mode`,
+ * no longer an authored `navigation.mode`) read `1 records` in `en` at one record. It rendered one key,
  * `console.objectView.recordCount`, at every count: no singular key and no
  * switch, while the list view's record-count bar and the record picker's count
  * beside it both pick a `…One` key at exactly one.
@@ -102,13 +103,14 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 type Lang = 'en' | 'ru' | 'ar';
 
 const OBJECT_NAME = 'duly_task';
 const VIEW_ID = `${OBJECT_NAME}.all`;
 
-// Split navigation is the one layout that draws the footer: the list sits in
+// The split pane is the one layout that draws the footer: the list sits in
 // the left pane with the footer under it, the open record in the right pane.
 const OBJECTS = [
   {
@@ -124,13 +126,15 @@ const OBJECTS = [
         label: 'Everything',
         type: 'grid',
         columns: ['name'],
-        navigation: { mode: 'split' },
       },
     },
   },
 ];
 
 beforeEach(() => {
+  // The split pane is the reader's preference (objectstack#26677): the view
+  // declares nothing, the browser remembers `split`.
+  window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -145,6 +149,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
 });
 
 function boot(lang: Lang) {

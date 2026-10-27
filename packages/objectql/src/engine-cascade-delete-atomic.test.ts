@@ -68,6 +68,11 @@ function makeDriver(opts: { transactional?: boolean } = {}) {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
       if (k.startsWith('$')) continue;
+      // [#26871] The predicate delete removes the rows it walked by id set.
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+        if (!(v as any).$in.some((x: unknown) => String(x) === String(row[k]))) return false;
+        continue;
+      }
       const exp = v && typeof v === 'object' && '$eq' in (v as any) ? (v as any).$eq : v;
       if ((row[k] ?? null) !== (exp ?? null)) return false;
     }
@@ -404,16 +409,168 @@ describe('a plain non-cascade delete is unchanged (#7413 control)', () => {
     expect(rec.at('warn')).toHaveLength(0);
   });
 
-  it('opens no transaction when the object HAS dependents declared but the delete is by predicate', async () => {
-    // The predicate branch never called `cascadeDeleteRelations` and still does
-    // not — the wrap is the by-id branch's alone.
-    const { engine, driver } = await makeEngine([parent, kid]);
-    await engine.insert('parent', { name: 'P' });
+  it('opens no transaction for a predicate delete when no relation points at the object', async () => {
+    // [#26871] The predicate twin of the control above: nothing to walk, so the
+    // predicate arm keeps its single `deleteMany` — no id resolution, no wrap.
+    const { engine, driver, rec } = await makeEngine([loner]);
+    await engine.insert('loner', { name: 'solo' });
+    await engine.insert('loner', { name: 'solo' });
     driver.writes.length = 0;
 
-    await engine.delete('parent', { where: { name: 'P' }, multi: true } as any);
+    const removed = await engine.delete('loner', { where: { name: 'solo' }, multi: true });
 
+    expect(removed).toBe(2);
     expect(driver.begun).toHaveLength(0);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+    for (const w of driver.writes) expect(w.transaction).toBeUndefined();
+    expect(rec.at('warn')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3b. [#26871] A predicate delete walks every matched row, as one unit of work.
+// ---------------------------------------------------------------------------
+
+/** A `master_detail` detail of `parent`: the default behaviour is `cascade`. */
+const detail = {
+  name: 'detail',
+  label: 'Detail',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    parent: { name: 'parent', type: 'master_detail' as const, reference: 'parent' },
+  },
+};
+/** An authored `restrict` lookup to `parent`. */
+const guard = {
+  name: 'guard',
+  label: 'Guard',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    parent: { name: 'parent', type: 'lookup' as const, reference: 'parent', deleteBehavior: 'restrict' },
+  },
+};
+
+describe('[#26871] a predicate delete runs the referential walk for every matched row', () => {
+  it('a restrict on one matched row refuses the whole delete, and nothing is deleted', async () => {
+    const { engine, driver } = await makeEngine([parent, detail, guard]);
+    const p1 = await engine.insert('parent', { name: 'doomed' });
+    const p2 = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('parent', { name: 'kept' });
+    await engine.insert('detail', { parent: p1.id });
+    await engine.insert('guard', { parent: p2.id });
+
+    await expect(engine.delete('parent', { where: { name: 'doomed' }, multi: true }))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, object: 'parent', dependentObject: 'guard' });
+
+    // p1's detail was cascaded before p2's restrict refused; the one unit of
+    // work puts it back, so the 409 means nothing changed.
+    expect(driver.rowsOf('parent')).toHaveLength(3);
+    expect(driver.rowsOf('detail')).toHaveLength(1);
+    expect(driver.rowsOf('guard')).toHaveLength(1);
+    expect(driver.begun).toHaveLength(1);
+    expect(driver.rolledBack).toHaveLength(1);
+    expect(driver.committed).toHaveLength(0);
+  });
+
+  it('cascades master_detail children and clears set_null references of every matched row', async () => {
+    const { engine, driver } = await makeEngine([parent, detail, link]);
+    const p1 = await engine.insert('parent', { name: 'doomed' });
+    const p2 = await engine.insert('parent', { name: 'doomed' });
+    const kept = await engine.insert('parent', { name: 'kept' });
+    await engine.insert('detail', { parent: p1.id });
+    await engine.insert('detail', { parent: p2.id });
+    const keptDetail = await engine.insert('detail', { parent: kept.id });
+    const l1 = await engine.insert('link', { parent: p1.id });
+    const l2 = await engine.insert('link', { parent: p2.id });
+    const keptLink = await engine.insert('link', { parent: kept.id });
+
+    const removed = await engine.delete('parent', { where: { name: 'doomed' }, multi: true });
+
+    expect(removed).toBe(2);
+    expect(driver.rowsOf('parent').map((r: any) => r.id)).toEqual([kept.id]);
+    expect(driver.rowsOf('detail').map((r: any) => r.id)).toEqual([keptDetail.id]);
+    const links = new Map(driver.rowsOf('link').map((r: any) => [r.id, r.parent]));
+    expect(links.get(l1.id)).toBeNull();
+    expect(links.get(l2.id)).toBeNull();
+    expect(links.get(keptLink.id)).toBe(kept.id);
+    expect(driver.begun).toHaveLength(1);
+    expect(driver.committed).toHaveLength(1);
+  });
+
+  it('routes the walk and the predicate delete onto ONE transaction handle', async () => {
+    const { engine, driver } = await makeEngine([parent, detail, link]);
+    const p = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('detail', { parent: p.id });
+    await engine.insert('link', { parent: p.id });
+    driver.writes.length = 0;
+
+    await engine.delete('parent', { where: { name: 'doomed' }, multi: true });
+
+    expect(driver.begun).toHaveLength(1);
+    const handle = driver.begun[0];
+    expect(driver.writes.some((w: any) => w.object === 'parent' && w.op === 'delete')).toBe(true);
+    expect(driver.writes.some((w: any) => w.object === 'detail' && w.op === 'delete')).toBe(true);
+    expect(driver.writes.some((w: any) => w.object === 'link' && w.op === 'update')).toBe(true);
+    for (const w of driver.writes) expect(w.transaction).toBe(handle);
+  });
+
+  it('deletes only the rows it walked, even when the walk makes another row match the predicate', async () => {
+    // A self-referencing set_null lookup: clearing `boss` on the report makes
+    // it match `{ boss: null }`. The delete removes the rows it resolved and
+    // walked, never a row the walk itself brought into the predicate.
+    const node = {
+      name: 'node',
+      label: 'Node',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        name: { name: 'name', type: 'text' as const },
+        boss: { name: 'boss', type: 'lookup' as const, reference: 'node' },
+      },
+    };
+    const { engine, driver } = await makeEngine([node]);
+    const root = await engine.insert('node', { name: 'root', boss: null });
+    const report = await engine.insert('node', { name: 'report', boss: root.id });
+
+    const removed = await engine.delete('node', { where: { boss: null }, multi: true });
+
+    expect(removed).toBe(1);
+    expect(driver.rowsOf('node').map((r: any) => [r.id, r.boss ?? null])).toEqual([[report.id, null]]);
+  });
+
+  it('a detail that also restricts its own master refuses the predicate delete, as it does by id (#26718)', async () => {
+    // The predicate arm runs the by-id walk itself, so every rule the walk
+    // judges holds here too: the detail is in its master's cascade set by its
+    // own master_detail, and its restrict to that master still refuses.
+    const pledge = {
+      name: 'pledge',
+      label: 'Pledge',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        parent: { name: 'parent', type: 'master_detail' as const, reference: 'parent' },
+        guard: { name: 'guard', type: 'lookup' as const, reference: 'parent', deleteBehavior: 'restrict' },
+      },
+    };
+    const { engine, driver } = await makeEngine([parent, pledge]);
+    const p = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('pledge', { parent: p.id, guard: p.id });
+
+    await expect(engine.delete('parent', { where: { name: 'doomed' }, multi: true }))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'pledge' });
+    expect(driver.rowsOf('parent')).toHaveLength(1);
+    expect(driver.rowsOf('pledge')).toHaveLength(1);
+  });
+
+  it('a matched set of zero rows walks nothing and deletes nothing', async () => {
+    const { engine, driver } = await makeEngine([parent, detail]);
+    const p = await engine.insert('parent', { name: 'kept' });
+    await engine.insert('detail', { parent: p.id });
+    driver.writes.length = 0;
+
+    const removed = await engine.delete('parent', { where: { name: 'nobody' }, multi: true });
+
+    expect(removed).toBe(0);
+    expect(driver.writes).toEqual([]);
+    expect(driver.rowsOf('detail')).toHaveLength(1);
   });
 });
 

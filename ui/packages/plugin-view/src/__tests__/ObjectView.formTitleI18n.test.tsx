@@ -144,7 +144,7 @@ function renderViewIn(
   );
 }
 
-/** Row click under drawer/modal/popover navigation -> formMode 'view'. */
+/** Row click under the drawer navigation (or a `layout: 'modal'`) -> formMode 'view'. */
 const openView = () => fireEvent.click(screen.getByTestId('grid-row'));
 /** Row edit action -> formMode 'edit'. */
 const openEdit = () => fireEvent.click(screen.getByTestId('grid-edit'));
@@ -246,17 +246,12 @@ describe('ObjectView form title — create mode, drawer (objectui#3462)', () => 
   });
 });
 
-describe('ObjectView form title — the other two consumption sites (objectui#3462)', () => {
+describe('ObjectView form title — the other consumption site (objectui#3462)', () => {
+  // The modal is reached through `layout: 'modal'` since objectstack#26677
+  // retired `navigation.mode: 'modal'`; the popover site, the title handed to
+  // `NavigationOverlay` in popover mode, left with the popover face.
   it('localizes the modal DialogTitle', async () => {
-    renderViewIn('zh', LABEL.zh, { navigation: { mode: 'modal' } } as never);
-    openView();
-
-    await waitFor(() => expect(screen.getByText('查看联系人')).toBeInTheDocument());
-    expect(screen.queryByText('View 联系人')).toBeNull();
-  });
-
-  it('localizes the title handed to NavigationOverlay in popover mode', async () => {
-    renderViewIn('zh', LABEL.zh, { navigation: { mode: 'popover' } } as never);
+    renderViewIn('zh', LABEL.zh, { layout: 'modal', navigation: undefined } as never);
     openView();
 
     await waitFor(() => expect(screen.getByText('查看联系人')).toBeInTheDocument());

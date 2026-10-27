@@ -88,7 +88,7 @@ Flows are built from **20 built-in node types** (plugins register more via
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
 
 #### Human Decision
 
@@ -217,10 +217,9 @@ variables: [
   evaluated before the query (`filter: { id: { dialect: 'cel', source:
   'record.id' } }`). A whole-string **query placeholder** (`{current_user_id}`,
   `{today}`, `{current_year_start}`) passes through verbatim for the query
-  engine to expand; every other `{…}` token is refused, and a flow variable
-  never shadows a placeholder. Only
-  `filter` gets this hand-off — in a text slot `{{ current_year_start }}` is a
-  nonsense reference.
+  engine to expand; a flow variable never shadows a placeholder. Only `filter`
+  gets this hand-off — in a text slot `{{ current_year_start }}` is a nonsense
+  reference.
 - **An operand that evaluates to `null` refuses the node** (not
   `fault`-routable): a dropped condition does not narrow a query, it widens
   it, so a routed `delete_record` would empty the object while the run reports
@@ -299,7 +298,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    ```
 
    If you genuinely need data-lifecycle **side effects** (read/write other records),
-   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
+   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`.
 
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
@@ -381,7 +380,7 @@ node `config`**:
 
 ### Trigger Configuration — on the `start` node
 
-The binding is the START NODE — this is that node, not a whole flow (a flow also
+This is the start node alone, not a whole flow (a flow also
 owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 
 ```typescript
