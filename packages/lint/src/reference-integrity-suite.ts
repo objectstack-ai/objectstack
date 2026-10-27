@@ -447,8 +447,10 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // published with a dangling chart binding is now refused (422) rather than
   // stored silently. Each was MEASURED over the shipped corpus at the door's
   // own snapshot shape before crossing — `report`: 9 reports (showcase 4,
-  // todo 5), 0 findings; `view` / `object`: MEASURED_VIEW_CORPUS — with a lit
-  // synthetic probe refused at each door.
+  // todo 5), 0 findings; `view` / `object`: every view and every object with
+  // `listViews` in the four example apps and platform-objects, of which two
+  // list views chart (showcase `task` and `project`), 0 findings. A lit
+  // synthetic probe is refused at each door.
   { name: 'validateChartBindings', runtimeTypes: ['flow', 'report', 'view', 'object'], run: validateChartBindings },
   // [#26548] The same report, one key on: `dateRange.dimension` resolved
   // against the bound dataset's `type: 'date'` dimensions (named, or the ONE
