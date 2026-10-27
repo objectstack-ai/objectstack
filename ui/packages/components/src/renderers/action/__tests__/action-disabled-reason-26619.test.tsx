@@ -151,9 +151,14 @@ describe.each(BUTTON_SITES)('$id — the declared reason is the one it gives (ob
     expect(description(archiveButton())).toBe(DEFAULT_ZH);
   });
 
-  it('a map with no usable entry for the language falls back to the default', () => {
+  it('a map whose entry for the language is blank falls back to the default', () => {
     mount(site.node({ ...ARCHIVE, disabledReason: { en: '  ' } }, OPEN_TASK));
     expect(description(archiveButton())).toBe(DEFAULT_EN);
+  });
+
+  it('a map with no entry for the language shows an authored entry (the `pickLocalized` chain), not the default', () => {
+    mount(site.node({ ...ARCHIVE, disabledReason: { en: DECLARED_EN } }, OPEN_TASK), { zh: true });
+    expect(description(archiveButton())).toBe(DECLARED_EN);
   });
 
   it('control — the predicate does not hold: the declared reason is not shown', () => {
