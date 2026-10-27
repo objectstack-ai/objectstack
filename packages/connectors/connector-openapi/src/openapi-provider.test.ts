@@ -243,3 +243,82 @@ describe('openapi provider — remote spec fetch fault classification (#3049)', 
         expect((err as Error).message).toMatch(/not a parseable.*OpenAPI JSON document/s);
     });
 });
+
+// ── Only OpenAPI 3.x loads; a Swagger 2.0 document is refused at load ───────
+//
+// A 2.0 document carries `host` / `basePath` and `body` / `formData`
+// parameters the 3.x generator never reads, so loading one would bring the
+// instance up with wrong actions and no error. Each spec form (inline, URL,
+// file) is refused as a plain configuration fault — fatal at boot, never the
+// upstream-unavailable marker that would degrade and retry it — with the
+// source named and the offline conversion as the remedy.
+
+describe('openapi provider — refuses a document that is not OpenAPI 3.x', () => {
+    const swagger2 = {
+        swagger: '2.0',
+        info: { title: 'Legacy', version: '1.0.0' },
+        host: 'legacy.example.com',
+        basePath: '/v1',
+        paths: {
+            '/pets': {
+                post: {
+                    operationId: 'createPet',
+                    parameters: [{ in: 'body', name: 'pet', schema: { type: 'object' } }],
+                    responses: { '200': { description: 'ok' } },
+                },
+            },
+        },
+    };
+
+    async function refusal(promise: Promise<unknown>): Promise<Error> {
+        const err = await promise.then(
+            () => { throw new Error('expected rejection'); },
+            (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(Error);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        return err as Error;
+    }
+
+    it('refuses a Swagger 2.0 file-path spec, naming the file and the offline conversion', async () => {
+        const factory = createOpenApiProviderFactory();
+        const err = await refusal(
+            factory(ctx({ providerConfig: { spec: './specs/legacy.json' }, loadPackageFile: async () => JSON.stringify(swagger2) })),
+        );
+        expect(err.message).toContain("connector 'pets' providerConfig.spec file './specs/legacy.json'");
+        expect(err.message).toContain('a Swagger "2.0" document');
+        expect(err.message).toContain('Convert the document to OpenAPI 3.x offline');
+    });
+
+    it('refuses a Swagger 2.0 document fetched from a URL, naming the URL', async () => {
+        const fetchImpl = (async () => ({ ok: true, status: 200, json: async () => swagger2 }) as unknown as Response) as unknown as typeof fetch;
+        const factory = createOpenApiProviderFactory({ fetchImpl });
+        const err = await refusal(factory(ctx({ providerConfig: { spec: 'https://legacy.example.com/swagger.json' } })));
+        expect(err.message).toContain("URL 'https://legacy.example.com/swagger.json'");
+        expect(err.message).toContain('a Swagger "2.0" document');
+        expect(err.message).toContain('Convert the document to OpenAPI 3.x offline');
+    });
+
+    it('refuses an inline Swagger 2.0 document', async () => {
+        const factory = createOpenApiProviderFactory();
+        const err = await refusal(factory(ctx({ providerConfig: { spec: swagger2 } })));
+        expect(err.message).toContain('(the inline document) is a Swagger "2.0" document');
+    });
+
+    it('refuses a document with no openapi field, and one declaring a version other than 3.x', async () => {
+        const factory = createOpenApiProviderFactory();
+        const { openapi: _omitted, ...unversioned } = petstore;
+        const missing = await refusal(factory(ctx({ providerConfig: { spec: unversioned } })));
+        expect(missing.message).toContain("a document with no 'openapi' version field");
+        const four = await refusal(factory(ctx({ providerConfig: { spec: { ...petstore, openapi: '4.0.0' } } })));
+        expect(four.message).toContain('a document declaring openapi: "4.0.0"');
+    });
+
+    it('loads every 3.x minor (3.1 included)', async () => {
+        const factory = createOpenApiProviderFactory();
+        for (const openapi of ['3.0.3', '3.1.0', '3.1']) {
+            const { def } = await factory(ctx({ providerConfig: { spec: { ...petstore, openapi } } }));
+            expect(def.actions?.map((a) => a.key), openapi).toEqual(['listPets']);
+        }
+    });
+});
