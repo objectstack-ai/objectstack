@@ -27,6 +27,8 @@ import { enumOptions } from '@object-ui/test-support';
 // `React.lazy` factory resolves at once instead of racing the test's wait
 // window (AGENTS.md, flaky-test discipline).
 import '@object-ui/plugin-dashboard';
+// The console registers the chart renderer the series families draw through.
+import '@object-ui/plugin-charts';
 
 vi.mock('@object-ui/react', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@object-ui/react')>();
@@ -128,8 +130,9 @@ describe('one widget-type registry, derived from the spec (objectstack#26745)', 
     );
   });
 
-  it('every offered type renders through the real DashboardRenderer — no placeholder, no red panel', async () => {
-    const widgets = WIDGET_TYPE_IDS.map((type, i) => ({
+  /** Render one widget per type through the real renderer; the drawn text once every cell is laid out. */
+  async function renderedText(types: readonly string[]): Promise<string> {
+    const widgets = types.map((type, i) => ({
       id: `w_${i}`,
       type,
       title: `Widget ${type}`,
@@ -151,8 +154,17 @@ describe('one widget-type registry, derived from the spec (objectstack#26745)', 
       const cells = container.querySelectorAll('[style*="grid-column"]');
       if (cells.length !== widgets.length) throw new Error(`expected ${widgets.length} widget cells, saw ${cells.length}`);
     });
-    expect(container.textContent).not.toMatch(/chart type is not supported yet/);
-    expect(container.textContent).not.toMatch(/Unknown component type/);
+    return container.textContent ?? '';
+  }
+
+  it('every offered type renders through the real DashboardRenderer — no placeholder, no red panel', async () => {
+    const text = await renderedText(WIDGET_TYPE_IDS);
+    expect(text).not.toMatch(/chart type is not supported yet/);
+    expect(text).not.toMatch(/Unknown component type/);
+  });
+
+  it('control: the same probe sees the placeholder a family with no renderer draws', async () => {
+    expect(await renderedText(['heatmap'])).toMatch(/chart type is not supported yet/);
   });
 
   it('every offered type has its Add-menu name and its Type-select name in en and zh', () => {
