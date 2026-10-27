@@ -84,9 +84,9 @@
  *             `content` leg), `isConfigBag(newSchema.<key>)` (the `properties`
  *             and `props` bags), and
  *             `evaluate{Visibility,Enablement}Predicate(newSchema.<key>, …)`
- *             (the eight condition keys). Read from `run`-shaped call sites,
+ *             (the four condition keys). Read from `run`-shaped call sites,
  *             never from the surrounding comments: that file's prose names
- *             `visibleOn`, `disabled` and the bags many times over, and a scan
+ *             `visibleWhen`, `disabled` and the bags many times over, and a scan
  *             of the raw text would be describing its own docblocks.
  *
  * A node's carried set is the union of the two, and a node whose `type` has no
@@ -1045,7 +1045,7 @@ export const CONTROL_FIXTURES = {
   "type": "badge",
   "text": "\${status}",
   "variant": "\${status === 'active' ? 'success' : 'warning'}",
-  "visibleOn": "\${status !== null}"
+  "visibleWhen": "\${status !== null}"
 }`,
   negative: `{
   "type": "card",
@@ -1053,7 +1053,7 @@ export const CONTROL_FIXTURES = {
   "description": "\${item.role}",
   "content": "\${greeting}",
   "properties": { "className": "\${theme.card}" },
-  "visibleOn": "\${item.active}"
+  "visibleWhen": "\${item.active}"
 }`,
   /**
    * The DIALECT controls (objectui#8334). The positive fixture is the shape the

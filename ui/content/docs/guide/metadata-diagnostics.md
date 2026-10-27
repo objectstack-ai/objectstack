@@ -205,9 +205,8 @@ a blank predicate at parse, as their protocol counterparts do. `visible`,
 and is only diagnosed.
 
 The same is now true of a **component node's own gate** — `visibleWhen` on a
-page component (and its `visible` / `visibleOn` / `hidden` / `hiddenOn`
-siblings; the page component's old `visibility` spelling is retired and not
-read), plus a `page:tabs` item's `visibleWhen`. These used to
+page component (and its `visible` / `hidden` siblings; the `visibility`,
+`visibleOn` and `hiddenOn` spellings are retired and not read), plus a `page:tabs` item's `visibleWhen`. These used to
 report in a development build only, so a gate that stopped biting in
 production left nothing on the console at all. They now warn in **both**
 builds, with the node type, the node id, the gate key, the predicate source
@@ -220,16 +219,15 @@ and the engine's reason:
 ...
 ```
 
-The rest of the line says what the fault did to the node: on `visibleWhen`,
-`visible` and `visibleOn` the node was **withheld**, on `hidden` and `hiddenOn`
-it was removed (see below).
+The rest of the line says what the fault did to the node: on `visibleWhen` and
+`visible` the node was **withheld**, on `hidden` it was removed (see below).
 
 The line is **rate limited to one per distinct predicate source**, so a broken
 predicate rendered down two hundred rows of a list is one line, not two
 hundred — while a second, differently-broken predicate still gets its own.
 
 Page visibility gates fail **closed**: a page node's `visibleWhen` (and its
-`visible` / `visibleOn` / `hidden` / `hiddenOn` siblings, objectui#13299) and a
+`visible` / `hidden` siblings, objectui#13299) and a
 `page:tabs` item's `visibleWhen` (objectui#13286). A declared predicate that
 cannot be evaluated — over the CEL engine's AST bound, a type error, an unbound
 root such as `record` on a surface with no row, a missing function — withholds

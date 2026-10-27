@@ -123,11 +123,11 @@ describe('SchemaRenderer Expression Integration', () => {
       expect(screen.getByTestId('test-component')).toBeInTheDocument();
     });
 
-    it('hides with hiddenOn expression', () => {
+    it('hides with a raw `hidden` expression — the one hide predicate, no `On` dialect', () => {
       const { container } = render(
         <PredicateScopeProvider scope={{ data: { status: 'draft' } }}>
         <SchemaRendererContext.Provider value={{ dataSource: { status: 'draft' } as unknown as DataSource }}>
-          <SchemaRenderer schema={{ type: 'test-component', hiddenOn: '${data.status === "draft"}' }} />
+          <SchemaRenderer schema={{ type: 'test-component', hidden: 'data.status === "draft"' }} />
         </SchemaRendererContext.Provider>
       </PredicateScopeProvider>
       );
@@ -141,8 +141,8 @@ describe('SchemaRenderer Expression Integration', () => {
   });
 
   // ADR-0089 — `visibleWhen` is the canonical conditional-visibility predicate.
-  // The page component's `visibility` spelling is retired (objectui#12654).
-  // `BaseSchema`'s own deprecated `visibleOn` is a different key, not covered here.
+  // The page component's `visibility` spelling is retired (objectui#12654), and
+  // so is `BaseSchema`'s own `visibleOn` dialect (a `?: never` tombstone).
   describe('visibleWhen (ADR-0089 canonical)', () => {
     it('shows when the visibleWhen predicate is truthy', () => {
       render(
@@ -208,11 +208,11 @@ describe('SchemaRenderer Expression Integration', () => {
       expect(screen.getByTestId('test-component')).not.toHaveAttribute('data-disabled');
     });
 
-    it('evaluates disabledOn expression', () => {
+    it('evaluates a raw `disabled` expression — the one enablement predicate, no `On` dialect', () => {
       render(
         <PredicateScopeProvider scope={{ data: { readOnly: true } }}>
         <SchemaRendererContext.Provider value={{ dataSource: { readOnly: true } as unknown as DataSource }}>
-          <SchemaRenderer schema={{ type: 'test-component', disabledOn: '${data.readOnly}' }} />
+          <SchemaRenderer schema={{ type: 'test-component', disabled: 'data.readOnly' }} />
         </SchemaRendererContext.Provider>
       </PredicateScopeProvider>
       );
