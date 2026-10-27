@@ -474,7 +474,8 @@ is executed. `POST /analytics/sql` refuses the same keys. To order by a member, 
 <Callout type="info">
 **`fields[]` is the resolved presentation surface — read it first.** Each entry carries
 `name` and `type` and, when the producer declares them, `label`, `format`, `currency`,
-`percentScale`, `builtinAggregate`, `aggregate` and `nullLabel`: the optional members
+`percentScale`, `builtinAggregate`, `aggregate`, `nullLabel` and `polarity` (which direction
+of a measure's change is good news, relayed from the dataset measure): the optional members
 `AnalyticsResultResponseSchema` declares (`packages/spec/src/api/analytics.zod.ts`),
 mirrored member for member by `IAnalyticsService.query`'s `AnalyticsResult` and bound to
 it at compile time. Optional means a given column may omit them — read them defensively,
