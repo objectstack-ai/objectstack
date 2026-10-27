@@ -115,7 +115,9 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import knex from 'knex';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
-import { SqlDriver, isUnresolvableColumnError, unresolvableColumnNameOf } from './sql-driver.js';
+import { SqlDriver, isUnresolvableColumnError } from './sql-driver.js';
+// [#25521 cut 15] The dialect-message reader moved with the read exits' fault terminals.
+import { unresolvableColumnNameOf } from './sql-driver-read-exit-fault.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const TABLE = 'unresolvable_where_task';

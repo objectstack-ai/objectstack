@@ -28,7 +28,8 @@
  * ## Two halves, and why both
  *
  * 1. **The enumeration** reads `sql-driver.ts` and its cross-field seam module
- *    `sql-driver-cross-field-comparison.ts` (#25521 cut 13) and lists every
+ *    `sql-driver-cross-field-comparison.ts` (#25521 cut 13), plus the read-exit
+ *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15), and lists every
  *    function that builds an `INVALID_FILTER` error. Only three may call
  *    `unsupportedFilterError` directly (the seam itself, the `'author'`
  *    re-issue, and the column refusal raised from a dialect error AFTER the
@@ -272,8 +273,8 @@ const DOORS: readonly Door[] = [
 // ── Half 1: the enumeration ───────────────────────────────────────────────────
 
 /**
- * Every function in `sql-driver.ts` and `sql-driver-cross-field-comparison.ts`
- * that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
+ * Every function in `sql-driver.ts`, `sql-driver-cross-field-comparison.ts` and
+ * `sql-driver-read-exit-fault.ts` that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
  * split across lines, an inline `throw`, or a builder written as a method or an
  * arrow cannot slip past the count.
  */
@@ -284,9 +285,12 @@ function enumerateRefusalBuilders(): {
 } {
   // [#25521 cut 13] The cross-field and now-anchored comparison compile moved to
   // its own seam module with two of the builders below; the scan reads both.
+  // [#25521 cut 15] The read exits' fault terminals moved to a third, with
+  // `unresolvableFilterColumnError`; the scan reads it too.
   const sources = [
     ['sql-driver.ts', readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8')],
     ['sql-driver-cross-field-comparison.ts', readFileSync(new URL('./sql-driver-cross-field-comparison.ts', import.meta.url), 'utf8')],
+    ['sql-driver-read-exit-fault.ts', readFileSync(new URL('./sql-driver-read-exit-fault.ts', import.meta.url), 'utf8')],
   ] as const;
   const directCallers = new Set<string>();
   const seamCallers = new Set<string>();
