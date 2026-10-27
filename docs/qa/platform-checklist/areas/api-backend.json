@@ -9,7 +9,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -22,7 +22,7 @@
           "default maxBatchSize (200 unless RestServerConfig.batch overrides)"
         ],
         "knownGaps": [
-          "acceptance[5] (an empty-string id on an update or delete op) stays red until #24781 lands: the door's up-front id check tests `op.id == null` only (packages/rest/src/batch-routes.ts), so `\"id\": \"\"` reaches the engine and answers 500 — DATABASE_ERROR for update, INTERNAL_ERROR for delete. Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24781's fix merges, re-run the clause and drop this line"
+          "CLOSED: #24781 is fixed. The door's up-front id check now asks namesNoRow of the op's row address (packages/rest/src/batch-routes.ts), so a blank id gets the answer an absent one does. QA run #26476 re-ran acceptance[5] at 756220c4: update and delete with id \"\" answered 400 VALIDATION_FAILED 'requires an id', identical to the no-id control, with no unhandled error in the log. The 500 shape this line used to record was measured at 580fd4ed (QA run #24779) and a43405d596 (#24802)"
         ]
       },
       "steps": [
@@ -66,7 +66,7 @@
           "evidence": "both responses + re-reads"
         },
         {
-          "clause": "an update or delete op whose id is the EMPTY STRING is refused up front exactly as a missing id is — 400 VALIDATION_FAILED (\"Operation 'update' on 'showcase_task' requires an id\") — and never answers a 5xx; the per-object doors (POST /data/:object/batch, /updateMany) already treat a blank id as absent. Red until #24781 lands",
+          "clause": "an update or delete op whose id is the EMPTY STRING is refused up front exactly as a missing id is — 400 VALIDATION_FAILED (\"Operation 'update' on 'showcase_task' requires an id\") — and never answers a 5xx; the per-object doors (POST /data/:object/batch, /updateMany) treat a blank id as absent too",
           "oracle": "api",
           "verify": "step-7 responses: both empty-id ops answer status 400 with error code VALIDATION_FAILED, the same status and code as their no-id controls, and the log carries no '[REST] Unhandled error' for them. Any 5xx is a FAIL (the #24781 shape: update 500 DATABASE_ERROR, delete 500 INTERNAL_ERROR, logged '[REST] Unhandled error: Error: Update requires an ID or options.multi=true'). Score status and code per verb, not the sentence",
           "evidence": "the four responses (two empty-id, two no-id controls) + the log excerpt around the empty-id pair"
@@ -129,6 +129,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0] and acceptance[5].clause stop saying the clause is red until #24781 lands. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): #24781 closed fixed on 2026-10-20 and the run scored acceptance[5] pass. Re-read at base e4ba846f (packages/rest/src/batch-routes.ts: the namesNoRow check ahead of the transaction). The knownGaps line is kept as a CLOSED record; no clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -208,7 +214,7 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "build",
       "steps": [
@@ -222,7 +228,7 @@
         {
           "clause": "each tombstoned KEY is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean). The retired-filter-operator registry (RETIRED_FILTER_OPERATORS) is the declared exception and is scored on its own terms: a filter is an open record, so a stored $regex / $options parses and builds GREEN; it is refused at RUNTIME with 400 INVALID_FILTER naming the operator RETIRED with its prescription (write $icontains, or $contains), and `os migrate meta` lists it as the semantic advisory filter-regex-options-retired",
           "oracle": "build",
-          "verify": "safeParse fails / os build exits non-zero for every sampled tombstoned key; for the retired filter operator: parse/build green, the runtime query answers 400 code INVALID_FILTER whose message says the operator is RETIRED — with the operator, field and the RETIRED_FILTER_OPERATORS prescription on a caller-authored where (a predicate whose provenance cannot be vouched gets the withheld sentence and the full diagnostic in the server log, sql-driver.ts retiredFilterOperatorError / withheldFilterError) — and the migrate-meta output lists filter-regex-options-retired among the manual changes. A build-time rejection of a stored $regex is NOT the expected shape",
+          "verify": "safeParse fails / os build exits non-zero for every sampled tombstoned key; for the retired filter operator: parse/build green, the runtime query answers 400 code INVALID_FILTER whose message says the operator is RETIRED — with the operator, field and the RETIRED_FILTER_OPERATORS prescription on a caller-authored where (a predicate whose provenance cannot be vouched gets the withheld sentence and the full diagnostic in the server log, sql-driver.ts retiredFilterOperatorError / withheldFilterError) — and the migrate-meta output lists filter-regex-options-retired among the manual changes. That listing proves the registry entry, not a detection: the entry declares no relevantWhen question, so `os migrate meta --from 16` prints it for any stack, one with no $regex included (QA run #26476; packages/cli/src/commands/migrate/meta.ts, group ③). A build-time rejection of a stored $regex is NOT the expected shape",
           "evidence": "the rejections, plus for the filter operator the green parse/build, the runtime 400 body and the migrate-meta advisory line"
         },
         {
@@ -292,6 +298,12 @@
           "date": "2026-10-20",
           "change": "steps[1] locates the filter advisory by what the report prints — checklist-accuracy finding B2 of QA run #24787 (wave anchor #24579 round 12): the human output of `os migrate meta --from 16` prints the headline `⚠ [protocol 17] data.filter $regex / $options …`, never the id, which is only in `--json` todos[].id (printNotice, migrate/meta.ts at base 307ce4c4b4). No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "acceptance[0].verify says the filter-regex-options-retired advisory is not source-sensitive. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the run saw it printed for a stack with no $regex. Re-read at base e4ba846f: packages/spec/src/migrations/entries/semantic/17.filter-regex-options-retired.ts declares no relevantWhen, so the chain cannot prove it absent. The run's other line on this item (the 400 message cut at 500 characters before the $contains alternative) is a product observation reported on the wave anchor, not a ledger edit. No clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -562,7 +574,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -607,7 +619,7 @@
           "evidence": "the bodies"
         },
         {
-          "clause": "HTTP status agrees with the code: a standard-catalog code answers the status HttpStatusErrorCodeMap maps it from (VALIDATION_ERROR 400, UNAUTHENTICATED 401, PERMISSION_DENIED 403, RESOURCE_NOT_FOUND 404, …), and a registered extension code (OBJECT_NOT_FOUND, RECORD_NOT_FOUND, VALIDATION_FAILED, …) answers a status in its condition's family (ErrorHttpStatusMap: validation 400, not_found 404, authorization 403, conflict 409, …). HttpStatusErrorCodeMap is the status → FLOOR-code map — the code a bare status derives — not a code → status table, so it names no status for an extension code",
+          "clause": "HTTP status agrees with the code: a floor code answers the status HttpStatusErrorCodeMap maps it from (VALIDATION_ERROR 400, UNAUTHENTICATED 401, PERMISSION_DENIED 403, RESOURCE_NOT_FOUND 404, …), and every other code answers a status in its condition's family: a StandardErrorCode member that is no status's floor (OBJECT_NOT_FOUND, RECORD_NOT_FOUND, …) and a registered extension code (VALIDATION_FAILED, …) alike (ErrorHttpStatusMap: validation 400, not_found 404, authorization 403, conflict 409, …). HttpStatusErrorCodeMap is the status → FLOOR-code map — the code a bare status derives — not a code → status table, so it names no status for an extension code",
           "oracle": "api",
           "verify": "status-vs-code table across the samples: each standard code judged against HttpStatusErrorCodeMap read in reverse, each extension code by its family; any mismatch (e.g. a 500 carrying a caller-fixable code) fails",
           "evidence": "the table"
@@ -683,6 +695,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "acceptance[3].clause stops calling OBJECT_NOT_FOUND and RECORD_NOT_FOUND extension codes. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): both are StandardErrorCode members (packages/spec/src/api/errors.zod.ts), while VALIDATION_FAILED is not. Neither is a floor code, so both still answer by family; the clause now sorts the codes into floor codes and the rest. Re-read at base e4ba846f. The assertion (status agrees with code) is unchanged",
+          "ref": "#25807"
         }
       ]
     },
@@ -1316,7 +1334,7 @@
       "title": "Filter comparand conformance: only the accepted comparand TYPES pass the where-door, a bigint past the exact-integer limit is refused, and a dotted head is classified rather than guessed",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1344,7 +1362,7 @@
         {
           "clause": "every member of ACCEPTED_FILTER_COMPARAND_TYPES is accepted at the where-door and returns a known answer set — the matrix is exhaustive over the pinned export, not a sample",
           "oracle": "api",
-          "verify": "one request per member; each returns 200 and the answer set reconciles against a directly-computed expectation",
+          "verify": "one request per member; each returns 200 and the answer set reconciles against a directly-computed expectation. Date and bigint have no JSON form, so a where-door request can only carry their wire spellings (an ISO string, a number): score the Date and bigint members themselves at an in-process door, through spec parseFilterAST and a driver, as steps[3] does for the bigint limit, and say so in the run record",
           "evidence": "per-member request + answer set"
         },
         {
@@ -1362,7 +1380,7 @@
         {
           "clause": "a dotted filter head is CLASSIFIED (relation | virtual | scalar | null) and each class is handled per contract — a scalar head with a dot is refused rather than treated as a relation traversal",
           "oracle": "api",
-          "verify": "one request per reachable class; classifyDottedFilterHead in packages/spec/src/data/filter-dotted-head.ts is the contract, and the observed behavior must match its classification",
+          "verify": "one request per reachable class; classifyDottedFilterHead in packages/spec/src/data/filter-dotted-head.ts is the contract, and the observed behavior must match its classification. The null class (a structured/JSON head, or a multiple field) is deliberately unjudged by the classifier and reaches the driver: on the showcase's SQL boot it answered 400 INVALID_FILTER, never rows (QA run #26476). The drivers may disagree on that class (the file's header), so record its answer per driver rather than holding it to one code",
           "evidence": "per-class request + observed handling"
         },
         {
@@ -1422,6 +1440,12 @@
           "date": "2026-10-02",
           "change": "re-pointed clause 5 at the door posture #20116 established. It demanded the SAME CODE at a second door; on 17.6.0 the POST /query door refuses the comparand in the request schema (400 VALIDATION_FAILED, fields[] at query.where.f_number.$eq) while GET $filter and the engine answer 400 INVALID_FILTER — every door refusing, none returning rows, the same contract sentence throughout. The release-verification run scored it a stale-clause fail; the clause now asserts refusal + shared sentence at every door and names each door's code, mirroring query-contract-matrix rev 3",
           "ref": "#21330"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "acceptance[0].verify and acceptance[3].verify say what a where-door request can and cannot reach. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): 'one request per member' cannot be met over JSON for Date and bigint, which the run scored in process; and the null head class, which the classifier leaves unjudged, was refused by the driver with INVALID_FILTER while the item did not mention it. Re-read at base e4ba846f (packages/spec/src/data/filter-comparand-type.ts, filter-dotted-head.ts DottedFilterHeadClass). No clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -1954,7 +1978,7 @@
       "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1979,7 +2003,7 @@
       "steps": [
         "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg) and DateGranularity (— 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
         "boot the showcase on its own port and DB; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
-        "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
+        "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. count_distinct over annual_revenue does not discriminate on the seeded rows (QA run #26476 measured every value distinct, so it equals count of the field): run count_distinct over `status` as well, where the distinct count is smaller than the row count. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
         "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string). The TIMEZONE lever is not on this door: POST /api/v1/data/showcase_account/query refuses a `timezone` key 400 INVALID_FIELD (the protocol does not forward one; engine.aggregate reads only query.timezone). The one wire lever is POST /api/v1/analytics/query with `timezone` — on the stock cube showcase_delivery, a count measure over its time dimension due_date at granularity day, once at UTC and once in a negative-offset zone such as America/Los_Angeles (QA run #24595: the answer's data.sql is present on the driver path and absent on the in-memory one, and the SQL echo refuses a non-UTC bucket)",
         "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
         "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → on this door the REQUEST SCHEMA answers first: 400 VALIDATION_FAILED with a fields[] entry located at query.aggregations ('expected array'). The protocol's worked-example refusal (assertAggregationFieldsExist: 'must be an array of { function, field?, alias } entries') is not reached through POST /query — the #20116 door posture api-backend.filter-comparand-conformance records",
@@ -2091,6 +2115,12 @@
           "date": "2026-10-26",
           "change": "negative[2] says the #24618 shift is fixed, from QA run #25817 (release-18.2.0-manual-set, at 6679644a): the negative-offset shift no longer reproduces. #24618 is closed as completed by PR #24642 (787939130c, merged 2026-10-19). No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "steps[2] names a field that discriminates count_distinct. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): over annual_revenue every seeded value is distinct, so count_distinct equals the per-field count and a broken distinct would pass. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -2216,7 +2246,7 @@
       "title": "enable.apiMethods three-state whitelist on the REST boundary: 404 hides apiEnabled:false, 405 OBJECT_API_METHOD_NOT_ALLOWED carries the EFFECTIVE derived set, bulk∧child + writeMode-precise import, legacy 8-value strip-and-WARN (deny-all cliff), the object gate answers ahead of the caller's 403, batch gated per-op before the txn",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2238,7 +2268,7 @@
         "read the contract sources: ApiMethod (packages/spec/src/data/object.zod.ts — SIX authored primitives get/list/create/update/delete/bulk) and the derivation table (packages/spec/src/data/api-derivation.ts — resolveEffectiveApiMethods: undefined/null → unrestricted, [] or stripped-to-empty or NON-ARRAY → deny-all, subset → restricted closure; isApiOperationAllowed: bulk∧child, writeMode-precise import, restore/purge permanently closed)",
         "free negatives, as ADMIN (the gate keys on the object, not the caller): PATCH /api/v1/data/sys_session/{id} → 405 OBJECT_API_METHOD_NOT_ALLOWED with the allowed[] array; GET /api/v1/data/sys_device_code (list against a get-only whitelist) → 405; GET /api/v1/data/sys_oauth_consent → 404 OBJECT_API_DISABLED (existence hidden); capture full bodies",
         "ordering leg: repeat the sys_session PATCH as the NON-ADMIN member and compare with the admin's 405 — the object-level gate answers before any caller-level 403 (the identity-auth.session-list-revoke precedent, '405 before 403'); the anonymous twin answers the 401 floor first",
-        "scratch subset leg: author qa_verb_gate_probe with enable.apiMethods ['get','list','create']; verify update/delete → 405 whose allowed[] is the EFFECTIVE closure in API_OPERATION_ORDER (get, list, create + derived aggregate/search/export/import — and NEVER restore/purge, and NOT the raw 3-element whitelist); POST createMany → refused (bulk not granted); re-author adding 'bulk' → createMany passes the gate, updateMany still refused (bulk∧child: the child verb must itself be granted)",
+        "scratch subset leg: author qa_verb_gate_probe with enable.apiMethods ['get','list','create']; verify update/delete → 405 whose allowed[] is the EFFECTIVE closure in API_OPERATION_ORDER (get, list, create + derived aggregate/search/export/import — search only while the object's `searchable` is not false, api-derivation.ts — and NEVER restore/purge, and NOT the raw 3-element whitelist); POST createMany → refused (bulk not granted; the createMany body is a bare JSON array of records, not { records }); re-author adding 'bulk' → createMany passes the gate, updateMany still refused (bulk∧child: the child verb must itself be granted)",
         "import precision leg (on the scratch object granting create but not update): the import door with writeMode insert clears the gate, writeMode update → 405 (rest-server.ts — the writeMode-precise check, not the coarse create∨update)",
         "legacy strip leg: author enable.apiMethods ['upsert'] and capture BOTH the parse-time warning (object.zod.ts — names the FROM→TO guidance 'declare [create,update] — upsert derives from create ∧ update' AND the deny-all cliff sentence, since stripping leaves []) and the runtime effect (every op → 405, allowed: []); then ['get','history'] → kept ['get'], warn names the history derivation; the registration-time diagnostic (packages/objectql/src/registry.ts warnStrippedLegacyApiMethods) adds the per-object line for schemas that skip Zod",
         "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (batch-routes.ts) with 405 OBJECT_API_METHOD_NOT_ALLOWED naming `bulk` — the route's own gate (a cross-object batch is a bulk write, checked as bulk ∧ the row's verb), which sys_session never grants — not the row's `update`; the valid sibling row never lands",
@@ -2334,6 +2364,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1], steps[6] and acceptance[2].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.api-methods-verb-gate fixtures and step 7; wave anchor #24579 §3). A scratch object needs a sharingModel (security-owd-unset, error tier); the cross-object /batch refusal names `bulk` (batch-routes.ts checks bulk with the row verb as its child); and a non-array apiMethods is refused by Zod at PUT (\"only producible by a raw/out-of-band metadata write\", api-derivation.ts), so its fail-closed arm is pinned, not live — api-derivation.test.ts measured at base 9a7838edf5 under os-verify-lock (32 passed). Re-derived at base 9a7838edf5. Left alone from the same finding: the OS_METADATA_WRITABLE=object half (object declares allowRuntimeCreate: true, so a NEW object needs no hatch; QA run #24558 authored scratch objects without one)",
           "ref": "#24649"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "steps[3] names the searchable flag on the derived search verb and the createMany body shape. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the closure carries search only when searchable is not false, and the createMany door takes a bare array. Re-read at base e4ba846f (packages/spec/src/data/api-derivation.ts: the search row's flag; packages/rest/src/batch-routes.ts: 'the body must be a JSON array of record objects'). No clause changed",
+          "ref": "#25807"
         }
       ]
     },

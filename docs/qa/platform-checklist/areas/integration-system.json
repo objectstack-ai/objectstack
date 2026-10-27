@@ -570,7 +570,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -582,7 +582,7 @@
         ],
         "knownGaps": [
           "PREDICATE (multi:true) WRITES ARE UNREACHABLE OVER REST BY DESIGN (run #7690) — do not re-derive this, and do not file the 400 as a defect. #3897 made the batch routes parse their body against the spec contract, and Zod object schemas STRIP unknown keys: `options.multi` and `options.where` can no longer ride into the engine's delete/update options, and `POST /data/:object/deleteMany` now deletes per id (packages/rest/src/rest-server.ts). That is a security boundary, not a gap. The bulk_update/bulk_delete clause therefore needs a FLOW `update_record` / `delete_record` node authored with multi:true, fired through the api trigger — that is the supported predicate-write door",
-          "acceptance[2], the bulk pair, is BLOCKED(dependency) on the org-walled showcase (QA run #23166): a flow node's predicate multi-write publishes its bulk event with NO organizationId, the org-owned subscription refuses it (auto-enqueuer.ts organization match), and an org-less subscription cannot be authored to receive it. Whether flow-node multi-writes should carry the organization is a maintainer question raised on #23166, not ruled; score acceptance[2] blocked(dependency) until it is. The same run did not attempt negative[1] or negative[2] (time budget): a re-run owes them, and their text is unchanged",
+          "acceptance[2], the bulk pair, is BLOCKED(dependency) on the org-walled showcase (QA run #23166): a flow node's predicate multi-write publishes its bulk event with NO organizationId, the org-owned subscription refuses it (auto-enqueuer.ts organization match), and an org-less subscription cannot be authored to receive it. Whether flow-node multi-writes should carry the organization is a maintainer question raised on #23166, not ruled; score acceptance[2] blocked(dependency) until it is. #23166 is the closed run record that raised it, not an open card: no open issue carries the question (its successor anchors #23121 and #23169 closed with it noted, not filed). QA run #26456 re-measured the block at 756220c4 on stock `single`: a flow update_record multi:true over two rows produced no bulk delivery, and the log read '[webhook-auto-enqueuer] … names no organization — refusing to deliver it inside an organization wall'. The same run did not attempt negative[1] or negative[2] (time budget): a re-run owes them, and their text is unchanged",
           "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts boots its own fixture stack (fixtures/webhook-materialization-fixture.ts, not the showcase). At the engine it asserts that no sys_webhook row is written for a declared webhook, and that the declared-webhook reader hands a matching record event to an AutoEnqueuer over a hand-driven realtime stub. That is acceptance[0]'s no-row half only: the activation door's 200 and 404 are never driven, and nothing of acceptance[1]–[6] is asserted. automated may return when a pin drives the activation door and a delivery on the showcase"
         ]
       },
@@ -597,13 +597,13 @@
       ],
       "steps": [
         "boot the showcase on a fresh database; verify the declared webhook is NOT materialized (ADR-0131 D2 retired the boot seeder): read sys_webhook over /api/v1/data and find NO showcase_task_changed row — the dispatcher reads the declaration from the registry",
-        "switch the shipped declared showcase_task_changed on as the admin: POST /api/v1/security/_activation/webhook/showcase_task_changed with { enabled: true } — 200 { type: 'webhook', name, enabled: true }, and one sys_metadata_activation row of metadata_type 'webhook'; an undeclared name answers 404. A declared webhook is read-only: pointing it at the receiver means a copy under a new name (the scratch webhook below). This switch is the subject of acceptance[6] ONLY: switched on, the declaration delivers under `single` (one sys_http_delivery row with ref_id declared:showcase_task_changed, stamped with the Default Organization, per task change), but only to its placeholder url (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
+        "switch the shipped declared showcase_task_changed on as the admin: POST /api/v1/security/_activation/webhook/showcase_task_changed with { enabled: true } — 200 { type: 'webhook', name, enabled: true }, and one sys_metadata_activation row of metadata_type 'webhook' whose `active` column is true (the door's body and answer spell it `enabled`, the row's column is `active`); an undeclared name answers 404. A declared webhook is read-only: pointing it at the receiver means a copy under a new name (the scratch webhook below). This switch is the subject of acceptance[6] ONLY: switched on, the declaration delivers under `single` (one sys_http_delivery row with ref_id declared:showcase_task_changed, stamped with the Default Organization, per task change), but only to its placeholder url (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
         "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
-        "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
+        "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object): one row per delivery with status/attempts/response_code",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "restore the receiver, let the failing row reach a terminal status (failed/dead), then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
-        "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there and the declaration still reads switched on (the switch is deployment state; the declaration is code)"
+        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
+        "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
         {
@@ -625,7 +625,7 @@
           "evidence": "receiver logs for both subscriptions"
         },
         {
-          "clause": "delivery mechanics honor the authored envelope: custom headers attached, HMAC signature present when secret is set, timeoutMs applied — and every attempt is durably observable as a sys_http_delivery row (status pending/in_flight/success/failed/dead, attempts, lastStatusCode)",
+          "clause": "delivery mechanics honor the authored envelope: custom headers attached, HMAC signature present when secret is set, timeoutMs applied — and every attempt is durably observable as a sys_http_delivery row (status pending/in_flight/success/failed/dead, attempts, response_code)",
           "oracle": "api",
           "verify": "receiver-side headers + the outbox rows over the data API",
           "evidence": "headers + delivery rows"
@@ -639,13 +639,13 @@
         {
           "clause": "a retired trigger kind fails at parse with the enum rejection — WebhookTriggerType is exactly [create, update, delete, bulk_update, bulk_delete]; undelete/api never register silently dead (the #3196 enforce-or-remove gate the #3358 sweep verified)",
           "oracle": "build",
-          "verify": "both scratch builds error on the trigger value",
+          "verify": "both scratch builds error on the trigger value. A scratch stack that declares a webhook also needs requires: ['webhooks', 'realtime'] (packages/spec/src/stack.zod.ts names the pair), or its build is refused for the missing capability as well",
           "evidence": "the two build errors"
         },
         {
           "clause": "the activation switch survives redeploys: the sys_metadata_activation row (metadata_type webhook) the door wrote is still in force after reboot — a declared webhook's on/off lives in the ledger, never in a row (ADR-0131 D6 regime C)",
           "oracle": "api",
-          "verify": "post-reboot sys_metadata_activation row, and the declaration still reads switched on (declared-webhooks.ts readWebhookActivation)",
+          "verify": "post-reboot sys_metadata_activation row (`active` true), and a delivery row for a task change made after the reboot: the switch has no public read door (declared-webhooks.ts readWebhookActivation reads the ledger inside the dispatcher; the meta read serves the declaration's own isActive:false)",
           "evidence": "before/after row reads"
         }
       ],
@@ -728,6 +728,12 @@
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The one dogfood pin asserts acceptance[0]'s no-sys_webhook-row half on its own fixture stack and drives no activation door. By RUNNER rule 6 (a pin scores only the layer it drives) no full clause is pinned, so automated is dropped (theme-B rule) and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-27",
+          "change": "Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A). steps[4] and acceptance[3] named a delivery column `lastStatusCode` that no code defines: the sys_http_delivery column is response_code (packages/services/service-messaging/src/objects/http-delivery.object.ts). steps[1] names the activation row's `active` column beside the door's `enabled`. steps[4] says a `$filter` is JSON. steps[6] names the 4xx receiver a terminal row needs (http-sender.ts: 4xx except 408/429 is permanent, the rest retries). steps[7] and acceptance[6].verify stop citing a public read of 'the declaration still reads switched on': the meta read answers isActive:false by design and the run read the switch off a post-reboot delivery. acceptance[5].verify names the requires pair a scratch webhook stack needs. knownGaps[1] records that #23166, the blocked.ref the run cited, is a closed run record and no open card carries its maintainer question, and adds the wave-2 re-measure. Read at base e4ba846f. No clause's assertion changed",
+          "ref": "#25807"
         }
       ],
       "enumSource": {
