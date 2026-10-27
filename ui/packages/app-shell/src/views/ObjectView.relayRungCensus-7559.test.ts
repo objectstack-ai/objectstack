@@ -466,10 +466,16 @@ const ABSENCES: Record<string, Absence> = {
   // A rung for one of these would relay a value into a void, and the void is
   // the finding: each is pinned here so that the day a reader appears, this
   // census reddens instead of the value silently not arriving.
-  // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance` sat
-  // here as `unread` while the spec import carried their tombstones; the
-  // tombstones aged out at spec 18.2 (objectstack#25767), so they are no longer
-  // `ListViewSchema` members and the census has nothing to declare for them.
+  // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance`:
+  // the spec import carried their tombstones through 18.1; at spec 18.2 the
+  // tombstones aged out (objectstack#25767), and the twin now declares each as
+  // its own refusal (`agedOutSpecKeyRefusal`), so an authored value never
+  // parses and there is nothing for a rung to relay.
+  striped: { kind: 'unread', reason: 'Retired by objectstack#7176 (maintainer-ruled 2026-08-10) after every objectui reader was measured as pass-through. Its spec tombstone aged out at 18.2 (objectstack#25767); `ListViewSchema` declares it only as the console\'s own refusal (`agedOutSpecKeyRefusal`).' },
+  bordered: { kind: 'unread', reason: 'Retired by objectstack#7176, as `striped`; declared only as the console\'s own refusal since the 18.2 age-out (objectstack#25767).' },
+  virtualScroll: { kind: 'unread', reason: 'Retired by objectstack#7176, as `striped`; declared only as the console\'s own refusal since the 18.2 age-out (objectstack#25767).' },
+  responsive: { kind: 'unread', reason: 'Retired at spec 17.0.0 with no reader in either repo; declared only as the console\'s own refusal since the 18.2 age-out (objectstack#25767).' },
+  performance: { kind: 'unread', reason: 'Retired at spec 17.0.0 with no reader in either repo; declared only as the console\'s own refusal since the 18.2 age-out (objectstack#25767).' },
   requiredPermissions: { kind: 'unread', reason: 'The ADR-0066 audience gate `@objectstack/spec` 18 adds to a list view (objectui#12030). The SERVER enforces it before the view is served: a user who lacks the capabilities is never listed the view and is refused it by name, so nothing on the ListView path has a value to consume.' },
   filterableFields: { kind: 'unread', reason: 'Retired by objectstack#24640 (maintainer ruling C, pulled into 18.0): no per-view Filter-panel whitelist replaces it. objectui#13118 removed its one reader, the whitelist branch of `ListView`\'s Filter-panel field list, and this relay\'s rung with it. Present only as the spec import that carries its tombstone from the pin bump that takes the retirement.' },
   pageName: { kind: 'unread', reason: 'Page-context key with no reader on the list path.' },
