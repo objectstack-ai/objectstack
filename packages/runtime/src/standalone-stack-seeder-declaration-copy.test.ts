@@ -39,8 +39,9 @@
 // The two copies used to differ on two independent axes:
 //
 //   CONVERSION  the ADR-0087 forward conversion: the retired `allowRestore` /
-//               `allowPurge` grant bits, the RLS `priority`, the legacy
-//               `sharedWith.type: 'role'` and `accessLevel: 'full'`.
+//               `allowPurge` grant bits and the legacy `accessLevel: 'full'`
+//               (the RLS `priority` and `sharedWith.type: 'role'` rode it too,
+//               until #25767 aged their ≤16.x kits out; see the fixture).
 //   PARSE       the door's strict parse: schema defaults the registry copy has
 //               never carried (`allowTransfer` / `viewAllRecords` /
 //               `modifyAllRecords`, `isDefault`, a sharing rule's `active`, a
@@ -121,16 +122,19 @@ import '@objectstack/service-datasource';
  * Each declaration isolates one axis of triage's question:
  *
  * - `permissions[0]`  — `allowRestore` / `allowPurge` are keys the current
- *   `PermissionSet` schema does not carry, and `rowLevelSecurity[].priority` is
- *   another; the forward conversion strips all three (on both copies since
- *   #22994), and the door's parse defaults three more grant bits in (on its
- *   copy only). So the first three read the CONVERSION axis and the defaults
- *   read the PARSE axis.
+ *   `PermissionSet` schema does not carry; the forward conversion strips both
+ *   (on both copies since #22994), and the door's parse defaults three more
+ *   grant bits in (on its copy only). So the two bits read the CONVERSION axis
+ *   and the defaults read the PARSE axis. (`rowLevelSecurity[].priority` read
+ *   the conversion axis too until #25767: its ≤16.x kit aged out, the key is a
+ *   strict unknown key at the door now, and the fixture no longer carries it.)
  * - `capabilities[0]` — no `scope`, so the door's schema default is observable
  *   (triage question 3).
- * - `sharingRules[0]` `share_legacy_deals` — BOTH legacy spellings at once
- *   (`sharedWith.type: 'role'`, `accessLevel: 'full'`), the commit 317132495 probe
- *   bytes.
+ * - `sharingRules[0]` `share_legacy_deals` — the commit 317132495 probe bytes
+ *   less the `sharedWith.type: 'role'` spelling: that recipient reconcile aged
+ *   out at #25767 (`'role'` is an invalid option at the door now), so the rule
+ *   carries the legacy `accessLevel: 'full'` over a `position` recipient and
+ *   is still the rule the seeder once dropped as unmappable.
  * - `sharingRules[1]` `share_legacy_level` — the legacy `accessLevel` ALONE,
  *   over a recipient type the seeder accepts, so the `accessLevel` axis is not
  *   masked by the recipient axis.
@@ -161,7 +165,7 @@ const ARTIFACT = {
       rowLevelSecurity: [
         {
           name: 'own_tasks', object: 'crm_task', operation: 'select',
-          using: 'assignee == current_user.email', enabled: true, priority: 10,
+          using: 'assignee == current_user.email', enabled: true,
         },
       ],
     },
@@ -177,7 +181,7 @@ const ARTIFACT = {
       object: 'crm_deal',
       accessLevel: 'full',
       condition: 'record.status == "open"',
-      sharedWith: { type: 'role', value: 'sales_mgr' },
+      sharedWith: { type: 'position', value: 'sales_mgr' },
     },
     {
       name: 'share_legacy_level',
@@ -398,11 +402,11 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     const door = byName(doorCopy.permission, 'probe_agent');
 
     // [#22994] CONVERGED on the conversion axis. The forward conversion strips
-    // the retired grant bits and the RLS `priority` from BOTH copies now, so the
-    // registry's grant map is the authored map less those two keys, and its RLS
-    // entry is the door's, whole. (Measured raw before #22994:
-    // `allowRestore: true, allowPurge: false` and `priority: 10` on the registry
-    // copy only.)
+    // the retired grant bits from BOTH copies now, so the registry's grant map
+    // is the authored map less those two keys, and its RLS entry is the door's,
+    // whole. (Measured raw before #22994: `allowRestore: true, allowPurge:
+    // false` — and `priority: 10`, whose kit aged out at #25767 — on the
+    // registry copy only.)
     expect(reg.objects.crm_ticket).toEqual({
       allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
     });
@@ -414,8 +418,6 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
       { name: 'own_tasks', object: 'crm_task', operation: 'select', using: 'assignee == current_user.email', enabled: true },
     ]);
     expect(reg.rowLevelSecurity).toEqual(door.rowLevelSecurity);
-    expect(reg.rowLevelSecurity[0]).not.toHaveProperty('priority');
-    expect(door.rowLevelSecurity[0]).not.toHaveProperty('priority');
 
     // Keys the door DEFAULTS IN and the registry copy has never had (the parse
     // axis, #14491's, unchanged).
@@ -433,12 +435,13 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     expect(rows.sys_permission_set.filter((r: any) => r.name === 'probe_agent')).toEqual([]);
   });
 
-  it('`sharing_rule`: the registry copy carries the forward-converted `sharedWith.type` and `accessLevel` the door carries', () => {
+  it('`sharing_rule`: the registry copy carries the forward-converted `accessLevel` the door carries, and the authored recipient', () => {
     const regLegacy = byName(registryCopy.sharing_rule, 'share_legacy_deals');
     const doorLegacy = byName(doorCopy.sharing_rule, 'share_legacy_deals');
     // [#22994] CONVERGED: both copies carry the conversion of the legacy
-    // `role` / `full` spellings. (Measured raw before #22994: the registry copy
-    // kept `{ type: 'role' }` and `'full'`.)
+    // `full` spelling. (Measured raw before #22994: the registry copy kept
+    // `'full'` — and `{ type: 'role' }`, whose conversion aged out at #25767;
+    // the recipient is authored `position` now and reaches both copies as is.)
     expect(regLegacy.sharedWith).toEqual({ type: 'position', value: 'sales_mgr' });
     expect(doorLegacy.sharedWith).toEqual({ type: 'position', value: 'sales_mgr' });
     expect(regLegacy.sharedWith).toEqual(doorLegacy.sharedWith);
@@ -470,13 +473,16 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     });
   });
 
-  it('the rule whose recipient the door converts is SERVED, as a position share, exactly once — and no row is written', () => {
+  it('the rule the seeder once dropped as unmappable is SERVED, as a position share, exactly once — and no row is written', () => {
     // AN AUTHORIZATION OUTCOME. `mapRecipientType` still refuses `'role'`, and
     // used to: before #22994 the registry copy kept the legacy recipient, the
     // seeder took its `skipped (unmappable recipient)` branch, and this rule had
-    // NO row (three declared, two seeded). [#22994] The registry copy now
-    // carries the forward conversion, so the seeder is handed the recipient the
-    // door's copy says, `position`, which `mapRecipientType` accepts.
+    // NO row (three declared, two seeded). [#22994] The registry copy carried
+    // the forward conversion, so the seeder was handed `position`. [#25767] That
+    // conversion aged out with the ≤16.x kits: a `'role'` recipient is refused
+    // at the door before any seeder runs (the two-reader harness pins the
+    // refusal), so the rule authors `position`, and what is measured here is
+    // that the authored recipient reaches the seeder unchanged on both copies.
     expect(byName(doorCopy.sharing_rule, 'share_legacy_deals').sharedWith.type).toBe('position');
     expect(byName(registryCopy.sharing_rule, 'share_legacy_deals').sharedWith.type).toBe('position');
     expect(byName(served, 'share_legacy_deals')).toMatchObject({

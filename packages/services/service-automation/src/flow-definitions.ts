@@ -17,7 +17,8 @@
  */
 
 import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
-import type { FlowUnboundCause } from '@objectstack/spec/contracts';
+import type { AutomationContext, FlowUnboundCause } from '@objectstack/spec/contracts';
+import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { applyConversionsToFlow } from '@objectstack/spec';
 import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
@@ -469,8 +470,24 @@ export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'fl
     return disabled;
 }
 
-/** The body of {@link AutomationEngine.toggleFlow}, moved unedited; that method's docblock is its contract. */
-export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>, name: string, enabled: boolean): Promise<void> {
+/**
+ * [#26474] The ledger write's options for one toggle's `caller`: the caller's
+ * id under the store's own grant-less system context, or nothing at all.
+ *
+ * Only `userId` is read, so a caller object that carries positions,
+ * permissions or a tenant contributes none of them: the contract's `caller` is
+ * attribution only, and the door has already judged the caller's authority.
+ * No id means no options, so the store writes under its own system context and
+ * the row names nobody, which is true of it.
+ */
+function flowActivationWriteOptions(caller: Pick<AutomationContext, 'userId'> | undefined): MetadataActivationWriteOptions | undefined {
+    const userId = caller?.userId;
+    if (typeof userId !== 'string' || userId === '') return undefined;
+    return { context: { isSystem: true, positions: [], permissions: [], userId } };
+}
+
+/** The body of {@link AutomationEngine.toggleFlow}; that method's docblock is its contract. */
+export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers'>, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
     const flow = this.flows.get(name);
     if (!flow) {
         throw new Error(`Flow '${name}' not found`);
@@ -522,7 +539,7 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
             // from an authoring door. Read once, up top, with the verdict.
             packageId: packageOwner,
             active: enabled,
-        });
+        }, flowActivationWriteOptions(caller));
     } else {
         // Degrading to in-process is a legitimate mode for a host with no
         // ObjectQL — degrading to it while REPORTING durability is not

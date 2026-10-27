@@ -34,8 +34,9 @@ import { applyArtifactForwardConversions } from './artifact-forward-conversion.j
 
 const SUBJECT = 'dashboard-refresh-interval-to-refresh-interval-seconds';
 
-/** The door's DEFAULT-FLIP refusals (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`, module-local by design). */
-const DOOR_DEFAULT_FLIPS: readonly string[] = ['app-hidden-to-unpublished', 'flow-decision-mode-inclusive-explicit'];
+/** The door's DEFAULT-FLIP refusals (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`, module-local by design).
+ *  `app-hidden-to-unpublished` left the list when #25767 retired it with the ≤16.x kits. */
+const DOOR_DEFAULT_FLIPS: readonly string[] = ['flow-decision-mode-inclusive-explicit'];
 
 const versionTriple = (v: string): [number, number, number] =>
   v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number];

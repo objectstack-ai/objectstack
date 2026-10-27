@@ -530,22 +530,24 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   // scanning `dead.evidence` would hold 6 rows to a standard, read nothing of
   // the other 74, and publish that as coverage of the class.
   //
-  // The carrier is `flow.active`, a `retiredKey()` tombstone, because the gate
+  // The carrier is `action.aria`, a `retiredKey()` tombstone, because the gate
   // itself holds a tombstoned row at `dead` (the #19062 join) — so it cannot be
-  // re-graded out from under this case. The carrier used to be `flow.description`,
-  // a docs-shaped row that WAS re-graded `live` (#20299): a borrowed `dead` row is
-  // a claim with a timestamp, and the precondition below says so if it moves.
+  // re-graded out from under this case. It was `flow.active` until that ≤16.x
+  // kit aged out (#25767) and its row left the ledger; before that
+  // `flow.description`, a docs-shaped row that WAS re-graded `live` (#20299):
+  // a borrowed `dead` row is a claim with a timestamp, and the precondition
+  // below says so if it moves.
   it('stays GREEN when a `dead` entry carries the SAME rotted pointer', () => {
-    const shipped = JSON.parse(readFileSync(path.join(LEDGERS, 'flow.json'), 'utf8'));
-    expect(shipped.props.active.status, 'the carrier row must be `dead` in the shipped ledger').toBe('dead');
+    const shipped = JSON.parse(readFileSync(path.join(LEDGERS, 'action.json'), 'utf8'));
+    expect(shipped.props.aria.status, 'the carrier row must be `dead` in the shipped ledger').toBe('dead');
 
     const root = path.join(tmp, 'dead-excluded');
     cpSync(LEDGERS, root, { recursive: true });
-    setEvidence(root, 'flow', 'active', `${ROTTED} (rotted by the self-test)`);
+    setEvidence(root, 'action', 'aria', `${ROTTED} (rotted by the self-test)`);
 
     const { status, output } = runGate(root);
     expect(status, output).toBe(0);
-    expect(output).not.toContain(`flow/active → ${ROTTED}`);
+    expect(output).not.toContain(`action/aria → ${ROTTED}`);
   });
 
   // The partition itself, pinned at the source — the precedent is the

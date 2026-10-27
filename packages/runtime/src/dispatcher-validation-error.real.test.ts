@@ -193,12 +193,17 @@ async function postAnalyticsBody(body: unknown) {
 }
 
 describe('#3878 — entry validation reaches the wire as a 400, service untouched', () => {
-    it('the retired envelope answers 400 with the tombstone prescription', async () => {
+    // [#25767] The `{ cube, query: {…} }` envelope's tombstone aged out with the
+    // ≤16.x kits: the entry refuses `query` as a strict unknown key naming the
+    // upgrade guide, not with the per-key prescription it used to carry.
+    it('the retired envelope answers 400 as a strict unknown key naming the upgrade guide', async () => {
         const { res, query } = await postAnalyticsBody({ cube: 'x', query: { measures: ['count'] } });
 
         expect(res.statusCode).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
-        expect(res.body.error.message).toContain('top level');
+        expect(res.body.error.message).toMatch(/Unrecognized key\(s\) on this analytics query: `query`/);
+        expect(res.body.error.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+        expect(res.body.error.message).not.toContain('top level');
         expect(query).not.toHaveBeenCalled();
         // A caller mistake, not a server fault: the reporter side-channel stays clear.
         expect(res.__obsRecordedError).toBeUndefined();

@@ -1,6 +1,6 @@
 # ADR-0026: Client-Side UI Plugin Distribution
 
-**Status**: Proposed
+**Status**: Deferred — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-06-01). No implementation under `packages/` or `ui/`; a customisable console has no business demand for now (objectstack#25922, ruling 6431234244). Restart condition: a third-party UI plugin is wanted, bundled in an App or operator-provisioned.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution — server/runtime plugins), [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0010](./0010-metadata-protection-model.md) (protection model)
 **Related**: [ADR-0019](./0019-app-as-consumer-unit.md) (App is the only consumer-facing unit — UI plugins ship inside Apps or are operator-provisioned, see §3.7)

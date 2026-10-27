@@ -614,7 +614,8 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
  * authored `execute` is rejected with the rename prescription rather than
- * silently stripped; `os migrate meta --from 16` lists the edit for you to apply.
+ * silently stripped; `os migrate meta --from 16` listed the edit until the
+ * protocol-16.x conversion aged out with its kit (#25767).
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -648,7 +649,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -1267,21 +1268,6 @@ const actionObject = () => strictObject({
   execution: BulkActionExecutionSchema.optional().describe("The bulk dispatch contract this action's BODY is written for, in `bulkActionDefs`' own vocabulary: 'perRecord' = one dispatch per selected row carrying that row's `recordId` (the view's `bulkActions: ['<name>']` bare-string form); 'aggregate' = ONE dispatch for the whole selection carrying every id in `params._selectedIds` (a `bulkActionDefs` entry with `execution: 'aggregate'`). Optional with NO default — omit it only when the body genuinely serves both. A list view wiring a declared action under the other contract is refused by `@objectstack/lint` (`action-dispatch-contract-mismatch`)."),
 
   /**
-   * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.
-   * Tombstoned rather than deleted: `ActionSchema` is `strictObject`, so a
-   * plain deletion would reject the key — but with a generic unknown-key error
-   * that does not name `target`. The prescription is the payload: it carries
-   * the rename, so an author who wrote `execute` is told where the handler ref
-   * goes instead of only that the key is unknown. It also types the key
-   * `never`, so the mistake fails `tsc` before any parse runs.
-   */
-  execute: retiredKey(
-    '`execute` was removed in @objectstack/spec 17 — use `target`. ' +
-    'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  
-  /**
    * User Input Requirements — the **parameter DEFINITION array** rendered as a
    * dialog before the action runs. `ActionParam[]`, never a values map.
    *
@@ -1577,27 +1563,6 @@ const actionObject = () => strictObject({
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there.'),
 
   /** Keyboard Shortcut */
-  // `shortcut` and `bulkEnabled` REMOVED by the 2026-07 #3896 audit close-out —
-  // both were authorable capability claims nothing enforced (ledger: dead,
-  // #3686 re-verification): ActionEngine registered them but no keydown path
-  // ever dispatched a shortcut, and the multi-select toolbar reads the LIST
-  // VIEW's bulkActions, never this flag. Tombstoned with the prescription;
-  // `action-inert-keys-removed` strips them from authored sources.
-  shortcut: retiredKey(
-    '`action.shortcut` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
-    "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
-    'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
-    'keyboard stack and have its handler invoke the action by name. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  bulkEnabled: retiredKey(
-    '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
-    'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
-    "in the view's `bulkActions` instead. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /**
    * AI exposure block (ADR-0011). Opt-in, default off: an action is exposed

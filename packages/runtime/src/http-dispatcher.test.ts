@@ -453,7 +453,7 @@ describe('HttpDispatcher', () => {
             // so only the caller changes.
             const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
-            expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false);
+            expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false, expect.anything());
         });
 
         it('should list runs via GET /:name/runs', async () => {
@@ -1023,14 +1023,17 @@ describe('HttpDispatcher', () => {
                     return mockAnalytics;
                 };
 
-                it('rejects the retired {cube, query:{...}} envelope with the tombstone prescription', async () => {
+                // [#25767] The envelope's tombstone aged out with the ≤16.x
+                // kits: `query` is a strict unknown key naming the upgrade
+                // guide now, with no per-key prescription.
+                it('rejects the retired {cube, query:{...}} envelope as a strict unknown key naming the upgrade guide', async () => {
                     const mockAnalytics = service();
                     await expect(dispatcher.dispatch(
                         'POST', '/analytics/query', { cube: 'x', query: { measures: ['count'] } }, {}, { request: {} },
                     )).rejects.toMatchObject({
                         name: 'ValidationError',
                         code: 'VALIDATION_FAILED',
-                        message: expect.stringContaining('top level'),
+                        message: expect.stringMatching(/Unrecognized key\(s\) on this analytics query: `query`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/),
                     });
                     expect(mockAnalytics.query).not.toHaveBeenCalled();
                 });

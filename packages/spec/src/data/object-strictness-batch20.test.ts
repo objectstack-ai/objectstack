@@ -565,22 +565,22 @@ describe('批 20 — `IndexSchema` is closed (the held 14th site, once the conso
     expect(reject(IndexSchema, { fields: ['name'], notAnIndexKey: 1 })).not.toContain('database layer');
   });
 
-  it('the `type`/`partial` tombstones SURVIVE the strict close — their prescription, not `unrecognized_keys`', () => {
-    // The tombstones are declared keys, so the strict unknown-key path never
-    // sees them; each still answers its own migration text. Losing that prose
-    // to a generic strict rejection would be a regression the close must not
-    // ship — pinned per key, on the message itself.
-    const retiredPartial = IndexSchema.safeParse({ fields: ['name'], partial: "status = 'open'" });
-    expect(retiredPartial.success, '`partial` is retired, not merely unknown').toBe(false);
-    expect(retiredPartial.error!.issues[0]!.message).toMatch(/`indexes\[\]\.partial` was removed.*Delete the key/s);
+  it('the aged-out `type`/`partial` are refused by the strict close as unknown keys naming the upgrade guide', () => {
+    // Both tombstones were 16.x retirement kits and left the shape at 18
+    // (#25767, ADR-0087 D2 = A). The close is what keeps the removal loud: each
+    // key is an `unrecognized_keys` refusal naming it, with the protocol
+    // upgrade guide — where the two prescriptions now live — in the message.
+    for (const body of [{ fields: ['name'], partial: "status = 'open'" }, { fields: ['name'], type: 'brin' }]) {
+      const retired = IndexSchema.safeParse(body);
+      expect(retired.success).toBe(false);
+      const issue = retired.error!.issues[0]!;
+      expect(issue.code).toBe('unrecognized_keys');
+      expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    }
 
-    const retiredType = IndexSchema.safeParse({ fields: ['name'], type: 'brin' });
-    expect(retiredType.success, '`type` is retired, not merely unknown').toBe(false);
-    expect(retiredType.error!.issues[0]!.message).toMatch(/`indexes\[\]\.type` was removed.*Delete the key/s);
-
-    // …and neither is offered as a rename target for a near-miss: a tombstone
-    // is excluded from the candidate list (`acceptsNothing`), so `partail`
-    // must not be answered with the one key the schema cannot accept.
+    // …and neither is offered as a rename target for a near-miss: a key the
+    // shape no longer declares is no candidate at all, so `partail` must not
+    // be answered with the spelling the schema cannot accept.
     expect(reject(IndexSchema, { fields: ['name'], partail: 'x' })).not.toContain('Did you mean');
   });
 

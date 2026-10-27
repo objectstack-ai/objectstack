@@ -17,7 +17,7 @@
  */
 
 import { z } from 'zod';
-import { aliasKeyRefusal, durationKeyRenamedGuidance, handlerKeyRefusal, retiredNodeType, retirementTombstone } from './tombstone.zod.js';
+import { agedOutSpecKeyRefusal, aliasKeyRefusal, durationKeyRenamedGuidance, handlerKeyRefusal, retiredNodeType, retirementTombstone } from './tombstone.zod.js';
 import {
   ChartTypeSchema as SpecChartTypeSchema,
   checkDashboardWidgetChartMeasureArity,
@@ -1519,8 +1519,13 @@ const WidgetComponentSlotUnion = z.core.$constructor<WidgetComponentSlot>(
  * consumed keys, undeclared widget keys refuse loudly — zod's
  * `unrecognized_keys` issue names every offending key. The spec's own
  * tombstones (`actionUrl` / `actionType` / `actionIcon` / `aria` /
- * `responsive`) stay DECLARED `z.never()` members, so they keep their specific
- * removal messages rather than degrading to a generic unknown-key error.
+ * `responsive`) stayed DECLARED `z.never()` members through spec 18.1, keeping
+ * their specific removal messages; at 18.2 they aged out of the spec's widget
+ * shape one major on (objectstack#25767, ADR-0087) and meet this `.strict()`
+ * door like any other undeclared key — loud, named, and sent to the spec's
+ * own refusal (which names the protocol upgrade guide) for the prescription.
+ * No arm of this schema's own is needed to keep that refusal, unlike the
+ * `.passthrough()` `app` / `dashboard` twins (`agedOutSpecKeyRefusal`).
  *
  * ⚠️ This schema owns spec-family widgets only. A component node in the widget
  * slot (`type: 'metric-card'`) is routed to
@@ -1725,6 +1730,27 @@ export const DashboardComponentSchema = BaseSchema.extend(SpecDashboardFields.sh
     + 'authored value therefore rendered NOTHING — no render-time error or warning and no element; only the parser tier\'s `not-a-container` warning (objectui#9910) noticed it. '
     + 'What it renders instead: `columns`, `dateRange`, `description`, `gap`, `globalFilters`, '
     + '`header`, `label`, `name`, `refreshIntervalSeconds`, `type`, `widgets`.',
+  ),
+  // `aria` and `performance`: spec 17.0.0 tombstones (the #3896 audit
+  // close-out) that this twin inherited by reference and refused at the key's
+  // own path through 18.1. At spec 18.2 both aged out of `DashboardSchema` one
+  // major on (objectstack#25767, ADR-0087): the spec refuses each as an unknown
+  // key naming the upgrade guide, `SpecDashboardFields` no longer carries the
+  // name, and without these arms `BaseSchema`'s `.passthrough()` would turn the
+  // refusal into a silent KEEP. Each is the console's own refusal now
+  // (`agedOutSpecKeyRefusal`, the reasoning on its docblock); the TS twins are
+  // `?: never` in `../complex.ts`, and the pins are
+  // `../__tests__/dashboard-aria-retired-contract-twins.test.ts` and
+  // `../__tests__/page-app-dashboard-spec-parity.test.ts`.
+  aria: agedOutSpecKeyRefusal(
+    'dashboard', 'dashboard.aria', 'aria', '17.0.0',
+    'No dashboard renderer ever applied it, so declared ARIA attributes never reached the DOM, and '
+    + '`plugin-dashboard` has no `schema.aria` read site. Delete the key; ARIA attributes are live on `page.aria`, '
+    + '`page.components[].aria` and the list view\'s `aria`.',
+  ),
+  performance: agedOutSpecKeyRefusal(
+    'dashboard', 'dashboard.performance', 'performance', '17.0.0',
+    'No renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key.',
   ),
 });
 

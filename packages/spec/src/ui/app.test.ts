@@ -631,10 +631,11 @@ describe('AppSchema', () => {
       expect(() => AppSchema.parse(hrApp)).not.toThrow();
     });
 
-    it('rejects the retired app-level sharing/embed blocks with the per-form-view pointer', () => {
+    it('refuses the aged-out app-level sharing/embed blocks as unknown keys naming the upgrade guide', () => {
       // Pre-#4001 these parsed and were never read — a declared-but-unenforced
-      // security surface (2026-06 liveness audit, ADR-0049). The tombstone
-      // carries the prescription: public access is per FORM VIEW.
+      // security surface (2026-06 liveness audit, ADR-0049). Their tombstones
+      // were 16.x retirement kits and left the shape at 18 (#25767); the strict
+      // shell refuses both, and the guide carries the per-FORM-VIEW prescription.
       const result = AppSchema.safeParse({
         name: 'shared_portal',
         label: 'Shared Portal',
@@ -643,8 +644,9 @@ describe('AppSchema', () => {
         embed: { enabled: true },
       });
       expect(result.success).toBe(false);
-      const messages = result.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain('FormView.sharing');
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys') as { keys: string[]; message: string };
+      expect(issue.keys.sort()).toEqual(['embed', 'sharing']);
+      expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('should accept CRM app with deeply nested navigation tree', () => {
@@ -719,8 +721,9 @@ describe('App Mobile Navigation (retired)', () => {
     });
     expect(result.success).toBe(false);
     const messages = result.error!.issues.map((i) => i.message).join('\n');
-    expect(messages).toContain('mobileNavigation');
-    expect(messages).toContain('unimplemented');
+    expect(messages).toContain('`mobileNavigation`');
+    // The tombstone aged out at 18 (#25767): the strict refusal, with the guide.
+    expect(messages).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 });
 
@@ -755,24 +758,16 @@ describe('defineApp', () => {
 });
 
 describe('AppSchema retired sharing/embed keys', () => {
-  it('rejects app-level sharing with the FormView prescription', () => {
+  it.each(['sharing', 'embed'])('refuses app-level `%s` as an unknown key naming the upgrade guide (#25767)', (key) => {
     const result = AppSchema.safeParse({
       name: 'public_app',
       label: 'Public App',
-      sharing: { enabled: true },
+      [key]: { enabled: true },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
-  });
-
-  it('rejects app-level embed with the per-form-view prescription', () => {
-    const result = AppSchema.safeParse({
-      name: 'embeddable_app',
-      label: 'Embeddable App',
-      embed: { enabled: true },
-    });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('iframe');
+    const messages = result.error!.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain(`Unrecognized key(s) on this app: \`${key}\``);
+    expect(messages).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('should accept app without sharing/embed (backward compatibility)', () => {
@@ -784,8 +779,8 @@ describe('AppSchema retired sharing/embed keys', () => {
       ],
     });
 
-    expect(app.sharing).toBeUndefined();
-    expect(app.embed).toBeUndefined();
+    expect(app).not.toHaveProperty('sharing');
+    expect(app).not.toHaveProperty('embed');
     expect(app.navigation).toHaveLength(1);
   });
 });
@@ -1111,25 +1106,24 @@ describe('AppSchema with areas', () => {
 });
 
 // #4001 (app step, PR A) — the seven keys the 2026-06 AppSchema liveness audit
-// verdicted DEAD are retiredKey() tombstones: tsc-level `never` for typed
-// authors, and a parse-time prescription for everyone else. Not a silent
-// strip: AppSchema is not yet .strict(), so a bare deletion would have
-// reintroduced the exact failure mode this campaign eliminates.
-describe('retired dead keys carry prescriptions', () => {
+// verdicted DEAD were retiredKey() tombstones: tsc-level `never` for typed
+// authors, and a parse-time prescription for everyone else, while AppSchema
+// was not yet .strict(). The shell closed since, and the tombstones — 16.x
+// retirement kits — aged out at 18 (#25767, ADR-0087 D2 = A). Not a silent
+// strip even so: each key is a strict unknown key, refused with the protocol
+// upgrade guide the prescriptions moved to.
+describe('retired dead keys are refused as unknown keys naming the upgrade guide', () => {
   it.each([
-    ['version', '1.0.0', 'manifest.version'],
-    // ⚠️ The expected fragment used to be `component/widget`. The widget half
-    // of that prescription named `dashboard.widgets[].aria`, retired by #5010
-    // in this same 17.0.0 — so the pin held `App.aria`'s prescription pointing
-    // at another tombstone (#6756). Re-aimed at the surviving carrier.
-    ['aria', { label: 'x' }, 'page.components[].aria'],
-    ['objects', [], 'defineStack'],
-    ['apis', [], 'defineStack'],
-  ] as const)('rejects `%s` with its upgrade prescription', (key, value, fragment) => {
+    ['version', '1.0.0'],
+    ['aria', { label: 'x' }],
+    ['objects', []],
+    ['apis', []],
+  ] as const)('refuses `%s`', (key, value) => {
     const result = AppSchema.safeParse({ name: 'app_x', label: 'X', [key]: value });
     expect(result.success).toBe(false);
-    const messages = result.error!.issues.map((i) => i.message).join('\n');
-    expect(messages).toContain(fragment);
+    const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys') as { keys: string[]; message: string };
+    expect(issue.keys).toEqual([key]);
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('an app without any retired key parses unchanged', () => {
@@ -1137,46 +1131,6 @@ describe('retired dead keys carry prescriptions', () => {
       name: 'clean_app', label: 'Clean',
       navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
     })).not.toThrow();
-  });
-
-  // #5238 (#5040 E9) — the `apis` tombstone redirects to `defineStack({ apis })`,
-  // so it also has to be TRUE about what that surface does. It used to add "which
-  // is ALSO not executable in v17 (#4936) … until the endpoint executor ships",
-  // and the executor shipped: an author following the prescription today would be
-  // told to move a declaration to a place the same sentence calls dead, and would
-  // reasonably keep serving the route from handler code instead.
-  //
-  // The assertions below are deliberately two-sided. Asserting only the presence
-  // of the new words would keep passing if the retired claim were re-added
-  // underneath them, and asserting only the absence would pass on an empty
-  // string — the vacuity the surrounding pins exist to avoid.
-  describe('the `apis` prescription tracks the executor', () => {
-    const prescription = (): string => {
-      const result = AppSchema.safeParse({ name: 'app_x', label: 'X', apis: [] });
-      expect(result.success).toBe(false);
-      return result.error!.issues.map((i) => i.message).join('\n');
-    };
-
-    it('states the stack-level surface EXECUTES, and where the endpoint may live', () => {
-      const messages = prescription();
-      expect(messages).toContain('defineStack({ apis })');
-      expect(messages).toContain('EXECUTES from protocol 17');
-      // The one edit an author moving a declaration up must make (ADR-0121 D1/D2).
-      expect(messages).toContain('/api/v1/apps/<manifest.namespace>/<subpath>');
-      // The key whose wrong answer is unrecoverable, plus its D6 obligation.
-      expect(messages).toContain('`authRequired` defaults to `true`');
-      expect(messages).toContain('enabled: true');
-      // Where the full security review lives — one source of truth, not a copy.
-      expect(messages).toContain('declarative-apis-endpoints-live');
-    });
-
-    it('no longer tells the author that stack-level `apis:` is rejected', () => {
-      const messages = prescription();
-      expect(messages).not.toContain('not executable in v17');
-      expect(messages).not.toContain('until the endpoint executor ships');
-      // The historical fact stays: #4936 happened, and the prescription says so.
-      expect(messages).toContain('refused wholesale');
-    });
   });
 });
 
@@ -1217,10 +1171,10 @@ describe('unknown keys are rejected, not stripped', () => {
         .toContain('defineStack');
     });
 
-    it('keeps the PR A tombstone prescriptions rather than a bare strict error', () => {
+    it('the PR A tombstones aged out (#25767): the strict error carries the upgrade guide instead', () => {
       const result = AppSchema.safeParse({ name: 'app_a', label: 'A', sharing: { enabled: true } });
       expect(result.success).toBe(false);
-      expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
+      expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     // #4829 — the ADR-0045 publish gate's acceptance face, both directions.
@@ -1427,40 +1381,19 @@ describe('unknown keys are rejected, not stripped', () => {
   });
   // ── homePageId / areas[].order retired in 17.0.0 (#4667, ADR-0049) ────────
   describe('retired app keys', () => {
-    it('rejects `homePageId` and names what actually decides the landing page', () => {
-      // Tombstoned (retiredKey), matching the seven #4142 retirements on this
-      // schema — so it is a tsc error as well as a parse error. Post-v17 the
-      // landing page really is the first navigation item; what the message must
-      // NOT do is explain *why* by claiming nobody read the key (see below).
+    it('refuses `homePageId` as an unknown key naming the upgrade guide (#25767)', () => {
+      // Its tombstone (the one #4709 corrected to state the REAL reason — the
+      // console did read the key in `resolveLandingRoute()`) was a 16.x
+      // retirement kit and aged out at 18. The strict shell keeps the removal
+      // loud: the refusal names the key and the guide the prescription lives in.
+      // The three retired aliases below still answer with the prescription —
+      // they are unknown-key guidance on the strict shell, not ledger rows.
       const parse = () => AppSchema.parse({
         name: 'crm', label: 'CRM', homePageId: 'nav_pipeline',
         navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
       });
-      expect(parse).toThrow(/homePageId.*removed.*17\.0\.0/s);
-      expect(parse).toThrow(/first navigation item/s);
-      expect(parse).toThrow(/isDefault/s);
-    });
-
-    it('the tombstone states the REAL reason, not the false "no shell read it" premise', () => {
-      // #4667 shipped this tombstone claiming "no shell ever read it". It was
-      // false — objectui's console read the key in `resolveLandingRoute()`
-      // (packages/app-shell/src/console/AppContent.tsx @785b8a5d) and it was the
-      // only thing deciding where an app opened — and it contradicted this
-      // repo's own 2026-06 AppSchema liveness audit, which listed the key LIVE.
-      // The removal stands (#4709 ruling B): the key encoded the landing page as
-      // an ID cross-reference that silently fell back when it dangled. Pinned
-      // because a tombstone is what the next reader reasons FROM: this sentence
-      // already sent one session to the renderer to discover it was wrong, and a
-      // regression would re-arm exactly that trap.
-      const parse = () => AppSchema.parse({
-        name: 'crm', label: 'CRM', homePageId: 'nav_pipeline',
-        navigation: [{ id: 'nav_home', type: 'object', label: 'Home', objectName: 'account' }],
-      });
+      expect(parse).toThrow(/`homePageId`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
       expect(parse).not.toThrow(/no shell ever read/i);
-      expect(parse).toThrow(/did read it/i);
-      expect(parse).toThrow(/resolveLandingRoute/);
-      // The prescription is unchanged by the correction — reorder, or isDefault.
-      expect(parse).toThrow(/reorder `navigation`/s);
     });
 
     it('routes the three retired homePageId aliases to the same prescription', () => {

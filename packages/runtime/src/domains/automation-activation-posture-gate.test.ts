@@ -156,7 +156,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
             const { response } = await toggle(h, TENANT_ADMIN());
 
             expect(statusOf(response)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false, expect.anything());
         });
 
         it('so may the platform operator', async () => {
@@ -165,7 +165,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
             const { response } = await toggle(h, PLATFORM_OPERATOR());
 
             expect(statusOf(response)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false, expect.anything());
         });
 
         it('no tenancy service at all behaves like `single` (ADR-0093 D4/D5)', async () => {
@@ -223,7 +223,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
                 const { response } = await toggle(h, PLATFORM_OPERATOR());
 
                 expect(statusOf(response)).toBe(200);
-                expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+                expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false, expect.anything());
             });
 
             it('[#15981] REFUSES a tenant admin holding only a MINTED `platform_admin` name', async () => {

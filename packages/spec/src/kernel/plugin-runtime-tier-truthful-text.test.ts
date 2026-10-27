@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { ManifestSchema, PluginRuntimeSchema } from './manifest.zod';
-import { entry as loadingRetiredEntry } from '../migrations/entries/semantic/17.plugin-manifest-loading-retired';
 
 // ─── [commit a9ee98992] `manifest.runtime` text states publish-gate-only enforcement ──
 //
@@ -31,25 +30,23 @@ import { entry as loadingRetiredEntry } from '../migrations/entries/semantic/17.
 // without that negative pin, a future edit could re-add "which are enforced"
 // beside the new text and every positive assertion would stay green.
 //
-// ⚠️ On the assertion set: a describe string and a tombstone prescription are
-// not a rejection envelope, so there is no ADR-0112 `code` + `status` to pin
-// here (the tombstone's own envelope is pinned in
-// `plugin-loading-retirement.test.ts`). Where the WORDING is the contract, the
-// wording is what gets pinned (#5240). The final case guards the other
-// direction — that this text-only change moved no accept/reject behaviour.
+// ⚠️ On the assertion set: a describe string is not a rejection envelope, so
+// there is no ADR-0112 `code` + `status` to pin here. Where the WORDING is the
+// contract, the wording is what gets pinned (#5240). The final case guards the
+// other direction — that this text-only change moved no accept/reject
+// behaviour.
+//
+// [#25767] The `manifest.loading` tombstone and its ADR-0087 D3 entry — the
+// two other carriers of this sentence, whose halves this file used to pin in
+// the same way — were a 16.x retirement kit and aged out at 18 (ADR-0087
+// amendment, D2 = A). `loading` is a strict unknown key now, pinned in
+// `plugin-loading-retirement.test.ts`; the describes below are the carriers
+// that remain, and the ones the reference docs render.
 
 /** Both halves of the truthful split, as separate probes. */
 const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
 const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
-/**
- * [commit aaacf1d5c] The permissions half of the same sentence, under the same rule: the
- * granted set is REGISTERED at load and queried by nothing. Probes the two
- * load-bearing words rather than a whole clause, so a rewording that keeps the
- * fact keeps the pin.
- */
-const SAYS_GRANT_REGISTERED_NOT_ENFORCED = /REGISTERED on the PluginPermissionEnforcer at load and queried by\s+nothing/i;
-
 describe('manifest.runtime trust-tier text is truthful', () => {
   const baseManifest = {
     id: 'com.example.plugin',
@@ -80,91 +77,17 @@ describe('manifest.runtime trust-tier text is truthful', () => {
     expect(text).toMatch(SAYS_LOAD_SIDE_NOT_ENFORCED);
   });
 
-  it('corrects the `loading` tombstone that redirected authors here', () => {
-    const result = ManifestSchema.safeParse({
-      ...baseManifest,
-      loading: { sandboxing: { enabled: true, isolationLevel: 'process' } },
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) return;
-
-    const message = result.error.issues.find((i) => i.path[0] === 'loading')!.message;
-
-    // Still names the tier — the redirection itself is not the defect, the
-    // unqualified "which are enforced" was.
-    expect(message).toMatch(/manifest\.runtime/);
-    expect(message).toMatch(SAYS_PUBLISH_GATE_ENFORCED);
-    expect(message).toMatch(SAYS_422);
-    expect(message).toMatch(SAYS_LOAD_SIDE_NOT_ENFORCED);
-
-    // ⛔ The retracted claim must not come back. This is the pin that makes the
-    // three above mean something: they all stay green if someone re-adds the
-    // old sentence alongside the new one.
-    expect(
-      message,
-      'the tombstone must not claim the trust tier is enforced without qualification',
-    ).not.toMatch(/trust tier \(`manifest\.runtime`\) and the permission declarations, which are enforced/);
-  });
-
-  it('states the PERMISSIONS half truthfully too — the handoff landed', () => {
-    // The coordination pin this replaces read
-    // `expect(message).toContain('the permission declarations, which are enforced')`
-    // and existed to go RED the day commit aaacf1d5c corrected the other half of the
-    // sentence. It did its job: maintainer ruling 2026-09-12 took option B on
-    // the permissions half as well — say it truthfully now — so the retracted
-    // claim is gone and the truthful split is asserted in its place.
-    //
-    // Both halves of the tombstone now name a surface that does NOT confine a
-    // plugin, for two DIFFERENT reasons, and the sentence has to keep both:
-    //   • the trust tier — enforced at the marketplace publish gate, not at load;
-    //   • the permission declarations — REGISTERED on the enforcer at load
-    //     (#13457) and queried by nothing, so they refuse no operation.
-    // The measurement behind the second lives in `@objectstack/core`:
-    // `granted-permissions-not-enforced.pin.test.ts` goes red when a production
-    // `SecurePluginContext` construction site appears (measured in commit aaacf1d5c, the ADR-0025
-    // materialize seam), which is the signal that this text is stale again.
+  it('`loading` no longer carries the sentence at all — it is a strict unknown key (#25767)', () => {
+    // The tombstone that used to redirect authors here aged out; the refusal
+    // an author meets is the strict one, naming the key and the upgrade guide.
+    // Pinned so a re-added tombstone would have to bring the truthful split
+    // back with it, under the pins above.
     const result = ManifestSchema.safeParse({ ...baseManifest, loading: { strategy: 'lazy' } });
     expect(result.success).toBe(false);
     if (result.success) return;
-
-    const message = result.error.issues.find((i) => i.path[0] === 'loading')!.message;
-    expect(message).toMatch(SAYS_GRANT_REGISTERED_NOT_ENFORCED);
-    // The negative pin, for the same reason the tier half carries one: without
-    // it, a future edit could re-add the retracted sentence beside the truthful
-    // one and the positive assertion above would stay green.
-    expect(
-      message,
-      'the tombstone must not claim the permission declarations are enforced',
-    ).not.toMatch(/permission declarations, which are enforced/);
-  });
-
-  it('corrects the permissions half in the shipped ADR-0087 D3 entry too', () => {
-    // Same two-carrier problem the tier half had: the tombstone ships once in
-    // the schema and once through this entry into `docs/protocol-upgrade-guide.md`.
-    const text = loadingRetiredEntry.replacement;
-
-    expect(text).toMatch(SAYS_GRANT_REGISTERED_NOT_ENFORCED);
-    expect(
-      text,
-      'the D3 entry must not present the permission declarations as an enforced surface',
-    ).not.toMatch(/permission declarations, which\s+are the surfaces the platform actually enforces/);
-  });
-
-  it('corrects the same claim in the shipped ADR-0087 D3 entry', () => {
-    // The tombstone ships TWICE — once in the schema, once through this entry
-    // into `docs/protocol-upgrade-guide.md`. Fixing only the schema would leave
-    // the upgrade guide still telling authors the tier is a surface "the
-    // platform actually enforces".
-    const text = loadingRetiredEntry.replacement;
-
-    expect(text).toMatch(SAYS_PUBLISH_GATE_ENFORCED);
-    expect(text).toMatch(SAYS_422);
-    expect(text).toMatch(SAYS_LOAD_SIDE_NOT_ENFORCED);
-    expect(
-      text,
-      'the D3 entry must not present the trust tier as an enforced surface',
-    ).not.toMatch(/trust tier\s*\(`manifest\.runtime`, ADR-0025 §3\.6\) and the manifest permission declarations/);
+    expect(result.error.issues.filter((i) => i.path[0] === 'loading')).toEqual([]);
+    const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('changes NO accept/reject behaviour — every tier still parses as before', () => {

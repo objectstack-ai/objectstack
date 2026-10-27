@@ -15451,14 +15451,116 @@ export function repoIdentity({ cwd = ROOT } = {}) {
 }
 
 /**
- * The files a derivation's ANSWER is made of — the ones whose staleness can
- * change it. The gate inventory is read from the workflow files, `check:*` is
- * resolved through the manifest, and the checks themselves live under
- * `scripts/`. Everything else in the tree can be arbitrarily old without moving
- * a single family, which is what makes this list the right filter and raw
- * commit distance the wrong one.
+ * Where the files a derivation's ANSWER is made of LIVE — the pathspec roots
+ * the staleness diff is scoped to. The gate inventory is read from the
+ * workflow files, `check:*` is resolved through the manifest, and the checks
+ * themselves live under `scripts/`. Everything outside these roots can be
+ * arbitrarily old without moving a single family, which is what makes the
+ * roots the right filter and raw commit distance the wrong one.
+ *
+ * Roots, not the surface itself (#26334). `scripts/` also holds generated
+ * records nothing derives from — the SDUI manifest record, the ADR anchor
+ * files — and those move on landings in other lanes, so a diff scoped to the
+ * roots ALONE named them as "files it derives from" on every such landing: a
+ * STALE TREE over a pm-only tree whose derived set had not moved, which is the
+ * warning-on-every-honest-run shape the paragraph under `baseDrift` prices.
+ * Which files under the roots the answer is really made of is MEASURED, never
+ * listed beside it: `derivationInputs` below, and `baseDrift` keeps only the
+ * moved paths that are in it.
  */
 export const DERIVATION_SURFACE = ['.github/workflows', '.github/actions', 'package.json', 'scripts'];
+
+/**
+ * This engine's own module closure — the file itself, the first-party modules
+ * it imports, and the battery it loads by `import()` — spelled from this
+ * file's own URL, so a rename moves it. The discovery follows a gate's imports
+ * ONE level, and this file is reached as an import or a spawn target of the
+ * gates that use it, never as a gate of its own, so its data module sits two
+ * levels down from every family: a tree whose `CHANGE_KIND_GATES` row moved
+ * upstream would otherwise read FRESH.
+ */
+function engineClosure() {
+  const self = nodePath.relative(ROOT, new URL(import.meta.url).pathname);
+  const battery = nodePath.relative(ROOT, new URL('./dispatch-gates.self-test.mjs', import.meta.url).pathname);
+  return [self, battery, ...firstPartyImportTargets(self, readFileSync(nodePath.join(ROOT, self), 'utf8'))];
+}
+
+const derivationInputsMemo = new WeakMap();
+
+/**
+ * The files this checkout's derivation ACTUALLY opens — the honest derivation
+ * surface, measured from the discovery rather than declared beside it.
+ *
+ * Every workflow file (the discovery reads all of them), every composite
+ * action the follow opened, the root manifest, and for every family its gate
+ * files, the modules it imports, the programs it spawns, the files it opens by
+ * path and the package manifests it resolves through — plus this engine's own
+ * closure. A path under `DERIVATION_SURFACE` that is in none of those is a
+ * path the answer was not made of, and a change to it upstream cannot have
+ * moved a family: a change that WOULD (a new gate, a new import, a new read)
+ * has to arrive through a file that IS in the set — the manifest, a workflow,
+ * or the gate that gained the edge — so the set is closed under the answer it
+ * describes. Measured on this tree: 266 of 443 tracked files under `scripts/`
+ * are inputs; the rest can move without moving a family.
+ *
+ * Memoised per discovery, which is itself memoised per tree, so a derivation
+ * that already discovered pays nothing more for it — and that is the ONLY
+ * price this may have. A discovery costs seconds (measured: ~14 s cold on
+ * this tree), so the modes that derive hand it to `baseDrift` and `--tier`,
+ * which reads no workflow by contract, does not: a battery of `--tier`
+ * children on a tree a few commits behind was measured to quadruple its wall
+ * clock when the banner asked for a discovery the mode never needed.
+ */
+export function derivationInputs({ tree = repoCorpus().tree } = {}) {
+  const discovered = discoverFamilies({ tree });
+  const hit = derivationInputsMemo.get(discovered);
+  if (hit !== undefined) return hit;
+  const inputs = new Set(['package.json', ...engineClosure()]);
+  for (const wf of discovered.workflows) inputs.add(`.github/workflows/${wf}`);
+  for (const action of discovered.compositeActions) inputs.add(action);
+  for (const entry of discovered.byCheck.values()) {
+    for (const list of [entry.files, entry.imports, entry.runs, entry.reads, entry.manifests]) {
+      for (const rel of list ?? []) inputs.add(rel);
+    }
+  }
+  derivationInputsMemo.set(discovered, inputs);
+  return inputs;
+}
+
+/**
+ * Split the paths a diff reported under the roots into the ones the answer is
+ * made of and the ones it is not. `inputs` null = NOT narrowed: every moved
+ * path is kept and `ignored` is `null` (no reading was taken, which is not an
+ * empty one — the same distinction `changed` draws), the only reading a
+ * checkout with no discovery of its own (a temporary repository in the
+ * battery) or a mode that reads no workflow (`--tier`) can honestly take: a
+ * superset, so it over-reports and never under-reports.
+ */
+export function narrowToDerivationInputs(moved, inputs) {
+  if (inputs === null || inputs === undefined) return { changed: [...moved], ignored: null };
+  const changed = [];
+  const ignored = [];
+  for (const rel of moved) (inputs.has(rel) ? changed : ignored).push(rel);
+  return { changed, ignored };
+}
+
+/**
+ * The inputs a DERIVING mode hands `baseDrift`: this checkout's own measured
+ * set, behind a function so it is asked for only once something moved under
+ * the roots — a level tree never pays for it, and a deriving mode pays for it
+ * once, since the derivation that follows the banner discovers the same tree
+ * through the same memo. A discovery that refuses degrades to no narrowing
+ * (the raw roots, a superset): the reading over-reports, which is this file's
+ * direction for every degraded read, and the derivation then refuses loudly
+ * on its own.
+ */
+export function liveDerivationInputs() {
+  try {
+    return derivationInputs();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * How far behind `DEFAULT_BASE_REF` this checkout is — and whether that matters.
@@ -15490,6 +15592,24 @@ export const DERIVATION_SURFACE = ['.github/workflows', '.github/actions', 'pack
  * measured against a base that is itself behind. Unfetched staleness can only
  * make the true number bigger, never smaller — which is what lets this stay
  * honest without the derivation reaching for the network.
+ *
+ * The CHANGED SET is NARROWED to what the answer is made of (#26334). The
+ * diff is scoped to `DERIVATION_SURFACE`, and `scripts/` is a root that also
+ * holds generated records nothing derives from, regenerated by landings in
+ * other lanes; reported raw, every such landing read as a STALE TREE over a
+ * tree whose families had not moved — the warning-nobody-reads shape the
+ * paragraph above was written to avoid, arriving by another route. So the
+ * moved paths are split against `derivationInputs` — the files the discovery
+ * really opened, measured, never listed — into `changed` (inputs) and
+ * `ignored` (under the roots, not inputs), and only `changed` decides between
+ * loud and quiet. The CALLER names `inputs` — a set, or a function asked for
+ * one only once something moved — because measuring it is a discovery, and
+ * which modes may pay for one is a fact about the mode: the deriving modes
+ * hand in `liveDerivationInputs` and pay nothing extra, `--tier` reads no
+ * workflow by contract and hands in nothing, and a battery driving a temporary
+ * repository (no discovery of its own) hands in the set it means. `null` keeps
+ * every moved path with `ignored: null`, the superset reading, and the loud
+ * rendering says that reading was not narrowed.
  *
  * The CHANGED SET inherits that lower-bound property, and for a while nothing
  * said so (#13392). `changed` is diffed against the same possibly-stale
@@ -15529,7 +15649,7 @@ export const DERIVATION_SURFACE = ['.github/workflows', '.github/actions', 'pack
  * not read, and only an ARRAY when it was. `unmeasuredDrift` below is the
  * single predicate all three degraded fields are read through.
  */
-export function baseDrift({ cwd = ROOT } = {}) {
+export function baseDrift({ cwd = ROOT, inputs = null } = {}) {
   const read = (args) => {
     try {
       const r = runGit(args, cwd);
@@ -15539,19 +15659,32 @@ export function baseDrift({ cwd = ROOT } = {}) {
     }
   };
   const base = read(['rev-parse', '--short', DEFAULT_BASE_REF]);
-  if (base === null) return { base: null, behind: null, changed: null, headDate: null, baseDate: null };
+  if (base === null) return { base: null, behind: null, changed: null, ignored: null, headDate: null, baseDate: null };
   const counted = read(['rev-list', '--count', `HEAD..${DEFAULT_BASE_REF}`]);
   const behind = /^\d+$/.test(counted ?? '') ? Number(counted) : null;
   // At `behind: 0` the empty set is exact BY CONSTRUCTION — an empty commit
   // range moves no files — so it is a reading without running the diff. With
   // no distance in hand there is no range to read, so `changed` is unread too.
   const names = behind ? read(['diff', '--name-only', `HEAD...${DEFAULT_BASE_REF}`, '--', ...DERIVATION_SURFACE]) : behind === 0 ? '' : null;
+  // `null` = the diff was NOT read (a failed read is not an empty one);
+  // an array — even empty — = the diff ran and this is what it said.
+  const moved = names === null ? null : names.split('\n').filter(Boolean);
+  // Narrowed to the inputs ONLY once the diff is in hand and non-empty: an
+  // unread diff has nothing to narrow, an empty one is not worth a discovery,
+  // and `ignored` degrades with `changed` so the two never describe different
+  // readings.
+  const narrowed = moved === null
+    ? null
+    : narrowToDerivationInputs(moved, typeof inputs === 'function' ? (moved.length > 0 ? inputs() : null) : inputs);
   return {
     base,
     behind,
-    // `null` = the diff was NOT read (a failed read is not an empty one);
-    // an array — even empty — = the diff ran and this is what it said.
-    changed: names === null ? null : names.split('\n').filter(Boolean),
+    changed: narrowed === null ? null : narrowed.changed,
+    // The moved paths under the roots that are NOT inputs — set aside, never
+    // dropped: the quiet rendering names them so a reader can see the quiet
+    // was measured rather than assumed. `null` = not narrowed (no inputs were
+    // named, or the diff was not read), never an empty array.
+    ignored: narrowed === null ? null : narrowed.ignored,
     headDate: read(['log', '-1', '--format=%cI', 'HEAD']),
     baseDate: read(['log', '-1', '--format=%cI', DEFAULT_BASE_REF]),
   };
@@ -15688,11 +15821,19 @@ export function driftLines(drift) {
     ];
   }
   if (!drift.behind) return [];
-  const { behind, base, changed, headDate, baseDate } = drift;
+  const { behind, base, changed, ignored, headDate, baseDate } = drift;
   const span = `HEAD${headDate ? ` ${headDate}` : ''} vs ${DEFAULT_BASE_REF} ${base}${baseDate ? ` ${baseDate}` : ''}`;
   if (changed.length === 0) {
+    // What moved under the roots and was set aside as not an input (#26334),
+    // named, so the quiet line reads as a measurement and not as the silence
+    // a level tree gets. Absent or empty prints nothing: a reading that set
+    // nothing aside renders byte-identically to one taken before the field
+    // existed.
+    const setAside = Array.isArray(ignored) && ignored.length > 0
+      ? ` ${ignored.length} path(s) under the surface moved too, none of them an input of this answer: ${ignored.slice(0, 3).join(' ')}${ignored.length > 3 ? ` … +${ignored.length - 3} more` : ''}.`
+      : '';
     return [
-      `  At least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, and none of the commit(s) this tree can SEE touched what this answer derives from — ${span}.`,
+      `  At least ${behind} commit(s) behind ${DEFAULT_BASE_REF}, and none of the commit(s) this tree can SEE touched what this answer derives from — ${span}.${setAside}`,
       `    Whether UNSEEN upstream work did, this run cannot tell: the range above ends at ${DEFAULT_BASE_REF}, a LOCAL snapshot only a fetch moves — not at upstream. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again for the strongest reading a checkout can take.`,
     ];
   }
@@ -15702,6 +15843,14 @@ export function driftLines(drift) {
     `    Stale here: ${changed.slice(0, 6).join(' ')}${changed.length > 6 ? ` … +${changed.length - 6} more` : ''}`,
     `    Those files ARE the families printed below, so this run read their old copies and still exited 0 — a well-formed answer about a tree nobody is on.`,
     `    "At least": ${DEFAULT_BASE_REF} is a LOCAL ref only a fetch moves. Run 'git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}' and derive again from a tree at ${DEFAULT_BASE_REF}.`,
+    // A list nobody narrowed may name paths the answer is not made of — a
+    // generated record under `scripts/` — and a reader cannot tell which from
+    // the list alone, so the reading says so and names the run that measures
+    // it (#26334). Absent from a narrowed reading: there the list IS the
+    // inputs.
+    ...(Array.isArray(ignored) ? [] : [
+      `    Not narrowed to what the answer is made of: this run measured no derivation, so every moved path under the surface is listed, generated records included. A --commands or --ran run measures the inputs and lists only those.`,
+    ]),
   ];
 }
 
@@ -16225,7 +16374,12 @@ if (invokedDirectly) {
       for (const line of sisterTier.stdout) console.log(line);
       process.exit(0);
     }
-    for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
+    // `--tier` reads no workflow and no check script by contract (its branch
+    // below), so it hands the drift no inputs to narrow by and its loud reading
+    // says so; every deriving mode hands in the measured set, which it is about
+    // to discover anyway.
+    const drift = baseDrift({ inputs: process.argv.includes('--tier') ? null : liveDerivationInputs });
+    for (const line of bannerLines({ identity, paths: declaredPaths, drift })) console.error(line);
     if (argv.assertion !== null) {
       // An assertion the tree contradicts is the measured failure, caught. It
       // ends the run: a caller that named the repo it needs has stated a

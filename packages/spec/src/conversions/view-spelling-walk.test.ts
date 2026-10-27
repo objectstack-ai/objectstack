@@ -25,6 +25,13 @@
  * identical payload under `config`, and to the identical payload flattened at
  * the top level. Every conversion is exercised in all three, because the gap
  * was family-wide rather than specific to any entry.
+ *
+ * The entries driven here are the 17.x view-family retirements still in the
+ * table (`filterableFields`, `tabs`, `visibleOn`, the per-option `default`,
+ * the overlay's `owner`/`hidden`). The 16.x ones that used to be driven
+ * (`pdf`, the inert and pass-through list keys, the form's `defaultSort`/`aria`)
+ * aged out of the table at 18 (ADR-0087 amendment, #25767), so a row still
+ * carrying them is served as stored and meets the strict refusal at the parse.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -113,87 +120,55 @@ describe('view conversions reach the ViewItem-record spelling ({ viewKind, confi
     ]);
   });
 
-  it('strips the retired `pdf` export format from a record `config`', () => {
+  it('strips the retired `filterableFields` whitelist from a record `config`, and only that', () => {
     const { out, notices } = convertViewRow(
-      listSpellings({ type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] }).record,
+      listSpellings({
+        type: 'grid',
+        columns: ['name'],
+        searchableFields: ['name'], // a different key that stays
+        filterableFields: ['status', 'priority'],
+      }).record,
     );
-    expect((out.config as Dict).exportOptions).toEqual(['xlsx']);
-    expect(pathsFor(notices, 'view-export-options-pdf-removed')).toEqual([
-      'views[0].config.exportOptions',
+    const config = out.config as Dict;
+    expect('filterableFields' in config).toBe(false);
+    expect(config.searchableFields).toEqual(['name']);
+    expect(pathsFor(notices, 'view-list-filterable-fields-removed')).toEqual([
+      'views[0].config.filterableFields',
     ]);
   });
 
-  it('strips `pdf` from the OBJECT export spelling under a record `config`', () => {
-    const { out } = convertViewRow(
-      listSpellings({
-        type: 'grid',
-        columns: ['name'],
-        exportOptions: { formats: ['csv', 'pdf'], maxRecords: 100 },
-      }).record,
-    );
-    // The surviving sibling keys stay — the strip is the value, not the block.
-    expect((out.config as Dict).exportOptions).toEqual({ formats: ['csv'], maxRecords: 100 });
-  });
-
-  it('strips the inert LIST keys from a `viewKind: list` record, and only those', () => {
+  it('strips the retired list `tabs` from a record `config`', () => {
     const { out, notices } = convertViewRow(
       listSpellings({
         type: 'grid',
         columns: ['name'],
-        responsive: { sm: {} },
-        performance: { lazyLoad: true },
-        aria: { label: 'Leads' }, // list `aria` is LIVE — must survive
+        tabs: [{ name: 'mine', label: 'Mine', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
       }).record,
     );
     const config = out.config as Dict;
-    expect('responsive' in config).toBe(false);
-    expect('performance' in config).toBe(false);
-    expect(config.aria).toEqual({ label: 'Leads' });
-    expect(pathsFor(notices, 'view-inert-keys-removed').sort()).toEqual([
-      'views[0].config.performance',
-      'views[0].config.responsive',
-    ]);
+    expect('tabs' in config).toBe(false);
+    expect(Object.keys(config).sort()).toEqual(['columns', 'type']);
+    expect(pathsFor(notices, 'view-list-tabs-removed')).toEqual(['views[0].config.tabs']);
   });
 
-  it('strips the inert FORM keys from a `viewKind: form` record, and only those', () => {
-    const { out } = convertViewRow(
-      formSpellings({
-        type: 'simple',
-        data: { provider: 'object', object: 'crm_lead' }, // form `data` is LIVE
-        defaultSort: [{ field: 'created_at', order: 'desc' }],
-        aria: { label: 'Lead form' },
-      }).record,
-    );
-    const config = out.config as Dict;
-    expect('defaultSort' in config).toBe(false);
-    expect('aria' in config).toBe(false);
-    expect(config.data).toEqual({ provider: 'object', object: 'crm_lead' });
-  });
-
-  it('is SHAPE-scoped across the record arms: a form key is not stripped from a list record', () => {
-    // `aria` is inert on a FORM and live on a LIST. Reading `viewKind` wrong
-    // (or ignoring it and stripping both key sets) would delete a live key.
-    const { out } = convertViewRow(
-      listSpellings({ type: 'grid', columns: ['name'], aria: { label: 'Leads' } }).record,
-    );
-    expect((out.config as Dict).aria).toEqual({ label: 'Leads' });
-  });
-
-  it('strips the pass-through list keys from a record `config`', () => {
+  it('is SHAPE-scoped across the record arms: a list key is not stripped from a form record', () => {
+    // `tabs` is a retired LIST key; a form record carrying the same spelling is
+    // not this entry's business. Reading `viewKind` wrong (or ignoring it and
+    // stripping by key name alone) would delete a key the entry never named.
     const { out, notices } = convertViewRow(
-      listSpellings({
-        type: 'grid',
-        columns: ['name'],
-        resizable: true, // live — survives
-        striped: true,
-        bordered: true,
-        virtualScroll: true,
-      }).record,
+      formSpellings({ type: 'simple', tabs: [{ name: 'mine', label: 'Mine' }] }).record,
     );
-    const config = out.config as Dict;
-    expect(config.resizable).toBe(true);
-    expect(Object.keys(config).sort()).toEqual(['columns', 'resizable', 'type']);
-    expect(pathsFor(notices, 'view-list-passthrough-keys-removed')).toHaveLength(3);
+    expect((out.config as Dict).tabs).toEqual([{ name: 'mine', label: 'Mine' }]);
+    expect(pathsFor(notices, 'view-list-tabs-removed')).toEqual([]);
+  });
+
+  it('leaves an aged-out key (16.x kit) in a record `config` as stored — only registered entries run here', () => {
+    // `striped` / `pdf` / `responsive` left the table with their kits (#25767):
+    // the row is not half-migrated by some other entry, and nothing is reported.
+    const row = listSpellings({ type: 'grid', columns: ['name'], striped: true, exportOptions: ['xlsx', 'pdf'] }).record;
+    const { out, notices } = convertViewRow(row);
+    expect(out).toEqual(row);
+    expect(notices).toHaveLength(0);
   });
 
   it('strips the per-option `default` inside a record `config`, nested rows included', () => {
@@ -230,7 +205,7 @@ describe('view conversions reach the ViewItem-record spelling ({ viewKind, confi
 
   it('leaves the record identity fields alone while converting its `config`', () => {
     const { out } = convertViewRow(
-      listSpellings({ type: 'grid', columns: ['name'], striped: true }).record,
+      listSpellings({ type: 'grid', columns: ['name'], filterableFields: ['status'] }).record,
     );
     expect(out.name).toBe('crm_lead.all');
     expect(out.object).toBe('crm_lead');
@@ -254,67 +229,40 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
     ]);
   });
 
-  it('strips the retired `pdf` export format from a flattened LIST overlay', () => {
-    const { out, notices } = convertViewRow(
-      listSpellings({ type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] }).flattened,
-    );
-    expect(out.exportOptions).toEqual(['xlsx']);
-    expect(pathsFor(notices, 'view-export-options-pdf-removed')).toEqual([
-      'views[0].exportOptions',
-    ]);
-  });
-
-  it('strips the inert LIST keys from a flattened LIST overlay', () => {
+  it('strips the retired `filterableFields` whitelist from a flattened LIST overlay', () => {
     const { out, notices } = convertViewRow(
       listSpellings({
         type: 'grid',
         columns: ['name'],
-        responsive: { sm: {} },
-        performance: { lazyLoad: true },
-        aria: { label: 'Leads' },
+        searchableFields: ['name'],
+        filterableFields: ['status', 'priority'],
       }).flattened,
     );
-    expect('responsive' in out).toBe(false);
-    expect('performance' in out).toBe(false);
-    expect(out.aria).toEqual({ label: 'Leads' });
-    expect(pathsFor(notices, 'view-inert-keys-removed').sort()).toEqual([
-      'views[0].performance',
-      'views[0].responsive',
+    expect('filterableFields' in out).toBe(false);
+    expect(out.searchableFields).toEqual(['name']);
+    expect(pathsFor(notices, 'view-list-filterable-fields-removed')).toEqual([
+      'views[0].filterableFields',
     ]);
   });
 
-  it('strips the inert FORM keys from a flattened FORM overlay', () => {
-    const { out } = convertViewRow(
-      formSpellings({
-        type: 'simple',
-        data: { provider: 'object', object: 'crm_lead' },
-        defaultSort: [{ field: 'created_at', order: 'desc' }],
-        aria: { label: 'Lead form' },
-      }).flattened,
-    );
-    expect('defaultSort' in out).toBe(false);
-    expect('aria' in out).toBe(false);
-    expect(out.data).toEqual({ provider: 'object', object: 'crm_lead' });
-  });
-
-  it('strips the pass-through list keys from a flattened LIST overlay', () => {
+  it('strips the retired list `tabs` from a flattened LIST overlay', () => {
     const { out, notices } = convertViewRow(
       listSpellings({
         type: 'grid',
         columns: ['name'],
-        striped: true,
-        bordered: true,
-        virtualScroll: true,
+        tabs: [{ name: 'urgent', label: 'Urgent' }],
       }).flattened,
     );
-    expect('striped' in out).toBe(false);
-    expect('bordered' in out).toBe(false);
-    expect('virtualScroll' in out).toBe(false);
-    expect(pathsFor(notices, 'view-list-passthrough-keys-removed').sort()).toEqual([
-      'views[0].bordered',
-      'views[0].striped',
-      'views[0].virtualScroll',
-    ]);
+    expect('tabs' in out).toBe(false);
+    expect(out.columns).toEqual(['name']);
+    expect(pathsFor(notices, 'view-list-tabs-removed')).toEqual(['views[0].tabs']);
+  });
+
+  it('leaves an aged-out key (16.x kit) on a flattened overlay as stored', () => {
+    const row = listSpellings({ type: 'grid', columns: ['name'], striped: true, virtualScroll: true }).flattened;
+    const { out, notices } = convertViewRow(row);
+    expect(out).toEqual(row);
+    expect(notices).toHaveLength(0);
   });
 
   it('strips the per-option `default` inside a flattened FORM overlay', () => {
@@ -361,7 +309,7 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
       columnState: { order: ['name'], widths: { name: 120 } },
       type: 'grid',
       columns: ['name'],
-      striped: true,
+      filterableFields: ['status'],
     });
     expect(out.name).toBe('crm_lead.all');
     expect(out.object).toBe('crm_lead');
@@ -372,7 +320,7 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
     expect(out.scope).toBe('user');
     expect(out.columnState).toEqual({ order: ['name'], widths: { name: 120 } });
     // The two retired keys on this row — each stripped by its own entry.
-    expect('striped' in out).toBe(false);
+    expect('filterableFields' in out).toBe(false);
     expect('owner' in out).toBe(false);
     expect(pathsFor(notices, 'view-overlay-owner-hidden-removed')).toEqual(['views[0].owner']);
   });
@@ -380,7 +328,7 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
 
 describe('the container spelling is unchanged, and the three agree', () => {
   it('converts a container `list`, a named `listViews` entry, a record and an overlay alike', () => {
-    const payload = { type: 'grid', columns: ['name'], striped: true, exportOptions: ['xlsx', 'pdf'] };
+    const payload = { type: 'grid', columns: ['name'], filterableFields: ['status'], tabs: [{ name: 'mine', label: 'Mine' }] };
     const s = listSpellings(payload);
 
     const fromContainer = convertViewRow(s.container).out.list as Dict;
@@ -388,7 +336,7 @@ describe('the container spelling is unchanged, and the three agree', () => {
     const fromRecord = convertViewRow(s.record).out.config as Dict;
     const flattened = convertViewRow(s.flattened).out;
 
-    const expected = { type: 'grid', columns: ['name'], exportOptions: ['xlsx'] };
+    const expected = { type: 'grid', columns: ['name'] };
     expect(fromContainer).toEqual(expected);
     expect(fromNamed).toEqual(expected);
     expect(fromRecord).toEqual(expected);
@@ -400,11 +348,21 @@ describe('the container spelling is unchanged, and the three agree', () => {
   it('converts a container `form` and a `viewKind: form` record alike', () => {
     const payload = {
       type: 'simple',
-      sections: [{ label: 'Details', visibleOn: 'record.open', fields: [] }],
-      aria: { label: 'Lead form' },
+      sections: [{
+        label: 'Details',
+        visibleOn: 'record.open',
+        fields: [{ field: 'status', type: 'select', options: [{ label: 'Open', value: 'open', default: true }] }],
+      }],
     };
     const s = formSpellings(payload);
-    const expected = { type: 'simple', sections: [{ label: 'Details', visibleWhen: 'record.open', fields: [] }] };
+    const expected = {
+      type: 'simple',
+      sections: [{
+        label: 'Details',
+        visibleWhen: 'record.open',
+        fields: [{ field: 'status', type: 'select', options: [{ label: 'Open', value: 'open' }] }],
+      }],
+    };
 
     expect(convertViewRow(s.container).out.form).toEqual(expected);
     expect((convertViewRow(s.containerNamed).out.formViews as Dict).quick).toEqual(expected);
@@ -416,7 +374,7 @@ describe('the walker recognizes shapes rather than guessing at them', () => {
   it('leaves a body that is none of the three spellings untouched', () => {
     // No `viewKind`, no container slot — nothing positively identifies a view
     // payload here, so the chain must not invent one and start stripping.
-    const row = { name: 'mystery', object: 'crm_lead', striped: true, aria: { label: 'x' } };
+    const row = { name: 'mystery', object: 'crm_lead', filterableFields: ['status'], aria: { label: 'x' } };
     const { out, notices } = convertViewRow(row);
     expect(out).toEqual(row);
     expect(notices).toHaveLength(0);
@@ -427,7 +385,7 @@ describe('the walker recognizes shapes rather than guessing at them', () => {
     // requires a config object; both overlay arms guard `config: undefined`).
     // A malformed body gets no rewrite — it is not silently re-read as a
     // flattened overlay whose top level would then be stripped.
-    const row = { name: 'broken', object: 'crm_lead', viewKind: 'list', config: null, striped: true };
+    const row = { name: 'broken', object: 'crm_lead', viewKind: 'list', config: null, filterableFields: ['status'] };
     const { out, notices } = convertViewRow(row);
     expect(out).toEqual(row);
     expect(notices).toHaveLength(0);
@@ -435,7 +393,7 @@ describe('the walker recognizes shapes rather than guessing at them', () => {
 
   it('is idempotent: replaying the chain over an already-converted row is a no-op', () => {
     const once = convertViewRow(
-      listSpellings({ type: 'grid', columns: ['name'], striped: true, exportOptions: ['xlsx', 'pdf'] }).record,
+      listSpellings({ type: 'grid', columns: ['name'], filterableFields: ['status'], tabs: [] }).record,
     );
     const twice = convertViewRow(once.out);
     expect(twice.out).toEqual(once.out);

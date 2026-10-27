@@ -370,7 +370,7 @@ describe('FlowSchema', () => {
       });
     });
 
-    it('REJECTS the retired `active` with the status prescription', () => {
+    it('REFUSES the aged-out `active` as an unknown key naming the upgrade guide (#25767)', () => {
       let message = '';
       try {
         FlowSchema.parse({
@@ -379,8 +379,9 @@ describe('FlowSchema', () => {
       } catch (e) {
         message = String((e as Error).message);
       }
-      expect(message).toMatch(/status/);
-      expect(message).toMatch(/audit close-out/);
+      expect(message).toMatch(/unrecognized_keys/);
+      expect(message).toMatch(/`active`/);
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('should default runAs to user', () => {
@@ -938,7 +939,7 @@ describe('FlowSchema - errorHandling', () => {
     });
   });
 
-  it('REJECTS the retired errorHandling.fallbackNodeId — faults route via fault edges', () => {
+  it('REFUSES the aged-out errorHandling.fallbackNodeId as an unknown key (faults route via fault edges; #25767)', () => {
     expect(() => FlowSchema.parse({
       name: 'fallback_flow',
       label: 'Fallback',
@@ -949,7 +950,7 @@ describe('FlowSchema - errorHandling', () => {
       ],
       edges: [],
       errorHandling: { strategy: 'continue', fallbackNodeId: 'fallback' },
-    })).toThrow(/fault edge/);
+    })).toThrow(/`fallbackNodeId`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('should accept flow without errorHandling (optional)', () => {
@@ -1304,7 +1305,10 @@ describe('BPMN — Wait Event Configuration', () => {
    * (#4158). Retiring the pair is what flipped them, which is the point — the
    * schema now says what `wait` actually does.
    */
-  it('rejects the retired timeout keys instead of stripping them', () => {
+  it('refuses the retired timeout keys instead of stripping them', () => {
+    // Their tombstones were 16.x retirement kits and aged out at 18 (#25767);
+    // the block is strict, so each is an unknown-key refusal naming the key and
+    // the upgrade guide, where the `timerDuration` prescription now lives.
     for (const retired of [{ timeoutMs: 7_200_000 }, { onTimeout: 'fail' }]) {
       const result = FlowNodeSchema.safeParse({
         id: 'wait_timer',
@@ -1314,22 +1318,25 @@ describe('BPMN — Wait Event Configuration', () => {
       });
       const key = Object.keys(retired)[0];
       expect(result.success, `${key} must be rejected, not silently dropped`).toBe(false);
-      // The prescription names the issue and the replacement (or its absence).
-      expect(JSON.stringify(result.error?.issues), `${key} guidance`).toMatch(/was removed in @objectstack\/spec 17/);
+      const issues = JSON.stringify(result.error?.issues);
+      expect(issues, `${key} refusal`).toContain('unrecognized_keys');
+      expect(issues, `${key} refusal`).toContain(`\`${key}\``);
+      expect(issues, `${key} refusal`).toContain('https://objectstack.ai/docs/protocol-upgrade');
     }
   });
 
   /**
    * #6758 — a prescription that does not parse is WORSE than no prescription:
-   * the author lands in the exact rejection the tombstone exists to spare them,
-   * and the second one is a bare `invalid_type` with no guidance attached. Both
-   * author-facing channels on this block print a `timerDuration` value to copy,
-   * and `timerDuration` is `z.string()` — so every value they print must be
-   * QUOTED. Until this test they printed the bare number `60000`, which is
-   * TS2322 at the authoring site and `expected string, received number` at the
-   * parse (the ADR-0087 conversion has always known better: it writes
-   * `String(next.timeoutMs)`, `conversions/registry.ts` — "Moving the number
-   * unstringified would produce a block that no longer parses").
+   * the author lands in the exact rejection the guidance exists to spare them,
+   * and the second one is a bare `invalid_type` with no guidance attached. The
+   * author-facing channel on this block prints a `timerDuration` value to copy,
+   * and `timerDuration` is `z.string()` — so every value it prints must be
+   * QUOTED. Until this test the channels printed the bare number `60000`, which
+   * is TS2322 at the authoring site and `expected string, received number` at
+   * the parse (the ADR-0087 conversion that moved `timeoutMs` knew better: it
+   * wrote `String(next.timeoutMs)`). The `timeoutMs` tombstone that was the
+   * other channel aged out at 18 with its kit (#25767); the `timeout`
+   * misspelling guidance is the channel that remains.
    *
    * The value is EXTRACTED from the message rather than compared to a copy: a
    * hard-coded `'60000'` here would go green the moment someone reworded the
@@ -1346,12 +1353,9 @@ describe('BPMN — Wait Event Configuration', () => {
     };
 
     const channels = {
-      // Channel 1 — `retiredKey()`'s `z.never` message, raised when an upgrading
-      // author still writes the removed key.
-      'the `timeoutMs` tombstone': messageFor({ eventType: 'timer', timeoutMs: 60_000 }, 'invalid_type'),
-      // Channel 2 — the `strictObject` `guidance` entry for the `timeout`
-      // misspelling. Worse than channel 1: there is no first failure to learn
-      // from, so a bad prescription here is the FIRST thing the schema ever says.
+      // The `strictObject` `guidance` entry for the `timeout` misspelling: there
+      // is no first failure to learn from, so a bad prescription here is the
+      // FIRST thing the schema ever says.
       'the `timeout` misspelling guidance': messageFor({ eventType: 'timer', timeout: 60_000 }, 'unrecognized_keys'),
     };
 
@@ -1976,19 +1980,20 @@ describe('unknown keys are rejected, not stripped', () => {
       expect(result.data!.errorHandling!.backoffMs).toBe(5000);
     });
 
-    it('errorHandling: `retryDelayMs` is the tombstone and carries the rename', () => {
+    it('errorHandling: `retryDelayMs` is an unknown key now, refused on THIS surface with the upgrade guide', () => {
+      // Its tombstone aged out at 18 (#25767). The refusal still names the
+      // surface it was written on — naming a scope narrower than the truth is
+      // what let the #4661 divergence read as reviewed for a whole release.
       const result = FlowSchema.safeParse({
         ...minimalFlow,
         errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 5000 },
       });
       expect(result.success).toBe(false);
       const message = JSON.stringify(result.error!.issues);
-      expect(message).toContain('was removed in @objectstack/spec 17.0.0');
-      expect(message).toContain('backoffMs');
-      // The prescription must name THIS surface, not only the two #4661 knew
-      // about — naming a scope narrower than the truth is what let this
-      // divergence read as reviewed for a whole release.
-      expect(message).toContain('flow.errorHandling');
+      expect(message).toContain('unrecognized_keys');
+      expect(message).toContain('`retryDelayMs`');
+      expect(message).toContain('`errorHandling`');
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('errorHandling: `maxAttempts` gets the off-by-one, not a rename', () => {

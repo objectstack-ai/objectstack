@@ -308,6 +308,10 @@ describe('tree-scoped absence: no ViewItem record or flattened overlay inside th
     'packages/spec/src/ui/view-overlay-owner-hidden-retirement.test.ts',
     // This pin names the keys to assert their absence.
     THIS_FILE,
+    // [#25767] The view union's prescription pin authors `owner` on a view
+    // record on purpose, to assert the branch-typed refusal names this kit's
+    // prescription.
+    'packages/spec/src/ui/view-union-retirement-prescription.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement record on purpose.

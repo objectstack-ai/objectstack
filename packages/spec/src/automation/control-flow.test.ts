@@ -115,17 +115,18 @@ describe('TryCatchConfigSchema', () => {
   });
 
   // #4661: `retryDelayMs` was the automation spelling of `backoffMs` before the
-  // retry policy converged onto one declaration. It is TOMBSTONED rather than
-  // deleted precisely because this schema is not `.strict()` — a plain removal
-  // would have Zod swallow the authored number and silently fall back to the
-  // 1000ms default. Assert the loud rejection, not merely its absence.
-  it('rejects the retired `retryDelayMs` spelling with the rename prescription', () => {
+  // retry policy converged onto one declaration. Its tombstone was a 16.x
+  // retirement kit and aged out at 18 (#25767); the retry policy is strict, so
+  // an authored number is still refused loudly — as an unknown key naming the
+  // upgrade guide — rather than swallowed into the 1000ms default. Assert the
+  // loud rejection, not merely its absence.
+  it('refuses the aged-out `retryDelayMs` spelling as an unknown key naming the upgrade guide', () => {
     const parse = () => TryCatchConfigSchema.parse({
       try: { nodes: [node('t')] },
       retry: { maxRetries: 3, retryDelayMs: 500 },
     });
-    expect(parse).toThrow(/backoffMs/);
-    expect(parse).toThrow(/retryDelayMs/);
+    expect(parse).toThrow(/Unrecognized key\(s\) on this retry policy: `retryDelayMs`/);
+    expect(parse).toThrow(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('retry is opt-in: a declared but empty retry block does not retry', () => {

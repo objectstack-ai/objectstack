@@ -319,11 +319,11 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
 
             const off = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, AUTHOR(), undefined);
             expect(statusOf(off.response)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, false, expect.anything());
 
             const on = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: true }, AUTHOR(), undefined);
             expect(statusOf(on.response)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, true);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, true, expect.anything());
         });
 
         it('[#10243] the gate is ahead of the body checks on toggle too', async () => {
@@ -352,7 +352,7 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             const { response } = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, SYSTEM(), undefined);
 
             expect(statusOf(response)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false, expect.anything());
         });
     });
 

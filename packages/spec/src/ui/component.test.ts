@@ -121,9 +121,13 @@ describe('PageHeaderProps recordChrome / showCopyId — declared because the hea
 // the header's own bag is never asked for one, and the registration publishes
 // no `icon` input. Four in-repo pages authored it and none ever drew it.
 describe('PageHeaderProps icon is retired — no renderer reads it', () => {
-  it('rejects the retired `icon` with its prescription', () => {
+  // #25767: the tombstone was a 16.x retirement kit and aged out (ADR-0087
+  // D2 = A), so the key is refused as a strict unknown key and the refusal's
+  // trailing sentence names the protocol upgrade guide instead of carrying
+  // the `recordChrome` prescription itself.
+  it('refuses the retired `icon` as a strict unknown key, pointing at the upgrade guide', () => {
     expect(() => PageHeaderProps.parse({ title: 'Connect an Agent', icon: 'bot' }))
-      .toThrow(/`icon`.*removed.*`recordChrome`/s);
+      .toThrow(/Unrecognized key\(s\) on this `page:header`: `icon`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('does not materialize the retired `icon` on a clean parse', () => {
@@ -240,12 +244,12 @@ describe('PageTabsProps tabStyle — renamed from `type`, which collides with th
     }
   });
 
-  it('rejects the retired `type` with the rename prescription', () => {
-    // Not `.toThrow()` alone: an undeclared key on this non-strict schema would
-    // be stripped silently, and a bare throw assertion cannot tell the two
-    // apart. The message IS the migration doc, so it is what gets asserted.
+  it('refuses the retired `type` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
+    // Not `.toThrow()` alone: a stripping schema would drop the key silently,
+    // and a bare throw assertion cannot tell the two apart. The `tabStyle`
+    // rename prescription left with its 16.x tombstone; the guide carries it.
     expect(() => PageTabsProps.parse({ type: 'card', items: [] }))
-      .toThrow(/`type`.*removed.*`tabStyle`/s);
+      .toThrow(/Unrecognized key\(s\) on this `page:tabs`: `type`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('does not materialize the retired `type` on a clean parse', () => {
@@ -417,7 +421,8 @@ describe('PageCardProps', () => {
     const result = PageCardProps.parse({});
     expect(result.bordered).toBe(true);
     expect(result.title).toBeUndefined();
-    expect(result.actions).toBeUndefined();
+    // [#25767] `actions` left the shape with its ≤16.x tombstone.
+    expect(result).not.toHaveProperty('actions');
     expect(result.children).toBeUndefined();
     expect(result.footer).toBeUndefined();
   });
@@ -447,9 +452,9 @@ describe('PageCardProps', () => {
     expect(result.children).toHaveLength(1);
   });
 
-  it('rejects the retired `body` with the rename prescription', () => {
+  it('refuses the retired `body` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     expect(() => PageCardProps.parse({ body: ['component1'] }))
-      .toThrow(/`body`.*removed.*`children`/s);
+      .toThrow(/Unrecognized key\(s\) on this `page:card`: `body`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('does not materialize the retired `body` on a clean parse', () => {
@@ -461,9 +466,9 @@ describe('PageCardProps', () => {
   // title/bordered/children/footer and has no actions area; the objectui
   // registration publishes no `actions` input either. The prescription points
   // at composition, which is what actually renders.
-  it('rejects the retired `actions` with the composition prescription', () => {
+  it('refuses the retired `actions` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     expect(() => PageCardProps.parse({ title: 'Shortcuts', actions: ['new_task'] }))
-      .toThrow(/`actions`.*removed.*`children`.*`footer`/s);
+      .toThrow(/Unrecognized key\(s\) on this `page:card`: `actions`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('does not materialize the retired `actions` on a clean parse', () => {
@@ -479,7 +484,6 @@ describe('pageComponentSlotPositions — the one slot list, derived from the row
   it('names exactly the positions the rows declare, in the walks\' visit order', () => {
     expect(pageComponentSlotPositions()).toEqual([
       { key: 'children', retired: false },
-      { key: 'body', retired: true },
       { key: 'footer', retired: false },
       { key: 'items', panelKey: 'children', retired: false },
     ]);
@@ -489,7 +493,9 @@ describe('pageComponentSlotPositions — the one slot list, derived from the row
     const cardShape = PageCardProps.shape as Record<string, unknown>;
     const tabsItem = (PageTabsProps.shape.items as any).def.element.shape as Record<string, unknown>;
     const accordionItem = (PageAccordionProps.shape.items as any).def.element.shape as Record<string, unknown>;
-    for (const key of ['children', 'body', 'footer']) expect(cardShape).toHaveProperty(key);
+    for (const key of ['children', 'footer']) expect(cardShape).toHaveProperty(key);
+    // `body` (≤16.x kit, aged out on #25767) is a strict unknown key, not a row.
+    expect(cardShape).not.toHaveProperty('body');
     expect(PageContainerProps.shape).toHaveProperty('children');
     expect(tabsItem).toHaveProperty('children');
     expect(accordionItem).toHaveProperty('children');
@@ -506,7 +512,8 @@ describe('pageComponentSlotPositions — the one slot list, derived from the row
     const unmarked = z.array(z.unknown()).optional().describe('Card footer components (slot)');
     expect(z.toJSONSchema(footer)).toEqual(z.toJSONSchema(unmarked));
     expect(footer.parse(['bare-id', { type: 'element:button' }])).toEqual(['bare-id', { type: 'element:button' }]);
-    expect(() => PageCardProps.parse({ body: [] })).toThrow(/`body`.*removed.*`children`/s);
+    expect(() => PageCardProps.parse({ body: [] }))
+      .toThrow(/Unrecognized key\(s\) on this `page:card`: `body`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('is derived once and handed back frozen', () => {
@@ -838,13 +845,15 @@ describe('RecordDetailsProps', () => {
   // two keys in that ruling this one WAS read — against `inline`/`compact`,
   // values this enum never permitted — so both legal values took the same
   // branch and the key selected nothing.
-  it('rejects the retired `layout` with its prescription', () => {
+  // The ≤16.x kit aged out on #25767: `layout` is a strict unknown key whose
+  // refusal names the upgrade guide, not the old prescription.
+  it('refuses the retired `layout` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     expect(() => RecordDetailsProps.parse({ layout: 'custom' }))
-      .toThrow(/`layout`.*removed.*`sections`.*`highlightFields`/s);
+      .toThrow(/Unrecognized key\(s\) on this `record:details`: `layout`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
     // The declared default is refused too — `auto` was never distinguishable
     // from `custom` or from omitting the key.
     expect(() => RecordDetailsProps.parse({ layout: 'auto' }))
-      .toThrow(/`layout`.*removed/s);
+      .toThrow(/Unrecognized key\(s\) on this `record:details`: `layout`/);
   });
 
   it('does not materialize the retired `layout` on a clean parse', () => {
@@ -2148,30 +2157,21 @@ describe('Interactive Elements — element:record_picker', () => {
     }).success).toBe(true);
   });
 
-  // #5775 tombstones — the prescription IS the payload. `displayField` was a
-  // REQUIRED declaration no renderer read; `searchFields` / `multiple` were
-  // capability claims the single-select control never kept (ADR-0049).
-  it('rejects the retired `displayField` with the rename prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ displayField: 'title' }))
-      .toThrow(/displayField.*removed.*use `labelField`|displayField.*removed.*`labelField`/s);
-  });
-
-  it('rejects the retired `searchFields` with its prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ searchFields: ['name'] }))
-      .toThrow(/`searchFields`.*removed.*Delete the key/s);
-  });
-
-  it('the `searchFields` prescription names the binding\'s filter, never the retired flat one', () => {
-    const r = ElementRecordPickerPropsSchema.safeParse({ searchFields: ['name'] });
-    const message = r.success ? '' : r.error.issues[0]!.message;
-    expect(message).toContain('use the component-level `dataSource.filter`');
-    expect(message).not.toContain('use `filter`');
-  });
-
-  it('rejects the retired `multiple` with its prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ multiple: true }))
-      .toThrow(/`multiple`.*removed.*Delete the key/s);
-  });
+  // #5775 tombstones (≤16.x kit) aged out on #25767: `displayField`,
+  // `searchFields` and `multiple` are strict unknown keys whose refusal names
+  // the upgrade guide; the rename/delete prescriptions live in the release
+  // that carried them.
+  it.each(['displayField', 'searchFields', 'multiple'])(
+    'refuses the retired `%s` as a strict unknown key, pointing at the upgrade guide (#25767)',
+    (key) => {
+      const r = ElementRecordPickerPropsSchema.safeParse({ [key]: key === 'multiple' ? true : key === 'searchFields' ? ['name'] : 'title' });
+      expect(r.success).toBe(false);
+      const message = r.success ? '' : r.error.issues[0]!.message;
+      expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\) on this \`element:record_picker\`: \`${key}\``));
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+      expect(message).not.toMatch(/was removed/);
+    },
+  );
 
   it('does not materialize the retired keys on a clean parse', () => {
     const props = ElementRecordPickerPropsSchema.parse({});

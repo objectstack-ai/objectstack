@@ -119,7 +119,10 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   visibleWhen: 'presentation',
   readonlyWhen: 'presentation',
   requiredWhen: 'presentation',
-  conditionalRequired: 'presentation',
+  // `conditionalRequired` (the pre-17 spelling of `requiredWhen`) was a row
+  // here while the spec carried its tombstone; the tombstone aged out of
+  // `FieldSchema` at spec 18.2 (objectstack#25767, ADR-0087 one major on), and
+  // the test beside this map refuses a classification the spec does not declare.
   dueLike: 'presentation',     // declares a date a deadline (#22227) — read by the renderer's date cells, never by `createColumn`: the column is the date the type already sizes
   settledWhen: 'presentation', // the deadline's settle predicate (#22227), display only like `visibleWhen` — no DDL reads it
   conditionalFormatting: 'presentation', // a field's cell formatting rules (#22228), display only — no DDL reads it
