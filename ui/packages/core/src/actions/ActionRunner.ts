@@ -547,14 +547,16 @@ export type ActionRunnerHandler = ((
  * Confirmation handler — replaces window.confirm.
  * Consumers can provide an async implementation (e.g., Shadcn AlertDialog).
  *
- * `options` is LIVE, and its producer is not in this file — searching the
- * runner alone will tell you otherwise. The only call site here passes one
- * argument (the structured `confirm` arm that used to forward a bag was
- * retired, objectui#4314), so a runner-scoped sweep reads this parameter as
- * declared-but-never-produced and files it for removal. That has already
- * happened once: objectui#5205, ruled KEEP on 2026-08-22.
+ * `options` is LIVE. The runner's own call site produces it for a declared
+ * action that has a label or `variant: 'danger'` (see `confirmOptions`): the
+ * dialog is titled with the action's label, its confirm button says the label,
+ * and a danger action paints that button destructive. Before that, the only
+ * call site here passed one argument (the structured `confirm` arm that used
+ * to forward a bag was retired, objectui#4314), so a runner-scoped sweep read
+ * this parameter as declared-but-never-produced and filed it for removal:
+ * objectui#5205, ruled KEEP on 2026-08-22.
  *
- * The producer bypasses the runner entirely. `handleDeleteView` in
+ * Other producers bypass the runner entirely. `handleDeleteView` in
  * `packages/app-shell/src/views/ObjectView.tsx` — the admin "delete saved
  * view" confirmation — invokes a `ConfirmationHandler` with all three fields
  * populated and localized (`console.objectView.deleteViewTitle` / `.delete` /
@@ -1533,9 +1535,17 @@ export class ActionRunner {
       // the runner's context alone: a row dispatch binds no `record` there, so
       // a hole the record header fills was shown raw from a list row
       // (objectui#12967).
+      //
+      // The dialog names the action it confirms: its label titles the dialog
+      // and labels the confirm button, and `variant: 'danger'` paints that
+      // button destructive (see `confirmOptions`). An action with neither is
+      // asked with the message alone, and the host's generic copy stands.
       const confirmMessage = this.confirmMessage(action);
       if (confirmMessage !== undefined) {
-        const confirmed = await this.confirmHandler(confirmMessage);
+        const confirmOptions = this.confirmOptions(action);
+        const confirmed = await (confirmOptions
+          ? this.confirmHandler(confirmMessage, confirmOptions)
+          : this.confirmHandler(confirmMessage));
         if (!confirmed) {
           return { success: false, error: 'Action cancelled by user' };
         }
@@ -1863,6 +1873,27 @@ export class ActionRunner {
       { record: this.dispatchRecord(action), params: staticParams },
       this.displayLocale?.(),
     );
+  }
+
+  /**
+   * The confirm dialog's chrome for a declared action, or `undefined` when the
+   * action carries nothing to name it with.
+   *
+   * The action already declares both inputs — no new key: `label` (already
+   * resolved against the locale's bundle by the surface that dispatches it,
+   * `useActionTextLocalizer`) becomes the dialog's title and its confirm
+   * button, and the spec's `variant: 'danger'` makes that button destructive,
+   * the style the record Delete asks with. The cancel button keeps the host's
+   * own copy.
+   */
+  private confirmOptions(action: ActionDef): Parameters<ConfirmationHandler>[1] {
+    const label = action.label || undefined;
+    const destructive = action.variant === 'danger';
+    if (label === undefined && !destructive) return undefined;
+    return {
+      ...(label !== undefined ? { title: label, confirmText: label } : {}),
+      ...(destructive ? { destructive } : {}),
+    };
   }
 
   /**

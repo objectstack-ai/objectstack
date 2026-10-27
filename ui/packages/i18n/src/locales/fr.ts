@@ -2800,6 +2800,8 @@ const fr = {
         dataRead: "Lire des enregistrements (dans la limite de vos propres autorisations)",
         dataWrite: "Créer, modifier et supprimer des enregistrements (dans la limite de vos propres autorisations)",
         actionsExecute: "Exécuter des actions en votre nom (dans la limite de vos propres autorisations)",
+        metadataWrite: "Créer et modifier les métadonnées de cette application sous forme de brouillons (dans la limite de vos propres autorisations) — une personne les publie",
+        unrecognised: "Autorisation non reconnue : {{scope}}",
       },
       deny: "Refuser",
       authorize: "Autoriser",

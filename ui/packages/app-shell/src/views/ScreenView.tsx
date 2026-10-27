@@ -69,6 +69,21 @@
  * The field takes no input. It is never seeded into the collected values
  * ({@link initialScreenValues}) and never posted ({@link screenResumeValues}):
  * the engine refuses a resume that carries any value under its name.
+ *
+ * ## `date`, `datetime` and `boolean` are the platform controls (objectstack#26579)
+ *
+ * A `date` / `datetime` field is the record form's picker (`DatePickerField` /
+ * `DateTimePickerField`, objectui#12622): a text box in the display locale's
+ * format, a calendar popover and a clear button, reached through
+ * `getLazyFieldWidget` as `ActionParamDialog`'s date params reach it. The
+ * value it writes is the stored shape the native inputs wrote — `YYYY-MM-DD`
+ * for a date, an ISO instant for a date-time, `''` when cleared — so the
+ * runner's `required` check and the resume bag read it unchanged.
+ *
+ * A `boolean` (or `checkbox`) field is `ActionParamDialog`'s inline row: the
+ * form's `BooleanField` in its checkbox face, with the label BESIDE the control
+ * and the help text under the row. The generic layout put the label on one line
+ * and a lone checkbox on the next, which read as an empty radio button.
  */
 import { Suspense } from 'react';
 import { Link, useInRouterContext, useParams } from 'react-router-dom';
@@ -76,7 +91,6 @@ import {
   Input,
   Label,
   Textarea,
-  Checkbox,
   Select,
   SelectTrigger,
   SelectValue,
@@ -101,6 +115,24 @@ const LookupFieldWidget = getLazyFieldWidget('lookup');
 
 /** The object form's upload widget (`FileField`), resolved the same way. */
 const FileFieldWidget = getLazyFieldWidget('file');
+
+/** The object form's date and date-time pickers (objectui#12622), resolved the same way. */
+const DateFieldWidget = getLazyFieldWidget('date');
+const DateTimeFieldWidget = getLazyFieldWidget('datetime');
+
+/** The object form's boolean control (`BooleanField`), resolved the same way. */
+const BooleanFieldWidget = getLazyFieldWidget('boolean');
+
+/**
+ * Whether a screen field draws the boolean control, and so the inline row.
+ * A boolean field that declares `options` is a select, as {@link ScreenFieldInput}
+ * draws it, so it keeps the label above.
+ */
+function isBooleanScreenField(field: ScreenFieldSpec): boolean {
+  const kind = (field.type || '').toLowerCase();
+  if (kind !== 'boolean' && kind !== 'checkbox') return false;
+  return !(Array.isArray(field.options) && field.options.length > 0);
+}
 
 /**
  * Whether a screen field is the read-only record link. Matched exactly, as the
@@ -390,6 +422,36 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
         // placeholder (which the browser clears on the first keystroke), and
         // the control names it in `aria-describedby` so it is announced too.
         const helpId = f.inlineHelpText ? screenFieldHelpId(f.name) : undefined;
+        const input = (
+          <ScreenFieldInput
+            field={f}
+            value={values[f.name]}
+            onChange={(v) => onValueChange(f.name, v)}
+            describedBy={helpId}
+            dataSource={dataSource}
+            objects={objects}
+          />
+        );
+        // The boolean control sits BESIDE its label, `ActionParamDialog`'s
+        // inline row; the help text lines up under the label.
+        if (isBooleanScreenField(f)) {
+          return (
+            <div key={f.name} className="grid gap-1">
+              <div className="flex items-start gap-2">
+                {input}
+                <Label htmlFor={`ff-${f.name}`} className="text-sm font-normal cursor-pointer">
+                  {f.label || f.name}
+                  {f.required && (
+                    <span className="text-destructive" aria-hidden="true" data-required-marker="true"> *</span>
+                  )}
+                </Label>
+              </div>
+              {helpId && (
+                <p id={helpId} className="text-xs text-muted-foreground ml-6">{f.inlineHelpText}</p>
+              )}
+            </div>
+          );
+        }
         return (
           <div key={f.name} className="space-y-1.5">
             <Label htmlFor={`ff-${f.name}`} className="text-sm">
@@ -401,14 +463,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
                 <span className="text-destructive" aria-hidden="true" data-required-marker="true"> *</span>
               )}
             </Label>
-            <ScreenFieldInput
-              field={f}
-              value={values[f.name]}
-              onChange={(v) => onValueChange(f.name, v)}
-              describedBy={helpId}
-              dataSource={dataSource}
-              objects={objects}
-            />
+            {input}
             {helpId && (
               <p id={helpId} className="text-xs text-muted-foreground">{f.inlineHelpText}</p>
             )}
@@ -537,17 +592,51 @@ export function ScreenFieldInput({
       </Select>
     );
   }
+  // The form's `BooleanField` in its checkbox face, as `ActionParamDialog`'s
+  // boolean params draw it (objectstack#26579); {@link ScreenView} lays the
+  // label beside it. The host owns the id, so the widget draws no `sr-only`
+  // label of its own. Only a real `true` is checked, and a tick answers a
+  // real boolean.
   if (kind === 'boolean' || kind === 'checkbox') {
-    return <Checkbox id={id} aria-required={ariaRequired} aria-describedby={describedBy} checked={value === true} onCheckedChange={(c) => onChange(c === true)} />;
+    return (
+      <Suspense fallback={<div className="size-4 mt-0.5 animate-pulse rounded-sm bg-muted" aria-hidden="true" />}>
+        <BooleanFieldWidget
+          id={id}
+          value={value === true}
+          onChange={(checked: unknown) => onChange(checked === true)}
+          field={{ name: field.name, label: field.label, type: 'boolean', widget: 'checkbox' }}
+          className="mt-0.5"
+          aria-required={ariaRequired}
+          aria-describedby={describedBy}
+        />
+      </Suspense>
+    );
+  }
+  // The record form's date / date-time picker (objectstack#26579), in the
+  // display locale's format instead of the browser's native input. It writes
+  // the stored shape the native input wrote, so nothing downstream changes.
+  if (kind === 'date' || kind === 'datetime') {
+    const Picker = kind === 'date' ? DateFieldWidget : DateTimeFieldWidget;
+    return (
+      <Suspense fallback={<div className="h-9 w-full animate-pulse rounded-md bg-muted" aria-hidden="true" />}>
+        <Picker
+          id={id}
+          value={value ?? null}
+          onChange={onChange}
+          field={{ name: field.name, label: field.label, type: kind }}
+          aria-required={ariaRequired}
+          aria-describedby={describedBy}
+        />
+      </Suspense>
+    );
   }
   if (kind === 'textarea' || kind === 'markdown') {
     return <Textarea id={id} aria-required={ariaRequired} aria-describedby={describedBy} value={(value as string) ?? ''} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />;
   }
-  const htmlType = kind === 'number' || kind === 'currency' ? 'number' : kind === 'email' ? 'email' : kind === 'date' ? 'date' : 'text';
+  const htmlType = kind === 'number' || kind === 'currency' ? 'number' : kind === 'email' ? 'email' : 'text';
   // The declared bound pair goes on a NUMERIC input only, as the native
-  // attributes — on a date input `min` / `max` would be read as dates, and on
-  // a text one they mean nothing. The submit-time refusal is the runner's
-  // (`screenFieldBoundViolations`), beside its `required` check.
+  // attributes — on a text input they mean nothing. The submit-time refusal
+  // is the runner's (`screenFieldBoundViolations`), beside its `required` check.
   const numeric = htmlType === 'number';
   return (
     <Input

@@ -2799,6 +2799,8 @@ const pt = {
         dataRead: "Ler registros (dentro das suas próprias permissões)",
         dataWrite: "Criar, alterar e excluir registros (dentro das suas próprias permissões)",
         actionsExecute: "Executar ações em seu nome (dentro das suas próprias permissões)",
+        metadataWrite: "Criar e alterar os metadados deste aplicativo como rascunhos (dentro das suas próprias permissões) — uma pessoa os publica",
+        unrecognised: "Permissão não reconhecida: {{scope}}",
       },
       deny: "Negar",
       authorize: "Autorizar",

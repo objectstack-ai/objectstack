@@ -24,6 +24,13 @@
  * addition: the object's own answer to a bare array (see
  * {@link LIST_VIEW_EXPORT_OPTIONS_ARRAY_FORM}). The list view's published JSON
  * Schema did not move with it.
+ *
+ * [#26548] A report's export block lives here too, at the end of the module:
+ * {@link ReportExportOptionsSchema}, three of these five members under the
+ * same key name, so a report and a list share one export vocabulary rather
+ * than two. It is a sibling, not a third carrier of the object above — a
+ * report table is not a record grid, and the members it leaves out are the
+ * record-stream ones.
  */
 
 import { z } from 'zod';
@@ -135,5 +142,88 @@ export const ListViewExportOptionsSchema = closedObject(z.object(LIST_VIEW_EXPOR
         : exportOptionsUnknownKeyError(issue)
     ),
     { prime: () => (exportOptionsUnknownKeyError as { prime?: () => void }).prime?.() },
+  ),
+}).strict());
+
+// ── The report's export block (#26548) ──────────────────────────────────────
+
+/**
+ * The formats a REPORT table exports: the list's enum narrowed to `csv` and
+ * `xlsx` (ruling 6408567749 on #25873, letter B). A report's rows are
+ * aggregates, not records, so `'json'` — the list's record format — is not
+ * offered, and a report never had `'pdf'`. The refusal names the two report
+ * formats rather than replaying the list's `'pdf'` retirement, whose sentence
+ * ("the surviving formats are 'csv', 'xlsx' and 'json'", a view's
+ * `allowPrinting`) is true of a list and not of a report. Every other value
+ * keeps zod's own enum message, which already lists the two members.
+ */
+const ReportExportFormatSchema = ListViewExportFormatSchema.exclude(['json'], {
+  error: (issue) => {
+    if (issue.input === 'json') {
+      return "a report exports its table as 'csv' or 'xlsx'. 'json' is a list export's record format, "
+        + "and a report's rows are aggregates with no record shape to write. Use 'csv' or 'xlsx'.";
+    }
+    if (issue.input === 'pdf') {
+      return "a report exports its table as 'csv' or 'xlsx' — there is no PDF export of a report. "
+        + 'A printable document is a page that declares `print`, with its blocks in `regions`.';
+    }
+    return undefined;
+  },
+});
+
+/**
+ * The record-stream members of the list block that a report does not carry:
+ * a report's rows are already aggregated, and bounded by what it selects.
+ */
+const REPORT_EXPORT_RECORD_STREAM_MEMBER =
+  'is a list export\'s record-stream member, and a report has none: its rows are already aggregated '
+  + 'and bounded by what the report selects, and its file is written from the table as drawn. Delete it.';
+
+const REPORT_EXPORT_OPTIONS_ARRAY_FORM =
+  'Expected the report export options object `{ formats?, includeHeaders?, fileNamePrefix? }`, '
+  + "received a bare array. Put the format list in `formats`: `{ formats: ['csv', 'xlsx'] }`.";
+
+/**
+ * Three of the list block's five members, and the list's key name — no second
+ * export vocabulary. `includeHeaders` is the list's member BY IDENTITY;
+ * `fileNamePrefix` is the list's member re-described, because the list's
+ * sentence names an object label and a view label a report has neither of.
+ * `formats` narrows the list's enum (see {@link ReportExportFormatSchema}).
+ */
+const REPORT_EXPORT_OPTIONS_SHAPE = {
+  formats: z.array(ReportExportFormatSchema).optional()
+    .describe("Formats the report's export control offers (default: ['csv', 'xlsx']); an empty list turns the control off"),
+  includeHeaders: LIST_VIEW_EXPORT_OPTIONS_SHAPE.includeHeaders,
+  fileNamePrefix: LIST_VIEW_EXPORT_OPTIONS_SHAPE.fileNamePrefix
+    .describe('Download file name prefix — replaces the report label in the generated file name'),
+};
+
+const reportExportOptionsUnknownKeyError = strictObjectError({
+  surface: 'this report export options block',
+  history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+  guidance: {
+    maxRecords: `\`maxRecords\` ${REPORT_EXPORT_RECORD_STREAM_MEMBER}`,
+    streaming: `\`streaming\` ${REPORT_EXPORT_RECORD_STREAM_MEMBER}`,
+  },
+}, REPORT_EXPORT_OPTIONS_SHAPE);
+
+/**
+ * `ReportSchema.exportOptions` (#26548): what a report's export control
+ * offers. Who may use it is not declared here — the report TSDoc states the
+ * `ObjectPermission.allowExport` axis it is gated on.
+ *
+ * Deliberately NOT the list's union: there is no legacy bare-array spelling
+ * to lift on a report, and a union collapses its curated messages into one
+ * bare `Invalid input` (#5014). A bare array is answered by name instead.
+ * Closed exactly as {@link ListViewExportOptionsSchema} is, `prime` forwarded.
+ */
+export const ReportExportOptionsSchema = closedObject(z.object(REPORT_EXPORT_OPTIONS_SHAPE, {
+  error: Object.assign(
+    (issue: Parameters<z.core.$ZodErrorMap>[0]) => (
+      issue.code === 'invalid_type' && Array.isArray(issue.input)
+        ? REPORT_EXPORT_OPTIONS_ARRAY_FORM
+        : reportExportOptionsUnknownKeyError(issue)
+    ),
+    { prime: () => (reportExportOptionsUnknownKeyError as { prime?: () => void }).prime?.() },
   ),
 }).strict());

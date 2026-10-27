@@ -350,3 +350,95 @@ describe('[#26413] the now-anchor is closed at the door, as NowAnchorSchema decl
     }
   });
 });
+
+describe('[#26413 review] the subDays clause answers subDays alone, so a one-key refusal stays inside the bound', () => {
+  const NOT_APPLIED_TAIL = 'an unapplied filter would have returned the UNFILTERED result set.';
+
+  it('names the subDays rule when subDays is among the keys, and only then', () => {
+    const subDays = refusalOf(() => normalizeFilterComparandTypes({ opened_at: { $lt: { $now: true, addDays: -30, subDays: 7 } } }));
+    expect(subDays?.message).toContain('there is no subDays: a negative addDays subtracts');
+    const note = refusalOf(() => normalizeFilterComparandTypes({ opened_at: { $lt: { $now: true, addDays: -30, note: 'x' } } }));
+    expect(note?.code).toBe('INVALID_FILTER');
+    expect(note?.message).toContain('undeclared key "note" — the anchor takes $now and addDays only.');
+    expect(note?.message).not.toContain('subDays');
+  });
+
+  it('a one-key refusal under the engine prefix, under $and, keeps its last sentence under 500 characters', () => {
+    // The contract review's measured case was 496 characters with the clause
+    // printed for `note`; a longer field and a path under `$and` pushed it over.
+    const err = refusalOf(() => normalizeFilterComparandTypes(
+      { $and: [{ status: 'open' }, { review_opened_at: { $lte: { $now: true, addDays: -30, note: 'x' } } }] },
+      "find('support_ticket')",
+    ));
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err!.message.length).toBeLessThanOrEqual(500);
+    expect(err!.message.endsWith(NOT_APPLIED_TAIL)).toBe(true);
+  });
+});
+
+describe('[#26601] a dotted addDays offset is refused at the door, on a reference and on an anchor', () => {
+  const REF = 'contract_type.review_sla_days';
+  /** `driver-sql`'s reason for the same refusal on every SQL read, verbatim. */
+  const SQL_REASON = `the addDays offset "${REF}" is a dotted path, and SQL push-down compiles same-table `
+    + 'column references only (no relation traversal, no alias-qualified columns).';
+  const COMPARANDS: Array<[string, Record<string, unknown>]> = [
+    ['the { $field, addDays } pair', { $field: 'review_due_at', addDays: { $field: REF } }],
+    ['the now-anchor', { $now: true, addDays: { $field: REF } }],
+    ['the now-anchor in its resolved form', { $now: '2026-03-03T12:00:00.000Z', addDays: { $field: REF } }],
+  ];
+
+  it('refuses it at every scalar comparison, in the SQL read\'s own words, with the envelope', () => {
+    for (const [label, comparand] of COMPARANDS) {
+      for (const op of ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']) {
+        const err = refusalOf(() => normalizeFilterComparandTypes({ review_started_at: { [op]: comparand } }));
+        expect(err?.code, `${label} ${op}`).toBe(StandardErrorCode.enum.INVALID_FILTER);
+        expect(err?.status, `${label} ${op}`).toBe(400);
+        expect(err?.message, `${label} ${op}`).toContain(`at where.review_started_at.${op} is refused: ${SQL_REASON}`);
+      }
+    }
+  });
+
+  it('refuses it under $and / $or / $not and through parseFilterAST\'s two forms', () => {
+    for (const [label, comparand] of COMPARANDS) {
+      for (const filter of [
+        { $and: [{ status: 'open' }, { review_started_at: { $lt: comparand } }] },
+        { $or: [{ review_started_at: { $gte: comparand } }] },
+        { $not: { review_started_at: { $lt: comparand } } },
+      ]) {
+        expect(refusalOf(() => normalizeFilterComparandTypes(filter))?.code, `${label} ${JSON.stringify(filter)}`).toBe('INVALID_FILTER');
+      }
+      expect(refusalOf(() => parseFilterAST({ review_started_at: { $lt: comparand } }))?.code, label).toBe('INVALID_FILTER');
+      expect(refusalOf(() => parseFilterAST(['review_started_at', '<', comparand]))?.code, label).toBe('INVALID_FILTER');
+    }
+  });
+
+  it('the refusal at the measure-filter position keeps its last sentence under 500 characters', () => {
+    const err = refusalOf(() => normalizeFilterComparandTypes(
+      { $and: [{ status: 'open' }, { contract_review_started_at: { $lte: { $now: true, addDays: { $field: 'contract_type_of_the_agreement.review_sla_days_offset' } } } }] },
+      "aggregate('clm_contract_review')",
+      'aggregations[0].filter',
+    ));
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err!.message.length).toBeLessThanOrEqual(500);
+    expect(err!.message.endsWith('an unapplied filter would have returned the UNFILTERED result set.')).toBe(true);
+  });
+
+  it('CONTROL: a same-record offset column, a literal offset and a dotted BASE reference are kept by reference', () => {
+    for (const comparand of [
+      { $field: 'review_due_at', addDays: { $field: 'review_sla_days' } },
+      { $now: true, addDays: { $field: 'review_sla_days' } },
+      { $now: true, addDays: -3 },
+      // The reference's own `$field` is not this rule's: memory walks it, SQL refuses it.
+      { $field: 'contract_type.review_due_at' },
+      { $field: 'contract_type.review_due_at', addDays: 2 },
+    ]) {
+      const filter = { review_started_at: { $lt: comparand } };
+      expect(normalizeFilterComparandTypes(filter), JSON.stringify(comparand)).toBe(filter);
+    }
+  });
+
+  it('CONTROL: the bare implicit form keeps its own fate — an operator spec named $field, not judged here', () => {
+    const filter = { review_started_at: { $field: 'review_due_at', addDays: { $field: REF } } };
+    expect(normalizeFilterComparandTypes(filter)).toBe(filter);
+  });
+});

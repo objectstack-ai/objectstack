@@ -21,7 +21,7 @@
  * | security-cbp-no-relation      (error)   | #7503 (runtime refusal #7474)   |
  * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
- * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): an owner-keyed update policy on a detail that has not opted in cannot admit the owner |
+ * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -124,6 +124,7 @@ import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/
 import { controlledByParentOwnerMayEdit, isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
+import { injectedColumnsFor } from './system-fields.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -470,8 +471,34 @@ function callerIdentityKeyedFields(predicate: unknown): string[] {
 }
 
 /**
+ * [#26591] The one column the ADR-0055 §3 owner leg compares the caller
+ * against: `assertControlledByParentWrite` admits the caller whose id equals
+ * the stored row's `owner_id`, and `resolveCbpRelation` resolves the opt-in
+ * only where the registered schema carries that column. The runtime's
+ * `OWNER_COLUMN` (`security-plugin-cbp-relation.ts`), one spelling.
+ */
+const CBP_OWNER_COLUMN = 'owner_id';
+
+/**
+ * [#26591] Does this detail carry the column the opt-in admits? The runtime
+ * asks the REGISTERED schema's field map, which holds the registry's injected
+ * columns and the author's own; at author time that is the spec's injection
+ * plan (`injectedColumnsFor`: `owner_id` under `ownership: 'user'`, the
+ * default, and never under `'business_unit' | 'org' | 'none'`, `managedBy` or
+ * a `sys_*` name) plus a field the author declared under that name.
+ */
+function carriesCbpOwnerColumn(obj: AnyRec): boolean {
+  return (
+    injectedColumnsFor(obj).has(CBP_OWNER_COLUMN) ||
+    recordsOf(obj.fields).some((f) => f.name === CBP_OWNER_COLUMN)
+  );
+}
+
+/**
  * `security-controlled-by-parent-owner-policy-without-opt-in` for one policy,
- * at `path` (the predicate that keys on the caller).
+ * at `path` (the predicate that keys on the caller), when the predicate keys
+ * `owner_id` on a detail that carries it and has not opted in: the one shape
+ * the opt-in turns into an admission, so the hint prescribes it.
  */
 function pushCbpOwnerPolicyWithoutOptIn(
   findings: SecurityFinding[],
@@ -497,6 +524,51 @@ function pushCbpOwnerPolicyWithoutOptIn(
     hint:
       `Declare sharing: { controlledByParent: { ownerMayEdit: true } } on "${objName}" so its owner_id updates ` +
       `with read access to the master, or drop the policy`,
+  });
+}
+
+/**
+ * [#26591] The same rule, when the predicate keys the caller only on columns
+ * the opt-in does not admit: another user field (`owner == current_user.id`),
+ * or `owner_id` on a detail that carries no such column. The opt-in cannot
+ * serve this policy, declared or not, so ⛔ the hint never prescribes it (a
+ * remedy the runtime does not honour is the defect this arm was narrowed for);
+ * it names the one that works: the accountable person keyed on `owner_id`.
+ */
+function pushCbpCallerPolicyOffOwnerColumn(
+  findings: SecurityFinding[],
+  psName: string,
+  path: string,
+  policyName: string,
+  objName: string,
+  fields: readonly string[],
+  detail: { readonly optedIn: boolean; readonly ownerColumn: boolean },
+): void {
+  const keyed = fields.map((f) => `${f} == current_user.id`).join(', ');
+  const admitsOnly =
+    `admits only the row's stored ${CBP_OWNER_COLUMN}` +
+    (detail.ownerColumn ? '' : `, a column "${objName}" does not carry`);
+  findings.push({
+    severity: 'warning',
+    rule: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+    where: `permission set "${psName}"`,
+    path,
+    // One verdict sentence, in the two states of the opt-in; why a detail's
+    // own policy can only narrow is this id's `os explain` entry.
+    message:
+      `update policy "${policyName}" keys on the caller (${keyed}) on controlled_by_parent detail ` +
+      `"${objName}", so it never admits that user: ` +
+      (detail.optedIn
+        ? `the opt-in it declares (sharing.controlledByParent.ownerMayEdit) ${admitsOnly}, every other write ` +
+          `needs edit access to the master, and this policy can only narrow master editors`
+        : `every write of a detail needs edit access to its master, this policy can only narrow master ` +
+          `editors, and the opt-in sharing.controlledByParent.ownerMayEdit ${admitsOnly}`),
+    // One remedy line.
+    hint: detail.ownerColumn
+      ? `Key the accountable person on ${CBP_OWNER_COLUMN} (the one column the master gate compares the caller ` +
+        `against), or drop the policy`
+      : `Give "${objName}" an ${CBP_OWNER_COLUMN} column (ownership: 'user', the default) and key the accountable ` +
+        `person on it, or drop the policy`,
   });
 }
 
@@ -842,18 +914,26 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // (only the owner among the master's editors), and no runtime door refuses
   // the shape — the write is refused per row, by the master gate, as it was.
   //
+  // [#26591] The opt-in admits ONE column: the stored row's `owner_id`, and
+  // only on a detail that carries it (`resolveCbpRelation` resolves it `false`
+  // otherwise). So the arm prescribes it only for a predicate keying the
+  // caller on `owner_id` there; a predicate keyed only on another user field
+  // (`owner == current_user.id`), or on an `owner_id` the detail lacks, is
+  // flagged whether or not the detail opted in, with the remedy that works —
+  // key the accountable person on `owner_id` — and ⛔ never with the opt-in.
+  //
   // Judged on the detail the policy names, as declared in THIS stack, and
   // only where its master resolves (an object that derives no master is
   // refused whole by the two rules above). A wildcard policy names no detail.
   // The opt-in is read through the spec's one reader, raw or parsed, so the
   // unparsed doors (`os lint` on a raw config) read it as the parse does.
-  const cbpDetailsWithoutOptIn = new Set<string>();
+  const cbpDetails = new Map<string, { optedIn: boolean; ownerColumn: boolean }>();
   for (const obj of objects) {
     if (!obj || typeof obj !== 'object' || typeof obj.name !== 'string') continue;
     if (owdOf(obj) !== 'controlled_by_parent' || !resolveCbpRelation(obj)) continue;
-    if (!controlledByParentOwnerMayEdit(obj)) cbpDetailsWithoutOptIn.add(obj.name);
+    cbpDetails.set(obj.name, { optedIn: controlledByParentOwnerMayEdit(obj), ownerColumn: carriesCbpOwnerColumn(obj) });
   }
-  if (cbpDetailsWithoutOptIn.size > 0) {
+  if (cbpDetails.size > 0) {
     for (let i = 0; i < permissionSets.length; i++) {
       const ps = permissionSets[i];
       if (!ps || typeof ps !== 'object') continue;
@@ -862,20 +942,21 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       for (let j = 0; j < policies.length; j++) {
         const policy = policies[j];
         if (!policy || typeof policy !== 'object' || policy.enabled === false) continue;
-        if (typeof policy.object !== 'string' || !cbpDetailsWithoutOptIn.has(policy.object)) continue;
+        const detailName = policy.object;
+        const detail = typeof detailName === 'string' ? cbpDetails.get(detailName) : undefined;
+        if (typeof detailName !== 'string' || !detail) continue;
         if (!UPDATE_CLASS_RLS_OPERATIONS.has(String(policy.operation ?? ''))) continue;
         const policyName = typeof policy.name === 'string' ? policy.name : `(policy ${j})`;
         for (const predicate of ['using', 'check'] as const) {
           const fields = callerIdentityKeyedFields(policy[predicate]);
           if (fields.length === 0) continue;
-          pushCbpOwnerPolicyWithoutOptIn(
-            findings,
-            psName,
-            `permissions[${i}].rowLevelSecurity[${j}].${predicate}`,
-            policyName,
-            policy.object,
-            fields,
-          );
+          const path = `permissions[${i}].rowLevelSecurity[${j}].${predicate}`;
+          // The opt-in admits the caller this predicate names only through
+          // `owner_id`, on a detail that carries it.
+          const admittable = detail.ownerColumn && fields.includes(CBP_OWNER_COLUMN);
+          if (admittable && detail.optedIn) continue;
+          if (admittable) pushCbpOwnerPolicyWithoutOptIn(findings, psName, path, policyName, detailName, fields);
+          else pushCbpCallerPolicyOffOwnerColumn(findings, psName, path, policyName, detailName, fields, detail);
         }
       }
     }

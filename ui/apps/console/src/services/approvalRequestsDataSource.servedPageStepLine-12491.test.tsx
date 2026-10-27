@@ -4,9 +4,15 @@
  *
  * objectui#12491 (face 5 of ruling C on objectui#12438, the seat's Q1 A, Q2 A
  * and Q3 A): on the page objectstack serves for an approval request, a
- * multi-step request shows its vertical step line, and a request no person
- * submitted shows its flow origin, as the approvals inbox's request sheet
- * shows both.
+ * request no person submitted shows its flow origin, as the approvals inbox's
+ * request sheet shows it.
+ *
+ * objectstack#26563: the same page draws NO step line. The row's `flow_steps`
+ * is the flow graph's trunk (`attachFlowSteps` walks it from the start,
+ * preferring `approve`, then `true`, then the first edge), not the route this
+ * request takes, so a request a decision sent down another branch was drawn on
+ * rungs it never visits. The row proves only its own step, so the page draws
+ * none until the approvals read serves the route the run takes.
  *
  * Mounted as the other served-page pins mount it: the REAL `RecordDetailView`,
  * opened by the generic record route under the console's `ApprovalRecordReads`,
@@ -283,33 +289,34 @@ afterEach(() => {
   served = FLOW_ROW;
 });
 
-describe('the served request page shows the flow origin and the step line (objectui#12491)', () => {
+describe('the served request page shows the flow origin (objectui#12491) and no guessed step line (objectstack#26563)', () => {
   it('the served page parses as a spec page, with no node or prop added for either', () => {
     const parsed = PageSchema.safeParse(SERVED_PAGE);
     expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
     expect(SERVED_PAGE.slots.actions).toEqual([{ type: 'record:approval_decision' }]);
   });
 
-  it('a multi-step request shows its vertical step line, every step in order, the current one marked', async () => {
+  it('a multi-step request served with its flow trunk draws no step line, and none of the trunk\'s other rungs', async () => {
     const panel = await openServedPage(FLOW_ROW);
-    const line = await within(panel).findByLabelText(PACK.stepProgress, undefined, { timeout: 8000 });
-    expect(line.tagName).toBe('OL');
-    expect(line.getAttribute('class')?.split(/\s+/)).toContain('flex-col');
-    const rows = within(line).getAllByRole('listitem');
-    expect(rows.map((r) => r.textContent)).toEqual(['Manager review', '2Finance review', '3Director sign-off', '4CFO sign-off']);
-    expect(within(rows[1]).getByText('Finance review').getAttribute('class')?.split(/\s+/)).toContain('font-medium');
-    // A first_response node carries no tally; the line is drawn without one.
+    await within(panel).findByRole('button', { name: 'Approve' }, { timeout: 8000 });
+    expect(within(panel).queryByLabelText(PACK.stepProgress)).toBeNull();
+    expect(within(panel).queryByRole('list')).toBeNull();
+    // The trunk's rungs past this request's own node are guesses: none is drawn.
+    for (const rung of ['Manager review', 'Director sign-off', 'CFO sign-off']) {
+      expect(pageText()).not.toContain(rung);
+    }
+    // A first_response node carries no tally.
     expect(within(panel).queryByRole('progressbar')).toBeNull();
   });
 
   it('a request served with no submitter is marked with the flow origin', async () => {
     expect('submitter_id' in FLOW_ROW).toBe(false);
     const panel = await openServedPage(FLOW_ROW);
-    await within(panel).findByLabelText(PACK.stepProgress, undefined, { timeout: 8000 });
-    expect(marker(panel)?.textContent).toBe(PACK.flowOrigin);
+    const origin = await within(panel).findByTestId('approval-decision-flow-origin', undefined, { timeout: 8000 });
+    expect(origin.textContent).toBe(PACK.flowOrigin);
   });
 
-  it('a decided request still shows its line and its origin', async () => {
+  it('a decided request shows its origin and still no step line', async () => {
     const decided = {
       ...FLOW_ROW,
       status: 'approved',
@@ -317,17 +324,19 @@ describe('the served request page shows the flow origin and the step line (objec
       viewer: { can_act: false, is_submitter: false, can_override: false },
     };
     const panel = await openServedPage(decided);
-    const line = await within(panel).findByLabelText(PACK.stepProgress, undefined, { timeout: 8000 });
-    expect(within(line).getAllByRole('listitem')).toHaveLength(FLOW_STEPS.length);
-    expect(marker(panel)?.textContent).toBe(PACK.flowOrigin);
+    const origin = await within(panel).findByTestId('approval-decision-flow-origin', undefined, { timeout: 8000 });
+    expect(origin.textContent).toBe(PACK.flowOrigin);
+    expect(within(panel).queryByLabelText(PACK.stepProgress)).toBeNull();
   });
 
-  it('CONTROL: a request a person submitted carries no flow-origin marker, and its line is unchanged', async () => {
+  it('CONTROL: a request a person submitted carries no flow-origin marker, and no step line either', async () => {
     const panel = await openServedPage(HUMAN_ROW);
-    const line = await within(panel).findByLabelText(PACK.stepProgress, undefined, { timeout: 8000 });
-    expect(within(line).getAllByRole('listitem')).toHaveLength(FLOW_STEPS.length);
+    // The decision button gates on the served row's `viewer`, which only the
+    // approvals get carries: once it shows, the panel is bound to that row.
+    await within(panel).findByRole('button', { name: 'Approve' }, { timeout: 8000 });
     expect(marker(panel)).toBeNull();
     expect(pageText()).not.toContain(PACK.flowOrigin);
+    expect(within(panel).queryByLabelText(PACK.stepProgress)).toBeNull();
   });
 
   it('CONTROL: a one-step flow draws no line', async () => {

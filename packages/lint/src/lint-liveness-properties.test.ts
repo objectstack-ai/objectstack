@@ -2290,3 +2290,30 @@ describe('#26146 — ledger rows below the child level are graded and counted', 
     expect(shipped.has('synth-depth-three')).toBe(false);
   });
 });
+
+// ── #26548: a report's period and export are declared before the renderer reads them ──
+//
+// `report` joined TYPE_COLLECTIONS with its ledger's first warned rows:
+// `dateRange` and `exportOptions` are `planned` + `authorWarn` until the
+// Console report page reads them. Read off the SHIPPED ledger, so the flip to
+// `live` (which drops `authorWarn`) turns the warning half of this block red
+// on purpose — rewrite it as a silence pin in that same edit.
+describe('report period and export (#26548 — planned until the report renderer reads them)', () => {
+  const report = (extra: Record<string, unknown> = {}) => ({
+    reports: [{ name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'], ...extra }],
+  });
+
+  it('warns on each key, at the report, with the row\'s author hint', () => {
+    const findings = lintLivenessProperties(report({ dateRange: { dimension: 'close_date' }, exportOptions: { formats: ['csv'] } }));
+    const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
+    expect(planned.map((f) => f.message.match(/`(dateRange|exportOptions)`/)?.[1]).sort()).toEqual(['dateRange', 'exportOptions']);
+    for (const f of planned) {
+      expect(f.where).toContain("report 'pipeline'");
+      expect(f.hint).toMatch(/^Keep it, but nothing reads it yet: the Console report page draws no /);
+    }
+  });
+
+  it('CONTROL — a report declaring neither key draws no warning', () => {
+    expect(lintLivenessProperties(report())).toEqual([]);
+  });
+});

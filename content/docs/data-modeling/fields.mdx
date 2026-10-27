@@ -309,6 +309,23 @@ row is unaffected — a user still needs edit access to change any other field o
 it — and the summary column stays subject to the parent's field-level security
 on read.
 
+A child validation rule can read a parent summary one hop through its
+reference, for example "each supplier has at most one primary contact" as a
+`count` summary filtered on `{ is_primary: true }` plus the child rule
+`record.is_primary == true && record.supplier.primary_contact_count > 0`.
+**A bulk create equals one-by-one creates (批量等于逐条):** inside one bulk
+insert (an import batch, `createManyData`, `insertManyData`) each row's rules
+read the summary as it stands after the earlier rows of the same batch that the
+rules admitted, accumulated in memory, so two primary contacts in one import
+create one row and refuse the other with the rule's error. A row the rules
+refuse is not counted. This holds for `count`, and for `sum`, `min` and `max`
+over number values. An `avg` summary, a `sum`/`min`/`max` meeting a value that
+is not a number, and a summary whose `filter` reads a dotted path through
+another reference keep reading the stored value, as they did before.
+**Concurrent writes are not guaranteed (并发不保证):** two writes in flight at
+the same time each read the summary they started from, so a guard like the one
+above can still admit one row from each.
+
 ### Specialized Types
 
 | Type | Factory | Description |

@@ -20,6 +20,8 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
 // [#24625] The mask of a mail-log row's body columns in a copy of it.
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
+// The key-material columns no copy of a row carries (`key-material-copy.ts`).
+import { keyMaterialColumnsOf, omitKeyMaterialFromCopy } from './key-material-copy.js';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -1558,6 +1560,8 @@ export function installAuditWriters(
     if (!titleField || titleField === 'id') return undefined;
     if (collectMaskedReadFields(def).includes(titleField)) return undefined;
     if (collectInternalReadFields(def).includes(titleField)) return undefined;
+    // …and a key-material column, which `ledgerView` omits by the same list.
+    if (keyMaterialColumnsOf(objectName).includes(titleField)) return undefined;
     return titleField;
   };
 
@@ -1854,6 +1858,12 @@ export function installAuditWriters(
     // keeps the body behind its field gate; the copy never holds it in clear.
     // [#24693] One helper, the one the at-rest rewrite of older copies applies.
     maskMailLogBodyCopy(objectName, out);
+    // A column that stores encrypted key material as plain text
+    // (`key-material-copy.ts` lists them and says why neither limb above
+    // reaches one) is OMITTED on every side, as an `internal` field is: the
+    // copy records which row changed and how, never the material. One helper,
+    // the one the at-rest rewrite of older copies applies.
+    omitKeyMaterialFromCopy(objectName, out);
     // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
     // is not a top-level secret field, so the mask above never touches it. The
     // audit copy is a credential read exit exactly like `/meta`, so the body is

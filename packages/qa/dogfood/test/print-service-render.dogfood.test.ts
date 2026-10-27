@@ -18,7 +18,11 @@
 //    `sys_file.owner_id` and `sys_attachment.uploaded_by` the requester;
 //  - the minted session gone after the print — after a success and after a
 //    forced failure (the archive's byte store refusing after the render);
-//  - the minted cookie in no refusal message.
+//  - the minted cookie in no refusal message;
+//  - a project printed on a print page that is NOT its object's default record
+//    page (the brief of `print-named-page.fixture.ts`, saved through the
+//    metadata save door), through the console's named record-page route
+//    (#26583).
 //
 // Needs two things this suite's CI job does not build: the Console bundle
 // (`packages/console/dist`, `pnpm objectui:build`) and a Chromium
@@ -38,6 +42,7 @@ import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import type { IAuthService, IDataEngine, IStorageService, PrincipalSession } from '@objectstack/spec/contracts';
 import { bootShowcase } from './showcase-boot.js';
+import { PROJECT_BRIEF_PAGE } from './print-named-page.fixture.js';
 import { createConsoleStaticPlugin } from '../../../cli/src/utils/console.js';
 import { PrintServicePlugin } from '../../../services/service-print/src/print-service-plugin.js';
 import type { IPrintService } from '../../../services/service-print/src/print-service.js';
@@ -180,6 +185,8 @@ for (const placement of ['local', 'remote'] as const) {
 
       print = stack.kernel.getService<IPrintService>('print');
       ql = stack.kernel.getService<IDataEngine>('objectql');
+      const protocol = await stack.kernel.getServiceAsync<{ saveMetaItem(r: Record<string, unknown>): Promise<unknown> }>('protocol');
+      await protocol.saveMetaItem({ type: 'page', name: PROJECT_BRIEF_PAGE.name, item: PROJECT_BRIEF_PAGE });
       // Observe each mint (the plugin reads the auth service per call): keep the
       // cookie so the test can ask, afterwards, whether it still opens a session.
       const auth = stack.kernel.getService<IAuthService>('auth');
@@ -239,6 +246,30 @@ for (const placement of ['local', 'remote'] as const) {
       expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
       expect(bytes.byteLength).toBe(out.size);
       // The minted session is gone.
+      expect(minted).toHaveLength(1);
+      expect(await opensASession(minted[0]!)).toEqual([401, 'UNAUTHENTICATED']);
+    }, 120_000);
+
+    it('prints a project on a print page that is not its default record page, through the named record-page route', async () => {
+      const token = await stack.signIn();
+      const ctx = await stack.contextFor(token);
+      const [project] = await ql.find('showcase_project', { limit: 1 }, { context: SYS });
+      const projectId = String(project!.id);
+      sessionUsers.length = 0;
+      minted.length = 0;
+
+      const out = await print.printRecordToFile(
+        { app: APP, object: 'showcase_project', recordId: projectId, page: PROJECT_BRIEF_PAGE.name },
+        ctx,
+      );
+
+      expect(new Set(sessionUsers)).toEqual(new Set([ctx.userId]));
+      const file = await ql.findOne('sys_file', { where: { id: out.fileId } }, { context: SYS });
+      const attachment = await ql.findOne('sys_attachment', { where: { id: out.attachmentId } }, { context: SYS });
+      expect(file).toMatchObject({ status: 'committed', mime_type: 'application/pdf', owner_id: ctx.userId });
+      expect(attachment).toMatchObject({ parent_object: 'showcase_project', parent_id: projectId, uploaded_by: ctx.userId });
+      const bytes = await stack.kernel.getService<IStorageService>('storage').download(String(file!.key));
+      expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
       expect(minted).toHaveLength(1);
       expect(await opensASession(minted[0]!)).toEqual([401, 'UNAUTHENTICATED']);
     }, 120_000);

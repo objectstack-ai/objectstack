@@ -713,14 +713,20 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'platform\'s injected per-record owner — updates that row by id with READ access to the master, ' +
       'and the detail\'s own policies then decide as authored. Everyone else, and every insert, delete, ' +
       'multi-row update and on-behalf-of write, still needs edit access to the master. The opt-in ' +
-      'reads `owner_id` and nothing else: a policy keyed on another field stays a narrowing even ' +
-      'after it, so key the policy on `owner_id` or declare what the other field means in prose.',
+      'reads the stored `owner_id` and nothing else, and only on a detail that carries that column ' +
+      '(`ownership: \'user\'`, the default; never `\'business_unit\'`, `\'org\'` or `\'none\'`). So the ' +
+      'rule prescribes the opt-in only for a policy that keys the caller on `owner_id` there. A policy ' +
+      'keyed only on another user field — `owner == current_user.id`, where `owner` is the detail\'s own ' +
+      'accountable-person field — stays a narrowing with or without the opt-in, and the rule says so in ' +
+      'both states instead of prescribing an opt-in that would not admit that user.',
     'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
-      'editors may update), and no runtime door refuses the shape. To fix it, declare the opt-in on ' +
-      'the detail when the owner is meant to write with read on the master, or drop the policy when ' +
-      'the master gate alone is the intended rule. The opt-in is refused by the parse on an object ' +
-      'whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where nothing ' +
-      'reads it.',
+      'editors may update), and no runtime door refuses the shape. To fix a policy keyed on `owner_id`, ' +
+      'declare the opt-in on the detail when the owner is meant to write with read on the master, or ' +
+      'drop the policy when the master gate alone is the intended rule. To fix a policy keyed on another ' +
+      'user field, keep the accountable person in `owner_id` (the column the master gate compares the ' +
+      'caller against) and key the policy on it, or drop the policy. The opt-in is refused by the parse ' +
+      'on an object whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where ' +
+      'nothing reads it.',
   ],
 };
 
@@ -4984,6 +4990,48 @@ const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
  */
+// ── Report date range (`validate-report-date-range.ts`) ──────────────────────
+
+const REPORT_DATE_RANGE_SHARED_PARAGRAPHS: readonly string[] = [
+  'A report\'s `dateRange` is a period over ONE dimension of the dataset the report binds, and that ' +
+    'dimension must declare `type: \'date\'`: the analytics compiler types exactly those as time ' +
+    'dimensions, and any other dimension, `type` absent included, as a string axis that cannot carry a ' +
+    'date window. A dimension over a date column that does not say `type: \'date\'` is not a date ' +
+    'dimension.',
+  'Name it in `dateRange.dimension`. When `dimension` is omitted, the dataset\'s one `type: \'date\'` ' +
+    'dimension is used; a dataset that declares none, or two or more, is an error naming what it found, ' +
+    'because the period would otherwise apply to no column, or to one nobody chose. That is the rule a ' +
+    'dashboard\'s omitted `compareTo.dimension` follows.',
+  'The report schema parses without the dataset, so it checks only the shape of `dateRange`; this rule ' +
+    'is the dataset-aware half and runs on `os validate`, `os build` and when a report is published. Not ' +
+    'judged here: a report whose `dataset` resolves to nothing (`chart-dataset-unknown` reports that ' +
+    'once), and a `joined` report, whose `dateRange` the schema refuses.',
+];
+
+const REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-unknown',
+  covers: 'which dimension a report date range applies to',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-not-date',
+  covers: 'what makes a dataset dimension a date dimension',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-ambiguous',
+  covers: 'how an omitted date range dimension is resolved',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
+const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
+  rule: 'report-date-range-dimension-none',
+  covers: 'how an omitted date range dimension is resolved',
+  paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5176,6 +5224,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DOCS_NAV_TARGET_EXPLANATION.rule]: DOCS_NAV_TARGET_EXPLANATION,
   [DOCS_FRONTMATTER_TAGS_EXPLANATION.rule]: DOCS_FRONTMATTER_TAGS_EXPLANATION,
   [PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION.rule]: PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_UNKNOWN_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
+  [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */
