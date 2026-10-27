@@ -178,10 +178,10 @@ export interface AuditWriterOptions {
   /**
    * The `@mention` recipient gate (`mention-recipient-gate.ts`): the mentioned
    * users who may be notified about a comment — each resolved to a user id,
-   * minus the author, minus everyone who cannot READ the comment's record.
-   * AuditPlugin wires the real gate. Absent → no mention notification is
-   * emitted at all (fail closed, said once): the writer cannot tell on its own
-   * who may see the record a notification would preview.
+   * minus the author, minus everyone who cannot READ the comment's record or
+   * the comment itself. AuditPlugin wires the real gate. Absent → no mention
+   * notification is emitted at all (fail closed, said once): the writer cannot
+   * tell on its own who may see the comment a notification would preview.
    */
   admitMentionRecipients?(input: MentionGateInput): Promise<string[]>;
 }
@@ -2529,7 +2529,7 @@ export function installAuditWriters(
   /**
    * M10.8: Dedicated hook on `sys_comment` afterInsert that parses the
    * `mentions` JSON field and writes one sys_notification per mentioned
-   * user who can read the comment's record (`admitMentionRecipients`).
+   * user who can read the comment and its record (`admitMentionRecipients`).
    * Lives outside `writeAudit` because sys_comment is in
    * SKIP_OBJECTS (we don't want audit/activity rows for comments —
    * those have their own first-class feed).
@@ -2565,9 +2565,9 @@ export function installAuditWriters(
     const commentId = row.id != null ? String(row.id) : null;
 
     // The notification is a copy of the comment (its preview) and a link to
-    // the record, so it reaches only a mentioned user who can READ that
-    // record — never a raw id or email from the client-written list. The
-    // author is dropped there too.
+    // the record, so it reaches only a mentioned user who can READ both the
+    // comment and that record — never a raw id or email from the
+    // client-written list. The author is dropped there too.
     if (!opts.admitMentionRecipients) {
       if (!warnedNoMentionGate) {
         warnedNoMentionGate = true;

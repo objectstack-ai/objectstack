@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: four spawns, one per (command, flags, fixture) triple, one per case and step (`validate --json`, `verify --json` and `verify` on the planted stack, `verify` on the clean control); slowest CI reading 38.85 s (run 40392443783) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * PIN — `os verify` runs the author-time rules FIRST, and a stack they refuse

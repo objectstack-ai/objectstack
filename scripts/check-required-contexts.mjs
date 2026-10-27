@@ -1506,8 +1506,8 @@ export async function scanInstructionSurfaces(
  * its seat class — hence this paragraph. Two seat classes, both dead ends;
  * there is no third spelling that works from here.
  *
- * The standing caller is therefore `.github/workflows/required-set-patrol.yml`
- * (#9678), where a runner reaches the API directly with the workflow's own
+ * The standing caller is therefore the `required-set-patrol` job of
+ * `.github/workflows/fleet-patrols.yml` (#9678), where a runner reaches the API directly with the workflow's own
  * GITHUB_TOKEN — no proxy env and no `--use-env-proxy` needed. It is scheduled,
  * report-only and ⛔ never a required context; the "live mode stays OFF the
  * required path" block in `--self-test` pins that from this side.
@@ -1707,7 +1707,7 @@ export const EXIT_ENVIRONMENT = 2;
  * self-test can assert the caller EXISTS and that nothing else runs the flag.
  * Repo-root-relative to `.github/workflows/`.
  */
-export const PATROL_WORKFLOW = 'required-set-patrol.yml';
+export const PATROL_WORKFLOW = 'fleet-patrols.yml';
 
 /**
  * The clean mark a COMPLETED sweep renders when the two lists agree in both
