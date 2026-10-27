@@ -1,4 +1,5 @@
 ---
+'@objectstack/spec': patch
 '@object-ui/types': minor
 '@object-ui/plugin-calendar': minor
 '@object-ui/plugin-gantt': minor
@@ -18,6 +19,7 @@ Metadata-protocol: narrowed
 - **`@object-ui/types`**: `ObjectCalendarSchema` (TypeScript and zod) no longer declares `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat; they are written in its `calendar` block. The `dateField` / `endField` tombstones stay and now prescribe `calendar.startDateField` / `calendar.endDateField`. `ObjectGanttSchema` no longer declares the 29 `GanttConfig` keys flat (`startDateField`, `endDateField`, `titleField`, `progressField`, `dependenciesField`, `colorField`, `viewMode`, `summaryExtent`, `interactions` and the rest), nor the legacy `dependencyField` alias or the `search` / `searchableFields` pair; they are written in its `gantt` block (the pair is not authored at all). `staticData`, `filter`, `sort`, `gantt` and the other node keys stay. For `object-gantt` the strict authoring face already refused every flat key (its arm is the `properties` bag), so the narrowing there is the published TypeScript and zod export.
 - **`@object-ui/plugin-calendar`**: `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` type the flat read `getCalendarConfig` keeps for a host that mounts the renderer directly. The renderer is unchanged: the `calendar` block wins, and the flat spelling is read only without it.
 - **`@object-ui/plugin-gantt`**: `ObjectGanttFlatFields` (derived from `GanttConfig`, plus the alias and the search pair) and `ObjectGanttHandoff` type the flat read the same way. The renderer is unchanged.
+- **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say `ObjectView` / `ListView` emit the flat spelling; they hand the binding off in the block, and the flat spelling is only a stored-document fallback the renderer still reads. The prescription itself is unchanged.
 - **`@object-ui/plugin-list`** and **`@object-ui/plugin-view`**: `ListView` and `ObjectView`'s `generateViewSchema` emit `calendar: { … }` and `gantt: { … }` on the node they build instead of the flat keys. They emit the block only where the renderer's flat branch drew: a calendar once `startDateField` is declared, a gantt once both dates are, with `titleField` floored at `'name'` as that branch floored it. A gantt binding carrying a value the spec's `GanttConfigSchema` refuses (a pre-door stored `options.gantt`, say) goes out nested too, and now shows the renderer's refusal screen where the unvalidated flat branch drew it.
 
 **BREAKING** for TypeScript code or hand-written nodes that write the flat keys on these two node types.

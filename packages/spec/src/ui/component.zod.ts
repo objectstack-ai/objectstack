@@ -6209,9 +6209,9 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'titleField'],
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
-      + 'endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff '
-      + '`ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is '
-      + 'not a second authorable spelling (one key per concept, Prime Directive #12).',
+      + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
+      + 'off in that block too; the flat spelling is only a stored-document fallback the renderer still '
+      + 'reads, not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
 ];
 
@@ -7561,9 +7561,10 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'endDateField', 'viewMode'],
     prescription:
       'Write this as a key of the `gantt` config object instead — `gantt: { startDateField, endDateField, '
-      + 'titleField, ... }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
-      + 'produce when they flatten `options.gantt`, not a second authoring spelling: whenever a `gantt` '
-      + 'block is present the renderer takes it WHOLE and names every flat key beside it as ignored. The '
+      + 'titleField, ... }`. `ObjectView`/`ListView` hand the binding off in that block too; the flat '
+      + 'top-level spelling is only a stored-document fallback the renderer still reads, not a second '
+      + 'authoring spelling: whenever a `gantt` block is present the renderer takes it WHOLE and names '
+      + 'every flat key beside it as ignored. The '
       + 'legacy singular `dependencyField` is `dependenciesField` inside that block.',
   },
 ];
