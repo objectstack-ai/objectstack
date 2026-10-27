@@ -64,7 +64,9 @@
  *     the API will ACCEPT two creates for one tag inside one second: 17.6.0
  *     has five tags carrying two Release objects each. No request sequence on
  *     this side can prevent that, so after its writes the script reads the
- *     Releases list and names every tag it released that has more than one.
+ *     Releases list and names every tag it released that has more than one
+ *     distinct Release id — the list's offset pages can serve one Release
+ *     twice while it moves, and that is one Release.
  *     A duplicate this run CREATED one of fails the run (`::error::`) — the
  *     race was this run's, and without the failure the convergence above
  *     would turn a red race into a green run with a duplicate in it. A
@@ -898,8 +900,21 @@ export const AUDIT_MAX_PAGES = 10;
  * contiguous run of that list (see `listPage`), so the walk stops at the first
  * page holding none of `tagNames` after one that did, or at the end of the
  * list, and is `complete` only when it stopped for one of those two reasons.
- * Every tag it never saw is returned in `unseen`: the audit cannot vouch for
- * those. Read-only — it never deletes, and nothing in this file does.
+ * Read-only — it never deletes, and nothing in this file does.
+ *
+ * The pages are offset slices of a list that can move while it is read: one
+ * version's Releases all carry the same tag date, so their order among
+ * themselves is not stable from one request to the next, and a Release created
+ * between two reads pushes every row down. Either way a row can be served on
+ * two pages and another on none — release run 40464600678 listed one
+ * `@object-ui/fields@18.2.0` Release (id 425135424) twice and never showed
+ * `@object-ui/types@18.2.0`. So a duplicate is two DISTINCT ids on one tag; the
+ * same id served twice is one Release, counted in `rowsServedTwice`. And a tag
+ * a complete walk never saw is re-read by tag before it is called unseen: a
+ * Release the by-tag endpoint answers exists, and is returned in `foundByTag`.
+ * Every tag still missing after that is returned in `unseen`: the audit cannot
+ * vouch for those. A walk that stopped at its page cap re-reads nothing — its
+ * unseen tags may sit, twins and all, on the pages it never read.
  *
  * @param {object} opts
  * @param {ReturnType<typeof createReleasesClient>} opts.client
@@ -910,6 +925,8 @@ export const AUDIT_MAX_PAGES = 10;
  * @returns {Promise<{
  *   duplicates: { tagName: string; releases: { id: number; assets: string[] }[]; byTagId: number | null; createdByThisRun: number[] }[];
  *   unseen: string[];
+ *   foundByTag: string[];
+ *   rowsServedTwice: number;
  *   pagesRead: number;
  *   complete: boolean;
  * }>}
@@ -922,11 +939,12 @@ export async function auditDuplicateReleases({
   maxPages = AUDIT_MAX_PAGES,
 }) {
   const wanted = new Set(tagNames);
-  /** @type {Map<string, { id: number; assets: string[] }[]>} */
+  /** @type {Map<string, Map<number, { id: number; assets: string[] }>>} keyed by release id */
   const byTag = new Map();
   let seenAny = false;
   let complete = false;
   let pagesRead = 0;
+  let rowsServedTwice = 0;
 
   for (let page = 1; page <= maxPages; page += 1) {
     const releases = await client.listPage({ page, perPage });
@@ -935,9 +953,10 @@ export async function auditDuplicateReleases({
     for (const rel of Array.isArray(releases) ? releases : []) {
       if (!wanted.has(rel.tag_name)) continue;
       hits += 1;
-      const list = byTag.get(rel.tag_name) ?? [];
-      list.push({ id: rel.id, assets: (rel.assets ?? []).map((a) => a.name) });
-      byTag.set(rel.tag_name, list);
+      const ids = byTag.get(rel.tag_name) ?? new Map();
+      if (ids.has(rel.id)) rowsServedTwice += 1; // the list moved between two page reads
+      else ids.set(rel.id, { id: rel.id, assets: (rel.assets ?? []).map((a) => a.name) });
+      byTag.set(rel.tag_name, ids);
     }
     if (hits > 0) seenAny = true;
     else if (seenAny) {
@@ -953,9 +972,9 @@ export async function auditDuplicateReleases({
   const ours = new Set(createdIds);
   const duplicates = [];
   for (const tagName of tagNames) {
-    const releases = byTag.get(tagName);
-    if (!releases || releases.length < 2) continue;
-    releases.sort((a, b) => a.id - b.id);
+    const ids = byTag.get(tagName);
+    if (!ids || ids.size < 2) continue;
+    const releases = [...ids.values()].sort((a, b) => a.id - b.id);
     // Which one `gh release view` / `gh release upload` resolve the tag to,
     // and so where the ADR-0087 D4 asset lands: the report's cleanup anchor.
     let byTagId = null;
@@ -972,22 +991,45 @@ export async function auditDuplicateReleases({
     });
   }
 
-  return { duplicates, unseen: tagNames.filter((t) => !byTag.has(t)), pagesRead, complete };
+  const unseen = [];
+  const foundByTag = [];
+  for (const tagName of tagNames) {
+    if (byTag.has(tagName)) continue;
+    let found = null;
+    if (complete) {
+      try {
+        found = await client.findByTag(tagName);
+      } catch {
+        found = null; // an unreadable by-tag answer vouches for nothing
+      }
+    }
+    (found ? foundByTag : unseen).push(tagName);
+  }
+
+  return { duplicates, unseen, foundByTag, rowsServedTwice, pagesRead, complete };
 }
 
 /**
  * Turn an audit into the lines `main` prints: `errors` fail the run,
- * `warnings` do not. A duplicate this run created one of is an error; one that
- * predates this run's writes is a warning (the header says why).
+ * `warnings` do not, and `notes` are plain log lines. A duplicate this run
+ * created one of is an error; one that predates this run's writes is a
+ * warning (the header says why). A list that moved under the walk is a note:
+ * it is the API's paging, not a fact about any tag.
  *
  * @param {Awaited<ReturnType<typeof auditDuplicateReleases>>} audit
- * @returns {{ errors: string[]; warnings: string[] }}
+ * @returns {{ errors: string[]; warnings: string[]; notes: string[] }}
  */
 export function describeDuplicates(audit) {
   const errors = [];
   const warnings = [];
+  const notes = [];
   for (const d of audit.duplicates) {
-    const list = d.releases
+    // One id listed twice is one Release, whatever handed it over: a duplicate
+    // is two distinct ids, so the surplus below is never an empty list.
+    const releases = [...new Map(d.releases.map((r) => [r.id, r])).values()];
+    if (releases.length < 2) continue;
+    const surplus = releases.filter((r) => r.id !== d.byTagId).map((r) => r.id);
+    const list = releases
       .map((r) => `${r.id} (${r.assets.length ? `assets: ${r.assets.join(', ')}` : 'no assets'})`)
       .join(', ');
     const anchor =
@@ -995,14 +1037,15 @@ export function describeDuplicates(audit) {
         ? 'The by-tag endpoint could not be read, so which one `gh release view` resolves the tag to is unknown.'
         : `The by-tag endpoint — what \`gh release view\` and \`gh release upload\` resolve the tag to, and so ` +
           `where the ADR-0087 D4 asset is attached — answers ${d.byTagId}; the other(s), ` +
-          `${d.releases.filter((r) => r.id !== d.byTagId).map((r) => r.id).join(', ')}, are the surplus.`;
-    const head = `${d.tagName} has ${d.releases.length} GitHub Releases: ${list}. ${anchor}`;
+          `${surplus.join(', ')}, are the surplus.`;
+    const head = `${d.tagName} has ${releases.length} GitHub Releases: ${list}. ${anchor}`;
     const tail =
       'This script never deletes a Release; deleting the surplus is a release act and the maintainer\'s call ' +
       '(AGENTS.md Prime Directive 15).';
-    if (d.createdByThisRun.length > 0) {
+    const createdByThisRun = [...new Set(d.createdByThisRun)];
+    if (createdByThisRun.length > 0) {
       errors.push(
-        `${head} This run created ${d.createdByThisRun.join(', ')}: the Releases API accepted a second create ` +
+        `${head} This run created ${createdByThisRun.join(', ')}: the Releases API accepted a second create ` +
           `for one tag from a concurrent writer. ${tail}`,
       );
     } else {
@@ -1022,7 +1065,19 @@ export function describeDuplicates(audit) {
         'whether those tags carry more than one Release is UNVERIFIED by this run.',
     );
   }
-  return { errors, warnings };
+  const foundByTag = audit.foundByTag ?? [];
+  if ((audit.rowsServedTwice ?? 0) > 0 || foundByTag.length > 0) {
+    notes.push(
+      `the Releases list moved while the duplicate audit read it: ${audit.rowsServedTwice ?? 0} row(s) were ` +
+        `served on two pages and counted once` +
+        (foundByTag.length
+          ? `, and ${foundByTag.length} tag(s) no page showed were read by tag and exist ` +
+            `(${foundByTag.slice(0, 5).join(', ')}${foundByTag.length > 5 ? ', …' : ''})`
+          : '') +
+        '.',
+    );
+  }
+  return { errors, warnings, notes };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1091,8 +1146,8 @@ async function main({ dryRun = false } = {}) {
   // After the writes, never instead of them: a duplicate is made by a
   // concurrent writer's create, and this run's last POST may be the one that
   // completed the pair.
-  /** @type {{ errors: string[]; warnings: string[] }} */
-  let duplicateReport = { errors: [], warnings: [] };
+  /** @type {{ errors: string[]; warnings: string[]; notes: string[] }} */
+  let duplicateReport = { errors: [], warnings: [], notes: [] };
   try {
     const audit = await auditDuplicateReleases({ client, tagNames: plans.map((p) => p.tagName), createdIds });
     duplicateReport = describeDuplicates(audit);
@@ -1103,6 +1158,7 @@ async function main({ dryRun = false } = {}) {
         'more than one Release is UNVERIFIED by this run.',
     );
   }
+  for (const n of duplicateReport.notes) console.log(n);
   for (const w of duplicateReport.warnings) console.log(`::warning::${w}`);
   for (const e of duplicateReport.errors) console.log(`::error::${e}`);
 
@@ -1174,6 +1230,8 @@ const STUB_TAG_DATE = '2026-10-02T02:49:42Z';
  * @param {{ id: number; tag_name: string; created_at: string; assets?: { name: string }[] }[]} [opts.seed]
  *   further Releases already in the store (older versions, pre-existing duplicates)
  * @param {boolean} [opts.tick] yield a macrotask per request, so two concurrent runs interleave
+ * @param {(ordered: any[], page: number, perPage: number) => any[]} [opts.listMoves] reshapes the
+ *   newest-first list just before a page is cut from it — the list moving between two page reads
  */
 function stubFetch({
   existing = {},
@@ -1183,6 +1241,7 @@ function stubFetch({
   hideAfterRace = new Map(),
   seed = [],
   tick = false,
+  listMoves = (ordered) => ordered,
 } = {}) {
   /** @type {{ method: string; url: string; body: any }[]} */
   const calls = [];
@@ -1225,7 +1284,7 @@ function stubFetch({
         const perPage = Number(list[1]);
         const page = Number(list[2]);
         const ordered = [...releases].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
-        return stubResponse(200, ordered.slice((page - 1) * perPage, page * perPage));
+        return stubResponse(200, listMoves(ordered, page, perPage).slice((page - 1) * perPage, page * perPage));
       }
       return stubResponse(404, { message: 'Not Found' });
     }
