@@ -2646,6 +2646,9 @@ const ru = {
       invitationDescription: "Используйте адрес электронной почты, на который пришло приглашение.",
       invitationSignUpButton: "Создать учётную запись и присоединиться",
       invitationSignInDivider: "или войдите в существующую учётную запись",
+      invitationPreviewTitle: "{{inviter}} приглашает вас в {{organization}}",
+      invitationPreviewTitleNoInviter: "Вас приглашают в {{organization}}",
+      invitationPreviewDescription: "Используйте адрес электронной почты, на который пришло приглашение ({{email}}).",
       showPasswordText: "Показать пароль",
       hidePasswordText: "Скрыть пароль",
       footer: {
@@ -2658,6 +2661,7 @@ const ru = {
       description: "Введите свои данные, чтобы начать",
       invitationTitle: "Создайте учётную запись, чтобы присоединиться",
       invitationDescription: "Зарегистрируйтесь с адресом, на который пришло приглашение. Принять его можно только с этим адресом.",
+      invitationPreviewDescription: "Зарегистрируйтесь с адресом, на который пришло приглашение ({{email}}). Принять его можно только с этим адресом.",
       nameLabel: "Имя",
       namePlaceholder: "Иван Иванов",
       emailLabel: "Электронная почта",

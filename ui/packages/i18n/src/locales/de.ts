@@ -2533,6 +2533,9 @@ const de = {
       invitationDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde.",
       invitationSignUpButton: "Konto erstellen und beitreten",
       invitationSignInDivider: "oder mit einem bestehenden Konto anmelden",
+      invitationPreviewTitle: "{{inviter}} hat Sie eingeladen, {{organization}} beizutreten",
+      invitationPreviewTitleNoInviter: "Sie sind eingeladen, {{organization}} beizutreten",
+      invitationPreviewDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde ({{email}}).",
       showPasswordText: "Passwort anzeigen",
       hidePasswordText: "Passwort verbergen",
       footer: {
@@ -2545,6 +2548,7 @@ const de = {
       description: "Geben Sie Ihre Daten ein, um loszulegen",
       invitationTitle: "Konto erstellen, um beizutreten",
       invitationDescription: "Registrieren Sie sich mit der E-Mail-Adresse, an die die Einladung gesendet wurde. Nur mit dieser Adresse kann sie angenommen werden.",
+      invitationPreviewDescription: "Registrieren Sie sich mit der E-Mail-Adresse, an die die Einladung gesendet wurde ({{email}}). Nur mit dieser Adresse kann sie angenommen werden.",
       nameLabel: "Name",
       namePlaceholder: "Max Mustermann",
       emailLabel: "E-Mail",

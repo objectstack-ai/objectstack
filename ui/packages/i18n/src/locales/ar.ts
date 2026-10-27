@@ -2743,6 +2743,9 @@ const ar = {
       invitationDescription: "استخدم البريد الإلكتروني الذي أُرسلت إليه الدعوة.",
       invitationSignUpButton: "إنشاء حساب والانضمام",
       invitationSignInDivider: "أو سجّل الدخول بحساب موجود",
+      invitationPreviewTitle: "دعاك {{inviter}} للانضمام إلى {{organization}}",
+      invitationPreviewTitleNoInviter: "أنت مدعو للانضمام إلى {{organization}}",
+      invitationPreviewDescription: "استخدم البريد الإلكتروني الذي أُرسلت إليه الدعوة ({{email}}).",
       showPasswordText: "إظهار كلمة المرور",
       hidePasswordText: "إخفاء كلمة المرور",
       footer: {
@@ -2755,6 +2758,7 @@ const ar = {
       description: "أدخل معلوماتك للبدء",
       invitationTitle: "أنشئ حسابًا للانضمام",
       invitationDescription: "سجّل بالبريد الإلكتروني الذي أُرسلت إليه الدعوة، فلا يمكن قبولها إلا بهذا العنوان.",
+      invitationPreviewDescription: "سجّل بالبريد الإلكتروني الذي أُرسلت إليه الدعوة ({{email}})، فلا يمكن قبولها إلا بهذا العنوان.",
       nameLabel: "الاسم",
       namePlaceholder: "محمد أحمد",
       emailLabel: "البريد الإلكتروني",

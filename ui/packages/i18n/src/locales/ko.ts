@@ -2533,6 +2533,9 @@ const ko = {
       invitationDescription: "초대를 받은 이메일 주소를 사용하세요.",
       invitationSignUpButton: "계정 만들고 참여하기",
       invitationSignInDivider: "또는 기존 계정으로 로그인",
+      invitationPreviewTitle: "{{inviter}} 님이 {{organization}}에 초대했습니다",
+      invitationPreviewTitleNoInviter: "{{organization}}에 초대되었습니다",
+      invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})를 사용하세요.",
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2545,6 +2548,7 @@ const ko = {
       description: "정보를 입력하여 시작하세요",
       invitationTitle: "계정을 만들고 참여하기",
       invitationDescription: "초대를 받은 이메일 주소로 가입하세요. 초대는 해당 주소로만 수락할 수 있습니다.",
+      invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})로 가입하세요. 초대는 해당 주소로만 수락할 수 있습니다.",
       nameLabel: "이름",
       namePlaceholder: "홍길동",
       emailLabel: "이메일",
