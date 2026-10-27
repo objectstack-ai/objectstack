@@ -233,8 +233,10 @@ describe('package.json `files` entries exist on disk (objectui#3663)', () => {
     // floors sit just under the measured values on main@dae1ac41e (40 packages
     // declaring `files`, 159 entries) so that losing a workspace root, a broken
     // glob parser or a moved directory is a failure and not a quiet pass.
+    // The entry floor came down when `@object-ui/plugin-ai` retired
+    // (objectstack#25921): 149 entries measured then.
     expect(packagesWithFiles.length).toBeGreaterThanOrEqual(38);
-    expect(declared.length).toBeGreaterThanOrEqual(150);
+    expect(declared.length).toBeGreaterThanOrEqual(145);
 
     // The specimen package must be in scope by name: if plugin-tree ever drops
     // out of the scan, the guard has stopped watching the exact spot that
