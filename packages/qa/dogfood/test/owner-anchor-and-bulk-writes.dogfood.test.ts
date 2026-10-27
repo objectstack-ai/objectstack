@@ -160,6 +160,42 @@ describe('owner anchor guard + owner-scoped bulk writes (#3004 / #2982)', () => 
     expect(back.status).toBeLessThan(300);
   });
 
+  // ── access-security.write-path-guards negative[0] + acceptance[4] (#26571) ──
+  // The guard gates on privilege, not on the key: the forge and the disown the
+  // member is refused above succeed for the privileged caller. And the
+  // REST bulk create stamps the caller as owner on every row it leaves empty.
+
+  it('a privileged caller CAN insert a record owned by someone else (forge is privilege-gated)', async () => {
+    const r = await stack.apiAs(adminToken, 'POST', OBJ, { title: 'admin-planted for bob', owner_id: bobId });
+    expect(r.status, 'platform admin forge-insert must pass').toBeLessThan(300);
+    expect(await ownerOf(idOf(await r.json())), 'the row is owned by the named user').toBe(bobId);
+  });
+
+  it('a privileged caller CAN disown a record (owner_id: null)', async () => {
+    const made = await stack.apiAs(adminToken, 'POST', OBJ, { title: 'admin disown probe', owner_id: aliceId });
+    expect(made.status).toBeLessThan(300);
+    const id = idOf(await made.json());
+    const r = await stack.apiAs(adminToken, 'PATCH', `${OBJ}/${id}`, { owner_id: null });
+    expect(r.status, 'platform admin disown must pass').toBeLessThan(300);
+    expect(await ownerOf(id) ?? null, 'the anchor is cleared').toBeNull();
+  });
+
+  it('a member’s REST createMany with no owner_id stamps the caller on every row', async () => {
+    const r = await stack.apiAs(aliceToken, 'POST', `${OBJ}/createMany`, [
+      { title: 'alice bulk 1' },
+      { title: 'alice bulk 2' },
+      { title: 'alice bulk 3' },
+    ]);
+    const body: any = await r.json();
+    expect(r.status, `bulk create as a member — got ${JSON.stringify(body)}`).toBeLessThan(300);
+    const rows = await ql.find('showcase_private_note', {
+      where: { title: { $in: ['alice bulk 1', 'alice bulk 2', 'alice bulk 3'] } },
+      context: { isSystem: true },
+    });
+    expect(rows.length, 'all three rows were created').toBe(3);
+    for (const row of rows) expect(row.owner_id, `${row.title} owner`).toBe(aliceId);
+  });
+
   // ── #3004 × #2982 — bulk change-set carrying owner_id fails closed ─────────
 
   it('a bulk update whose change-set carries owner_id fails closed for a member', async () => {

@@ -137,7 +137,7 @@ GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.
   是协议载体、不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取
   义务条款)。**这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。
 - **正文**,按此顺序:
-  - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
+  - **环境指纹** —— framework sha(`ui/` 在内)、端口、db、seed、时间戳。
   - **范围** —— 选择器 + 每项所对的 `revision`。
   - **逐条款判定表** —— 项 · 条款 · 判定 · 一行**文本** oracle 证据
     (API/网络/构建/测试结果 —— 服务端真相,永不是像素)。
