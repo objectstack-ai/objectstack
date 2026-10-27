@@ -19,7 +19,7 @@
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项(schema/governed 两面加 ④)、
+- 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项(申报面外三面加 ④)、
   独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
   无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
@@ -27,7 +27,7 @@
   有行必校,缺行旧记录不改判。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
-- ④ 设计判断只欠 schema 与 governed 规则文本两面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
+- ④ 设计判断欠 schema、governed 规则文本、收窄三面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
   逐 `hits` 文件判改动对所引代码与验收场景是否成立,ADR 另判首个消费者与执行计划;
   被引代码读而不审;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。
 - 实质 head 各欠一轮完整复核;只落发现的 commit 由同一复核者 delta 复核;无 must-fix 即止。

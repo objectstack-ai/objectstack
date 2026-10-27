@@ -69,6 +69,7 @@ import {
   type KanbanLanePagingRequest,
 } from './KanbanLanePaging';
 import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
+import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
 
 /**
  * English fallbacks for the record-detail drawer heading this board opens on
@@ -1480,19 +1481,26 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         }
     }
 
-    // Try to get options from metadata
+    // Try to get options from metadata. The lanes follow the options' declared
+    // lifecycle `kind` — open → won → lost, lost lanes collapsed — when the
+    // field declares one (`lanesFromOptions`, objectstack#26612). The kind is
+    // read off the RAW options by value, so the i18n hop cannot drop it.
     if (schema.groupBy && objectDef?.fields?.[schema.groupBy]?.options) {
-        const rawOptions = objectDef.fields[schema.groupBy].options.map((opt: any) => ({
+        const declared = objectDef.fields[schema.groupBy].options as Array<any>;
+        const rawOptions = declared.map((opt: any) => ({
             value: opt.value,
             label: opt.label,
         }));
+        const kindOf = new Map<unknown, LaneLifecycleKind>();
+        for (const opt of declared) {
+          if (opt?.kind !== undefined) kindOf.set(opt.value, opt.kind);
+        }
         const localized = schema.objectName
           ? translateOptions(schema.objectName, schema.groupBy, rawOptions)
           : rawOptions;
-        return localized.map((opt: any) => ({
-            id: opt.value,
-            title: opt.label,
-        }));
+        return lanesFromOptions(
+          localized.map((opt: any) => ({ value: opt.value, label: opt.label, kind: kindOf.get(opt.value) })),
+        );
     }
 
     // If no columns, but we have groupBy and data, generate from data

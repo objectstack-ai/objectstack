@@ -153,6 +153,8 @@ const authored = (name: string) => ({
 const INJECTED = [
     'created_at', 'created_by', 'updated_at', 'updated_by',
     'organization_id', 'owner_id', 'owning_business_unit_id',
+    // [ADR-0142 D3] the ownership queue rides with `owner_id`.
+    'queue',
 ] as const;
 
 async function seed(name: string, item: Record<string, unknown> = authored(name), mode?: 'draft') {
@@ -235,9 +237,11 @@ describe('[#6562] every /meta object read exit serves the effective schema', () 
                 }
                 expect(served!.fields.organization_id).toMatchObject({ readonly: true, system: true });
                 expect(served!.fields.owning_business_unit_id).toMatchObject({ readonly: true, system: true });
-                // Ownership is TRANSFERABLE — `owner_id` is the one injected
-                // column that is `system` but deliberately NOT `readonly`.
+                // Ownership is TRANSFERABLE — `owner_id` and its ownership queue
+                // (ADR-0142 D3) are the injected columns that are `system` but
+                // deliberately NOT `readonly`.
                 expect(served!.fields.owner_id).toMatchObject({ readonly: false, system: true });
+                expect(served!.fields.queue).toMatchObject({ readonly: false, system: true });
             });
 
             it('leaves the author’s own fields exactly as declared', async () => {
@@ -308,13 +312,15 @@ describe('[#6562] the opt-out rows are the spec derivation’s, re-derived nowhe
             { managedBy: 'better-auth' }, []],
         ['systemFields.audit: false — no audit family',
             { systemFields: { audit: false } },
-            ['organization_id', 'owner_id', 'owning_business_unit_id']],
+            ['organization_id', 'owner_id', 'owning_business_unit_id', 'queue']],
         ['systemFields.tenant: false — no tenant anchor',
             { systemFields: { tenant: false } },
-            ['created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id', 'owning_business_unit_id']],
+            ['created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id', 'owning_business_unit_id',
+                'queue']],
         ['tenancy.enabled: false — the schema-level shared-catalog declaration',
             { tenancy: { enabled: false } },
-            ['created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id', 'owning_business_unit_id']],
+            ['created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id', 'owning_business_unit_id',
+                'queue']],
         ['ownership: org — no per-record ownership anchor, either tier',
             { ownership: 'org' },
             ['created_at', 'created_by', 'updated_at', 'updated_by', 'organization_id']],

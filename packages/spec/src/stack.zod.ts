@@ -66,6 +66,8 @@ import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permis
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
+import { QueueSchema } from './security/queue.zod';
+import { AssignmentRuleSchema } from './automation/assignment-rule.zod';
 
 import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
 import {
@@ -823,6 +825,28 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   capabilities: z.array(CapabilityDeclarationSchema).optional()
     .describe('[ADR-0066 D1] Authorization capabilities this package defines (seeded with package provenance)'),
   sharingRules: z.array(SharingRuleSchema).optional().describe('Record Sharing Rules'),
+  /**
+   * [ADR-0142 D1] Ownership queues this package DECLARES — named sets of
+   * people records can sit in until one of them claims the record. A declared
+   * queue's members name positions only; an organization staffs its own queues
+   * as `sys_queue` rows in Setup. Served from the registry, never copied into
+   * rows, and switched off through the activation ledger.
+   *
+   * A composition that declares queues must register the ownership-queue
+   * service (`@objectstack/plugin-sharing`): without it nothing resolves the
+   * names, so the boot is refused rather than served with inert queues.
+   */
+  queues: z.array(QueueSchema).optional()
+    .describe('[ADR-0142 D1] Ownership queues — named sets of people records can sit in until a member claims them'),
+  /**
+   * [ADR-0142 D5] Assignment rules this package DECLARES: per object, ordered
+   * entries routing an inserted, still-ownerless row to a queue (parked, or
+   * given to one member by `round_robin` / `least_loaded`) or to one user.
+   * Evaluated by the engine once per insert, after every `beforeInsert` hook;
+   * never on update. Requires the ownership-queue service, as `queues` does.
+   */
+  assignmentRules: z.array(AssignmentRuleSchema).optional()
+    .describe('[ADR-0142 D5] Assignment rules — route new ownerless records to a queue or a person, once, on insert'),
 
   /**
    * ObjectAPI: API Layer — the platform's OUTWARD integration face.
@@ -1445,6 +1469,8 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   permissions: 'concat',
   capabilities: 'concat',
   sharingRules: 'concat',
+  queues: 'concat',
+  assignmentRules: 'concat',
   apis: 'concat',
   webhooks: 'concat',
   agents: 'concat',
@@ -2941,6 +2967,8 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   permissions: lastWinsByName('Permission set', 'permission sets'),
   capabilities: lastWinsByName('Capability', 'capabilities'),
   sharingRules: lastWinsByName('Sharing rule', 'sharing rules'),
+  queues: lastWinsByName('Queue', 'queues'),
+  assignmentRules: lastWinsByName('Assignment rule', 'assignment rules'),
   webhooks: lastWinsByName('Webhook', 'webhooks'),
   hooks: {
     identity: readEntryName,

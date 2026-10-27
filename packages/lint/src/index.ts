@@ -315,6 +315,13 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
 
 export {
+  validateAssignmentRules,
+  ASSIGNMENT_RULE_USER_TARGET,
+  ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
+} from './validate-assignment-rules.js';
+export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
+
+export {
   validateSeedReplaySafety,
   SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
 } from './validate-seed-replay-safety.js';
@@ -645,6 +652,18 @@ export {
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
+
+// [#26548] A report's `dateRange` resolved against its dataset: the one
+// `type: 'date'` dimension the period applies to. Beside the chart rule
+// because it resolves the same report against the same `stack.datasets`.
+export {
+  validateReportDateRange,
+  REPORT_DATE_RANGE_DIMENSION_UNKNOWN,
+  REPORT_DATE_RANGE_DIMENSION_NOT_DATE,
+  REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS,
+  REPORT_DATE_RANGE_DIMENSION_NONE,
+} from './validate-report-date-range.js';
+export type { ReportDateRangeFinding } from './validate-report-date-range.js';
 
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,

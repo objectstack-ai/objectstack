@@ -523,7 +523,7 @@ describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, no
  * whose absence is #4991.
  */
 const BU_TREE_RECIPIENTS = ['business_unit', 'unit_and_subordinates'] as const;
-const FLAT_RECIPIENTS = ['user', 'team', 'position', 'field'] as const;
+const FLAT_RECIPIENTS = ['user', 'team', 'position', 'field', 'queue'] as const;
 
 describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal', () => {
   const platformGlobalStack = (
