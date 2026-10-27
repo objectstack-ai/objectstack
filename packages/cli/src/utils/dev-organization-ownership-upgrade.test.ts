@@ -18,6 +18,7 @@ import {
   isOrganizationOwnershipRequiredMessage,
   ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE,
   upgradeDevelopmentDatabase,
+  type CeremonyRunEnd,
   type DevelopmentUpgradeInput,
 } from './dev-organization-ownership-upgrade.js';
 
@@ -29,19 +30,34 @@ const NOW = new Date('2026-10-16T10:00:00.000Z');
 const BACKUP = (): string => join(dir, 'backups', 'organization-ownership-2026-10-16T10-00-00-000Z');
 
 /** A fake CLI: answers `planCode`, and writes the files a real run writes. */
-function fakeRun(opts: { planCode?: number; report?: Record<string, unknown> | null }): DevelopmentUpgradeInput['run'] {
+function fakeRun(opts: {
+  planCode?: number;
+  report?: Record<string, unknown> | null;
+  /** What the apply prints to its log, verbatim. */
+  applyLog?: string;
+  /** How the apply ends, when not by its report's verdict. */
+  applyEnd?: CeremonyRunEnd;
+  /** What the apply leaves at its `--out` path instead of a report. */
+  applyFile?: string;
+}): DevelopmentUpgradeInput['run'] {
   return (args, logFile) => {
     calls.push([...args]);
     const out = args[args.indexOf('--out') + 1]!;
     if (!args.includes('--apply')) {
       writeFileSync(logFile, opts.planCode ? '  ✗ Refused (sys_mystery): sys_mystery carries organization_id …\n' : 'planned\n', { flag: 'a' });
       if (!opts.planCode) writeFileSync(out, '{}');
-      return opts.planCode ?? 0;
+      return { status: opts.planCode ?? 0 };
     }
+    if (opts.applyLog) writeFileSync(logFile, opts.applyLog, { flag: 'a' });
     if (opts.report) writeFileSync(out, JSON.stringify(opts.report));
-    return opts.report?.complete ? 0 : 1;
+    if (opts.applyFile !== undefined) writeFileSync(out, opts.applyFile);
+    return opts.applyEnd ?? { status: opts.report?.complete ? 0 : 1 };
   };
 }
+
+/** The exact command every failed apply ends on: the plan this upgrade wrote, the database it opened. */
+const AGAIN = (): string =>
+  `os migrate organization-ownership --dev --database-url file:${primary} --apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`;
 
 const input = (run: DevelopmentUpgradeInput['run'], over: Partial<DevelopmentUpgradeInput> = {}): DevelopmentUpgradeInput => ({
   binPath: '/cli/bin/run.js',
@@ -83,7 +99,8 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     const result = upgradeDevelopmentDatabase(input(fakeRun({ planCode: 1 })));
     expect(result.ok).toBe(false);
     expect(calls).toHaveLength(1);
-    expect(result.lines[0]).toContain('✗ Refused (sys_mystery)');
+    // The ceremony's own words; the `✗` glyph is the printer's, never doubled.
+    expect(result.lines[0]).toBe('Refused (sys_mystery): sys_mystery carries organization_id …');
     expect(result.lines.at(-1)).toContain('nothing was changed');
     expect(result.lines.at(-1)).toContain(BACKUP());
     // The ceremony is open (18.x step 6): the way on is running it by hand.
@@ -97,7 +114,7 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     })));
     expect(result.ok).toBe(false);
     expect(result.lines[0]).toBe('authored-conversion: The authored permission x differs …');
-    expect(result.lines.at(-1)).toContain(`--apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`);
+    expect(result.lines.at(-1)).toContain(AGAIN());
   });
 
   it('every step finished but the post-check holds an unattributable row: boots nothing, names the table, count and remedy', () => {
@@ -128,6 +145,70 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(existsSync(join(dir, 'backups'))).toBe(false);
     expect(result.lines[0]).toContain('os migrate organization-ownership --dev');
     expect(result.lines[0]).not.toContain('17.x');
+  });
+
+  describe('an apply that writes no report still names its cause, and the exact command that carries on', () => {
+    // A `FORCE_COLOR` terminal: chalk colours the refusal even into the log file.
+    const COLOURED = '\u001b[31m  ✗ Refused: The plan file … was computed for the database A, and this run opened B.\u001b[39m\n';
+
+    it('⭐ a refusal printed in colour is read in the ceremony\'s own words', () => {
+      const result = upgradeDevelopmentDatabase(input(fakeRun({ applyLog: COLOURED, applyEnd: { status: 1 } })));
+      expect(result.ok).toBe(false);
+      expect(result.lines[0]).toBe('Refused: The plan file … was computed for the database A, and this run opened B.');
+      expect(result.lines.at(-1)).toContain('The upgrade did not run to a report.');
+      expect(result.lines.at(-1)).toContain(AGAIN());
+      expect(result.lines.at(-1)).toContain(BACKUP());
+    });
+
+    it('an apply that stopped with no refusal of its own (an uncaught error) names how it ended and the end of its log', () => {
+      const log =
+        '2026-10-27T10:08:09.000Z INFO Bootstrap complete\n' +
+        '  → step column-drops…\n' +
+        '2026-10-27T10:08:10.000Z INFO Graceful shutdown started\n' +
+        '    Error: SQLITE_ERROR: error in index idx_sys_secret_organization_id after drop column\n';
+      const result = upgradeDevelopmentDatabase(input(fakeRun({ applyLog: log, applyEnd: { status: 1 } })));
+      expect(result.ok).toBe(false);
+      expect(result.lines[0]).toContain('exited with code 1 without a refusal of its own');
+      expect(result.lines).toContain('  Error: SQLITE_ERROR: error in index idx_sys_secret_organization_id after drop column');
+      expect(result.lines).toContain('  → step column-drops…');
+      // The kernel's INFO narration is not the cause.
+      expect(result.lines.some((l) => l.includes('Bootstrap complete'))).toBe(false);
+      expect(result.lines.at(-1)).toContain(AGAIN());
+    });
+
+    it('an apply ended by a signal says so', () => {
+      const result = upgradeDevelopmentDatabase(input(fakeRun({ applyEnd: { status: null, signal: 'SIGKILL' } })));
+      expect(result.lines[0]).toContain('was ended by SIGKILL without a refusal of its own, and its log');
+      expect(result.lines.at(-1)).toContain('The upgrade did not run to a report.');
+    });
+
+    it('a report file still holding the apply\'s reservation text is no report: the cause is printed, not "a blocker (above)"', () => {
+      const reservation = JSON.stringify({ kind: 'organization-ownership-apply-reservation', reservedAt: '2026-10-27T10:08:09.000Z', note: '…' });
+      const result = upgradeDevelopmentDatabase(input(fakeRun({
+        applyLog: '    Error: the stack shut down mid-step\n',
+        applyEnd: { status: 1 },
+        applyFile: reservation,
+      })));
+      expect(result.ok).toBe(false);
+      expect(result.lines).toContain('  Error: the stack shut down mid-step');
+      expect(result.lines.at(-1)).toContain('The upgrade did not run to a report.');
+      expect(result.lines.join('\n')).not.toContain('a blocker (above)');
+    });
+
+    it('a report file that does not parse is named, never thrown', () => {
+      const result = upgradeDevelopmentDatabase(input(fakeRun({ applyEnd: { status: 1 }, applyFile: '{"kind":"organization-own' })));
+      expect(result.ok).toBe(false);
+      expect(result.lines.some((l) => l.startsWith(`Its report file ${join(BACKUP(), 'apply.json')} could not be read`))).toBe(true);
+    });
+
+    it('a blocked report that names no blocker prints the log\'s cause instead of an empty "above"', () => {
+      const result = upgradeDevelopmentDatabase(input(fakeRun({
+        report: { complete: false, warnings: [], steps: [{ step: 'column-drops', status: 'blocked', blockers: [] }] },
+        applyLog: '  ✗ The ceremony stopped at a blocker (above). Resolve it and re-run --apply; finished steps are not repeated. Report: …\n',
+      })));
+      expect(result.lines[0]).toContain('The ceremony stopped at a blocker');
+      expect(result.lines.at(-1)).toContain(AGAIN());
+    });
   });
 
   it('the IPC message is recognised by its type alone', () => {
