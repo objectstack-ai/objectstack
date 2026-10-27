@@ -66,6 +66,7 @@ Translation data for a single field
 | **help** | `string` | optional | Translated help text |
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
+| **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
 
 
 ---
@@ -90,7 +91,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -107,6 +108,7 @@ Translation data for a single field
 | **help** | `string` | optional | Translated help text |
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
+| **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
 
 ### Nested Shape: `ObjectTranslationData._views[string]`
 
@@ -177,7 +179,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
@@ -196,7 +198,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -255,6 +257,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `PlatformTranslationData.pages[string]`
 
@@ -341,7 +344,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
@@ -359,7 +362,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -418,6 +421,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `ServedTranslationData.pages[string]`
 
@@ -566,7 +570,7 @@ Per-app translation data for objects, apps, and UI messages
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
@@ -584,7 +588,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -643,6 +647,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `TranslationData.pages[string]`
 
@@ -750,7 +755,7 @@ One locale of translations — the `translation` metadata type
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
@@ -778,7 +783,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -837,6 +842,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `TranslationItem.pages[string]`
 

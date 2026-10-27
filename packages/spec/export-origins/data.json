@@ -588,6 +588,7 @@
     "QUERY_TRANSPORT_ALIAS_SLOTS": "src/data/data-engine.zod.ts#QUERY_TRANSPORT_ALIAS_SLOTS (const)",
     "QUERY_TRANSPORT_DOLLAR_ALIASES": "src/data/data-engine.zod.ts#QUERY_TRANSPORT_DOLLAR_ALIASES (const)",
     "QUERY_TRANSPORT_DOLLAR_PARAMS": "src/data/data-engine.zod.ts#QUERY_TRANSPORT_DOLLAR_PARAMS (const)",
+    "QUEUE_FIELD_DEF": "src/data/injected-system-column-provenance.ts#QUEUE_FIELD_DEF (const)",
     "QueryAST": "src/data/query.zod.ts#QueryAST (type)",
     "QueryAliasConflict": "src/data/data-engine.zod.ts#QueryAliasConflict (interface)",
     "QueryAliasSlot": "src/data/data-engine.zod.ts#QueryAliasSlot (interface)",
