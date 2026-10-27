@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authGateEvents } from './auth-gate-events.js';
-import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthPublicConfig, SignInWithProviderOptions } from './types.js';
+import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions } from './types.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
 import { createAuthClient, takePreflightSession, TokenStorage } from './createAuthClient.js';
 import { ActiveOrganizationStorage, SessionUserScope } from './ActiveOrganizationStorage.js';
@@ -1039,6 +1039,12 @@ export function AuthProvider({
     [client],
   );
 
+  const getInvitationPreview = useCallback(
+    (invitationId: string): Promise<AuthInvitationPreview | null> =>
+      client.getInvitationPreview(invitationId),
+    [client],
+  );
+
   const acceptInvitation = useCallback(
     async (invitationId: string): Promise<void> => {
       await client.acceptInvitation(invitationId);
@@ -1130,6 +1136,7 @@ export function AuthProvider({
       listInvitations,
       cancelInvitation,
       getInvitation,
+      getInvitationPreview,
       acceptInvitation,
       rejectInvitation,
       listUserInvitations,
@@ -1142,7 +1149,7 @@ export function AuthProvider({
       organizations, activeOrganization, activeMember, isOrganizationsLoading, isMembershipResolved, switchOrganization, createOrganization, refreshOrganizations,
       updateOrganization, deleteOrganization, leaveOrganization,
       getMembers, inviteMember, describeDelegableScope, removeMember, updateMemberRole,
-      listInvitations, cancelInvitation, getInvitation, acceptInvitation, rejectInvitation, listUserInvitations,
+      listInvitations, cancelInvitation, getInvitation, getInvitationPreview, acceptInvitation, rejectInvitation, listUserInvitations,
     ],
   );
 

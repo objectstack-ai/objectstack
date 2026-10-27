@@ -10,7 +10,8 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthPublicConfig, SignInWithProviderOptions,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
+  SignInWithProviderOptions,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
 
@@ -160,6 +161,32 @@ function asAuthInvitation(raw: unknown, method: string): AuthInvitation {
     );
   }
   return raw as AuthInvitation;
+}
+
+/**
+ * The boundary for the signed-out invitation preview's success body,
+ * `{ success: true, data: { organizationName, inviterName, email } }`
+ * (objectstack `plugin-auth` `invitation-preview.ts`). Anything else is a
+ * producer defect and fails loudly, naming the method — the page that asked
+ * treats a rejection as "no preview" and keeps its generic copy, so a wrong
+ * shape never reaches the screen as a half-filled sentence.
+ */
+function asAuthInvitationPreview(raw: unknown): AuthInvitationPreview {
+  const body = raw as { success?: unknown; data?: Record<string, unknown> } | null | undefined;
+  const data = body?.success === true ? body.data : undefined;
+  if (
+    !data ||
+    typeof data.organizationName !== 'string' ||
+    !(data.inviterName === null || typeof data.inviterName === 'string') ||
+    typeof data.email !== 'string'
+  ) {
+    throw new Error('getInvitationPreview: unexpected response body');
+  }
+  return {
+    organizationName: data.organizationName,
+    inviterName: data.inviterName as string | null,
+    email: data.email,
+  };
 }
 
 /** Same boundary, per row, for the list-returning invitation routes. */
@@ -1008,6 +1035,31 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       });
       if (error) throw toAuthError(error, 'Failed to load invitation');
       return asAuthInvitation(data, 'getInvitation');
+    },
+
+    async getInvitationPreview(invitationId: string): Promise<AuthInvitationPreview | null> {
+      // objectstack's own signed-out read (#26473): better-auth's
+      // `get-invitation` above answers 401 without a session. The server
+      // gives one uniform 404 for an unknown, expired, accepted, rejected or
+      // cancelled id, which is an answer ("no preview"), not a failure.
+      const url = `${origin}${basePath}/organization/invitation-preview?id=${encodeURIComponent(invitationId)}`;
+      const response = await bearerFetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (response.status === 404) return null;
+      const body = (await response.json().catch(() => null)) as
+        | { error?: { code?: string; message?: string } }
+        | null;
+      if (!response.ok) {
+        const err = new Error(
+          body?.error?.message ?? `Invitation preview failed with status ${response.status}`,
+        ) as Error & { code?: string; status?: number };
+        if (body?.error?.code) err.code = body.error.code;
+        err.status = response.status;
+        throw err;
+      }
+      return asAuthInvitationPreview(body);
     },
 
     async acceptInvitation(invitationId: string): Promise<void> {

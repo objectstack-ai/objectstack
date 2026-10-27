@@ -273,8 +273,13 @@ export {
 } from './console/auth/signUpOffer.js';
 export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstrapStatus.js';
 // The register-first prompt both login pages show a signed-out visitor who
-// arrived from an invitation link (#25886).
-export { InvitationSignUpPrompt } from './console/auth/invitationArrival.js';
+// arrived from an invitation link (#25886), and the signed-out invitation
+// preview both login and both register pages greet that visitor with (#26473).
+export {
+  InvitationSignUpPrompt,
+  invitationArrivalCopy,
+  useInvitationPreview,
+} from './console/auth/invitationArrival.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
