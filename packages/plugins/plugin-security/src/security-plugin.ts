@@ -305,6 +305,7 @@ import {
 } from './manifest.js';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 import { humanBaselineFor } from './external-baseline.js';
+import { subscribeMetadataChangeInvalidation } from './metadata-change-invalidation.js';
 
 /**
  * [ADR-0138 D9, D1] Whether `context` is the GUEST envelope — the anonymous
@@ -1302,10 +1303,9 @@ export class SecurityPlugin implements Plugin {
   private readonly warnedAuthoredTenantPolicies = new Set<string>();
   /**
    * Per-object field-name cache. Populated lazily from the metadata
-   * service / ObjectQL registry on first access per object. Schemas are
-   * effectively immutable for the lifetime of the kernel today (hot
-   * reload tears the kernel down), so we don't bother with
-   * invalidation — a kernel restart drops the cache.
+   * service / ObjectQL registry on first access per object, and dropped with
+   * every other metadata-derived cache when metadata changes at runtime
+   * ({@link invalidateMetadataDerivedCaches}).
    */
   private readonly fieldNamesCache = new Map<string, Set<string> | null>();
   /**
@@ -1366,8 +1366,11 @@ export class SecurityPlugin implements Plugin {
    * plugin load order does not matter.
    */
   private resolveKernelService: ((name: string) => any) | null = null;
-  /** Unsubscribe handle for metadata-change cache invalidation (runtime metadata edits). */
-  private metadataWatch: { unsubscribe: () => void } | null = null;
+  /**
+   * [#26596, #26698] Disposers for the metadata-change subscriptions `start()`
+   * installs (`subscribeMetadataChangeInvalidation`), released by `destroy()`.
+   */
+  private metadataChangeUnsubscribes: Array<() => void> = [];
   /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
   private cbpRelCache = new Map<string, CbpRelation | null>();
   /**
@@ -1926,31 +1929,13 @@ export class SecurityPlugin implements Plugin {
       try { return ctx.getService(name); } catch { return undefined; }
     };
 
-    // Invalidate metadata-derived caches when object/field metadata changes
-    // at runtime (Studio / AI authoring). Without this they go stale until
-    // restart — even single-node. With a cluster pub/sub driver the
-    // metadata.changed event propagates cross-node, so peers invalidate too.
-    const md: any = this.metadata;
-    if (typeof md?.watch === 'function') {
-      this.metadataWatch = md.watch('*', () => {
-        this.fieldNamesCache.clear();
-        this.datetimeFieldNamesCache.clear();
-        this.numberComparandFieldsCache.clear();
-        this.tenancyDisabledCache.clear();
-        this.cbpRelCache.clear();
-        this.objectSecurityMetaCache.clear();
-        // [#10757] A permission set can be DECLARED in metadata, so a metadata
-        // change is a permission change even when no row was written. Retiring
-        // the per-context memo here keeps it on the same invalidation footing
-        // as every other metadata-derived cache above, rather than being the
-        // one that survives a Studio edit.
-        //
-        // [#11968] This bump stays here whichever side owns the epoch: it is
-        // precisely the invalidation the ENGINE seam cannot see, because no row
-        // is written. The engine covers writes; this covers declarations.
-        this.epoch.bump('metadata');
-      });
-    }
+    // [#26596, #26698] Invalidate the metadata-derived caches when metadata
+    // changes at runtime (Studio / AI authoring / package publish / artifact
+    // reload), on every node of a cluster. Which signals carry a change, and
+    // why those, is `metadata-change-invalidation.ts`'s header.
+    this.metadataChangeUnsubscribes = subscribeMetadataChangeInvalidation(ctx, () =>
+      this.invalidateMetadataDerivedCaches(),
+    );
 
     // Resolve the tenancy POSTURE once at start time (the plugin DI graph is
     // static after start); Layer 0 and `collectRLSPolicies` consult it on every
@@ -2296,9 +2281,33 @@ export class SecurityPlugin implements Plugin {
     declareBuiltinPositions.call(host, ctx);
   }
 
+  /**
+   * [#26596, #26698] Drop every cache derived from an object's declaration —
+   * the one body every metadata-change signal runs
+   * (`subscribeMetadataChangeInvalidation`). Each cache refills from the
+   * engine registry on its next miss.
+   */
+  private invalidateMetadataDerivedCaches(): void {
+    this.fieldNamesCache.clear();
+    this.datetimeFieldNamesCache.clear();
+    this.numberComparandFieldsCache.clear();
+    this.tenancyDisabledCache.clear();
+    this.cbpRelCache.clear();
+    this.objectSecurityMetaCache.clear();
+    // [#10757] A permission set can be DECLARED in metadata, so a metadata
+    // change is a permission change even when no row was written. Retiring
+    // the per-context memo here keeps it on the same invalidation footing
+    // as every other metadata-derived cache above, rather than being the
+    // one that survives a Studio edit.
+    //
+    // [#11968] This bump stays here whichever side owns the epoch: it is
+    // precisely the invalidation the ENGINE seam cannot see, because no row
+    // is written. The engine covers writes; this covers declarations.
+    this.epoch.bump('metadata');
+  }
+
   async destroy(): Promise<void> {
-    this.metadataWatch?.unsubscribe();
-    this.metadataWatch = null;
+    for (const unsubscribe of this.metadataChangeUnsubscribes.splice(0)) unsubscribe();
     unregisterGrantPermissionSetNameHooks(this.ql);
   }
 
@@ -4501,8 +4510,9 @@ export class SecurityPlugin implements Plugin {
    *     per object — a per-read report would be a noise defect of its own, and
    *     a noisy channel is a channel operators filter out, which would make
    *     the tolerance silent again by a longer route.
-   *   • It RE-ARMS on a metadata change, because `start()`'s
-   *     `metadata.watch('*')` subscription clears `cbpRelCache` alongside the
+   *   • It RE-ARMS on a metadata change, because the metadata-change
+   *     subscription `start()` installs (`subscribeMetadataChangeInvalidation`)
+   *     clears `cbpRelCache` alongside the
    *     other metadata-derived caches. That is exactly when an author wants to
    *     hear it: they just edited the metadata (Studio / AI authoring), so the
    *     next resolution reports the verdict on what they changed instead of
