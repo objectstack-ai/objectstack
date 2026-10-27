@@ -937,18 +937,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
       },
-      refusals: {
-        label: "Refusals",
-        helpText: "Refusals the body may throw, by code — the body throws an error carrying the code, and the caller reads this message"
-      },
-      "refusals.message": {
-        label: "Message",
-        helpText: "What the user reads (translated per locale)"
-      },
-      "refusals.status": {
-        label: "Status",
-        helpText: "HTTP status, 400–499 (default 400)"
-      },
       handler: {
         label: "Handler",
         helpText: "Handler function name (deprecated — prefer `body`)"

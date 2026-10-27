@@ -937,18 +937,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "内存（MB）",
         helpText: "单次调用内存上限（MB，最大 256）"
       },
-      refusals: {
-        label: "拒绝目录",
-        helpText: "按代码列出 body 可能抛出的拒绝 —— body 抛出带该代码的错误，调用方读到此处的消息"
-      },
-      "refusals.message": {
-        label: "消息",
-        helpText: "用户读到的文字（按语言翻译）"
-      },
-      "refusals.status": {
-        label: "状态码",
-        helpText: "HTTP 状态码，400–499（默认 400）"
-      },
       handler: {
         label: "处理器",
         helpText: "处理器函数名（已废弃——建议使用 body）"
