@@ -3486,6 +3486,7 @@ jobs:
         run: |
           node scripts/ci/scheduled-full-run-card.mjs --self-test
           node scripts/ci/test-nightly-tiers-card.mjs --self-test
+          bash scripts/ci/board-snapshot-r2-upload.selftest.sh
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
