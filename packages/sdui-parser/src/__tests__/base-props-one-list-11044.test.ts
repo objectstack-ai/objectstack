@@ -25,8 +25,9 @@
  *     nothing, while a near-miss spelling still draws `unknown-prop` (the lit
  *     control — without it, "draws nothing" would also pass against a tier
  *     that stopped warning on undeclared keys);
- *   - MEMBER 1: `visibleWhen`, `hiddenOn` and `testId` are accepted on every
- *     node, as `bind` and `hidden` are;
+ *   - MEMBER 1: `visibleWhen` and `testId` are accepted on every node, as
+ *     `bind` and `hidden` are; the retired `visibleOn` / `hiddenOn` /
+ *     `disabledOn` dialects are answered by name (`retired-visibility-dialects.ts`);
  *   - MEMBER 2 (the triage ruling): a `'where-undeclared'` member is a base
  *     prop only where the type declares no input of that name. Where one does,
  *     the declared input wins, `type-mismatch` included;
@@ -100,11 +101,8 @@ const WELL_TYPED: Record<string, unknown> = {
   style: { padding: 4 },
   visible: true,
   visibleWhen: "data.role == 'admin'",
-  visibleOn: "data.role == 'admin'",
   hidden: true,
-  hiddenOn: "data.role != 'admin'",
   disabled: false,
-  disabledOn: 'data.locked',
   bind: 'users',
   testId: 'users-list',
   children: [],
@@ -155,10 +153,26 @@ describe('objectui#11044 — the base props are one list, read by the validator 
   });
 });
 
-describe('objectui#11044 member 1 — `visibleWhen`, `hiddenOn` and `testId` are base props of every node', () => {
-  it.each(['visibleWhen', 'hiddenOn', 'testId'])('`%s` is an `every-node` member', (key) => {
+describe('objectui#11044 member 1 — `visibleWhen` and `testId` are base props of every node', () => {
+  it.each(['visibleWhen', 'testId'])('`%s` is an `every-node` member', (key) => {
     expect(SDUI_BASE_PROPS.find((p) => p.name === key)?.scope).toBe('every-node');
     expect(diagnose({ ...LEAF, [key]: WELL_TYPED[key] })).toEqual([]);
+  });
+
+  // The retired node-level dialects are NOT base props: each draws ONE
+  // `unknown-prop` that names the canonical key, the way `body` names
+  // `children` — a replacement for the bare "has no prop", never a second line.
+  it.each([
+    ['visibleOn', 'visibleWhen'],
+    ['hiddenOn', 'hidden'],
+    ['disabledOn', 'disabled'],
+  ] as const)('the retired `%s` draws one `unknown-prop` naming `%s`', (key, canonical) => {
+    expect(SDUI_BASE_PROPS.find((p) => p.name === key)).toBeUndefined();
+    const found = diagnose({ ...LEAF, [key]: 'data.locked' });
+    expect(found.map((d) => d.code)).toEqual(['unknown-prop']);
+    expect(found[0]!.message).toContain(`"${key}"`);
+    expect(found[0]!.message).toContain(`"${canonical}"`);
+    expect(found[0]!.message).toContain('retired spelling');
   });
 });
 
@@ -185,7 +199,7 @@ const TSX_CASES: ReadonlyArray<{ what: string; code: string; rejected: boolean }
   { what: '`bind` (objectui#11008)', rejected: false, code: `export const c1 = <list bind="users" />;` },
   { what: '`hidden` (objectui#11008)', rejected: false, code: `export const c2 = <list hidden={true} />;` },
   { what: '`visibleWhen`', rejected: false, code: `export const c3 = <list visibleWhen="data.role == 'admin'" />;` },
-  { what: '`hiddenOn`', rejected: false, code: `export const c4 = <list hiddenOn="data.archived" />;` },
+  { what: 'the retired `hiddenOn` is no JSX attribute either', rejected: true, code: `export const c4 = <list hiddenOn="data.archived" />;` },
   { what: '`testId`', rejected: false, code: `export const c5 = <list testId="users-list" />;` },
   { what: 'an undeclared `label`', rejected: false, code: `export const c6 = <list label="Users" />;` },
   { what: 'lit control: a near-miss', rejected: true, code: `export const c7 = <list bindTo="users" />;` },

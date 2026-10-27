@@ -7,7 +7,7 @@
  * (objectui#11403), so this page and the shipped manifest load one list. */
 import './manifest-registry';
 import { ComponentRegistry } from '@object-ui/core';
-import { assertFullyLoaded, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { assertFullyLoaded, manifestFromConfigs } from '@objectstack/sdui-parser';
 import { nodeSlotsFor } from '@object-ui/types';
 
 const out = document.getElementById('out')!;

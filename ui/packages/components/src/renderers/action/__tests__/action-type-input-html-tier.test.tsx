@@ -68,7 +68,7 @@ import type { ActionContext, ActionDef, ActionResult } from '@object-ui/core';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider } from '@object-ui/react';
 import { SchemaRenderer } from '@object-ui/react';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 // Module-scope side-effect import so `page` (the kind:'html' host) and the two
 // action renderers are registered before the first render — the light `dom`
 // project does not load the `@object-ui/components` barrel for us, and

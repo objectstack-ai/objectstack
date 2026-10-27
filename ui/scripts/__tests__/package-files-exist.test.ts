@@ -442,19 +442,20 @@ describe('published packages that declare a license ship its text (objectui#3696
     // Same anti-vacuity floor as the guard above, sitting just under the 39
     // measured on main@3e601773e. A predicate that quietly matches nothing —
     // a renamed `license` field, a lost workspace root, a `private` default
-    // flipped — would otherwise report success over an empty set.
-    expect(owingPackages.length).toBeGreaterThanOrEqual(38);
+    // flipped — would otherwise report success over an empty set. Lowered by
+    // one when `@object-ui/sdui-parser` was retired for the root
+    // `@objectstack/sdui-parser` (objectstack#25712 item 3): 37 measured then.
+    expect(owingPackages.length).toBeGreaterThanOrEqual(37);
 
-    // The two packages objectui#3696 fixed must be in scope BY NAME. If either
-    // drops out of the population, this guard has stopped watching the exact
-    // spot that motivated it, and the pin below would pass on a package nobody
-    // is checking any more.
+    // The package objectui#3696 fixed must be in scope BY NAME. If it drops
+    // out of the population, this guard has stopped watching the exact spot
+    // that motivated it, and the pin below would pass on a package nobody is
+    // checking any more. (The second, `@object-ui/sdui-parser`, was retired
+    // for `@objectstack/sdui-parser` by objectstack#25712 item 3, which carries
+    // its MIT notice at the repo root.)
     const names = owingPackages.map((p) => p.name);
     expect(names, '@object-ui/react-runtime must still be required to ship license text').toContain(
       '@object-ui/react-runtime',
-    );
-    expect(names, '@object-ui/sdui-parser must still be required to ship license text').toContain(
-      '@object-ui/sdui-parser',
     );
   });
 
@@ -521,14 +522,13 @@ describe('published packages that declare a license ship its text (objectui#3696
     ).toEqual([]);
   });
 
-  it('pins the three packages fixed in objectui#3696 / objectui#3702', () => {
+  it('pins the packages fixed in objectui#3696 / objectui#3702', () => {
     // The general assertion covers these, but naming them means a revert points
     // straight at the issue that explains why the files have to be there —
     // and, unlike the general assertion, this cannot be satisfied by adding a
     // baseline line.
     const fixed: Record<string, string> = {
       'packages/react-runtime': 'objectui#3696',
-      'packages/sdui-parser': 'objectui#3696',
       // Found by re-running objectui#3696's census over ALL FOUR workspace
       // roots instead of `packages/*` alone, which is how it was missed twice.
       'apps/console': 'objectui#3702',

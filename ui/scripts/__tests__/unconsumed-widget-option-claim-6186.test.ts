@@ -59,7 +59,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
  *  - **A computed access through a VARIABLE key is invisible** (`x[k]` where
  *    `k === 'thresholds'`). Nothing can see that textually. The census test's
  *    leg 2 covers the one file where it would matter by REFUSING the shape:
- *    `packages/sdui-parser/src/__tests__/dashboard-widget-options-census.test.ts`
+ *    `packages/plugin-dashboard/src/__tests__/dashboard-widget-options-census.test.ts`
  *    fails loudly if `DatasetWidget.tsx` ever gains a computed access, a spread
  *    or a destructuring of the options bag.
  *
@@ -103,6 +103,13 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/**
+ * The monorepo root, one level above `ui/`. The census module lives in the one
+ * parser, `@objectstack/sdui-parser` at the repo root, since the ui copy was
+ * retired (objectstack#25712 item 3); `CENSUS_MODULE` is spelled from there,
+ * which is also how the plugin-dashboard page names it.
+ */
+const monorepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 const CENSUS_MODULE = 'packages/sdui-parser/src/dashboard-widget-options.ts';
 const DASHBOARD_PAGE = 'content/docs/plugins/plugin-dashboard.mdx';
@@ -270,7 +277,7 @@ describe('objectui#6186 claim 2 — the claim itself, re-derived from source', (
 
 describe('objectui#6186 claim 2 — the claim is single-sourced, and the pointer resolves', () => {
   const page = fs.readFileSync(path.join(repoRoot, DASHBOARD_PAGE), 'utf8');
-  const census = fs.readFileSync(path.join(repoRoot, CENSUS_MODULE), 'utf8');
+  const census = fs.readFileSync(path.join(monorepoRoot, CENSUS_MODULE), 'utf8');
 
   /**
    * A docblock WRAPS. `toContain` over raw text therefore fails when someone
@@ -301,6 +308,6 @@ describe('objectui#6186 claim 2 — the claim is single-sourced, and the pointer
 
   it('the pointer names a file that really exists', () => {
     // A path in prose is a claim too. This one is cheap to re-derive, so it is.
-    expect(fs.existsSync(path.join(repoRoot, CENSUS_MODULE))).toBe(true);
+    expect(fs.existsSync(path.join(monorepoRoot, CENSUS_MODULE))).toBe(true);
   });
 });

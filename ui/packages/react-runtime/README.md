@@ -173,7 +173,7 @@ generateElement(code, scope)     // transpile + eval → ReactElement | null (th
 
 - [React pages guide](../../content/docs/guide/react-pages.md) — authoring
   `kind:'react'` pages, the injected block scope, and the capability gate.
-- `@object-ui/sdui-parser` — the `kind:'html'` tier: parse, never execute.
+- `@objectstack/sdui-parser` — the `kind:'html'` tier: parse, never execute.
 
 ## License
 

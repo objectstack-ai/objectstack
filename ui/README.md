@@ -424,7 +424,7 @@ Grouped by dependency weight — atoms and fields stay light, heavy widgets live
 | **[@object-ui/cli](./packages/cli)** | Scaffold, develop, build, and validate schema-driven apps |
 | **[@object-ui/create-plugin](./packages/create-plugin)** | Scaffold a new Object UI plugin |
 | **[@object-ui/runner](./packages/runner)** | Universal application runner for testing schemas (private workspace app, not published) |
-| **[@object-ui/sdui-parser](./packages/sdui-parser)** | Constrained JSX source → schema tree compiler (parse, never execute) |
+| **[@objectstack/sdui-parser](https://github.com/objectstack-ai/objectstack/tree/main/packages/sdui-parser)** | Constrained JSX source → schema tree compiler (parse, never execute) |
 | **[@object-ui/react-runtime](./packages/react-runtime)** | Trusted runtime execution for `kind: 'react'` pages |
 | **[vscode-extension](./packages/vscode-extension)** | IntelliSense and live preview for schema files |
 

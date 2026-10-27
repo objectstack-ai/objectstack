@@ -71,8 +71,8 @@
       "@object-ui/core": ["packages/core/src"],
       "@object-ui/core/*": ["packages/core/src/*"],
       "@object-ui/react-runtime": ["packages/react-runtime/src"],
-      "@object-ui/sdui-parser": ["packages/sdui-parser/src"],
-      "@object-ui/sdui-parser/*": ["packages/sdui-parser/src/*"],
+      "@objectstack/sdui-parser": ["../packages/sdui-parser/src"],
+      "@objectstack/sdui-parser/*": ["../packages/sdui-parser/src/*"],
       "@object-ui/protocol": ["packages/core/src"],
       "@object-ui/protocol/*": ["packages/core/src/*"],
       "@object-ui/console": ["apps/console/plugin.ts"]

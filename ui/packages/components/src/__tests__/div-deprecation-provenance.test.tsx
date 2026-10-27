@@ -59,7 +59,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer } from '@object-ui/react';
-import { compile, isHtmlTierNode, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, isHtmlTierNode, manifestFromConfigs } from '@objectstack/sdui-parser';
 // Registers the renderers at module scope, NOT inside a `beforeAll` — there the
 // cold transform is billed to `hookTimeout`. See
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).

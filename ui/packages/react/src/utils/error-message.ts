@@ -22,6 +22,7 @@
  */
 
 import { isApiAccessDeniedError } from '@object-ui/core';
+import { errorCodeIs } from '@object-ui/types';
 import type { ApiError } from '@objectstack/spec/api';
 
 /**
@@ -136,6 +137,43 @@ export function declaredUserMessage(err: unknown): string | null {
   return null;
 }
 
+/**
+ * The ADR-0112 code a delegated administrator's write answers when it falls
+ * outside the caller's OWN `adminScope` (the ledger row registered under
+ * `@objectstack/plugin-security`, thrown as `DelegationScopeViolationError`).
+ */
+const DELEGATION_SCOPE_VIOLATION = 'DELEGATION_SCOPE_VIOLATION';
+
+/**
+ * The server's reason for a delegated-admin scope refusal, or `null` when the
+ * refusal is anything else.
+ *
+ * A `403 DELEGATION_SCOPE_VIOLATION` names which boundary of the caller's own
+ * delegated scope refused the write (a business unit outside the delegated
+ * subtree, a permission set outside the allowlist, a target user outside the
+ * subtree). That text describes only the caller's own scope, so it is safe to
+ * show, and it tells the delegate what to fix (ruling on objectstack#26059, Q3).
+ * Every other denial stays opaque: `PERMISSION_DENIED`, `FORBIDDEN`, a bare 403
+ * or a row-level-security refusal answers `null` here, and callers keep their
+ * fixed localized line (ruling B′ on objectstack#24914, unchanged).
+ *
+ * Callers must ask this BEFORE {@link isPermissionError}: that predicate answers
+ * true for any 403, so a scope refusal read after it is flattened into the
+ * plain denial. The code is read from the same pair {@link isPermissionError}
+ * reads (`code`, then `details.code`); the text is
+ * {@link extractWriteErrorMessage}'s, without the `[Security] ` machine prefix.
+ * A scope refusal that carries no usable text answers `null`, so the caller
+ * still says something.
+ */
+export function delegationScopeMessage(err: unknown): string | null {
+  if (!err || typeof err !== 'object') return null;
+  const details = (err as { details?: unknown }).details;
+  if (!errorCodeIs(err, DELEGATION_SCOPE_VIOLATION) && !errorCodeIs(details, DELEGATION_SCOPE_VIOLATION)) {
+    return null;
+  }
+  return extractWriteErrorMessage(err);
+}
+
 /** One field the server rejected, normalised for `form.setError`. */
 export interface WriteFieldError {
   /** Field name, matching the form control's `name`. */
@@ -198,6 +236,10 @@ export function extractFieldErrors(err: unknown): WriteFieldError[] | null {
  * `PERMISSION_DENIED` / `FORBIDDEN` / a row-level-security denial). Lets a
  * caller show a friendly "you don't have permission" toast rather than dumping
  * the raw server text.
+ *
+ * A delegated-admin scope refusal is a 403 too, so this answers true for it:
+ * a caller that shows that refusal's reason asks
+ * {@link delegationScopeMessage} first.
  */
 export function isPermissionError(err: unknown): boolean {
   const e = err as Record<string, any> | null | undefined;

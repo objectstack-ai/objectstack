@@ -26,7 +26,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { validatePageSourceStyling, PAGE_SOURCE_CLASSNAME } from '@objectstack/lint';
-import { parseJsx } from '@object-ui/sdui-parser';
+import { parseJsx } from '@objectstack/sdui-parser';
 /**
  * The enumeration and the page-source extractor both live in the helper, so
  * this file and `sdui-preview-page-source-query-params.test.ts` cannot disagree

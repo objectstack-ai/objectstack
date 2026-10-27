@@ -35,6 +35,7 @@
     "driver-sqlite",
     "driver-turso",
     "field-value",
-    "picklist"
+    "picklist",
+    "seed-file"
   ]
 }

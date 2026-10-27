@@ -34,7 +34,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 import { ElementRecordPickerPropsSchema } from '@objectstack/spec/ui';
 // Module scope, not a hook: the cold transform is billed to the import phase,
 // which has no test/hook timeout (AGENTS.md §测试纪律, objectui#3010).

@@ -74,7 +74,7 @@ import {
   generateBlockList,
   generateDts,
   manifestFromConfigs,
-} from '@object-ui/sdui-parser';
+} from '@objectstack/sdui-parser';
 
 // The two graphs whose registrations this reads — the layout/content primitives
 // and the console's own plugin layer, from the module main.tsx boots from. Same

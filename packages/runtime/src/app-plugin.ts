@@ -28,7 +28,8 @@ import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
-import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
@@ -53,6 +54,30 @@ import { countServerTiming } from '@objectstack/observability';
  * live while the main path had it suppressed (#3760).
  */
 const SEED_WRITE_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
+
+/**
+ * [#25779] What every seed loader this plugin builds is given beyond its
+ * engine: the `field-files` service a seed file (`seedFile(path)`) is stored
+ * through, resolved when a dataset loads. A kernel without
+ * `@objectstack/service-storage` answers none, and the loader refuses a row
+ * naming a seed file, by name, rather than write an object into a file field.
+ */
+function seedLoaderOptionsFor(ctx: PluginContext): { getFieldFiles: () => IFieldFileService | undefined } {
+    return {
+        getFieldFiles: () => {
+            try {
+                return ctx.getService<IFieldFileService>(FIELD_FILE_SERVICE);
+            } catch {
+                return undefined;
+            }
+        },
+    };
+}
+
+/** [#25779] Does any of these datasets carry the bytes of a seed file? */
+function datasetsCarrySeedFiles(datasets: ReadonlyArray<{ files?: unknown }>): boolean {
+    return datasets.some((d) => d.files !== null && typeof d.files === 'object' && Object.keys(d.files).length > 0);
+}
 
 /**
  * Optional per-project context attached when AppPlugin is instantiated by the
@@ -1837,7 +1862,7 @@ export class AppPlugin implements Plugin {
                      if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) {
                          return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      }
-                     const seedLoader = new SeedLoaderService(ql, md, loggerRef);
+                     const seedLoader = new SeedLoaderService(ql, md, loggerRef, seedLoaderOptionsFor(ctx));
                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                      const request = SeedLoaderRequestSchema.parse({
                          seeds: datasetsNow,
@@ -1936,7 +1961,7 @@ export class AppPlugin implements Plugin {
               try {
                   const metadata = ctx.getService('metadata') as IMetadataService | undefined;
                   if (metadata) {
-                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
+                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       // [#16595] `Seed.locale`'s producer on the DEFAULT boot
                       // path — see {@link resolveSeedLocale}.
@@ -2116,8 +2141,18 @@ export class AppPlugin implements Plugin {
              // seed source is already declared, so every consumer of the
              // settlement tally waits for `app:seeded` exactly as it does for a
              // seed that overran its budget.
+             //
+             // [#25779] The same anchor when a dataset carries seed files: the
+             // storage plugin settles the deployment's file store from its
+             // `storage` settings at `kernel:ready`, so a file stored now could
+             // land in the constructor default that a saved setting is about
+             // to replace — and the reference hooks it is owned under are
+             // installed then too.
              if (this.demoStaffingArmed(ctx)) {
                  ctx.logger.info('[Seeder] inline seed deferred to kernel:bootstrapped — the demo accounts this stack declares (demoStaff) are created at kernel:ready');
+                 ctx.hook('kernel:bootstrapped', runInlineSeed);
+             } else if (datasetsCarrySeedFiles(normalizedDatasets)) {
+                 ctx.logger.info('[Seeder] inline seed deferred to kernel:bootstrapped — its datasets carry seed files, which are stored once the storage service has read its settings at kernel:ready');
                  ctx.hook('kernel:bootstrapped', runInlineSeed);
              } else {
                  await runInlineSeed();
@@ -2348,7 +2383,7 @@ export class AppPlugin implements Plugin {
                     ctx.logger.warn('[Seeder] hot-reload seed skipped — metadata service unavailable');
                     return;
                 }
-                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
+                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
                 const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                 // [#16595] `Seed.locale`'s producer on the dev hot-reload
                 // path. Resolved from the BOOT bundle, not from `payload`: a
