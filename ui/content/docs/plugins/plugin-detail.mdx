@@ -222,7 +222,10 @@ Three sources, in precedence order:
    hands each handler over only where the caller may make that write
    (objectui#12082): the composer and the reply input need the **create** grant
    on `sys_comment`; the reaction control needs the **create** grant on
-   `sys_comment_reaction`, and taking a reaction back its **delete** grant; on a
+   `sys_comment_reaction`, and taking the caller's own reaction back needs the
+   same grant: it goes through the unreact door
+   (`DELETE /api/v1/comments/reactions/:id`), which removes only the caller's
+   own row and asks no **delete** grant. On a
    deployment with no `sys_comment_reaction` the control needs the **update**
    grant on `sys_comment`. These are the `feedComment`, `feedReactionAdd`,
    `feedReactionRemove` and `feedReactionColumn` rows of the affordance-to-grant

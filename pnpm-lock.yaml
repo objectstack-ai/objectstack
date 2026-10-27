@@ -3496,9 +3496,9 @@ importers:
 
   ui/apps/console:
     dependencies:
-      '@object-ui/sdui-parser':
+      '@objectstack/sdui-parser':
         specifier: workspace:*
-        version: link:../../packages/sdui-parser
+        version: link:../../../packages/sdui-parser
     devDependencies:
       '@dnd-kit/core':
         specifier: ^6.3.1
@@ -3928,9 +3928,9 @@ importers:
       '@object-ui/react-runtime':
         specifier: workspace:*
         version: link:../../packages/react-runtime
-      '@object-ui/sdui-parser':
+      '@objectstack/sdui-parser':
         specifier: workspace:*
-        version: link:../../packages/sdui-parser
+        version: link:../../../packages/sdui-parser
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -4044,12 +4044,12 @@ importers:
       '@object-ui/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../../packages/sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -4336,12 +4336,12 @@ importers:
       '@object-ui/react-runtime':
         specifier: workspace:*
         version: link:../react-runtime
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec
@@ -4754,12 +4754,12 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@vitejs/plugin-react':
         specifier: ^6.0.5
         version: 6.0.5(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
@@ -4911,12 +4911,12 @@ importers:
       '@object-ui/data-objectstack':
         specifier: workspace:*
         version: link:../data-objectstack
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -5124,12 +5124,12 @@ importers:
       '@object-ui/plugin-charts':
         specifier: workspace:*
         version: link:../plugin-charts
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react-grid-layout':
         specifier: ^2.1.0
         version: 2.1.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -5267,15 +5267,15 @@ importers:
       '@object-ui/react':
         specifier: workspace:*
         version: link:../react
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -5444,12 +5444,12 @@ importers:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     devDependencies:
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -5523,12 +5523,12 @@ importers:
       '@object-ui/data-objectstack':
         specifier: workspace:*
         version: link:../data-objectstack
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -5602,12 +5602,12 @@ importers:
       '@object-ui/data-objectstack':
         specifier: workspace:*
         version: link:../data-objectstack
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -5742,9 +5742,9 @@ importers:
       '@object-ui/plugin-list':
         specifier: workspace:*
         version: link:../plugin-list
-      '@object-ui/sdui-parser':
+      '@objectstack/sdui-parser':
         specifier: workspace:*
-        version: link:../sdui-parser
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -5937,12 +5937,12 @@ importers:
       '@object-ui/data-objectstack':
         specifier: workspace:*
         version: link:../data-objectstack
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -6004,12 +6004,12 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
-      '@object-ui/sdui-parser':
-        specifier: workspace:*
-        version: link:../sdui-parser
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -6151,6 +6151,9 @@ importers:
       '@object-ui/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../../../packages/sdui-parser
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -6240,24 +6243,6 @@ importers:
       vite:
         specifier: ^8.2.1
         version: 8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1)
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.3)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-
-  ui/packages/sdui-parser:
-    devDependencies:
-      '@object-ui/core':
-        specifier: workspace:*
-        version: link:../core
-      '@object-ui/react':
-        specifier: workspace:*
-        version: link:../react
-      '@object-ui/types':
-        specifier: workspace:*
-        version: link:../types
-      '@objectstack/spec':
-        specifier: workspace:^
-        version: link:../../../packages/spec
       vitest:
         specifier: ^4.1.10
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.3)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))

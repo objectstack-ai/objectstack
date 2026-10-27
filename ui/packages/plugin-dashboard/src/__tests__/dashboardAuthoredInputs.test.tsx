@@ -105,8 +105,8 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { DashboardSchema } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree, generateDts, propsName } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree, generateDts, propsName } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 import { ActionProvider } from '@object-ui/react';
 import { DashboardRenderer } from '../DashboardRenderer';
 // Module scope, not a hook: this import IS the registration.

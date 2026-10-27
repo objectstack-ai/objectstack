@@ -21,6 +21,8 @@ import {
   // #14057 coverage seam — the statuses the shipped ledgers actually carry, so
   // the coverage pin below is derived from the ledgers rather than hand-listed.
   shippedLedgerStatuses,
+  // #26146 — the same census against a ledger directory the test controls.
+  ledgerStatusesIn,
   // #19268/#19276 walk seam — package-internal, same posture as the two above
   // (module exports; `src/index.ts` re-exports neither, and the package's
   // `exports` map publishes only `.` and `./runtime`). The rule against a
@@ -1967,29 +1969,29 @@ describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () =
 describe('the hint a warned row shows an author (#16094, #21096)', () => {
   type ShippedRow = { type: string; path: string; entry: Record<string, unknown> };
 
-  /** Every shipped row at the depth the warn map reads (props + one level of `children`). */
+  /** Every shipped row at the depth the warn map reads: every level of `children` (#26146). */
   function shippedRows(): ShippedRow[] {
     const rows: ShippedRow[] = [];
     const dir = shippedLedgerDir();
-    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
-      const type = file.replace(/\.json$/, '');
-      const ledger = JSON.parse(readFileSync(join(dir, file), 'utf8'));
-      const isRow = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-      for (const [key, entry] of Object.entries((ledger.props ?? {}) as Record<string, unknown>)) {
+    const isRow = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+    const walk = (type: string, entries: unknown, prefix: string) => {
+      for (const [key, entry] of Object.entries(isRow(entries) ? entries : {})) {
         if (!isRow(entry)) continue;
-        for (const [ck, centry] of Object.entries((entry.children ?? {}) as Record<string, unknown>)) {
-          if (isRow(centry)) rows.push({ type, path: `${key}.${ck}`, entry: centry });
-        }
-        rows.push({ type, path: key, entry });
+        const path = prefix ? `${prefix}.${key}` : key;
+        walk(type, entry.children, path);
+        rows.push({ type, path, entry });
       }
+    };
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+      walk(file.replace(/\.json$/, ''), JSON.parse(readFileSync(join(dir, file), 'utf8')).props, '');
     }
     return rows;
   }
 
-  /** An item that authors exactly `path` (one level of nesting at most). */
+  /** An item that authors exactly `path`, at any depth. */
   const itemAuthoring = (path: string): Record<string, unknown> => {
-    const [head, child] = path.split('.');
-    return child === undefined ? { name: 'probe', [head]: 'x' } : { name: 'probe', [head]: { [child]: 'x' } };
+    const nested = path.split('.').reduceRight<unknown>((value, seg) => ({ [seg]: value }), 'x');
+    return { name: 'probe', ...(nested as Record<string, unknown>) };
   };
 
   const hintFor = (row: ShippedRow) => {
@@ -2187,5 +2189,101 @@ describe('[#22161] one-line fix — liveness-ledger-unreadable', () => {
     for (const fact of ['packaging fault in the platform, not an authoring error', 'silence about that type means nothing', 'once per run']) {
       expect(text, fact).toContain(fact);
     }
+  });
+});
+
+// ── #26146: the warn map and the status census read every depth of `children` ──
+//
+// Both walks used to stop one `children` level down, while the ledgers had grown
+// rows two and three levels down (the dashboard's `widgets.chartConfig.*`, the
+// app's `navigation.dataSource.read.*`). None of them reached the warn map or
+// the vocabulary census. The shipped deep rows carry no `authorWarn`, and every
+// status they carry also appears at a shallower depth, so the opt-in and the
+// census are each held through a planted copy of the ledger directory; the
+// verdict-triggered half is held against the real dashboard ledger.
+describe('#26146 — ledger rows below the child level are graded and counted', () => {
+  const board = (widget: Record<string, unknown>) => ({
+    dashboards: [{
+      name: 'sales_overview',
+      label: 'Sales',
+      widgets: [
+        { id: 'first', type: 'metric', dataset: 'orders', values: ['total'] },
+        { id: 'second', type: 'bar', dataset: 'orders', values: ['total'], ...widget },
+      ],
+    }],
+  });
+
+  it('REAL LEDGER: the dead `widgets.chartConfig.*` rows, two levels down, are graded dead on an unparsed stack', () => {
+    const warned = authorWarnedProperties('dashboard');
+    const findings = lintLivenessProperties(board({
+      chartConfig: { type: 'bar', xAxis: 'region', yAxis: 'total', series: ['total'], title: 'Pipeline' },
+    }));
+    for (const key of ['type', 'xAxis', 'yAxis', 'series']) {
+      const path = `widgets.chartConfig.${key}`;
+      expect(warned.has(path), path).toBe(true);
+      // The second widget is the one authoring it, so the array fan-out is in the path too.
+      expect(ruleOf(findings, path), path).toBe(LIVENESS_DEAD_PROPERTY);
+    }
+    // Control: a live sibling on the same carrier stays silent in the same call.
+    expect(warned.has('widgets.chartConfig.title')).toBe(false);
+    expect(ruleOf(findings, 'widgets.chartConfig.title')).toBeUndefined();
+  });
+
+  /** The shipped `dashboard.json`, with a synthetic subtree planted under `widgets`. */
+  const plantedDashboardLedgerDir = () => ledgerDirWith((dir) => {
+    const ledger = JSON.parse(readFileSync(join(dir, 'dashboard.json'), 'utf8'));
+    ledger.props.widgets.children.synthNest = {
+      status: 'live',
+      children: {
+        // Depth 2: the card's case, a `dead` row with `authorWarn`.
+        deadOptIn: { status: 'dead', authorWarn: true },
+        deeper: {
+          status: 'live',
+          children: {
+            // Depth 3: `planned` warns ONLY through the opt-in, so this pair
+            // shows the opt-in itself reaches this deep, not just the verdict.
+            plannedOptIn: { status: 'planned', authorWarn: true },
+            plannedQuiet: { status: 'planned' },
+          },
+        },
+      },
+    };
+    writeLedger(dir, 'dashboard', ledger);
+  });
+
+  it('PLANTED: a dead row with authorWarn two levels down warns, and an opted-in planned row three levels down warns too', () => {
+    const findings = lintLivenessPropertiesFromLedgerDir(plantedDashboardLedgerDir(), board({
+      synthNest: { deadOptIn: 'x', deeper: { plannedOptIn: 'x', plannedQuiet: 'x' } },
+    }));
+    expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
+    expect(ruleOf(findings, 'widgets.synthNest.deadOptIn')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'widgets.synthNest.deeper.plannedOptIn')).toBe('liveness-planned-property');
+    expect(ruleOf(findings, 'widgets.synthNest.deeper.plannedQuiet')).toBeUndefined();
+    // The live containers on the way down warn on nothing.
+    expect(ruleOf(findings, 'widgets.synthNest')).toBeUndefined();
+    expect(ruleOf(findings, 'widgets.synthNest.deeper')).toBeUndefined();
+  });
+
+  it('PLANTED: a status word used only two or three levels down reaches the vocabulary census', () => {
+    const dir = ledgerDirWith((d) => {
+      const ledger = JSON.parse(readFileSync(join(d, 'dashboard.json'), 'utf8'));
+      ledger.props.widgets.children.synthNest = {
+        status: 'live',
+        children: {
+          atDepthTwo: { status: 'synth-depth-two' },
+          deeper: { status: 'live', children: { atDepthThree: { status: 'synth-depth-three' } } },
+        },
+      };
+      writeLedger(d, 'dashboard', ledger);
+    });
+    const planted = ledgerStatusesIn(dir);
+    expect(planted.has('synth-depth-two')).toBe(true);
+    expect(planted.has('synth-depth-three')).toBe(true);
+    // Control: the shipped census is this same walk over the shipped directory,
+    // and neither planted word is in it.
+    const shipped = shippedLedgerStatuses();
+    expect([...ledgerStatusesIn(shippedLedgerDir())].sort()).toEqual([...shipped].sort());
+    expect(shipped.has('synth-depth-two')).toBe(false);
+    expect(shipped.has('synth-depth-three')).toBe(false);
   });
 });

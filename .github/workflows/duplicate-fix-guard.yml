@@ -27,10 +27,20 @@ on:
 permissions:
   pull-requests: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled.
+concurrency:
+  group: duplicate-fix-guard-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   duplicate-fix-guard:
     name: No other open PR may claim the same issue
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.3 min, max
+    # 0.8.
+    timeout-minutes: 5
     steps:
       - name: Check declared issues against other open PRs
         uses: actions/github-script@v9

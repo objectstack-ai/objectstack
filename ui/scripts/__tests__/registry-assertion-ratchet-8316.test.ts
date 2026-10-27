@@ -108,7 +108,7 @@ describe('the scope is one file, not the repo (objectui#8316 fence)', () => {
   });
 
   it('does not reach the `gen-manifest.ts` sibling the card recorded and did not file', async () => {
-    const sibling = path.join(REPO_ROOT, 'packages/sdui-parser/scripts/gen-manifest.ts');
+    const sibling = path.join(REPO_ROOT, 'apps/console/scripts/gen-manifest.ts');
     const code = 'export const configs = [] as unknown as RegistryConfigLike[];\n';
     // Two reports at the guarded path, because `as unknown as T` is two
     // assertions — which is the control that makes the sibling's zero a

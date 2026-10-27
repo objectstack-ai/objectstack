@@ -7,7 +7,7 @@
  */
 
 import { ComponentRegistry } from '@object-ui/core';
-import { isHtmlTierNode } from '@object-ui/sdui-parser';
+import { isHtmlTierNode } from '@objectstack/sdui-parser';
 import type { TextSpanSchema } from '@object-ui/types';
 import { renderChildren } from '../../lib/utils';
 import { forwardRef } from 'react';

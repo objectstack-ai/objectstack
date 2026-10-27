@@ -966,13 +966,11 @@ jobs:
       # repo-root `sdui.manifest.json` is absent or unreadable, so nothing in
       # the production path ever says "the gate lost its whitelist" — this step
       # is the thing that notices. Offline record checks only (existence, shape,
-      # sha256 vs the provenance record, and with no pin each registry
-      # package's source digest vs its record): the regenerate-and-compare half
-      # runs where the registry is built, as ci.yml's Build & E2E UI step "The
-      # committed SDUI manifest is the one this tree generates" (#26137), on
-      # pull_request and on the merge queue's combined tree. Unfiltered:
-      # filtering it to the artefact would go dormant on exactly the PR that
-      # moves the artefact's inputs and not the artefact.
+      # sha256 vs the provenance record): freshness is decided where the
+      # registry is built, by ci.yml's Build & E2E UI step "The committed SDUI
+      # manifest is the one this tree generates" (#26137), on pull_request and
+      # on the merge queue's combined tree. Unfiltered: it builds nothing and
+      # runs in seconds, and an absent artefact is the failure it exists for.
       # Direct invocation per the GATE INVOCATION IDIOM at the top of this file.
       - name: SDUI manifest is present, intact and fresh at the objectui pin
         id: sdui-manifest-is-present-intact-and-fresh
@@ -1812,7 +1810,7 @@ jobs:
       # from a primary checkout, a detached HEAD and a non-repo cwd with
       # identical results, so neither this checkout's depth nor its branch is an
       # input. This step itself needs only `jq` and `git` (both in the runner
-      # image; `jq` is already relied on bare by cut-rc.yml and release.yml),
+      # image; `jq` is already relied on bare by release.yml),
       # plus whatever each discovered matrix declares in its own header —
       # discovery above is by glob, so a matrix needing more (node, pnpm, a
       # built tree, a generator) must say so there; this comment is not the
@@ -3474,6 +3472,38 @@ jobs:
         run: |
           node scripts/ci/scheduled-full-run.mjs --self-test
           node scripts/ci/scheduled-full-run.mjs --check-concurrency
+
+      # Workflow step bodies that moved out of inline `run:` / `github-script`
+      # blocks into scripts/ci/ (#26086). Each step fires only on an event no
+      # pull request produces (a red scheduled run, a red nightly on main), so
+      # its module's --self-test is the one place it runs before it fires.
+      # Offline doubles; sub-second each. A collector, so one red self-test
+      # does not hide the others (#10814).
+      - name: Moved workflow step bodies self-test
+        id: moved-workflow-step-bodies-self-test
+        continue-on-error: true
+        run: |
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
+          run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
+          run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Moved workflow step bodies self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Moved workflow step bodies self-tests — all three ran and passed"
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into

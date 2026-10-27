@@ -38,7 +38,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { LayoutSchema } from '@object-ui/types/zod';
-import { compile, generateDts, manifestFromConfigs, type RegistryConfigLike } from '@object-ui/sdui-parser';
+import { compile, generateDts, manifestFromConfigs, type RegistryConfigLike } from '@objectstack/sdui-parser';
 import {
   ComponentRegistry,
   HTML_TIER_INTRINSICS,
@@ -51,7 +51,7 @@ import '@object-ui/components';
 // … and the console's own plugin layer, from the module main.tsx boots from.
 import '../register-plugins';
 
-/** Exactly the generators' read (`dev/manifest-dump.tsx`, `sdui-parser/scripts/gen-manifest.ts`). */
+/** Exactly the generators' read (`dev/manifest-dump.tsx`, `apps/console/scripts/gen-manifest.ts`). */
 const manifest = manifestFromConfigs(ComponentRegistry.getPublicConfigs() as unknown as RegistryConfigLike[]);
 /** What a consumer reads back off disk — `JSON.stringify` drops every `undefined`. */
 const published = JSON.parse(JSON.stringify(manifest)) as typeof manifest;

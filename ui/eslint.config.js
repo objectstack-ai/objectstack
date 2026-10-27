@@ -384,7 +384,7 @@ export default tseslint.config({
   // `assertionStyle: 'never'` is a much larger decision with its own decision
   // box and is NOT this ratchet (objectui#8316); so is the pre-existing
   // sibling `as unknown as RegistryConfigLike[]` in
-  // `packages/sdui-parser/scripts/gen-manifest.ts`, which this scope does not
+  // `apps/console/scripts/gen-manifest.ts`, which this scope does not
   // reach. `Registry.ts` carries zero type assertions today, so this lints
   // clean with no allowlist.
   files: ['packages/core/src/registry/Registry.ts'],

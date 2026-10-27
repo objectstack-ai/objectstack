@@ -28,7 +28,7 @@
  * published authoring surface, and four layers are silent about a key that only
  * exists there:
  *
- *   1. `packages/sdui-parser/scripts/gen-manifest.ts` serializes `inputs` into
+ *   1. `apps/console/scripts/gen-manifest.ts` serializes `inputs` into
  *      `sdui.manifest.json` (the save-gate + parser whitelist) and into
  *      `sdui-intrinsics.d.ts` (the JSX authoring type surface), so both declare
  *      the key legal;
@@ -250,7 +250,7 @@ import {
   PageComponentType,
   RETIRED_PAGE_COMPONENT_TYPES,
 } from '@objectstack/spec/ui';
-import { MANIFEST_INPUT_TYPES, inputTypeArms } from '@object-ui/sdui-parser';
+import { MANIFEST_INPUT_TYPES, inputTypeArms } from '@objectstack/sdui-parser';
 import type { ComponentInput } from '@object-ui/types';
 import {
   authorableShapeKeys,

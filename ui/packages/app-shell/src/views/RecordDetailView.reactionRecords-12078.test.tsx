@@ -10,7 +10,8 @@
  * left only the later write stored. Now, where the deployment has the object,
  * the chatter reads every comment's reaction rows in one batched `comment_id`
  * `$in` read, groups them into the shape the panel already renders, and a click
- * creates or deletes the clicker's own row. Where the deployment has no such
+ * creates the clicker's own row, or removes it through the unreact door
+ * (`DELETE /api/v1/comments/reactions/:id`, objectstack#26346). Where the deployment has no such
  * object (a framework that predates it), the column path stays, unchanged: the
  * `objectui#11019` / `objectui#10899` / `objectui#11035` pins beside this file
  * run on that path.
@@ -20,7 +21,8 @@
  * source is a fake SERVER shared by every mounted view: each view's adapter is
  * bound to its signed-in member, and the server keeps the object's declared
  * rules: `user_id` stamped from that member, one row per (comment, emoji,
- * user), and a member deletes only their own row. Which store the page uses is
+ * user), and a member removes only their own row, through the unreact door
+ * the page's authenticated fetch reaches. Which store the page uses is
  * read from the object registry the page's metadata context serves.
  */
 
@@ -36,6 +38,9 @@ import { toast } from 'sonner';
 /** The signed-in member is read from a context, so two views can be two members at once. */
 const signedIn = vi.hoisted(() => ({ ctx: null as unknown as React.Context<string> }));
 
+/** The unreact door of the member a view is being mounted as: the page's authenticated fetch reaches it. */
+const mounting = vi.hoisted(() => ({ door: null as unknown as (url: string, init?: RequestInit) => Promise<Response> }));
+
 vi.mock('@object-ui/auth', async (importOriginal) => {
   const ReactModule = await import('react');
   signedIn.ctx = ReactModule.createContext('u1');
@@ -45,7 +50,12 @@ vi.mock('@object-ui/auth', async (importOriginal) => {
       const id = ReactModule.useContext(signedIn.ctx);
       return { user: { id, name: id, image: null }, activeOrganization: null };
     },
-    createAuthenticatedFetch: () => vi.fn(),
+    // Only the unreact door is answered; every other call answers nothing, as before.
+    createAuthenticatedFetch: () => {
+      const door = mounting.door;
+      return (url: string, init?: RequestInit) =>
+        String(url).includes('/api/v1/comments/reactions/') ? door(url, init) : undefined;
+    },
   };
 });
 
@@ -136,7 +146,8 @@ const refusal = (status: number, code: string) =>
 /**
  * One server shared by every view a case mounts. `as(member)` is that member's
  * adapter: what they create is stamped as theirs, and they delete only rows
- * that are theirs.
+ * that are theirs. Its `unreact` is that member's unreact door: it removes the
+ * member's own row and refuses anyone else's, as the server's door does.
  */
 function makeServer(init: { comments?: CommentRow[]; reactions?: Omit<ReactionRow, 'id' | 'created_at'>[] } = {}) {
   const comments: CommentRow[] = init.comments ?? [
@@ -192,6 +203,18 @@ function makeServer(init: { comments?: CommentRow[]; reactions?: Omit<ReactionRo
       reactions.splice(at, 1);
       return true;
     }),
+    unreact: vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      const id = decodeURIComponent(String(url).split('/api/v1/comments/reactions/')[1]);
+      if (init?.method !== 'DELETE') return answer(404, { success: false });
+      const at = reactions.findIndex((r) => r.id === id);
+      if (at < 0) return answer(404, { success: false, error: { code: 'RECORD_NOT_FOUND' } });
+      // The door's own rule: the row's reactor is the caller.
+      if (reactions[at].user_id !== member) return answer(403, { success: false, error: { code: 'PERMISSION_DENIED' } });
+      reactions.splice(at, 1);
+      return answer(200, { success: true, data: { id, deleted: true } });
+    }),
   });
 
   return { comments, reactions, as };
@@ -234,6 +257,7 @@ function tree(member: string, dataSource: any, metadata: any) {
 
 /** Mounts the record page as `member` and waits for the comment to show. */
 async function mountAs(member: string, dataSource: any, objects: unknown[] = REGISTRY.present) {
+  mounting.door = dataSource.unreact;
   const view = render(tree(member, dataSource, metadataFor(objects)));
   await within(view.container).findByText(COMMENT_BODY);
   // Let the reaction read that follows the comment read land.
@@ -281,6 +305,11 @@ function pick(view: View, emoji: string) {
 async function click(run: () => void) {
   run();
   await act(async () => {});
+}
+
+/** The row ids a member's take-backs removed through the unreact door, in order. */
+function unreacted(dataSource: any): string[] {
+  return dataSource.unreact.mock.calls.map(([url]: [string]) => decodeURIComponent(url.split('/').pop() as string));
 }
 
 /** Every `sys_comment_reaction` read a data source was asked, as its `$in` id lists. */
@@ -332,7 +361,7 @@ describe("a comment's reactions are each member's own sys_comment_reaction recor
     expect(isOwn(again, '👍')).toBe(true);
   });
 
-  it('a second click removes it: the clicker deletes their own row, by the id the create returned and by the id the read returned', async () => {
+  it('a second click removes it: the clicker removes their own row through the unreact door, by the id the create returned and by the id the read returned', async () => {
     const server = makeServer({ reactions: [{ comment_id: COMMENT_ID, emoji: '👍', user_id: 'u2' }] });
     const u1 = server.as('u1');
     const view = await mountAs('u1', u1);
@@ -342,11 +371,12 @@ describe("a comment's reactions are each member's own sys_comment_reaction recor
     expect(chips(view)).toEqual(['👍 1', '🎉 1']);
 
     await click(() => fireEvent.click(chip(view, '🎉')));
-    expect(u1.delete.mock.calls).toEqual([[REACTION, created.id]]);
+    expect(unreacted(u1)).toEqual([created.id]);
+    expect(u1.delete).not.toHaveBeenCalled();
     expect(server.reactions.map((r) => [r.emoji, r.user_id])).toEqual([['👍', 'u2']]);
     expect(chips(view)).toEqual(['👍 1']);
 
-    // A row the read found: its id is the one the take-back deletes.
+    // A row the read found: its id is the one the take-back removes.
     cleanup();
     const before = makeServer({
       reactions: [
@@ -359,7 +389,8 @@ describe("a comment's reactions are each member's own sys_comment_reaction recor
     const read = await mountAs('u1', reader);
     expect(chips(read)).toEqual(['👍 2']);
     await click(() => fireEvent.click(chip(read, '👍')));
-    expect(reader.delete.mock.calls).toEqual([[REACTION, mine.id]]);
+    expect(unreacted(reader)).toEqual([mine.id]);
+    expect(reader.delete).not.toHaveBeenCalled();
     expect(before.reactions.map((r) => r.user_id)).toEqual(['u2']);
     expect(chips(read)).toEqual(['👍 1']);
     expect(toast.error).not.toHaveBeenCalled();
@@ -452,7 +483,7 @@ describe("a comment's reactions are each member's own sys_comment_reaction recor
     expect(server.reactions.map((r) => r.user_id)).toEqual(['u2']);
   });
 
-  it('a take-back clicked before the create answers deletes the row that create made', async () => {
+  it('a take-back clicked before the create answers removes the row that create made', async () => {
     const server = makeServer();
     const u1 = server.as('u1');
     let answer!: () => void;
@@ -471,11 +502,12 @@ describe("a comment's reactions are each member's own sys_comment_reaction recor
     expect(chips(view)).toEqual([]);
     await act(async () => {});
     // The take-back waits for the row it takes back.
-    expect(u1.delete).not.toHaveBeenCalled();
+    expect(u1.unreact).not.toHaveBeenCalled();
 
     await act(async () => answer());
-    await waitFor(() => expect(u1.delete).toHaveBeenCalledTimes(1));
-    expect(u1.delete.mock.calls[0]).toEqual([REACTION, 'r1']);
+    await waitFor(() => expect(u1.unreact).toHaveBeenCalledTimes(1));
+    expect(unreacted(u1)).toEqual(['r1']);
+    expect(u1.delete).not.toHaveBeenCalled();
     expect(server.reactions).toEqual([]);
     expect(chips(view)).toEqual([]);
     expect(toast.error).not.toHaveBeenCalled();

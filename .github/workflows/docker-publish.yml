@@ -36,6 +36,11 @@ jobs:
   publish:
     name: Build & push ghcr.io/objectstack-ai/objectstack
     runs-on: ubuntu-latest
+    # Job wall, all four readings on record: 3.5 and 3.5 min (the two dispatch runs), 4.3
+    # min (18.1.0, Release run 40078805767, attempt 2) and 1.4 min (attempt 1, red). Four
+    # readings make p99 the max, 4.3; the bound is wide because the image is built for two
+    # platforms, arm64 under QEMU, and a cold layer cache is unmeasured.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write

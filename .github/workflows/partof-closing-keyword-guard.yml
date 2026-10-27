@@ -50,6 +50,9 @@ jobs:
   partof-closing-keyword:
     name: Part-of PR must not also close its card
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.8 min, max
+    # 0.8.
+    timeout-minutes: 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

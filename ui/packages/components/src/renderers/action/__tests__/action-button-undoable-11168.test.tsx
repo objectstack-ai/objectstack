@@ -41,8 +41,8 @@ import type { PublicBlockNodeOf } from '@object-ui/types';
 import { undeclaredNode } from '@object-ui/test-support';
 import { ActionProvider, RecordContextProvider, SchemaRenderer } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { SchemaElement } from '@objectstack/sdui-parser';
 // Module-scope side-effect imports, so the renderers are registered before the
 // first render: the light `dom` project does not load the components graph.
 // Module scope, not a `beforeAll`, per AGENTS.md 测试纪律.

@@ -614,7 +614,7 @@ const FLEX_FLAT_PROP =
  * bag, and as code composes it. A stored flat `flex` node keeps rendering,
  * because `SchemaRenderer` reads both spellings and the narrowing is on the
  * authoring faces only; a node compiled from the `kind: 'html'` JSX tier
- * (`@object-ui/sdui-parser`) never passes through this face.
+ * (`@objectstack/sdui-parser`) never passes through this face.
  */
 export const FlexBlockSchema = BaseSchema.extend({
   type: z.literal('flex'),

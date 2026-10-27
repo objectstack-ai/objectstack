@@ -21,7 +21,7 @@
  * declared them, so the three walks that judge a document — the `objectui
  * check` unevaluated-expression gate (`findUnbindableTextExpressions` in
  * `@object-ui/cli`), `validateChildren` in `@object-ui/core`'s schema
- * validator and `validateTree` in `@object-ui/sdui-parser` — stopped at
+ * validator and `validateTree` in `@objectstack/sdui-parser` — stopped at
  * `children` and never reached a node under a slot: a `${…}` on such a node's
  * `title` reached the user as literal text, unrefused.
  *
@@ -38,7 +38,7 @@
  * spelling (objectui#6771) and stays retired: it appears below ONLY on the
  * types whose renderer was measured still reading it for stored documents,
  * marked `retired`, and the parser tier's refusal of the spelling by name
- * (`RETIRED_CHILD_LIST_KEY` in `@object-ui/sdui-parser`) is unchanged.
+ * (`RETIRED_CHILD_LIST_KEY` in `@objectstack/sdui-parser`) is unchanged.
  *
  * ## Where each row comes from
  *
