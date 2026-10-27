@@ -459,36 +459,8 @@ jobs:
           # check would degrade to "not verified" on every run.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # No "migration registry matches its entry files" step since #22554:
-      # `packages/spec/src/migrations/registry.ts` is git-ignored and generated
-      # whole from `registry.ts.template` + `entries/` by `gen:migration-registry`,
-      # which `pnpm install` above already ran (spec's `prepare`, self-test
-      # included). There is no committed copy left to compare, and an entry the
-      # generator refuses fails that install step, loudly, in every job.
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Enforces the no-restricted-imports guard against @objectstack/spec root
       # namespace imports (the dormant rule was never run in CI). Syntactic
@@ -566,29 +538,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
@@ -2007,29 +1958,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Rationale: `scripts/check-docs-single-h1.mjs` header (#12236, #12249, #12250,
       # #4690).
@@ -3118,29 +3048,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Lockstep package-count guard (#17039). `.changeset/config.json`'s
       # `fixed` array is the one true count of packages one stray `major`
@@ -3299,8 +3208,9 @@ jobs:
       # moving onto .github/actions/setup-pnpm, and when that finishes a grep
       # for `corepack enable` returns 0 — a true answer about Corepack that
       # reads as a complete answer about pnpm acquisition. It is not one:
-      # showcase-smoke.yml acquires pnpm through `pnpm/action-setup`, which
-      # contains no Corepack string and is invisible to that key. A metric that
+      # showcase-smoke.yml acquired pnpm through `pnpm/action-setup`, which
+      # contains no Corepack string and is invisible to that key, until it
+      # moved onto .github/actions/setup-workspace. A metric that
       # hits zero while its subject survives is worse than no metric, because it
       # retires the attention.
       #
@@ -4274,29 +4184,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # ── Gate-family selection (#16496) ───────────────────────────────────
       # After #16453 this job is the merge queue's critical path (median 1468 s
@@ -4451,29 +4340,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Gate-family selection (#16496) — the same step, once per lane that carries a
       # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
@@ -4616,29 +4484,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Gate-family selection (#16496) — the same step, once per lane that carries a
       # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
@@ -4825,29 +4672,8 @@ jobs:
           # `fetch-depth: 0`: same reason as the `lint-eslint` checkout above.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Gate-family selection (#16496) — the same step, once per lane that carries a
       # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
@@ -5040,26 +4866,8 @@ jobs:
           # and degrades this gate to a false RED on an innocent PR.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # This job runs the full workspace build below ("Build workspace
       # packages"); without a restored turbo cache that step rebuilt every
@@ -5113,9 +4921,6 @@ jobs:
             ${{ runner.os }}-turbo-typecheck-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Coverage meta-gate (#4311): 66 of 77 workspace packages build with tsup
       # (esbuild transpile, no type check) and `vitest run` does not type-check
@@ -5703,26 +5508,8 @@ jobs:
           # #6356).
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Same note as `typecheck-source-gates`' Restore Turbo cache step (#5401). ⚠️ The
       # namespace is the literal `typecheck`, never `github.job`.
@@ -5736,9 +5523,6 @@ jobs:
             ${{ runner.os }}-turbo-typecheck-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Example apps are AI-authoring reference templates; a red typecheck is a
       # bad signal to copy from. tsup transpiles them without a full typecheck,
@@ -5968,26 +5752,8 @@ jobs:
           # #6356).
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Same note as `typecheck-source-gates`' Restore Turbo cache step (#5401). ⚠️ The
       # namespace is the literal `typecheck`, never `github.job`.
@@ -6001,9 +5767,6 @@ jobs:
             ${{ runner.os }}-turbo-typecheck-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Example apps are AI-authoring reference templates; a red typecheck is a
       # bad signal to copy from. tsup transpiles them without a full typecheck,
@@ -6191,26 +5954,8 @@ jobs:
           # #6356).
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Same note as `typecheck-source-gates`' Restore Turbo cache step (#5401). ⚠️ The
       # namespace is the literal `typecheck`, never `github.job`.
@@ -6224,9 +5969,6 @@ jobs:
             ${{ runner.os }}-turbo-typecheck-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Same build note as `typecheck-debt`'s Build workspace packages step (#3037,
       # #22077, #21186).

@@ -484,25 +484,9 @@ jobs:
       # failed without ever compiling anything. It also keeps the failure signature
       # single: on this path the only red is the adjudication step, never an
       # install that happened to flake on the same shaky network.
-      - name: Setup Node.js
-        if: >-
-          steps.labels.outputs.skip != 'true'
-          && steps.diffbase.outputs.base_error == ''
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        if: >-
-          steps.labels.outputs.skip != 'true'
-          && steps.diffbase.outputs.base_error == ''
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Install dependencies
-        if: >-
-          steps.labels.outputs.skip != 'true'
-          && steps.diffbase.outputs.base_error == ''
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        if: steps.labels.outputs.skip != 'true' && steps.diffbase.outputs.base_error == ''
+        uses: ./.github/actions/setup-workspace
 
       # COUNTING ONLY -- the verdict is two steps down (#6378). The split is not
       # cosmetic: it is what lets the label window be settled for exactly the PRs
