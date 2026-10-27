@@ -143,11 +143,11 @@ function makeStubEngine() {
             }
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts: { where: Record<string, unknown> }) {
-            if (table === 'sys_metadata_history') {
-                return historyRows.filter((h) => matchesHistory(h, opts.where));
-            }
-            return Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where));
+        async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+            const matched = table === 'sys_metadata_history'
+                ? historyRows.filter((h) => matchesHistory(h, opts.where))
+                : Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where));
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
