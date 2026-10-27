@@ -34,6 +34,15 @@ import { useNavigate } from 'react-router-dom';
 import { Check, KeyRound, ShieldAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { OAuthApplicationPublic } from '@objectstack/client';
+import {
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_CONSENT_COPY,
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+  MCP_OAUTH_SCOPES,
+  type McpOauthScope,
+} from '@objectstack/spec/ai';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
@@ -271,10 +280,14 @@ export function OAuthConsentPage() {
   );
 }
 
-function describeScope(
-  scope: string,
-  t: ReturnType<typeof useObjectTranslation>['t'],
-): string {
+type Translate = ReturnType<typeof useObjectTranslation>['t'];
+
+function isMcpOauthScope(scope: string): scope is McpOauthScope {
+  return (MCP_OAUTH_SCOPES as readonly string[]).includes(scope);
+}
+
+function describeScope(scope: string, t: Translate): string {
+  if (isMcpOauthScope(scope)) return describeAgentScope(scope, t);
   switch (scope) {
     case 'openid':
       return t('oauth.consent.scope.openid', {
@@ -292,23 +305,37 @@ function describeScope(
       return t('oauth.consent.scope.offlineAccess', {
         defaultValue: 'Stay signed in (refresh access)',
       });
-    // The three agent scopes, as the server grants them: the agent's tools and
-    // data ceiling follow the scope, and every call still runs under the
-    // signed-in user's own permissions, so each sentence carries that bound.
-    case 'data:read':
-      return t('oauth.consent.scope.dataRead', {
-        defaultValue: 'Read records, within your own permissions',
-      });
-    case 'data:write':
-      return t('oauth.consent.scope.dataWrite', {
-        defaultValue: 'Create, change and delete records, within your own permissions',
-      });
-    case 'actions:execute':
-      return t('oauth.consent.scope.actionsExecute', {
-        defaultValue: 'Run actions on your behalf, within your own permissions',
-      });
+    // A scope the page cannot name is still a grant the user is asked to
+    // make, so it is announced as unrecognised, never shown as its bare
+    // spelling: a raw string reads like a description of what is granted.
     default:
-      return scope;
+      return t('oauth.consent.scope.unrecognised', {
+        scope,
+        defaultValue: 'Unrecognised permission: {{scope}}',
+      });
+  }
+}
+
+/**
+ * The MCP agent scopes, as the server grants them: the agent's tools and data
+ * ceiling follow the scope, and every call still runs under the signed-in
+ * user's own permissions, so each sentence carries that bound. The sentence is
+ * the spec's `MCP_OAUTH_SCOPE_CONSENT_COPY`, the one the server side declares
+ * beside the scope; the pack translates it. The switch is exhaustive over
+ * `McpOauthScope`, so a scope added to the spec without a case here fails to
+ * compile instead of reaching the user as "unrecognised".
+ */
+function describeAgentScope(scope: McpOauthScope, t: Translate): string {
+  const defaultValue = MCP_OAUTH_SCOPE_CONSENT_COPY[scope];
+  switch (scope) {
+    case MCP_OAUTH_SCOPE_DATA_READ:
+      return t('oauth.consent.scope.dataRead', { defaultValue });
+    case MCP_OAUTH_SCOPE_DATA_WRITE:
+      return t('oauth.consent.scope.dataWrite', { defaultValue });
+    case MCP_OAUTH_SCOPE_ACTIONS:
+      return t('oauth.consent.scope.actionsExecute', { defaultValue });
+    case MCP_OAUTH_SCOPE_METADATA_WRITE:
+      return t('oauth.consent.scope.metadataWrite', { defaultValue });
   }
 }
 

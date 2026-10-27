@@ -137,7 +137,7 @@
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
 - 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
-- 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
+- 席位留认领文本/派发令/契约复核/ACCEPT/落地;线程实施、开 draft PR、驱动 CI 与可合并。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。

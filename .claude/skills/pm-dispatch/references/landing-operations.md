@@ -22,7 +22,6 @@
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
 - 合并后工作流不在 PR 检查清单上,读 PR 检查的规则对它全盲;按独立检查类登记分开读。
 - 人闸不是验证层的替代:答不了会不会坏的人闸只买延迟,⛔ 不以人闸代替探测。
-- 信任 suite/check 事件前先重读 PR 对象取 head:检查读数绑定该 head,⛔ 不绑事件带的 SHA。
 - 落地记账:座位贴落地清单即账本,逐轮即时记;确需全仓核对时首选 `head:claude/` 精确过滤。
 - 红/踢出处置在同一落地窗口内做:机器输入是 merge-queue triage workflow 的分诊评论。
 - 判据唯一来源是签名台账(锚点 issue),优先于现场判断;只有人工能升级台账。
@@ -54,7 +53,6 @@
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
-- 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
@@ -74,6 +72,8 @@
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
 - 会话席窗口内 PR 须在挂 `subscribe_pr_activity`,缺即补;⛔ 不早于报告,Routine 座位轮询。
+- PR 开出至 MERGED,每看一眼(唤醒/巡检/报告前)同读检查与 `mergeable_state`;`unknown` 即重读。
+- `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。
 - 触发条件是卡终局且报告已收复核;⛔ 合并前不归档,误归档可 unarchive 但容器现场已失。
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。
