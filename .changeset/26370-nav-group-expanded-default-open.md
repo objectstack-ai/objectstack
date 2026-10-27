@@ -7,6 +7,10 @@ spec(ui): a navigation group that says nothing opens — `GroupNavItem.expanded`
 Clause-②: yes
 Metadata-protocol: semantic
 
+<!-- adr-0087: registered ui-nav-group-expanded-default-open -->
+
+**BREAKING** — a declared default moves, shipped as `minor` under the launch-window convention. The author who relied on the documented default (`false`, "a group starts collapsed unless the author opens it") for a group meant to stay out of the daily user's sight — an advanced, developer or diagnostics section — now sees it open on first view wherever the app is parsed (`defineStack`, `defineApp`, a compiled `objectstack.json`). The remedy is one key on that group: `expanded: false`.
+
 - **Before.** `GroupNavItemSchema.expanded` defaulted to `false`. An app parsed through `defineStack` or `defineApp` (and so every compiled `objectstack.json`) carried a written `expanded: false` on every group whose author said nothing. The console honours a written `false` as an explicit close, so those groups started collapsed. An app registered without a parse (the platform's Setup and Account apps) arrived without the key, and the console opened its groups. The protocol and the console disagreed about what a silent group means.
 - **Now.** The default is `true`. A group that says nothing parses to `expanded: true` and opens on first view, the same answer the console already gave a group without the key. A group holding the current route still opens whatever it declares.
 - **To keep a group closed**, write `expanded: false`. Setup's Advanced group and Account's Developer group already do, and they still collapse. Every authored `expanded` parses exactly as before, and a non-boolean is still refused.
