@@ -169,6 +169,26 @@ export function objectstackDependencySpec(placement: ScaffoldPlacement): string 
 }
 
 /**
+ * The TypeScript range an emitted manifest declares, by placement.
+ *
+ * `standalone` is `SCAFFOLD_TYPESCRIPT_RANGE`, the support floor the docs
+ * promise a developer's own project. `in-repo` is this workspace's TypeScript:
+ * the scaffold extends `tsconfig.base.json`, whose `ignoreDeprecations: "6.0"`
+ * only TypeScript 6 accepts, so the standalone floor (installed as 5.x) failed
+ * the new package's first `tsc` with TS5103. ⛔ Never `SCAFFOLD_TYPESCRIPT_RANGE`
+ * here, and never this range for `standalone`.
+ *
+ * `test/create-in-repo-scaffold-typechecks.test.ts` pins it equal to the range
+ * the repository root and every sibling under `packages/plugins/` declare, so a
+ * workspace TypeScript bump reddens there until this moves with it.
+ */
+export const IN_REPO_TYPESCRIPT_RANGE = '^6.0.3';
+
+export function typescriptDependencySpec(placement: ScaffoldPlacement): string {
+  return placement === 'in-repo' ? IN_REPO_TYPESCRIPT_RANGE : SCAFFOLD_TYPESCRIPT_RANGE;
+}
+
+/**
  * The `extends` an in-repo scaffold needs to reach this repo's shared
  * `tsconfig.base.json` — the file every package here extends — DERIVED from
  * where the template lands rather than written down. Writing it down is how the
@@ -421,7 +441,7 @@ export const templates: Record<string, CreateTemplate> = {
           },
           devDependencies: {
             '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
-            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
+            typescript: typescriptDependencySpec(placement),
             vitest: SCAFFOLD_VITEST_RANGE,
           },
           // The same npm override `os init` emits, from the same constant, so
@@ -475,7 +495,9 @@ export const ${sanitizeIdentifier(name)}Plugin: Plugin = {
   name: '${name}',
   version: '0.1.0',
   
-  async init(context) {
+  // \`_context\` is the kernel's plugin context: register services and hooks
+  // through it. Drop the underscore once init reads it.
+  async init(_context) {
     console.log('Initializing ${name} plugin...');
     // Plugin initialization logic
   },
