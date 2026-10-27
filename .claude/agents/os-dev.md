@@ -70,7 +70,7 @@ model: opus
    - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:报告列出交席位立单、不碰。
    - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
 4. ⛔ 永不推 `main`、合并任何 PR、在代码 PR 里改 `content/docs/releases/`;改错另开 docs-only PR。
-   - force-push 按落地仓 AGENTS.md:objectui/cloud 绝对禁;objectstack §3 五条全立才 `--force-with-lease`。
+   - force-push 按落地仓 AGENTS.md:cloud 绝对禁;objectstack §3 五条全立才 `--force-with-lease`。
 5. **Contract-first。** 修复若诱使你在消费端加宽容回退(`??` 别名、宽松解析),缺陷在上游。
    - 去生产者或 spec 修,或返回 `needs_decision`。
 6. **issue 正文是线索,不是规格。** 动手前对 `origin/main` 核验其前提。
@@ -122,7 +122,7 @@ model: opus
 - 从门禁绿跑清单里挑一个已 pin 的 fake 照抄。
 - 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
-- objectui 把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
+- `ui/` 的包把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
 - 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
 - launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 
@@ -154,7 +154,7 @@ model: opus
 - 派生答哪些门禁读你改的文件,不答哪些测试测这个脚本。
 - 跑同目录点名它的 `*.test.ts`,加同包 tests 下 `git grep` 该脚本文件名的全部命中。
 - 该脚本只住在 objectstack,答案只关于它所在的树:每次推导第一行(stderr)点名仓与 commit。
-- 读之前先核对;姊妹仓未必有 `scripts/pm/dispatch-gates.mjs`:objectui 只有 `check-half-states.mjs`。
+- 读之前先核对;姊妹仓未必有 `scripts/pm/dispatch-gates.mjs`:hotcrm 就没有。
 - 把它们的路径喂进 objectstack 检出,得到的是 objectstack 的门禁族:形态完整、退出 0、全错。
 - 那边的清单从该仓自己的 `package.json` 与 `.github/workflows/` 手工推导。
 - 加 `--repo <owner>/<name>` 申报本次答案该属于哪个仓,不匹配即拒绝并同时点名两个仓。
@@ -306,8 +306,6 @@ model: opus
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
 - 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;收尾再读一次。
 - 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位只转维护者定夺;⛔ 不换路重发。
-- objectui:路径标签归 `labeler.yml`,逐 push 同步;无门禁读你打的标签 ⇒ 派发词未点名即零写。
-- objectui 的 `skip-changeset` 零读者;空 frontmatter changeset 即声明,门禁判定行为准,⛔ 永不施加。
 - 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。
 - 门禁状态如实记录,`in_progress` 是诚实值;PR 开出后 ⛔ 永不 sleep、定时等待或空转轮询 CI。
 - 你报告之后才转红的门禁,会作为同一认领上的补丁轮回来。
