@@ -26,9 +26,6 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataResponse } from '@objectstack/spec/api';
-// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
-// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -300,6 +297,10 @@ import {
   collectInternalReadFields,
   collectCredentialFields,
 } from './secret-fields.js';
+// [#25522 cut 18] `count` and `aggregate()`'s credential guard
+// (`rejectCredentialAggregation`); the methods of the same names below hand
+// each body the members it reads (`CountAggregateHost`).
+import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
@@ -599,7 +600,7 @@ export const HOOK_EVENT_DISPATCH_VOCABULARY = {
  * lowering (`sort` records, `populate` lists) that belongs to those layers, so
  * the engine deliberately does not fold them.
  */
-const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
+export const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where');
 const ENGINE_QUERY_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where' || slot.canonical === 'limit');
@@ -698,7 +699,7 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
 // Before their schemas declared them they were refused here, and the wire paths
 // left them out: the unsearched groups answered, and a paged list's `total`
 // under a search was a page-local estimate (#22790).
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
+export const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -907,7 +908,7 @@ export const ENGINE_OPTION_KEY_SETS: Readonly<Record<string, ReadonlySet<string>
  * (`cursor`/`distinct`) quote their tombstone. Everything else gets the legal
  * key set, so the error carries the fix.
  */
-function rejectUnknownEngineOptions(
+export function rejectUnknownEngineOptions(
   object: string,
   operation: string,
   bag: object | undefined,
@@ -949,7 +950,7 @@ function rejectUnknownEngineOptions(
  * shallow copy, because the bag belongs to the caller and may be reused (view
  * metadata, flow node config).
  */
-function foldEngineOptionAliases<T extends object | undefined>(
+export function foldEngineOptionAliases<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1107,7 +1108,7 @@ const UNAPPLIED_WHERE_CONSEQUENCE: Readonly<Record<string, string>> = {
  * common path allocates nothing), otherwise a shallow copy: the bag belongs to
  * the caller and may be reused (view metadata, flow node config).
  */
-function lowerWhereFilterArray<T extends object | undefined>(
+export function lowerWhereFilterArray<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1405,7 +1406,7 @@ function resolveThenLowerWhere<W>(
  * copies, and with them gone that reading would have dropped the whole-day
  * bound on every such read.
  */
-function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
+export function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;
   if (fields === null || typeof fields !== 'object') return {};
   return {
@@ -4056,7 +4057,7 @@ export function servedAsStored(served: unknown, stored: unknown, depth = 0): boo
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
-function mergeReadContext(
+export function mergeReadContext(
   fromQuery?: ExecutionContext,
   fromOptions?: ExecutionContext,
 ): ExecutionContext | undefined {
@@ -19894,64 +19895,22 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   async count(object: string, query?: EngineCountOptions, options?: EngineReadOptions): Promise<number> {
-     object = this.resolveObjectName(object);
-     // Fold the `filter` alias into `where` (#4346) — the AST below reads
-     // `query.where` only, so an unfolded `{ filter }` counted the whole table.
-     query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
-     rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
-     // [#22790] ADR-0061 `search` → the rows are searched before they are
-     // counted, by the one expander `find` runs, at the same point in the
-     // sequence — so the count is the number of rows `find` returns for the bag.
-     if (query) query = await this.expandSearchOnOptions(object, query, options);
-     const driver = this.getDriver(object);
-
-     // The AST must ride on the opCtx so the security/sharing middlewares can
-     // inject their read filters (RLS, OWD/sharing scope) into `ast.where` —
-     // exactly like find(). Building it locally inside the executor (#2737)
-     // discarded every injected filter: `total` counted the RAW table while
-     // `records` were scoped, leaking invisible-row counts and breaking
-     // pagination.
-     const opCtx: OperationContext = {
-       object,
-       operation: 'count',
-       ast: { object, where: query?.where },
-       options: query,
-       context: mergeReadContext(query?.context, options?.context),
-     };
-     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower. [#20802] …with
-     // the nested-relation step between the two.
-     await this.resolveWhereTokens(
-       opCtx.ast as QueryAST,
-       opCtx.context,
-       declaredDatetimeLowering(this._registry.getObject(object)),
-       'where',
-       'count',
-     );
-     // The caller's own `where`, placeholders expanded — captured BEFORE the
-     // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
-     // still passes the unscoped filter (find() applies the read filters itself).
-     const callerWhere = (opCtx.ast as QueryAST).where;
-
-     await this.executeWithMiddleware(opCtx, async () => {
-       const countOpts = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
-       if (driver.count) {
-           // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
-           // before-hook): the AST is final once the chain has run. The
-           // `find()` fallback below composes at its own boundary.
-           return driver.count(
-             object,
-             await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
-             countOpts,
-           );
-       }
-       // Fallback to find().length — find() applies the read filters itself,
-       // so pass the caller's original where, not the already-scoped ast.
-       const res = await this.find(object, { where: callerWhere, fields: ['id'], context: opCtx.context });
-       return res.length;
-     });
-
-     return opCtx.result as number;
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const readRelatedSchemaOf = () => this.relatedSchemaOf;
+    const host: ThisParameterType<typeof count> = {
+      resolveObjectName: (...a) => this.resolveObjectName(...a),
+      get _registry() { return readRegistry(); },
+      get relatedSchemaOf() { return readRelatedSchemaOf(); },
+      expandSearchOnOptions: (...a) => this.expandSearchOnOptions(...a),
+      getDriver: (...a) => this.getDriver(...a),
+      resolveWhereTokens: (...a) => this.resolveWhereTokens(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
+      find: (...a) => this.find(...a),
+    };
+    return count.call(host, object, query, options);
   }
 
   /**
@@ -19996,44 +19955,12 @@ export class ObjectQL implements IObjectQLEngine {
    * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
-    const schema = this._registry.getObject(object);
-    // Deduped: one field can be reachable through both collectors (a `secret`
-    // column that is also flagged `internal`), and it must be named once.
-    const protectedFields = [
-      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
-    ];
-    if (protectedFields.length === 0) return;
-
-    const referenced = new Set<string>();
-    for (const agg of query?.aggregations ?? []) {
-      const field = (agg as { field?: string })?.field;
-      if (field && field !== '*') referenced.add(field);
-    }
-    for (const g of query?.groupBy ?? []) {
-      const field = typeof g === 'string' ? g : g?.field;
-      if (field) referenced.add(field);
-    }
-
-    const hit = protectedFields.filter((f) => referenced.has(f));
-    if (hit.length > 0) {
-      const err = new Error(
-        `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
-          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
-          + 'them (group-by, min/max, array_agg, …) would surface it. '
-          + 'Refusing (fail-closed) — see ADR-0100.',
-      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
-      // ADR-0112 envelope, the same number under D5's two spellings — `status`
-      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
-      // error (the CLI `--json` envelope).
-      err.code = StandardErrorCode.enum.INVALID_FIELD;
-      err.status = 400;
-      err.httpStatus = 400;
-      err.field = hit[0];
-      err.fields = hit;
-      err.object = object;
-      throw err;
-    }
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof rejectCredentialAggregation> = {
+      get _registry() { return readRegistry(); },
+    };
+    return rejectCredentialAggregation.call(host, object, query);
   }
 
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {

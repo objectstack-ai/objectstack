@@ -417,6 +417,8 @@ import { saveConflict } from './protocol-save-conflict.js';
 import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
 // [#25467 cut 26] The runtime authoring gate's deployment-posture probes: org wall, tenancy, RLS keys, hierarchy.
 import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
+// [#25467 cut 27] The automation service's flow reads: the stored-flow canonicalizer and the engine's registrations.
+import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -6588,18 +6590,12 @@ export class ObjectStackProtocolImplementation implements
      */
     private resolveFlowCanonicalizer():
         ((name: string, body: unknown, options?: { includeRetired?: boolean }) => StoredFlowCanonicalization) | undefined {
-        const automation = this.getServicesRegistry?.().get('automation') as
-            | {
-                canonicalizeStoredFlow?: (
-                    name: string, definition: unknown, options?: { includeRetired?: boolean },
-                ) => StoredFlowCanonicalization;
-            }
-            | undefined;
-        const canonicalize = automation?.canonicalizeStoredFlow;
-        if (typeof canonicalize !== 'function') return undefined;
-        return (name, body, options) => (options === undefined
-            ? canonicalize.call(automation, name, body)
-            : canonicalize.call(automation, name, body, options));
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveFlowCanonicalizer> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveFlowCanonicalizer.call(host);
     }
 
     /**
@@ -6695,13 +6691,12 @@ export class ObjectStackProtocolImplementation implements
      * cross-process store is read.
      */
     private resolveFlowRegistrationReader(type: string): ((name: string) => FlowRegistration) | undefined {
-        if (canonicalMetaType(type) !== 'flow') return undefined;
-        const automation = this.getServicesRegistry?.().get('automation') as
-            | { getFlowRegistration?: (name: string) => FlowRegistration }
-            | undefined;
-        const read = automation?.getFlowRegistration;
-        if (typeof read !== 'function') return undefined;
-        return (name) => read.call(automation, name);
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveFlowRegistrationReader> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveFlowRegistrationReader.call(host, type);
     }
 
     /**
@@ -6713,15 +6708,11 @@ export class ObjectStackProtocolImplementation implements
      * `Object.fromEntries`, so a name is an own key whatever it spells.
      */
     private flowRegistrationsOf(type: string, items: readonly unknown[]): { registrations?: Record<string, FlowRegistration> } {
-        const read = this.resolveFlowRegistrationReader(type);
-        if (!read) return {};
-        const entries: Array<[string, FlowRegistration]> = [];
-        for (const it of items) {
-            const name = (it as { name?: unknown } | null | undefined)?.name;
-            if (typeof name !== 'string' || (it as { _draft?: unknown })._draft === true) continue;
-            entries.push([name, read(name)]);
-        }
-        return { registrations: Object.fromEntries(entries) };
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const host: ThisParameterType<typeof flowRegistrationsOf> = {
+            resolveFlowRegistrationReader: (...a) => this.resolveFlowRegistrationReader(...a),
+        };
+        return flowRegistrationsOf.call(host, type, items);
     }
 
     /**

@@ -14,8 +14,9 @@
  * What is pinned:
  *   - each picker IS the primitive (a Radix combobox trigger), shows what the
  *     entry or the dialog holds, and no native select is left;
- *   - each picker keeps the accessible name the native control had (the
- *     object picker had none, and has none);
+ *   - each picker keeps the accessible name the native control had, and the
+ *     object picker, which had none, is named by its *Link to object* label
+ *     (objectstack#26732);
  *   - every option of every picker writes what the native control wrote:
  *     the inspector's `onNavPatch` value as JSON text plus the keys it holds
  *     as `undefined` (JSON erases those), the *New object* save and the
@@ -158,7 +159,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The object picker's handle: it has no accessible name, as the native control had none. */
+/** The object picker's handle, kept from when it had no accessible name (the native control had none). */
 const OBJECT_PICKER = 'nav-link-object';
 const CHOOSE_OBJECT = en('engine.studio.nav.chooseObject');
 const CHOOSE = en('engine.inspector.appNav.choose');
@@ -337,13 +338,14 @@ describe('the nav-item inspector picks with the shared Select (objectui#11865)',
   });
 
   // The names were read on the native controls; red there only because the object picker is found by its test id.
-  it('each picker keeps the name its label gave the native control; the object picker had none', async () => {
+  // The object picker had none there; objectstack#26732 names it by its *Link to object* label.
+  it('each picker keeps the name its label gave the native control; the object picker is named by its label', async () => {
     const names: Record<string, string[]> = {};
     for (const key of ['objBorn', 'pageBorn', 'dashBound', 'reportBorn', 'actionBorn', 'compBorn', 'docBorn', 'urlDefault']) {
       renderEntry(key);
       names[key] = screen.getAllByRole('combobox').map((c) => {
         // objectui#12455 — the inspector's Icon picker is a combobox named by its label too.
-        const named = ['Page', 'Dashboard', 'Report', 'Action', 'Component', 'Doc page', 'Book', 'Open in', 'Icon'].find(
+        const named = ['Link to object', 'Page', 'Dashboard', 'Report', 'Action', 'Component', 'Doc page', 'Book', 'Open in', 'Icon'].find(
           (n) => screen.queryByRole('combobox', { name: n }) === c,
         );
         return named ?? '';
@@ -351,7 +353,7 @@ describe('the nav-item inspector picks with the shared Select (objectui#11865)',
       cleanup();
     }
     expect(names).toEqual({
-      objBorn: ['', 'Icon'],
+      objBorn: ['Link to object', 'Icon'],
       pageBorn: ['Page', 'Icon'],
       dashBound: ['Dashboard', 'Icon'],
       reportBorn: ['Report', 'Icon'],
@@ -361,7 +363,7 @@ describe('the nav-item inspector picks with the shared Select (objectui#11865)',
       urlDefault: ['Open in', 'Icon'],
     });
     renderEntry('objBorn');
-    expect(screen.getByTestId(OBJECT_PICKER)).not.toHaveAccessibleName();
+    expect(screen.getByTestId(OBJECT_PICKER)).toHaveAccessibleName('Link to object');
   });
 
   it('each picker lists its options in the order the native control did', async () => {
