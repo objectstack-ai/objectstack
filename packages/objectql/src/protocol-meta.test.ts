@@ -486,34 +486,46 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 expect(mockEngine.insert).toHaveBeenCalled();
             });
 
-            it('[#20051] stores the console\'s declared round-trip keys, and drops the `objectName` alias', async () => {
+            it('[#20051] stores the console\'s declared round-trip keys; [#26711] refuses the `objectName` alias by name', async () => {
                 // Re-judged at stage (iv) of #20051: was "preserves Studio-only
                 // auxiliary fields verbatim". A saved view now stores the parsed
                 // value of every key its body carried. `isPinned` / `isDefault` /
                 // `sortOrder` survive because the list overlay DECLARES them
-                // (`VIEW_CONSOLE_ROUND_TRIP_KEYS`); `objectName` is the
+                // (`VIEW_CONSOLE_ROUND_TRIP_KEYS`). `objectName` is the
                 // console's alias of `object`, which the member does not
-                // declare, so it is dropped and `object` carries the binding.
-                const itemWithExtras = {
+                // declare: stage (iv) dropped it on a success, and since #26711
+                // the `view` write door refuses it, pointing at `object`.
+                const declared = {
                     ...validView,
                     isPinned: true,
                     isDefault: false,
                     sortOrder: 5,
-                    objectName: 'lead',
                 };
 
                 await protocol.saveMetaItem({
                     type: 'view',
                     name: 'all_leads',
-                    item: itemWithExtras,
+                    item: declared,
                 });
 
                 const insertCall = mockEngine.insert.mock.calls[0];
                 const persisted = JSON.parse(insertCall[1].metadata);
-                const { objectName: _alias, ...declared } = itemWithExtras;
                 expect(persisted).toEqual(declared);
-                expect(persisted).not.toHaveProperty('objectName');
                 expect(persisted.object).toBe('lead');
+
+                mockEngine.insert.mockClear();
+                let caught: any;
+                try {
+                    await protocol.saveMetaItem({
+                        type: 'view',
+                        name: 'all_leads',
+                        item: { ...declared, objectName: 'lead' },
+                    });
+                } catch (e) { caught = e; }
+                expect(caught?.code).toBe('INVALID_METADATA');
+                expect(caught?.status).toBe(422);
+                expect(caught.message).toContain('Did you mean `objectName` → `object`?');
+                expect(mockEngine.insert).not.toHaveBeenCalled();
             });
 
             it('rejects an invalid view (container with a listView missing `columns`) with 422', async () => {
