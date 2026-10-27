@@ -42,23 +42,24 @@ export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'drawer';
 /** The storage surface this module reads — `localStorage`, or a test double. */
 export type RecordOpenPreferenceStorage = Pick<Storage, 'getItem'>;
 
-function defaultStorage(): RecordOpenPreferenceStorage | undefined {
-  if (typeof window === 'undefined') return undefined;
+function defaultStorage(): RecordOpenPreferenceStorage | null {
+  if (typeof window === 'undefined') return null;
   try {
     return window.localStorage;
   } catch {
     // Accessing `localStorage` itself throws on a blocked origin.
-    return undefined;
+    return null;
   }
 }
 
 /**
  * The reader's record-open preference, or {@link DEFAULT_RECORD_OPEN_PREFERENCE}
  * when none is stored, the stored value is not one of the two, or there is no
- * readable storage.
+ * readable storage. `storage` defaults to the browser's `localStorage`; `null`
+ * says there is none.
  */
 export function readRecordOpenPreference(
-  storage: RecordOpenPreferenceStorage | undefined = defaultStorage(),
+  storage: RecordOpenPreferenceStorage | null = defaultStorage(),
 ): RecordOpenPreference {
   if (!storage) return DEFAULT_RECORD_OPEN_PREFERENCE;
   try {

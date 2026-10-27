@@ -447,19 +447,12 @@ describe('`object-tree.navigation` — the members decide what a row click opens
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each(['modal', 'popover'] as const)('`mode: "%s"` opens the row\'s record in that overlay', async (mode) => {
-    const { open } = await clickRoot({ mode });
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default — it opens the row\'s record in the drawer (objectstack#26677)', async () => {
+    // `modal`, `split` and `popover`, which these rows drove, left the spec
+    // with objectstack#26677; the mode-less block is the second overlay input.
+    const { open } = await clickRoot({ size: 'lg' });
     await waitFor(() => expect(dialog()).not.toBeNull());
     expect(openedRecord()).not.toBeNull();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it('`mode: "split"` opens the record BESIDE the tree, which stays drawn', async () => {
-    // Unlike the timeline, the tree hands the split shell its own view as the
-    // main panel (objectui#9299 item 2).
-    const { open } = await clickRoot({ mode: 'split' });
-    await waitFor(() => expect(openedRecord()).not.toBeNull());
-    expect(screen.getAllByTestId('object-tree-row').length).toBeGreaterThan(0);
     expect(open).not.toHaveBeenCalled();
   });
 
@@ -600,12 +593,11 @@ describe('`object-tree.navigation` `page` under the host\'s record navigator (ob
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('a block WITHOUT `mode` resolves to `page`, and navigates the same way', async () => {
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default: it opens the drawer and does NOT navigate (objectstack#26677)', async () => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickRootUnderHost({ size: 'lg' }, value);
-    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
-    expect(openRecord).toHaveBeenCalledWith(OBJECT, 'r1');
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 

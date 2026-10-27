@@ -443,7 +443,7 @@ const schema: ObjectViewSchema = {
   type: 'object-view',
   objectName: 'users',
   layout: 'page',
-  navigation: { mode: 'page' }, // none | drawer | modal | page | split | popover | new_window
+  navigation: { mode: 'page' }, // drawer (the default) | page | new_window | none
   onNavigate: (recordId, mode) => {
     // mode is 'view' or 'edit'
     router.push(`/users/${recordId}${mode === 'edit' ? '/edit' : ''}`);
@@ -457,11 +457,7 @@ and a row click under `navigation: { mode: 'page' }` opens nothing.
 `navigation: { mode: 'none' }` (or `preventNavigation`)
 makes rows inert. An active named view (`listViews`, under Read/List) that
 declares its own `navigation` replaces this one, as a whole, while it is shown.
-Under `split` or `popover`, which open only beside a record the user picked, the
-New button's create form opens on the `layout` surface instead: the modal for
-`layout: 'modal'`, the drawer otherwise, whether the mode is this node's or an
-active named view's. A `page` layout with `onNavigate` still hands New to your
-router.
+A `navigation` block written without `mode` takes the spec's `drawer` default.
 
 With no host `onRowClick`, a Cmd/Ctrl-click or middle-click on a row opens the
 record as a full page in a new browser tab. Inert rows stay inert: `mode: 'none'`,
@@ -477,9 +473,8 @@ not wire handlers for them — you switch them on or off with `operations`, and
 ### Create
 
 `operations.create` enables record creation; `showCreate` shows the button.
-Both default to on. The new-record form opens on the surface a `drawer` or
-`modal` navigation names, and on the `layout` surface otherwise, under `split`
-and `popover` too (see Opening a record):
+Both default to on. The new-record form opens in the drawer a `drawer`
+navigation names, and on the `layout` surface otherwise (see Opening a record):
 
 ```typescript
 import type { ObjectViewSchema } from '@object-ui/types';
@@ -560,8 +555,7 @@ edit to the user. Its `navigation` replaces the node's `navigation` as a whole:
 the row click, and the surface and width of the record, create and edit forms,
 follow the active named view, on this path, and on a host's `renderListView`
 when the host wires the `onRowClick` it is handed and passes `ObjectView` no
-`onRowClick` of its own. Under a named `split` or `popover`, the create form
-opens on the `layout` surface, as under Opening a record. `label` and `data`,
+`onRowClick` of its own. `label` and `data`,
 also declared on both, are not
 handed to the grid on this path: the named view's `label` is already the tab's
 text, and `data` waits on objectui#10971, because `ListView` and `ObjectGrid`
