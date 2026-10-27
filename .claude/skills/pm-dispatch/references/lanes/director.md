@@ -54,9 +54,8 @@
 - 入箱勤务:校验/补全四棱块、速读与 `Prior rulings on this card:` 行;入箱同笔现读前提。
 - 线程有 `Ruling:`/RULED 的卡再入箱,该行逐 id 各一句变化;缺行 ⇒ 拒入,`pm:retriage` 回立卡者。
 - 一次只开一批:维护者对批 N 回字(一字即可)后,新到才合成批 N+1;续批至清零才收工。
-- 受管草稿批:两仓 `is:pr is:open is:draft label:needs-user-decision` 对照等人合清单,差集点名。
-- 有席内 ACCEPT 者呈一批 ≤5 行,写法见 `../decision-analysis.md`;四件缺一者列缺口不呈。
-- 回批原话逐 PR 记到 PR 上,缺的请审补上即止步;批准与合并恒是维护者的点击,⛔ 不代。
+- 受管 PR 待人批前核四件:席位记录、维护者速读、中继 `pr_request_reviewers` 请审、绿 head。
+- 缺件即补;⛔ 不入批、不求聊天「同意」;批准与合并恒是维护者的点击,⛔ 不代。
 - 呈报前逐卡逐仓重跑 `git grep -n -iE 'TERMS' origin/main -- AGENTS.md docs/adr packages/spec/src`。
 - 以协议为准:消费面对齐协议 ⇒ 荐对齐呈批,协议没有的能力荐删;⛔ 不自裁。
 - 协议是否正确由本席按①读协议原文与主流平台分析,有误即荐改动呈批,⛔ 不自裁。
