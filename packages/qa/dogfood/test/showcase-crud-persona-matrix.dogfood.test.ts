@@ -553,6 +553,161 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     expect(afterPlain?.title, 'and the row is untouched').toBe(opsValue);
   }, 120_000);
 
+  // ── VAMA on the rest of the auditor's objects (clause 3, #26571) ─────────
+  // The private-note case above is one of the four objects the auditor's
+  // viewAllRecords names. The other three each hide a foreign row from a
+  // persona that HOLDS read but not the bit, by a different mechanism: the
+  // private OWD (inquiry), the contributor's owner RLS (invoice) and the
+  // master-derived scope (line, controlled_by_parent).
+  it('viewAllRecords: the auditor reads a FOREIGN inquiry, invoice and invoice line by id AND in lists; a contributor gets none of them', async () => {
+    const auditor = persona.get('showcase_auditor')!;
+    const contributor = persona.get('showcase_contributor')!;
+    const mark = `MX-vama3-${Date.now()}`;
+    const make = async (object: string, body: Record<string, unknown>) => {
+      const r = await stack.apiAs(adminTok, 'POST', `/data/${object}`, body);
+      const json = await bodyOf(r);
+      expect(r.status, `admin creates the foreign ${object} — got ${JSON.stringify(json)}`).toBeLessThan(300);
+      return String(idOf(json));
+    };
+    const inquiry = await make('showcase_inquiry', PAYLOAD.showcase_inquiry(ctxFor('admin@objectos.ai', mark)));
+    const invoice = await make('showcase_invoice', PAYLOAD.showcase_invoice(ctxFor('admin@objectos.ai', mark)));
+    const line = await make('showcase_invoice_line', PAYLOAD.showcase_invoice_line(ctxFor('admin@objectos.ai', mark, invoice)));
+
+    for (const [object, id] of [
+      ['showcase_inquiry', inquiry],
+      ['showcase_invoice', invoice],
+      ['showcase_invoice_line', line],
+    ] as const) {
+      const listPath = `/data/${object}?$filter=${encodeURIComponent(JSON.stringify({ id }))}`;
+      const byId = await stack.apiAs(auditor.token, 'GET', `/data/${object}/${id}`);
+      expect(byId.status, `auditor reads the foreign ${object} by id`).toBe(200);
+      const listed = rowsOf(await bodyOf(await stack.apiAs(auditor.token, 'GET', listPath))).map((r: any) => r.id);
+      expect(listed, `and in the ${object} list`).toContain(id);
+
+      const otherById = await stack.apiAs(contributor.token, 'GET', `/data/${object}/${id}`);
+      expect(otherById.status, `the contributor cannot read the foreign ${object} by id`).toBeGreaterThanOrEqual(300);
+      const otherList = await stack.apiAs(contributor.token, 'GET', listPath);
+      expect(otherList.status, `the contributor's ${object} list itself is served`).toBe(200);
+      expect(rowsOf(await bodyOf(otherList)).map((r: any) => r.id), `nor sees the ${object} in a list`).not.toContain(id);
+    }
+  }, 120_000);
+
+  // ── Wrong persona, both sides (negative[0], #26571) ──────────────────────
+  // One denied cell per permission set, re-run as the admin: a denial that also
+  // refuses the admin is a broken route or payload, not the persona's grant.
+  it('one denied cell per set succeeds when re-run as the admin', async () => {
+    const firstDenied = new Map<string, Cell>();
+    for (const cell of VERDICTS) {
+      if (cell.expected === 'deny' && !firstDenied.has(cell.set)) firstDenied.set(cell.set, cell);
+    }
+    const setsWithDenials = [...new Set(VERDICTS.filter((c) => c.expected === 'deny').map((c) => c.set))].sort();
+    expect([...firstDenied.keys()].sort(), 'every set that has a denied cell is re-run').toEqual(setsWithDenials);
+    expect(setsWithDenials.length, 'the sweep has denials to re-run').toBeGreaterThan(0);
+
+    const adminMake = async (object: string, mark: string) => {
+      const r = await stack.apiAs(adminTok, 'POST', `/data/${object}`, PAYLOAD[object](ctxFor('admin@objectos.ai', mark)));
+      expect(r.status, `admin seeds a ${object} target`).toBeLessThan(300);
+      return String(idOf(await bodyOf(r)));
+    };
+    for (const cell of firstDenied.values()) {
+      const label = `${cell.set} × ${cell.object} ${cell.verb}, re-run as admin`;
+      const mark = `MX-n0-${cell.set}-${cell.object}`;
+      let r: Response;
+      if (cell.verb === 'create') {
+        r = await stack.apiAs(adminTok, 'POST', `/data/${cell.object}`, PAYLOAD[cell.object](ctxFor('admin@objectos.ai', mark)));
+      } else if (cell.verb === 'read') {
+        r = await stack.apiAs(adminTok, 'GET', `/data/${cell.object}`);
+      } else if (cell.verb === 'edit') {
+        const { field, value } = EDIT_PROBE[cell.object](mark);
+        r = await stack.apiAs(adminTok, 'PATCH', `/data/${cell.object}/${await adminMake(cell.object, mark)}`, { [field]: value });
+      } else {
+        r = await stack.apiAs(adminTok, 'DELETE', `/data/${cell.object}/${await adminMake(cell.object, mark)}`);
+      }
+      expect(r.status, `${label} — got ${JSON.stringify(await bodyOf(r))}`).toBeLessThan(300);
+    }
+  }, 180_000);
+
+  // ── The delegate × sys_* rows (clauses 0, 1 and 6, #26571) ───────────────
+  // The four rows the sweep above leaves out, driven by a delegate holding
+  // exactly `showcase_field_ops_delegate`. Two cells are not permission
+  // verdicts at all: sys_user declares no create and no delete over the API, so
+  // the API-exposure gate answers 405 for every caller, the admin included.
+  // The sys_user_position cells are judged on rows the DELEGATE made, inside
+  // its Field Operations subtree: a row another principal made meets the
+  // platform's write-ownership floor instead, and an out-of-subtree write the
+  // ADR-0090 D12 gate (the permission zoo pins both sides of that gate).
+  it('the 16 showcase_field_ops_delegate × sys_* cells answer the matrix', async () => {
+    const DELEGATE = 'crudmx-field-ops-delegate@verify.test';
+    const TARGET = 'crudmx-delegate-target@verify.test';
+    const delegateTok = await stack.signUp(DELEGATE);
+    await stack.signUp(TARGET);
+    const uid = async (email: string) =>
+      String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id ?? '');
+    const delegateId = await uid(DELEGATE);
+    const targetId = await uid(TARGET);
+    expect(delegateId && targetId, 'delegate and target provisioned').toBeTruthy();
+    const ps = await catalogPermissionSet(ql, 'showcase_field_ops_delegate');
+    expect(ps, 'delegate set served by the security catalog').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: delegateId, permission_set: ps.name }, { context: SYS });
+    await ql.insert('sys_business_unit_member', { business_unit_id: 'bu_field_ops', user_id: delegateId }, { context: SYS });
+    await ql.insert('sys_business_unit_member', { business_unit_id: 'bu_west_coast', user_id: targetId }, { context: SYS });
+
+    const sysMake = async (object: string, data: Record<string, unknown>) =>
+      String(idOf(await ql.insert(object, data, { context: SYS })));
+    const delegateRows = UNJUDGED_ROWS.filter((r) => r.permissionSet === 'showcase_field_ops_delegate');
+    const cells: Array<{ cell: string; status: number; code?: string; expected: string }> = [];
+    const drive = (object: string, verb: Verb, status: number, json: any, expected: 'allow' | 'deny' | 405) => {
+      cells.push({ cell: `${object} ${verb}`, status, code: json?.code, expected: String(expected) });
+      return json;
+    };
+    const send = async (object: string, verb: Verb, r: Response, expected: 'allow' | 'deny' | 405) =>
+      drive(object, verb, r.status, await bodyOf(r), expected);
+
+    for (const row of delegateRows) {
+      const o = row.object;
+      const expectOf = (verb: Verb): 'allow' | 'deny' | 405 =>
+        o === 'sys_user' && (verb === 'create' || verb === 'delete') ? 405 : row[verb] ? 'allow' : 'deny';
+      if (o === 'sys_user_position') {
+        const created = await stack.apiAs(delegateTok, 'POST', `/data/${o}`, {
+          user_id: targetId, position: 'contributor', business_unit_id: 'bu_west_coast',
+        });
+        const own = String(idOf(await send(o, 'create', created, expectOf('create'))));
+        await send(o, 'read', await stack.apiAs(delegateTok, 'GET', `/data/${o}`), expectOf('read'));
+        await send(o, 'edit', await stack.apiAs(delegateTok, 'PATCH', `/data/${o}/${own}`, { reason: 'crudmx delegate edit' }), expectOf('edit'));
+        await send(o, 'delete', await stack.apiAs(delegateTok, 'DELETE', `/data/${o}/${own}`), expectOf('delete'));
+        continue;
+      }
+      const createBody: Record<string, unknown> =
+        o === 'sys_business_unit' ? { name: 'crudmx delegate BU' }
+          : o === 'sys_business_unit_member' ? { business_unit_id: 'bu_west_coast', user_id: delegateId }
+            : { email: 'crudmx-forged@verify.test', name: 'forged' };
+      const probe =
+        o === 'sys_business_unit' ? await sysMake(o, { name: 'crudmx probe BU' })
+          : o === 'sys_business_unit_member' ? await sysMake(o, { business_unit_id: 'bu_hq_finance', user_id: targetId })
+            : targetId;
+      const editBody: Record<string, unknown> =
+        o === 'sys_business_unit_member' ? { business_unit_id: 'bu_acme' } : { name: 'crudmx delegate edit' };
+      await send(o, 'create', await stack.apiAs(delegateTok, 'POST', `/data/${o}`, createBody), expectOf('create'));
+      await send(o, 'read', await stack.apiAs(delegateTok, 'GET', `/data/${o}`), expectOf('read'));
+      await send(o, 'edit', await stack.apiAs(delegateTok, 'PATCH', `/data/${o}/${probe}`, editBody), expectOf('edit'));
+      await send(o, 'delete', await stack.apiAs(delegateTok, 'DELETE', `/data/${o}/${probe}`), expectOf('delete'));
+    }
+    console.log('[crud-matrix delegate cells]', JSON.stringify(cells));
+    expect(cells.length, 'four rows × four verbs').toBe(16);
+    for (const c of cells) {
+      if (c.expected === 'allow') expect(c.status, `${c.cell}: allowed`).toBeLessThan(300);
+      else if (c.expected === '405') expect([c.status, c.code], `${c.cell}: not exposed over the API`).toEqual([405, 'OBJECT_API_METHOD_NOT_ALLOWED']);
+      else expect([c.status, c.code], `${c.cell}: withheld`).toEqual([403, 'PERMISSION_DENIED']);
+    }
+
+    // The admin control on the two 405 cells: the exposure gate answers before
+    // any permission is judged, so the admin is refused the same way.
+    const adminCreate = await stack.apiAs(adminTok, 'POST', '/data/sys_user', { email: 'crudmx-admin-forged@verify.test', name: 'x' });
+    expect([adminCreate.status, (await bodyOf(adminCreate))?.code], 'admin sys_user create').toEqual([405, 'OBJECT_API_METHOD_NOT_ALLOWED']);
+    const adminDelete = await stack.apiAs(adminTok, 'DELETE', `/data/sys_user/${targetId}`);
+    expect([adminDelete.status, (await bodyOf(adminDelete))?.code], 'admin sys_user delete').toEqual([405, 'OBJECT_API_METHOD_NOT_ALLOWED']);
+  }, 180_000);
+
   // ── The verdict table itself (clause 6) ──────────────────────────────────
   //
   // This is the anti-vacuity check. Without it the sweep could shrink — a
