@@ -9,7 +9,10 @@
  * rather than the security catalog; and `webhook`, a webhook a stack declares
  * (`defineStack({ webhooks })`), read from the declared-webhook reader
  * (`declaredWebhooks`, plugin-webhooks) under the same regime (ADR-0131 D2/D6,
- * the ruling that retired the declared-webhook seeder).
+ * the ruling that retired the declared-webhook seeder); and, since ADR-0142,
+ * `queue`, a queue a stack declares (`queues`), read from the `ownership-queue`
+ * service, and `assignment_rule`, a rule a stack declares (`assignmentRules`),
+ * read from the engine's metadata registry, where the evaluator reads it.
  *
  * ## Why it exists
  *
@@ -53,7 +56,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
-import type { ISharingRuleService } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, type IOwnershipQueueService, type ISharingRuleService } from '@objectstack/spec/contracts';
 import {
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
@@ -69,6 +72,8 @@ import {
     PERMISSION_SET_ACTIVATION_SUBJECT,
     SHARING_RULE_ACTIVATION_SUBJECT,
     WEBHOOK_ACTIVATION_SUBJECT,
+    QUEUE_ACTIVATION_SUBJECT,
+    ASSIGNMENT_RULE_ACTIVATION_SUBJECT,
     type ActivationSubject,
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -82,7 +87,10 @@ export const CATALOG_ACTIVATION_SEGMENT = '_activation';
  * types the resolver reads from the ledger; `capability` is code-only on the
  * regime and has no switch.
  */
-const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission' | 'sharing_rule' | 'webhook', ActivationSubject>> = {
+const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<
+    'position' | 'permission' | 'sharing_rule' | 'webhook' | 'queue' | 'assignment_rule',
+    ActivationSubject
+>> = {
     position: POSITION_ACTIVATION_SUBJECT,
     permission: PERMISSION_SET_ACTIVATION_SUBJECT,
     // [ADR-0131 D6 regime C] A declared sharing rule — read from the sharing-rule
@@ -91,6 +99,12 @@ const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission' | '
     // [ADR-0131 D2/D6 regime C] A declared webhook — read from the declared-webhook
     // reader, which the dispatcher reads its switch through.
     webhook: WEBHOOK_ACTIVATION_SUBJECT,
+    // [ADR-0142 D1] A declared ownership queue — read from the queue service,
+    // which resolves no declared queue this ledger switches off.
+    queue: QUEUE_ACTIVATION_SUBJECT,
+    // [ADR-0142 D5] A declared assignment rule — read from the registry the
+    // engine's evaluator reads, which skips a rule this ledger switches off.
+    assignment_rule: ASSIGNMENT_RULE_ACTIVATION_SUBJECT,
 };
 
 type CatalogActivationType = keyof typeof CATALOG_ACTIVATION_SUBJECTS;
@@ -105,6 +119,8 @@ const NOUN: Readonly<Record<CatalogActivationType, string>> = {
     permission: 'Permission set',
     sharing_rule: 'Declared sharing rule',
     webhook: 'Declared webhook',
+    queue: 'Declared queue',
+    assignment_rule: 'Declared assignment rule',
 };
 
 /**
@@ -142,15 +158,50 @@ function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | unde
 }
 
 /**
- * The service-backed types — declarations a plugin owns, not catalog entries —
- * each with how its declaration is looked up and how it is named in a refusal.
+ * [ADR-0142 D1] The declaration a `queue` row addresses, as the queue service
+ * (`ownership-queue`, plugin-sharing) reads it: declared in the code, whether
+ * or not the ledger has it switched off. A queue an organization authored is a
+ * `sys_queue` row and is never addressed here.
  */
-const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook', {
-    service: string;
+type DeclaredQueueReader = Required<Pick<IOwnershipQueueService, 'declaredQueueNamed'>>;
+
+function declaredQueueReaderOf(service: unknown): DeclaredQueueReader | undefined {
+    const candidate = service as Partial<DeclaredQueueReader> | null | undefined;
+    return typeof candidate?.declaredQueueNamed === 'function' ? (candidate as DeclaredQueueReader) : undefined;
+}
+
+/**
+ * [ADR-0142 D5] The declaration an `assignment_rule` row addresses: the item of
+ * that type in the engine's metadata registry — the one the engine's evaluator
+ * lists on every insert — whether or not the ledger has it switched off.
+ * `undefined` when the engine carries no registry to ask.
+ */
+function declaredAssignmentRuleNamed(
+    ql: unknown,
+    name: string,
+): Promise<{ name: string; packageId?: string } | null> | undefined {
+    const registry = (ql as { registry?: { listItems?: (type: string) => unknown } } | null | undefined)?.registry;
+    if (typeof registry?.listItems !== 'function') return undefined;
+    return Promise.resolve(registry.listItems('assignment_rule')).then((items) => {
+        const item = (Array.isArray(items) ? items : [])
+            .find((i: any) => i && typeof i === 'object' && i.name === name) as Record<string, unknown> | undefined;
+        if (!item) return null;
+        const packageId = item._packageId ?? item.packageId;
+        return { name, ...(typeof packageId === 'string' && packageId ? { packageId } : {}) };
+    });
+}
+
+/**
+ * The declaration-backed types — declarations a plugin or the engine owns, not
+ * catalog entries — each with how its declaration is looked up and how it is
+ * named in a refusal. `service` absent means the lookup reads the engine.
+ */
+const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook' | 'queue' | 'assignment_rule', {
+    service?: string;
     noun: string;
     serviceNoun: string;
     authoredRemedy: string;
-    lookup(service: unknown, name: string): Promise<{ name: string; packageId?: string } | null> | undefined;
+    lookup(service: unknown, name: string, ql: unknown): Promise<{ name: string; packageId?: string } | null> | undefined;
 }>> = {
     sharing_rule: {
         service: 'sharingRules',
@@ -172,6 +223,19 @@ const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook', {
                     : null))
                 : undefined;
         },
+    },
+    queue: {
+        service: OWNERSHIP_QUEUE_SERVICE,
+        noun: 'queue',
+        serviceNoun: 'ownership-queue service',
+        authoredRemedy: 'A queue your organization authored is a `sys_queue` row: staff or delete it there.',
+        lookup: (service, name) => declaredQueueReaderOf(service)?.declaredQueueNamed(name),
+    },
+    assignment_rule: {
+        noun: 'assignment rule',
+        serviceNoun: 'metadata registry',
+        authoredRemedy: 'Assignment rules are declared by the application only; an organization authors none.',
+        lookup: (_service, name, ql) => declaredAssignmentRuleNamed(ql, name),
     },
 };
 
@@ -291,10 +355,10 @@ export async function handleCatalogActivationWrite(
     let entry: { name: string; packageId?: string } | undefined;
     if (isDeclarationType(type)) {
         const declaration = DECLARATION_LOOKUPS[type];
-        const service = await deps.resolveService(context, declaration.service);
+        const service = declaration.service ? await deps.resolveService(context, declaration.service) : undefined;
         let pending: Promise<{ name: string; packageId?: string } | null> | undefined;
         try {
-            pending = declaration.lookup(service, name);
+            pending = declaration.lookup(service, name, ql);
         } catch (err) {
             pending = Promise.reject(err); // a reader that throws before its promise is still a failed read
         }

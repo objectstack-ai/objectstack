@@ -168,6 +168,10 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     // explicitly permits, and #12878's pins are what keep it visible.
     capabilities: 'capability',
     sharingRules: 'sharing_rule',
+    // [ADR-0142 D1/D5] Declared ownership queues and assignment rules, beside the
+    // sharing rules that can name a queue as their recipient.
+    queues: 'queue',
+    assignmentRules: 'assignment_rule',
     // `policies: 'policy'` removed at #12894: the stack schema is a
     // `strictObject` that declares no top-level `policies` key, so a
     // definition carrying one is refused by the strict parse a few lines

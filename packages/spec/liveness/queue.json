@@ -1,0 +1,44 @@
+{
+  "type": "queue",
+  "_note": "QueueSchema (packages/spec/src/security/queue.zod.ts) — a DECLARED ownership queue, the stack's `queues` (ADR-0142 D1). Seeded 2026-10-26 with the type itself (#25769): the type was registered governed, not opened as a PENDING_GOVERNANCE debt. THE SHAPE FACT THAT DECIDES EVERY ROW BELOW: a declared queue is never copied into a row. ADR-0131 D6 (regime C) applies — the registry item is read on every use, through the one reader every queue consumer shares, packages/plugins/plugin-sharing/src/ownership-queue-service.ts#OwnershipQueueService (`resolveQueue`, `expandMembers`, `isMember`, `queuesOf`), and switched off through the activation ledger (`sys_metadata_activation`, `metadata_type: 'queue'`). So each row's consumer is that service, and each row's `producer` is the registry thread that puts the authored item where the service reads it: packages/objectql/src/engine.ts#registerMetadataCollections, which loads the stack's `queues` array (METADATA_ARRAY_KEYS) into the registry under type `queue`. An organization's AUTHORED queues (`sys_queue` + `sys_queue_member`) are rows, not this type, and are governed by their object definitions. The word `queue` here is a queue of PEOPLE; the job queue and `sys_job_queue` are a different noun. PREVIEW READ POINTS: no metadata-admin preview is registered for `queue` (the type is new); the Studio metadata list falls through to its default columns, read in-tree at ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (objectui, merged under ui/ — not a REPO_ROOT, so the evidence resolver does not check that path).",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/plugins/plugin-sharing/src/ownership-queue-service.ts#resolveQueue — the declared item is looked up by `name` (registry-first) and a declared name switched off in the ledger resolves nowhere, not even to an authored row; packages/plugins/plugin-sharing/src/queue-hooks.ts#bindQueueGuards refuses a `sys_queue` row that takes a declared queue's name (`isDeclaredQueueName`), so the authored name owns its namespace; packages/objectql/src/assignment-rules.ts#route resolves an assignment entry's queue target by this name, and the record's `queue` column stores it verbatim.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections — loads the stack's `queues` entries into the registry under type `queue`, keyed by `name`; packages/plugins/plugin-sharing/src/ownership-queue-service.ts#declaredQueueNamed is the lookup the activation door names a `queue` ledger row's subject through.",
+      "note": "Identity, and the one reference every queue consumer carries: the `queue` column, `assignTo.value`, a queue approver's value and a sharing recipient's value. A rename is a migration, not an edit."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "packages/plugins/plugin-sharing/src/ownership-queue-service.ts#resolveQueue — `label: declared.label ?? name` serves the authored label as the resolved queue's label, the one display string the service contract (`ResolvedQueue.label`) carries to its consumers; the Studio metadata list shows it in its default `label` column (ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns, in-tree objectui), the `webhook.label` / `email_template.label` precedent.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+      "note": "Display-shaped: being shown to a human is the whole of the claimed effect (#7131). Required by the schema, so a queue always has one."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-10-26",
+      "evidence": "Shown in the Studio metadata list's default `description` column — ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (objectui, merged in-tree under ui/), the `webhook.description` / `email_template.description` precedent; served on `GET /api/v1/meta/queue` by packages/rest/src/meta-item-read-gate.ts#createMetaListAnswer with no metadata-type redactor.",
+      "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+      "note": "Administrative notes; nothing gates on them. Not `authorWarn`ed — a description that only describes does not mislead its author."
+    },
+    "members": {
+      "children": {
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/plugins/plugin-sharing/src/ownership-queue-service.ts#declaredMemberSpecs — only `type === 'position'` yields a member specification; packages/plugins/plugin-sharing/src/ownership-queue-service.ts#expandSpec then branches on it to the position-holder expansion (deactivated positions filtered on the access purpose, not on addressing — ADR-0142 D2).",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections",
+          "note": "A one-member literal on the declared form (`'position'`): users, teams and business units are an organization's rows and join a queue through `sys_queue_member`, where every QueueMemberType is admitted. The literal is still dispatched on — the authored `sys_queue_member.recipient_type` takes the other branches of the same `expandSpec`."
+        },
+        "value": {
+          "status": "live",
+          "verifiedAt": "2026-10-26",
+          "evidence": "packages/plugins/plugin-sharing/src/ownership-queue-service.ts#expandSpec — the position machine name whose holders, in the record's or request's organization, are the queue's members; packages/plugins/plugin-sharing/src/ownership-queue-service.ts#queuesNaming matches a written position against it, which is how a `sys_user_position` write re-materialises a queue-recipient sharing rule's grants.",
+          "producer": "packages/objectql/src/engine.ts#registerMetadataCollections"
+        }
+      }
+    }
+  }
+}

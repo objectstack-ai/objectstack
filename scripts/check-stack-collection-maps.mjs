@@ -569,12 +569,13 @@ const SITES = [
           'datasources', 'datasourceMapping', 'objectExtensions', 'apps', 'jobs', 'emailTemplates',
           'docs', 'books', 'positions', 'capabilities', 'sharingRules', 'webhooks', 'tools', 'skills',
           'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
+          'queues', 'assignmentRules',
         ],
         reason:
           'DRIFT in the opposite direction, under the same acceptance constraint: ADDING a member widens '
           + 'what an artifact may declare and presumes a packaging layout (one subdirectory per category) '
           + 'that does not exist for these. The omissions are inert today because this enum is not the '
-          + 'artifact ingest path — `ARTIFACT_FIELD_TO_TYPE` below is — but 21 of 33 collections absent is '
+          + 'artifact ingest path — `ARTIFACT_FIELD_TO_TYPE` below is — but 23 of 35 collections absent is '
           + 'the measurement that says so out loud (#6242 row 5).',
       },
     ],
@@ -714,7 +715,7 @@ const SITES = [
         keys: [
           'objectExtensions', 'datasourceMapping', 'datasources', 'jobs', 'apis', 'webhooks',
           'hooks', 'mappings', 'analyticsCubes', 'connectors', 'capabilities', 'datasets',
-          'picklists', 'picklistExtensions',
+          'picklists', 'picklistExtensions', 'queues', 'assignmentRules',
         ],
         reason:
           'DELIBERATE, and load-bearing. This is a HEURISTIC, not a registration list: it answers "did the '
@@ -753,6 +754,7 @@ const SITES = [
           'views', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
           'emailTemplates', 'docs', 'books', 'apis', 'webhooks', 'agents', 'tools', 'skills',
           'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
+          'queues', 'assignmentRules',
         ],
         reason:
           'DELIBERATE — a four-collection SUBSET, not an enumeration of the collection set. This block '
@@ -766,7 +768,10 @@ const SITES = [
           + 'reaches it as of #12892 step 1, so this block is no longer that collection\'s sole registrar — '
           + 'it is the SECOND one, on the same boot path, which is the interim state the ruling permits '
           + 'while step 2 (this block stops registering the five on the ARTIFACT path only, after a census '
-          + 'of the non-artifact boots that depend on it) lands.',
+          + 'of the non-artifact boots that depend on it) lands. `queues` and `assignmentRules` (ADR-0142) '
+          + 'were considered here and left out: nothing reads them through `list(...)` — the ownership-queue '
+          + 'service and the assignment seam read the ObjectQL registry that `METADATA_ARRAY_KEYS` stamps, '
+          + 'and the artifact door maps both — so a third registrar would only add a copy.',
       },
     ],
   },

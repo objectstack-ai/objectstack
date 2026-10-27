@@ -3165,6 +3165,8 @@ const es = {
     recordAccessDeniedDescription: "No tiene permiso para ver registros de este tipo. Contacte a su administrador si cree que debería tener acceso.",
     recordLoadFailed: "No se pudo cargar este registro",
     recordLoadFailedDescription: "Algo salió mal al cargarlo. Compruebe su conexión y vuelva a intentarlo.",
+    recordAccessEnded: "Decisión registrada",
+    recordAccessEndedDescription: "Su paso de aprobación ha finalizado y su acceso a este registro ha terminado.",
   },
   actionDialog: {
     title: "Parámetros de acción",
