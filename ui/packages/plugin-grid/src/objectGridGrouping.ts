@@ -25,7 +25,7 @@ type QueryInputs = ReturnType<typeof useObjectGridQueryInputs>;
 type GroupingDecisions = ReturnType<typeof useObjectGridGroupingDecisions>;
 type RowLoad = ReturnType<typeof useObjectGridRowLoad>;
 /** What the grouping reads off an object field: its cell face and its options. */
-type ObjectFieldLike = GridCellFieldLike & {
+type GroupingFieldDef = GridCellFieldLike & {
   type?: string;
   options?: Parameters<ReturnType<typeof useSafeFieldLabel>['translateOptions']>[2];
 };
@@ -93,7 +93,7 @@ export function useObjectGridGrouping({
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
   objectName: string | undefined;
-  objectFields: Readonly<Record<string, ObjectFieldLike | undefined>> | undefined;
+  objectFields: Readonly<Record<string, GroupingFieldDef | undefined>> | undefined;
   objectTypesPending: boolean;
   data: unknown[];
   setData: React.Dispatch<React.SetStateAction<unknown[]>>;
