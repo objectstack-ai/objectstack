@@ -475,9 +475,10 @@ describe('a seed of many files yields to waiting requests (#26670)', () => {
       maxStored = Math.max(maxStored, turns[t].stored - turns[t - 1].stored);
       maxClaims = Math.max(maxClaims, turns[t].claims - turns[t - 1].claims);
     }
-    // The first turn lands before the last file is stored, so the load did
-    // not run through in one chain.
-    expect(turns[0].stored, 'the first macrotask turn came only after the seed stored every file').toBeLessThan(ROWS);
+    // A turn ran while the load did, and the first one landed before the last
+    // file was stored: the load did not run through in one chain.
+    expect(turns.length, 'no macrotask turn ran while the seed ran').toBeGreaterThan(1);
+    expect(turns[0].stored,'the first macrotask turn came only after the seed stored every file').toBeLessThan(ROWS);
     expect({ maxStored, maxClaims }).toEqual({ maxStored: 1, maxClaims: 1 });
   });
 
