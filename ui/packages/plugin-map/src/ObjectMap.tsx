@@ -31,6 +31,7 @@ import {
   useFilterScope,
   useResolvedFilter,
   useObjectTranslation,
+  useHostMapStyle,
 } from '@object-ui/react';
 import { NavigationOverlay, cn, useIsMobile } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
@@ -61,9 +62,11 @@ import {
 
 /**
  * Public MapLibre demo style — free, unauthenticated, but not intended for
- * production traffic (rate-limited, no uptime guarantee). Used only when no
- * `style` is configured; a load failure swaps the map for the record list
- * below rather than leaving a grey canvas.
+ * production traffic (rate-limited, no uptime guarantee). The LAST fallback
+ * (objectstack#26163): used only when the view configures no style and the
+ * host provides no deployment default (`useHostMapStyle`, the Console's
+ * runtime-config `mapStyleUrl`). A load failure swaps the map for the record
+ * list below rather than leaving a grey canvas.
  */
 const DEFAULT_MAP_STYLE = 'https://demotiles.maplibre.org/style.json';
 
@@ -792,6 +795,18 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
    * equality.
    */
   const mapConfig = useMemo(() => getMapConfig(schema), [schema]);
+  // The style the map draws, and whose it is (objectstack#26163): the view's
+  // own (`mapStyle`, then `map.style`, already folded into `mapConfig.style`),
+  // then the deployment's default the host provides (the operator's
+  // `OS_CONSOLE_MAP_STYLE_URL`, served as runtime-config `mapStyleUrl`), then
+  // the public demo style. The owner picks the failure notice's remedy below.
+  const hostMapStyle = useHostMapStyle();
+  const mapStyleOwner: 'view' | 'deployment' | 'default' = mapConfig.style
+    ? 'view'
+    : hostMapStyle
+      ? 'deployment'
+      : 'default';
+  const drawnMapStyle = mapConfig.style || hostMapStyle || DEFAULT_MAP_STYLE;
   const hasInlineData = dataConfig?.provider === 'value';
 
   /**
@@ -1381,10 +1396,11 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
     );
   }
 
-  // Why the record list stands where the map should be. No deployment-wide map
-  // style setting exists, so neither style remedy promises one: a configured
-  // style is this view's own to check, and the public default is for an
-  // administrator to replace with a style set on this view.
+  // Why the record list stands where the map should be. Each remedy names the
+  // style that actually failed: a configured style is this view's own to check;
+  // the deployment's default (objectstack#26163) is the administrator's, who set
+  // it; and the public default is for an administrator to replace with a style
+  // set on this view.
   const styleFailureReason =
     mapStyleError ||
     t('element.map.styleFailedUnknownReason', { defaultValue: 'the map style or tiles could not be loaded' });
@@ -1393,17 +1409,23 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
         defaultValue:
           'Map failed to load (this browser does not provide WebGL2, which the map needs). The records are listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.',
       })
-    : mapConfig.style
+    : mapStyleOwner === 'view'
       ? t('element.map.styleFailedConfigured', {
           reason: styleFailureReason,
           defaultValue:
             'Map failed to load ({{reason}}). The records are listed below; check the map style URL set on this view.',
         })
-      : t('element.map.styleFailedDefault', {
-          reason: styleFailureReason,
-          defaultValue:
-            'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
-        });
+      : mapStyleOwner === 'deployment'
+        ? t('element.map.styleFailedDeployment', {
+            reason: styleFailureReason,
+            defaultValue:
+              'Map failed to load ({{reason}}). The records are listed below; the default map style set for this deployment could not be loaded here, so ask your administrator to check it.',
+          })
+        : t('element.map.styleFailedDefault', {
+            reason: styleFailureReason,
+            defaultValue:
+              'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
+          });
 
   return (
     <div className={cn("min-w-0 overflow-hidden", className)}>
@@ -1487,7 +1509,7 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
             ref={(r) => { mapRef.current = r as any; }}
             initialViewState={initialViewState}
             style={{ width: '100%', height: '100%' }}
-            mapStyle={mapConfig.style || DEFAULT_MAP_STYLE}
+            mapStyle={drawnMapStyle}
             touchZoomRotate={true}
             dragRotate={true}
             touchPitch={true}

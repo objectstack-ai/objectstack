@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots in one beforeAll, each a distinct port leg (`os dev -p N`, `os serve --port N`, `os dev -p N` with N held); slowest CI reading 16.35 s (run 40424746941, the first run of its current six-case shape) after the oclif test manifest (PR #26256), x 1.25, rounded up
 
 /**
  * #26130 — on an `os dev` boot, a connector value the config reads from the
