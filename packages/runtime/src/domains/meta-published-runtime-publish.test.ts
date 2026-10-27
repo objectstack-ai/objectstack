@@ -38,6 +38,16 @@ import { MetadataManager } from '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.projects']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 interface Row {
     id: string;
     type: string;
@@ -131,7 +141,7 @@ function makeStubEngine() {
             registerItem: () => {},
             registerObject: () => {},
             getItem: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
         },
     };
     return { engine, rows };
@@ -360,7 +370,7 @@ describe('[#21002] the dispatcher published door follows the layered read for a 
         engine.registry = {
             registerItem: () => {},
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getItem: (type: string, name: string) =>
                 (type === 'flow' || type === 'flows') && name === SHIPPED ? loaderEntry : undefined,
         };
@@ -491,7 +501,7 @@ describe('[#21986] the dispatcher published door serves a code-defined datasourc
         engine.registry = {
             registerItem: () => {},
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getItem: () => undefined,
             getAllPackages: () => [{
                 manifest: {

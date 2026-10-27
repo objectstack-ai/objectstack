@@ -1706,13 +1706,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing the drafts of package "${id}"`);
             if (walled) return walled;
-            // [#26708] An id no installed package has is refused BEFORE
-            // anything is published — see `packageIsUnknown`.
-            if (packageIsUnknown(registry, id)) {
-                return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
-            }
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
+                // [#26708] An id no installed package has is refused BEFORE
+                // anything is published — see `packageIsUnknown`. After the
+                // capability probe, as its siblings: a host that cannot
+                // publish answers 501 whatever id it is asked about.
+                if (packageIsUnknown(registry, id)) {
+                    return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                }
                 try {
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,

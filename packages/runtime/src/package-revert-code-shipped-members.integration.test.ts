@@ -268,6 +268,9 @@ describe('#22113 controls', () => {
     // The #22090 contract-review shape: a draft row in `sys_metadata` bound to
     // a code package. Written while the id is not yet booted — the authoring
     // gate refuses a new item into a booted package — then the package boots.
+    // [#26708] …and while it is installed: a save naming a package no
+    // installed package has is refused. It is an authored base until it boots.
+    engine.registry.installPackage({ id: BOOTED_PKG, name: BOOTED_PKG, version: '1.0.0' } as any, 'authored');
     await protocol.saveMetaItem({
       type: 'view',
       name: 'booted_board',
@@ -278,6 +281,7 @@ describe('#22113 controls', () => {
       packageId: BOOTED_PKG,
       mode: 'draft',
     });
+    engine.registry.uninstallPackage(BOOTED_PKG);
     await bootArtifactPackage(engine, metadata);
 
     const answer = await revert(BOOTED_PKG);
