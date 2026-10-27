@@ -121,7 +121,7 @@ describe('[#26871] a multi delete_record runs the referential walk for every row
     ((await ql.insert(object, data, { context: SYS })) as any).id;
   /** Rows of `object`, read from the driver with no engine in between. */
   const rows = async (object: string, where: FilterCondition = {}): Promise<any[]> =>
-    (await driver.find(object, { object, where })) as any[];
+    (await driver.find(object, { where })) as any[];
 
   function bulkDeleteFlow(name: string, grp: string) {
     return {
