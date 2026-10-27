@@ -6,7 +6,7 @@
 
 fix(types): a unique refusal tells the user which field by its label, never by its API key
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A create or update refused by a single-column unique index answered `409 UNIQUE_VIOLATION` with a user-facing `error` that named the field by its API key ("A record with this gsku already exists"), while `developerMessage` named it by its label. The split was inverted: the developer read the label and the end user read `gsku`.
