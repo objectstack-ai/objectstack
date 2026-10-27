@@ -15,8 +15,10 @@
  *      ViewAll/ModifyAll). Cells are colored chips — green when
  *      granted, neutral when not, amber when "View All" or "Modify
  *      All" is on (highlighting the bypass).
- *   3. Field-level security: grouped by object, only fields with a
- *      non-default setting are listed (read=false or editable=true).
+ *   3. Field-level security: grouped by object, every field the set
+ *      declares an entry for, tagged hidden / read-only / editable. A field
+ *      without an entry follows the object grant, so it is not listed
+ *      (objectstack#26597).
  *   4. Row-level security: each `rowLevelSecurity` policy by its `name`,
  *      with its `label` beside it and its `description` beneath it when
  *      authored (objectui#11027). Both keys are plain strings in the spec,
@@ -163,15 +165,17 @@ export function PermissionPreview({ name, draft, locale }: MetadataPreviewProps)
   const warnings = React.useMemo(() => findWarnings(objects), [objects]);
 
   // Group field permissions by object name (key format: "<object>.<field>").
+  // objectstack#26597 — EVERY declared entry is listed: an entry is a rule the
+  // runtime enforces, a read-only one included (the write gate refuses a field
+  // whose entry is not `editable`). `FieldPermissionSchema`'s defaults are the
+  // defaults of an entry that exists, never a reason to hide one; a field with
+  // no entry follows the object grant and has nothing to list.
   const fieldsByObject = React.useMemo(() => {
     const out = new Map<string, Array<{ field: string; perm: FieldPermission }>>();
     for (const [key, perm] of Object.entries(fields)) {
       const [obj, ...rest] = key.split('.');
       if (!obj || rest.length === 0) continue;
       const fname = rest.join('.');
-      // Only surface entries that diverge from the default (read=true, edit=false).
-      const isNonDefault = perm.readable === false || perm.editable === true;
-      if (!isNonDefault) continue;
       if (!out.has(obj)) out.set(obj, []);
       out.get(obj)!.push({ field: fname, perm });
     }
@@ -297,17 +301,20 @@ export function PermissionPreview({ name, draft, locale }: MetadataPreviewProps)
                         <li
                           key={field}
                           className="inline-flex items-center gap-1 rounded border bg-muted/30 px-1.5 py-0.5"
-                          title={`readable=${perm.readable !== false}, editable=${!!perm.editable}`}
+                          title={`readable=${perm.readable !== false}, editable=${!!perm.editable}${perm.when ? `, when=${perm.when}` : ''}`}
                         >
                           <span className="font-mono">{field}</span>
-                          {perm.readable === false && (
+                          {perm.readable === false ? (
                             <span className="text-[9px] uppercase text-red-700">
                               {tr('engine.permissionPreview.fls.hidden', locale)}
                             </span>
-                          )}
-                          {perm.editable && (
+                          ) : perm.editable === true ? (
                             <span className="text-[9px] uppercase text-emerald-700">
                               {tr('engine.permissionPreview.fls.editable', locale)}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] uppercase text-amber-700">
+                              {tr('engine.permissionPreview.fls.readOnly', locale)}
                             </span>
                           )}
                         </li>
