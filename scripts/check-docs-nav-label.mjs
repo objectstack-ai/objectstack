@@ -736,8 +736,22 @@ export async function selfTest() {
     failures.push(`cannot read .github/workflows/lint.yml to verify wiring: ${err.code ?? err.message}`);
   }
   if (lint !== null) {
-    assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} directly (lint.yml's GATE INVOCATION IDIOM note)`);
-    assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
+    // CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so the
+    // alias is where both legs live: pin the step AND the alias value.
+    assert(
+      /^\s*run: pnpm check:docs-nav-label\s*$/m.test(lint),
+      `wiring: lint.yml runs ${SELF} through its root alias \`pnpm check:docs-nav-label\``,
+    );
+    let alias = null;
+    try {
+      alias = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).scripts?.['check:docs-nav-label'] ?? null;
+    } catch (err) {
+      failures.push(`cannot read root package.json to verify wiring: ${err?.code ?? err?.message}`);
+    }
+    assert(
+      alias === `node ${SELF} --self-test && node ${SELF}`,
+      `wiring: root package.json's check:docs-nav-label runs the --self-test leg, then the gate -- got ${JSON.stringify(alias)}`,
+    );
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───

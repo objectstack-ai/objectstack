@@ -408,6 +408,8 @@ import { resolveWritePackageScope } from './protocol-write-package-scope.js';
 import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
 // [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
 import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
+// [#25467 cut 22] A row-less view name's expansion for the by-name read, and a container's expansion under its own name.
+import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2869,7 +2871,7 @@ export function addressPackages(packageId: string | undefined): ReadonlyArray<st
  * stored copy of a container displaced another package's item of each name
  * the copy expands, a withdrawn public form included.
  */
-function servedViewExpansion<E extends { packageId: string | undefined }>(
+export function servedViewExpansion<E extends { packageId: string | undefined }>(
     expansions: ReadonlyArray<{ item: Record<string, unknown>; container: E }>,
     name: string,
     packageId: string | undefined,
@@ -6251,7 +6253,7 @@ export interface StoredOverlayEntry {
  * list read serves under the name, and the stored container row it derives
  * from.
  */
-interface RowlessExpandedView {
+export interface RowlessExpandedView {
     item: Record<string, unknown>;
     container: StoredOverlayEntry;
 }
@@ -10306,33 +10308,15 @@ export class ObjectStackProtocolImplementation implements
     private async resolveRowlessExpandedView(
         request: { type: string; name: string; packageId?: string },
     ): Promise<RowlessExpandedView | undefined> {
-        if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
-        let records: any[] = [];
-        // [#21967] Naming a package, the package-less rows in scope stand in,
-        // read as the list scoped to that package reads them (the
-        // package-agnostic read, filtered back to the package-less rows).
-        let standInRows: any[] = [];
-        try {
-            records = await this.readActiveOverlayRows(
-                { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
-            );
-            if (request.packageId) {
-                standInRows = (await this.readActiveOverlayRows({ type: request.type }))
-                    .filter((row) => (row?.package_id ?? null) === null);
-            }
-        } catch (error) {
-            // [#5532] The list read's rule: only an unprovisioned store means
-            // "no rows". Any other failure is not answered as "nothing expands
-            // this name".
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const rows = [...records, ...standInRows];
-        if (this.namesWithOwnStoredRow(rows, request.packageId).has(request.name)) return undefined;
-        return servedViewExpansion(
-            this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, rows)),
-            request.name,
-            request.packageId,
-        );
+        // [#25467 cut 22] The body moved to `protocol-view-expansion-names.ts` (see `ViewExpansionNamesHost`).
+        const host: ThisParameterType<typeof resolveRowlessExpandedView> = {
+            expandStoredViewContainers: (...a) => this.expandStoredViewContainers(...a),
+            namesWithOwnStoredRow: (...a) => this.namesWithOwnStoredRow(...a),
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return resolveRowlessExpandedView.call(host, request);
     }
 
     /**
@@ -18162,34 +18146,11 @@ export class ObjectStackProtocolImplementation implements
         container: Record<string, any>,
         ownPackageId: string | undefined,
     ): Record<string, unknown>[] {
-        const ownName = typeof container.name === 'string' && container.name !== '' ? container.name : undefined;
-        if (ownName === undefined) return [];
-        const under = `${object}.${ownName}`;
-        const expandAt = under;
-        const list = container.list;
-        const bare = !!list && typeof list === 'object' && !(typeof list.name === 'string' && list.name !== '');
-        const source = bare ? { ...container, list: { ...list, name: ownName } } : container;
-        const bareSpelled = `${expandAt}.${ownName}`;
-        const underIsShipped = this.isShippedByAnotherPackage(type, under, ownPackageId);
-        return expandViewContainer(expandAt, source).map((vi) => {
-            const item: Record<string, any> = { ...vi, object };
-            const name = String(item.name);
-            const fromBare = bare
-                && item.viewKind === 'list'
-                && item.config?.name === ownName
-                && name.startsWith(bareSpelled)
-                && /^(_\d+)?$/.test(name.slice(bareSpelled.length));
-            if (fromBare) {
-                const authored = { ...item.config };
-                delete authored.name;
-                item.config = authored;
-                if (!underIsShipped) {
-                    item.name = under;
-                    delete item._diagnostics;
-                }
-            }
-            return item;
-        });
+        // [#25467 cut 22] The body moved to `protocol-view-expansion-names.ts` (see `ViewExpansionNamesHost`).
+        const host: ThisParameterType<typeof expandUnderOwnName> = {
+            isShippedByAnotherPackage: (...a) => this.isShippedByAnotherPackage(...a),
+        };
+        return expandUnderOwnName.call(host, type, object, container, ownPackageId);
     }
 
     /**
