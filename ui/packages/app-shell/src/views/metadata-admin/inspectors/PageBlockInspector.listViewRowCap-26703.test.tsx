@@ -27,6 +27,12 @@ vi.mock('../useMetadata', () => ({
   useMetadataClient: () => ({ get: vi.fn(async () => undefined), list: vi.fn(async () => [] as unknown[]) }),
 }));
 
+// The inspector's `engine.inspector.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 afterEach(cleanup);
 
 const BLOCK_PATH = 'regions[0].components[0]';
