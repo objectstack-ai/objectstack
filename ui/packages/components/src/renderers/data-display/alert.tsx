@@ -16,7 +16,7 @@ import {
 } from '../../ui';
 
 ComponentRegistry.register('alert', 
-  ({ schema, className, ...props }: { schema: AlertSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: AlertSchema; className?: string; [key: string]: unknown }) => (
     <Alert variant={schema.variant} className={className} {...props}>
       <AlertTitle>{schema.title}</AlertTitle>
       <AlertDescription>{schema.description || renderChildren(schema.children)}</AlertDescription>

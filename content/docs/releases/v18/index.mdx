@@ -134,6 +134,12 @@ every flag is in
 Each release below is a self-contained page: what it changed, what breaks, and
 its own upgrade checklist.
 
+- **[18.2.0](/docs/releases/v18/18-2)** — the first release that ships the
+  Console and the `@object-ui/*` packages from this repository, at one version
+  with `@objectstack/*`. 59 of its 231 changesets are declared breaking: 52
+  need you to act and 7 are converted by `os migrate meta`. Its
+  [upgrade checklist](/docs/releases/v18/18-2#upgrade-checklist) moves an
+  18.1.0 app to 18.2.0, and is compiled from the changesets, not walked.
 - **[18.1.0](/docs/releases/v18/18-1)** — the first minor, and a minor that
   breaks: 91 of its changesets are declared breaking (ruling A grades a
   non-protocol breaking change `patch` and a protocol narrowing `minor`). Its

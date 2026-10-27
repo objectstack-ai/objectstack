@@ -108,6 +108,7 @@ export type {
   AuthOrganization,
   AuthOrganizationMember,
   AuthInvitation,
+  AuthInvitationPreview,
   AuthSocialProvider,
   AuthPublicConfig,
   SignInWithProviderOptions,

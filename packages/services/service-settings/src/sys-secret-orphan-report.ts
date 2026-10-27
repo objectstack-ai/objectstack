@@ -37,7 +37,8 @@
  *    including tenant-authored ones.
  *  - ✅ The audit trail records digests, not handles (`old_hash` / `new_hash`
  *    are content digests; `SettingsService` passes the provider's
- *    `keyedDigest()` for secret-valued keys, `digest()` otherwise),
+ *    `keyedDigest()` for secret-valued keys, the `sha256:` digest of
+ *    `settingAuditDigest()` otherwise),
  *    so audit stays readable after a ciphertext is destroyed — and, the other
  *    way round, audit can never be used to reconstruct which handles existed.
  *

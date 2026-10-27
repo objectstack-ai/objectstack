@@ -543,6 +543,30 @@ export async function failSuspendedRun(
     }, run.context, consumed?.run);
 }
 
+/**
+ * [#26477] The two NEVER-DISPATCHED exits of {@link resumeInternal}, as one
+ * read: the registered flow a suspension belongs to and the node it parked on,
+ * or — when either is gone — the cause a resume answers `RUN_NOT_FOUND` with.
+ *
+ * Pure: it reads the flow registry and records nothing. {@link resumeInternal}
+ * acts on a cause by settling the run ({@link settleUnresumableSuspension});
+ * {@link AutomationEngine.unresumableSuspensionCause} only reports it, so a
+ * caller that is about to write a decision of its own can refuse first. One
+ * function for both, so the pre-flight and the resume it guards classify the
+ * same suspension the same way.
+ */
+export function resolveResumeTarget(
+    flows: AutomationEngine['flows'],
+    runId: string,
+    run: Pick<SuspendedRun, 'flowName' | 'nodeId'>,
+): { flow: FlowParsed; node: FlowParsed['nodes'][number] } | { cause: string } {
+    const flow = flows.get(run.flowName);
+    if (!flow) return { cause: `Flow '${run.flowName}' not found for run '${runId}'` };
+    const node = flow.nodes.find(n => n.id === run.nodeId);
+    if (!node) return { cause: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
+    return { flow, node };
+}
+
 /** The body of {@link AutomationEngine.settleUnresumableSuspension}, moved unedited; that method's docblock is its contract. */
 export async function settleUnresumableSuspension(this: Pick<RunResumeHost, 'nodeTypeVocabularySealed' | 'claimAdvance' | 'evictConsumedSuspension' | 'forgetSuspendedRun' | 'recordLog' | 'logger'>, run: SuspendedRun, cause: string): Promise<AutomationResult> {
     const refusal: AutomationResult = { success: false, code: 'RUN_NOT_FOUND', error: cause };
@@ -1006,17 +1030,13 @@ export async function resumeInternal(
         // good" while the row kept `status: 'paused'` left it resumable on
         // every surface that reads the row, and outside retention, whose
         // scope is terminal statuses only.
-        const flow = this.flows.get(run.flowName);
-        if (!flow) {
-            return this.settleUnresumableSuspension(run, `Flow '${run.flowName}' not found for run '${runId}'`);
-        }
-        const node = flow.nodes.find(n => n.id === run.nodeId);
-        if (!node) {
-            return this.settleUnresumableSuspension(
-                run,
-                `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'`,
-            );
-        }
+        //
+        // [#26477] The classification itself is {@link resolveResumeTarget},
+        // shared with the read-only probe a caller asks BEFORE it writes
+        // anything of its own, so the two cannot disagree.
+        const target = resolveResumeTarget(this.flows, runId, run);
+        if ('cause' in target) return this.settleUnresumableSuspension(run, target.cause);
+        const { flow, node } = target;
 
         // #4354 — up-bubble: the child that just finished did work this run
         // is accountable for. Credit it to the step that suspended awaiting

@@ -20,7 +20,7 @@ import { renderChildren, renderTriggerSlot } from '../../lib/utils';
 // example, doc page or README authors one, so `modal={schema.modal}` rode
 // `BaseSchema`'s index signature alone and was retired.
 ComponentRegistry.register('popover', 
-  ({ schema, className, ...props }: { schema: PopoverSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: PopoverSchema; className?: string; [key: string]: unknown }) => (
     <Popover defaultOpen={schema.defaultOpen} {...props}>
       {renderTriggerSlot(PopoverTrigger, schema.trigger)}
       <PopoverContent align={schema.align} side={schema.side} className={className}>

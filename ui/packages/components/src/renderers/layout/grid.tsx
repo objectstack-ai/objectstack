@@ -10,6 +10,7 @@ import { ComponentRegistry, toDomProps } from '@object-ui/core';
 import type { GridSchema } from '@object-ui/types';
 import { renderChildren } from '../../lib/utils';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Helper maps to ensure Tailwind classes are scanned and included
 const GRID_COLS: Record<number, string> = {
@@ -87,7 +88,7 @@ const GAPS: Record<number, string> = {
 };
 
 ComponentRegistry.register('grid', 
-  ({ schema, className, ...props }: { schema: GridSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: GridSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Determine columns configuration
     // Supports detailed object configuration from schema
     let baseCols = 2;

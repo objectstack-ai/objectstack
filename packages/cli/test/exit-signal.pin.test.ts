@@ -468,28 +468,20 @@ const FLOW = new Map(
 );
 
 /**
- * Floors, not counts of today: the population and the `this.exit`-in-`try`
- * sites this was widened over, on `f9a8eb889e`. That is 65 commands: 46
- * JSON-capable (32 `--json`, 14 `--format json`, the first population) and 19
- * text-face only. It is 127 sites: 105 in the first population, 21 of them
- * `os build`'s through `compile.ts`, and 22 in the three text-face commands
- * the widening was filed on. A discovery or analyzer that silently stops
- * finding anything returns zero, and zero passes every per-member assertion —
- * these are what notice. A drop below them is a broken detector or a
- * deliberate removal; say which when you lower one.
- *
- * Seeding `this.error` raised the site floor to 131, measured on
- * `bee8d1c62c` over the same 65 commands: the 127 `this.exit` sites, plus
- * four `this.error` sites — `compile.ts`'s bundling refusal, counted for
- * `os compile` and again for `os build` through it, and `os init`'s two
- * refusals inside its outer `try`. Those four sites now spell `this.exit(2)`
- * (the status `this.error` raised, with the sentence rendered once): both
- * spellings are seeds, so the floor is unchanged.
+ * Vacuity floors, not counts of today. A discovery or analyzer that silently
+ * stops finding anything returns zero, and zero passes every per-member
+ * assertion; these are what notice. Each sits at about two thirds of its
+ * measured count, so deleting a command is an ordinary green change while a
+ * walk or scan that resolves nothing is not. The site count is every
+ * signal-raising call inside a `try` (`this.exit`, and `this.error`, which
+ * raises the same signal in another spelling), summed over each member's
+ * inheritance chain, so `compile.ts`'s sites count for `os build` too. Raise
+ * one only alongside a reason that the smaller number is impossible.
  */
-const POPULATION_FLOOR = 65;
-const SITE_FLOOR = 131;
-/** The first population's floor, kept so a face-label regression is seen too. */
-const JSON_FACE_FLOOR = 46;
+const POPULATION_FLOOR = 48; // measured 72 on 2026-10-27 (`185512cc`)
+const SITE_FLOOR = 109; // measured 164 on 2026-10-27 (`185512cc`)
+/** The first population (the JSON-capable commands), kept so a face-label regression is seen too. */
+const JSON_FACE_FLOOR = 35; // measured 53 on 2026-10-27 (`185512cc`)
 
 // ---------------------------------------------------------------------------
 // 1. The analyzer, against fixtures — it must be able to fail
@@ -622,7 +614,7 @@ describe('every command lets the exit signal through', () => {
   });
 
   it('the population is not vacuous — the floor holds and the commands this was filed on are in it', () => {
-    expect(POPULATION.length, 'fewer commands discovered than this pin was widened over').toBeGreaterThanOrEqual(POPULATION_FLOOR);
+    expect(POPULATION.length, 'fewer commands discovered than the vacuity floor').toBeGreaterThanOrEqual(POPULATION_FLOOR);
     // The population IS the walk: every module the walk lists is a member.
     expect(POPULATION).toHaveLength(COMMAND_FILES.length);
     expect(
@@ -643,7 +635,7 @@ describe('every command lets the exit signal through', () => {
 
   it('the scan reaches the sites — including the completed-apply exit and the text-face refusals this was filed on', () => {
     const total = [...FLOW.values()].reduce((n, f) => n + f.sites.length, 0);
-    expect(total, 'fewer signal-raising calls inside a try found than this pin was widened over').toBeGreaterThanOrEqual(SITE_FLOOR);
+    expect(total, 'fewer signal-raising calls inside a try found than the vacuity floor').toBeGreaterThanOrEqual(SITE_FLOOR);
     expect(FLOW.get('migrate recorded-by')?.sites.map((s) => s.call)).toContain(
       "this.exit(result.status === 'completed' ? 0 : 1)",
     );

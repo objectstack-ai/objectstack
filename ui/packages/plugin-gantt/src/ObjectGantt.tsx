@@ -132,8 +132,10 @@ export interface QuickFilterDef {
  * `defaultCollapsedDepth`, `borderColorField`, `dependencyTypes`, `timeZone`,
  * `exportFileName`, `interactions` — were lifted into `@object-ui/types`, because
  * a type private to this package can be referenced by neither authoring face.
- * Each key is now declared once and both faces derive from it: the `gantt` block
- * and the flattened top-level spelling on `ObjectGanttSchema`.
+ * Each key is now declared once and both spellings derive from it: the `gantt`
+ * block and the flattened top-level spelling, which since objectstack#25923 is
+ * this package's own {@link ObjectGanttFlatFields} rather than a member list of
+ * the published `ObjectGanttSchema`.
  */
 type GanttConfigEx = GanttConfig & GanttConfigRestated;
 
@@ -162,9 +164,9 @@ type GanttConfigEx = GanttConfig & GanttConfigRestated;
  *    the key. It does NOT reach every member: four are bare here —
  *    `parentField`, `baselineEndField`, `assigneeField`, `effortField` — the last
  *    three covered by a neighbour's docblock, `parentField` by nothing. Nor is
- *    this prose unique any more: since objectui#6472 the flattened face
- *    (`ObjectGanttSchema` in `@object-ui/types`) documents all twelve, and
- *    objectui#6561 expanded `parentField`'s entry there.
+ *    this prose unique: objectui#6472 documented all twelve on the flattened
+ *    face of `ObjectGanttSchema` in `@object-ui/types`, which objectstack#25923
+ *    retired from that interface, so this is again the fullest description.
  *
  * 2. PIN OPERAND — this reason reaches EVERY member, and for `parentField` it is
  *    the only one. The pin below is derived over `keyof GanttConfigRestated`: a
@@ -298,10 +300,46 @@ export function normalizeDependencies(raw: unknown): GanttDependency[] {
   return out;
 }
 
+/**
+ * The keys `getGanttConfig`'s FLAT branch and the fetch path read off the node
+ * that the published {@link ObjectGanttSchema} does not declare: the package-local
+ * hand-off spelling (objectstack#25923, ui/AGENTS.md Commandment #0.1).
+ *
+ * `ComponentPropsMap['object-gantt']` refuses every one of them on the node:
+ * the `GanttConfig` keys (written in the `gantt` block instead), the legacy
+ * `dependencyField` alias, and the `search` / `searchableFields` pair, which
+ * only `ListView`'s toolbar writes at runtime. So they left the published
+ * interface and its zod mirror, and live here, beside the one consumer. Both
+ * producers in this tree (`ListView`, and `ObjectView`'s `generateViewSchema`)
+ * emit the `gantt` block; the flat branch keeps a host that mounts
+ * `<ObjectGantt schema={…}>` with the flat keys drawing.
+ *
+ * The `GanttConfig` half is DERIVED from {@link GanttConfig}, the type the
+ * `gantt` block carries, so the two spellings cannot fork.
+ */
+export type ObjectGanttFlatFields = Partial<Pick<GanttConfig, KnownGanttConfigKey>> & {
+  /**
+   * @deprecated Legacy singular alias of `dependenciesField`, which wins where
+   * both carry a value. No producer writes it and the spec has no such key.
+   */
+  dependencyField?: string;
+  /**
+   * Full-text search term, forwarded as `$search` (objectui#10250). `ListView`
+   * writes it from its toolbar Search box: the chart runs its own query.
+   */
+  search?: string;
+  /** Narrows the fields `search` matches, forwarded as `$searchFields` alongside a term. */
+  searchableFields?: string[];
+};
+
+/** The node `ObjectGantt` reads: the published schema plus {@link ObjectGanttFlatFields}. */
+export type ObjectGanttHandoff = ObjectGanttSchema & ObjectGanttFlatFields;
+
 export interface ObjectGanttProps {
   /**
-   * The gantt node. Typed as {@link ObjectGanttSchema} (objectui#5903) — the
-   * declaration this component's schema reads actually resolve against.
+   * The gantt node. Typed as {@link ObjectGanttHandoff}: {@link ObjectGanttSchema}
+   * (objectui#5903), plus the flat keys this component still reads that left the
+   * published interface in objectstack#25923.
    *
    * It used to be `ObjectGridSchema`, and that is why ten genuine reads had to
    * be spelled `(schema as any).K`: the keys are not grid keys, so the only
@@ -319,7 +357,7 @@ export interface ObjectGanttProps {
    * renderer (`index.tsx`) still passes `schema: any`, so no runtime shape is
    * turned away either way.
    */
-  schema: ObjectGanttSchema;
+  schema: ObjectGanttHandoff;
   dataSource?: DataSource;
   className?: string;
   onTaskClick?: (record: any) => void;
@@ -504,14 +542,13 @@ export type KnownGanttConfigKey = KnownKeys<GanttConfig>;
 
 /**
  * The FLAT spelling of `GanttConfig`'s keys — what `getGanttConfig`'s flat
- * branch reads, and what `ObjectView` / `ListView` EMIT.
+ * branch reads ({@link ObjectGanttFlatFields}).
  *
- * Both flatteners build an `object-gantt` schema by spreading `options.gantt`'s
- * CONTENTS at the top level (`plugin-view/src/ObjectView.tsx` `case 'gantt'`,
- * `plugin-list/src/ListView.tsx` `case 'gantt'`); the product carries these keys
- * and NO `gantt` key at all. That is an internal transport form, not a second
- * authoring surface — and it is why the precedence flip below strands neither
- * producer.
+ * Until objectstack#25923 both producers (`plugin-view/src/ObjectView.tsx` and
+ * `plugin-list/src/ListView.tsx`, each in `case 'gantt'`) EMITTED this spelling
+ * and no `gantt` key. Both now hand the view's block on as the node's `gantt`,
+ * so the block branch is the producers' path and this list only names what a
+ * node carrying both spellings loses to its block.
  *
  * DERIVED from `GanttConfigSchema` in full — the same zod object the block
  * branch validates against — so a key added to the spec reaches the shadow
@@ -546,25 +583,22 @@ const warnedShadowedFlatGanttKeys = new Set<string>();
  * Silence is what the precedence rule costs if it is not diagnosed: two
  * spellings of ONE vocabulary (objectui#6051 proved they are one — both derive
  * from `GanttConfig`) in a single schema, one of them inert. The ruling picks
- * the author's block over the flatten product deliberately — maintainer on
+ * the author's block over the flat spelling deliberately — maintainer on
  * objectui#5018 (2026-08-17) for `plugin-map`, inherited here by objectui#6469 —
  * so the diagnostic names what was dropped instead of leaving the author to
  * infer it from a chart that renders the other spelling's values.
  *
- * It cannot fire on the ordinary ObjectView / ListView path, and that matters
- * more here than it did for the map: the flat branch is the HOT path for gantt,
- * because a hand-authored `gantt` block reaching this component through either
- * view layer has already been flattened before `getGanttConfig` sees it. Both
- * flatteners emit the flat keys and NO `gantt` key, so this function's block
- * branch — the only caller of this warning — is not even reached for their
- * output. Reaching it means one schema carries both spellings, which is exactly
- * the case the flip changes.
+ * It cannot fire on the ordinary ObjectView / ListView path: since
+ * objectstack#25923 both producers emit the `gantt` block and NO flat key, so
+ * their output reaches the block branch — the only caller of this warning —
+ * with nothing to shadow. Reaching it means one schema carries both spellings,
+ * which is exactly the case the flip changes.
  */
-function warnOnShadowedFlatGanttKeys(schema: ObjectGanttSchema): void {
+function warnOnShadowedFlatGanttKeys(schema: ObjectGanttHandoff): void {
   if (!isDev()) return;
 
   // `key` is a `GanttConfigSchema` key or the legacy `dependencyField`, and
-  // `ObjectGanttSchema` declares every one of those, so the read is typed as it
+  // `ObjectGanttHandoff` declares every one of those, so the read is typed as it
   // stands; no conversion is needed (objectui#11355).
   const shadowed = FLAT_GANTT_CONFIG_KEYS.filter((key) => schema[key] !== undefined);
   if (shadowed.length === 0) return;
@@ -576,8 +610,8 @@ function warnOnShadowedFlatGanttKeys(schema: ObjectGanttSchema): void {
   console.warn(
     '[ObjectGantt] The `gantt` block configures this chart, so these top-level keys are ' +
       `IGNORED: ${shadowed.map((k) => `\`${k}\``).join(', ')}. The \`gantt\` block is the ` +
-      'authoring shape; the flat top-level spelling is the internal form ObjectView/ListView ' +
-      'produce when they flatten `options.gantt`, and what the author wrote outranks it. The ' +
+      'authoring shape; the flat top-level spelling is a hand-off form a host may mount this ' +
+      'chart with, and what the author wrote outranks it. The ' +
       'block is taken WHOLE — the flat keys are not merged into it — so move anything you ' +
       'still need into `gantt`, or drop the `gantt` block. objectui#6469.',
   );
@@ -595,8 +629,15 @@ function warnOnShadowedFlatGanttKeys(schema: ObjectGanttSchema): void {
  * ruled the other way (PR #5156); gantt's answer had never been ruled — it was
  * just what the early `return` happened to do.
  *
- * Safe for the producer path: neither flattener emits a `gantt` key, so their
- * output still takes branch 2 exactly as before — see `FLAT_GANTT_CONFIG_KEYS`.
+ * The producers' path is branch 1 since objectstack#25923: `ListView` and
+ * `ObjectView`'s `generateViewSchema` hand the view's block on as `gantt` —
+ * only once both date fields are declared, and with `titleField` floored at
+ * `'name'` there, the two conditions branch 2 applies here — so a view renders
+ * as it did when they flattened it, except that the block is validated here and
+ * branch 2 never was: a binding carrying a value the spec refuses, which branch
+ * 2 drew, now reaches the refusal screen (a pre-door stored row like that is
+ * converted at the store, ADR-0087, never tolerated). Branch 2 stays for a host that
+ * mounts this component with the flat keys ({@link ObjectGanttFlatFields}).
  *
  * The block is taken WHOLE, not merged over the flat keys. That is the ruling's
  * shape ("what the author wrote outranks it"), and merging would be the lenient
@@ -616,7 +657,7 @@ function warnOnShadowedFlatGanttKeys(schema: ObjectGanttSchema): void {
  * downstream can read the unvalidated block. Same posture as `ObjectTimeline`'s
  * refusal: the renderer says what is wrong rather than guessing what was meant.
  */
-function getGanttConfig(schema: ObjectGanttSchema): {
+function getGanttConfig(schema: ObjectGanttHandoff): {
   config: GanttConfigEx | null;
   invalidBlock: readonly string[] | null;
 } {
@@ -632,8 +673,9 @@ function getGanttConfig(schema: ObjectGanttSchema): {
     return { config: schema.gantt as GanttConfigEx, invalidBlock: null };
   }
 
-  // 2. The internal flat form — the ObjectView / ListView flatten product.
-  // Taken only when BOTH date fields are present, unchanged by the flip; a
+  // 2. The flat hand-off form (`ObjectGanttFlatFields`) — what ObjectView /
+  // ListView emitted until objectstack#25923, kept for a host that mounts this
+  // component with it. Taken only when BOTH date fields are present; a
   // partial flat spelling still falls through to `null`. Deliberately NOT
   // `safeParse`d, also unchanged: this branch never validated, and adding
   // validation to it is a separate question from precedence.

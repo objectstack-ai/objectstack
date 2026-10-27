@@ -156,6 +156,7 @@ import {
     resumeInternal,
     failSuspendedRun,
     settleUnresumableSuspension,
+    resolveResumeTarget,
     cancelRun,
     cloneVariablesAtPause,
     failAncestors,
@@ -6603,6 +6604,41 @@ export class AutomationEngine implements IAutomationService {
      */
     async hasSuspendedRun(runId: string): Promise<boolean> {
         return (await this.loadSuspendedRunStrict(runId)) !== null;
+    }
+
+    /**
+     * [#26477] Why the suspension behind `runId` can never be resumed — its
+     * flow is no longer registered, or the node it parked on was edited away
+     * — as the exact cause a resume would answer `RUN_NOT_FOUND` with; or
+     * `undefined` when no suspension exists for `runId` (that is
+     * {@link hasSuspendedRun}'s answer to give) or its flow and node are
+     * still there.
+     *
+     * The second half of the pre-flight approvals asks before it records a
+     * decision. A suspension outlives the flow it belongs to — a
+     * `DELETE /automation/:name`, an uninstall or an overlay removal drops the
+     * flow and leaves the parked row — so {@link hasSuspendedRun} still
+     * answers `true`, the decision used to be recorded, and only the resume
+     * after it found the run could not continue. The classification is
+     * {@link resolveResumeTarget}, the one the resume's own never-dispatched
+     * exits use, so the two cannot disagree.
+     *
+     * Read-only: it settles nothing and records nothing; settling a
+     * gone-for-good run is the resume's job
+     * ({@link settleUnresumableSuspension}). That is also why it may answer
+     * before the host seals the boot: a flow that is "not registered yet"
+     * cannot be resumed at that moment either, and a caller that refuses on
+     * it writes nothing a later registration would have to undo (AGENTS.md
+     * "Startup registry reads": a read-only probe is legal).
+     *
+     * THROWS when the durable store cannot be read, as {@link hasSuspendedRun}
+     * does: an outage means "unknown", never "can continue".
+     */
+    async unresumableSuspensionCause(runId: string): Promise<string | undefined> {
+        const run = await this.loadSuspendedRunStrict(runId);
+        if (!run) return undefined;
+        const target = resolveResumeTarget(this.flows, runId, run);
+        return 'cause' in target ? target.cause : undefined;
     }
 
     /**

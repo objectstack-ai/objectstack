@@ -12,9 +12,10 @@ import type { ToggleSchema } from '@object-ui/types';
 import { Toggle } from '../../ui';
 import { renderChildren } from '../../lib/utils';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('toggle',
-  ({ schema, ...props }: { schema: ToggleSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: ToggleSchema; [key: string]: unknown } & RendererHostProps) => {
     // `style` is forwarded BY NAME rather than reopened in the shared list —
     // the objectui#4435 route, same as the layout renderers objectui#5574
     // converged. Everything else goes through the form-control declaration.

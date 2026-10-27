@@ -3,8 +3,8 @@
     "Pre-existing sink contracts that permit silence — scripts/check-optional-error-sink-contract.mjs (#9754).",
     "Each entry is a sink type declaring an optional `error` with no GUARANTEED fallback channel.",
     "",
-    "SHRINK-ONLY and hand-edited under review. The checker fails on a stale entry, so a sink that",
-    "gets repaired must have its entry deleted in the same PR, and there is deliberately no",
+    "SHRINK-ONLY and hand-edited under review. The checker reports a stale entry (it passes since",
+    "#26444), so a sink that gets repaired is named for deletion on every run, and there is deliberately no",
     "`--fix`/`--update` flag — a generator would let a NEW violation be admitted by 'just run the",
     "update command', which is precisely how a gate stops meaning anything.",
     "",
@@ -63,8 +63,8 @@
     "           it before treating this file's length as a worklist. There is no",
     "           mechanical repair left in here — the last one left in PR #10937.",
     "",
-    "  Shrink-only is unaffected: each row still fails the gate the moment its sink stops being",
-    "  red, so all three can only leave this file, never linger."
+    "  Shrink-only is unaffected: each row is reported for deletion the moment its sink stops",
+    "  being red, so all three can only leave this file."
   ],
   "entries": [
     {

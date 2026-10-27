@@ -20,7 +20,7 @@ import {
 import { renderChildren, renderNodeSlot, renderTriggerSlot } from '../../lib/utils';
 
 ComponentRegistry.register('dialog', 
-  ({ schema, className, ...props }: { schema: DialogSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: DialogSchema; className?: string; [key: string]: unknown }) => (
     <Dialog modal={schema.modal} defaultOpen={schema.defaultOpen} {...props}>
       {renderTriggerSlot(DialogTrigger, schema.trigger)}
       <DialogContent className={className}>

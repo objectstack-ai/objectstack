@@ -7,13 +7,10 @@ Runnable examples that show how to consume ObjectUI in different scenarios. Pick
 | Example | Use it when… | Backend | Bundle | What it gives you |
 |---|---|---|---|---|
 | [`hello-world/`](./hello-world) | You want the smallest possible `<SchemaRenderer>` demo to see the JSON → React pipeline. | None (in-memory schema) | Tiny | A single `App.tsx` rendering one schema. |
-| [`byo-backend-console/`](./byo-backend-console) | You want to **embed** ObjectUI into your own app and connect it to **your own** REST/GraphQL backend. | Bring-your-own (mock REST shown) | ~50 KB | `@object-ui/app-shell` + `@object-ui/react`, custom router, custom `DataSource`. ~100 lines of integration code, no auth, no plugins. |
-| [`console-starter/`](./console-starter) | You want a **fork-ready, opinionated console** with the full plugin set already wired against an **ObjectStack** backend. | ObjectStack (`/api/v1`) | Full | `@object-ui/app-shell` `ConsoleShell` + `AuthProvider` + every `@object-ui/plugin-*` (grid, kanban, calendar, charts, dashboard, designer, detail, form, list, report, view, chatbot). |
 
-> **Rule of thumb:**
-> - Learning the rendering protocol → `hello-world`.
-> - Adding ObjectUI to an existing product / different backend → `byo-backend-console`.
-> - Standing up a brand-new ObjectStack console → fork `console-starter`.
+> The console itself is `apps/console`, built for ObjectOS. `@object-ui/app-shell`, the
+> package its shell and views live in, is private and no longer published to npm, so there
+> is no host-console example to fork.
 
 ### Also under `examples/`
 
@@ -23,18 +20,7 @@ Runnable examples that show how to consume ObjectUI in different scenarios. Pick
 
 ## Running an example
 
-`byo-backend-console` and `console-starter` are Vite apps. From the monorepo root:
-
-```bash
-pnpm install
-pnpm -w build
-cd examples/console-starter   # or byo-backend-console
-pnpm dev
-```
-
-Each exposes its own dev server port (see its README).
-
-The other two directories are not dev servers: `hello-world` is a snippet to drop into
+Neither directory is a dev server: `hello-world` is a snippet to drop into
 your own Vite/Next.js app, and `schema-catalog` is a data package verified with
 `pnpm --filter @object-ui/example-schema-catalog test`.
 
@@ -44,4 +30,4 @@ your own Vite/Next.js app, and `schema-catalog` is a data package verified with
 2. Mark it `private: true`.
 3. Add an entry to the table above and link its README.
 4. Reference workspace packages with `workspace:*`.
-5. Keep the dependency footprint aligned with the example's purpose — heavy plugins belong in `console-starter`, not in lightweight integration demos.
+5. Keep the dependency footprint aligned with the example's purpose — heavy plugins belong in `apps/console`, not in lightweight integration demos.

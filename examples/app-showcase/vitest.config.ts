@@ -1,11 +1,45 @@
 import { defineConfig, configDefaults } from 'vitest/config';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
+import { isNightlyTierFile, readTierMode } from '../../scripts/nightly-tiers.mjs';
+
 /**
- * Unit tests only. The Playwright browser smoke under `e2e/` also uses
- * `*.spec.ts`, so exclude it here — otherwise vitest tries to run it and chokes
- * on the `@playwright/test` import. Run the smoke with `pnpm test:smoke`.
+ * The Playwright browser smoke under `e2e/` also uses `*.spec.ts`, so exclude
+ * it here — otherwise vitest tries to run it and chokes on the
+ * `@playwright/test` import. Run the smoke by hand with `pnpm test:smoke`.
+ *
+ * ## The nightly `live` tier — `OS_TEST_TIERS`, read through `scripts/nightly-tiers.mjs`
+ *
+ * `test/showcase-smoke.live.test.ts` runs that Playwright suite against the
+ * real stack, and its `*.live.test.*` name puts it in the nightly `live` tier:
+ *
+ *   OS_TEST_TIERS unset / queue   every test file EXCEPT the tier files (pull request, merge queue, local)
+ *   OS_TEST_TIERS=nightly         EXACTLY the tier files (test-nightly-tiers.yml)
+ *
+ * The predicate is imported, never re-spelled as a glob here: the tier files
+ * are this package's test files that `isNightlyTierFile` names, found by the
+ * walk below, and the switch is `readTierMode`'s (which refuses a misspelt
+ * value rather than falling back to `queue`). Under `queue` they are excluded
+ * by exact path and vitest's default `include` is left as it was;
+ * under `nightly` they ARE the `include`. `node scripts/nightly-tiers.mjs
+ * --check` judges this by what vitest collects under each setting, and the
+ * nightly refuses to run past a package that fails it.
  */
+const TIER_WALK_SKIP = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'e2e', 'fixtures']);
+function tierFilesOnDisk(dir: string, rel = ''): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (TIER_WALK_SKIP.has(entry.name)) continue;
+    const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...tierFilesOnDisk(path.join(dir, entry.name), childRel));
+    else if (isNightlyTierFile(entry.name)) out.push(childRel);
+  }
+  return out.sort();
+}
+const TIER_FILES = tierFilesOnDisk(__dirname);
+const TIER_MODE = readTierMode();
+
 export default defineConfig({
   resolve: {
     // `test/action-predicate-sparse-face.test.ts` (#8990) drives this app's
@@ -56,7 +90,8 @@ export default defineConfig({
     // against the path relative to the root in use). Collecting them here
     // instead would import a leaked-console-log fixture into the app's own
     // suite, i.e. arm the exact flake the pin exists to keep disarmed.
-    exclude: [...configDefaults.exclude, '**/e2e/**', 'test/fixtures/**'],
+    ...(TIER_MODE === 'nightly' ? { include: TIER_FILES } : {}),
+    exclude: [...configDefaults.exclude, '**/e2e/**', 'test/fixtures/**', ...(TIER_MODE === 'queue' ? TIER_FILES : [])],
 
     // ⛔ Do not remove without reading `test/vitest-console-teardown-race.test.ts`
     // — that pin fails when this is off, and its ablation leg is what proves it.

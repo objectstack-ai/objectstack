@@ -15,9 +15,13 @@
 //   • a file NOT in the baseline reports a site (that already fails `pnpm lint`
 //     — reported here too so one command explains the whole picture), or
 //   • a baselined file's count INCREASES (new erasure hiding behind an old
-//     entry — the invisible move), or
-//   • a baselined file's count DECREASED or the file is clean/gone (progress!)
-//     — run with --update to ratchet the baseline down and commit it.
+//     entry — the invisible move).
+//
+// It is ONE-SIDED (#26444): a baselined file whose count DECREASED, or that is
+// clean/gone, PASSES and is reported — deleting or sweeping a file must not
+// red a PR that never touched this gate. The report names the headroom: until
+// `--update` writes the lower count down, the old number stays that file's
+// ceiling, so the run prints exactly what `--update` would record.
 //
 // And it REFUSES to report at all (exit 2) when a file in the population does
 // not PARSE. ESLint's Node API returns a parse failure as a message carrying no
@@ -63,13 +67,14 @@
 //     Both exist for a rule that has been renamed, rescoped or split, which is
 //     precisely the state in which nothing else in this file is meaningful.
 //
-// The DETECTOR half is different, and this file states the difference rather
-// than claiming a uniform blindness: because a fall below the baseline is
-// itself an error here, a weakening broad enough to erase live sites reddens
-// the production run too (MEASURED: narrowing SLOT_LOOKUPS to `resolveService`
-// alone reddens both). What that argument does not cover is a weakening over a
-// shape with no live sites, an over-fire (which the ratchet cannot see at all
-// once a file is already baselined), or either refusal above. So the self-test
+// The DETECTOR half is no different any more. A fall below the baseline used to
+// be an error, so a weakening broad enough to erase live sites reddened the
+// production run too (MEASURED then: narrowing SLOT_LOOKUPS to `resolveService`
+// alone reddened both). Since the ratchet went one-sided (#26444) that
+// weakening reads as a run of improvements — reported, not red — so the
+// production run is blind to it exactly as it is to a weakening over a shape
+// with no live sites, an over-fire (which the ratchet cannot see at all once a
+// file is already baselined), or either refusal above. So the self-test
 // drives the REAL rule — the one `eslint.config.mjs` exports and the production
 // run counts — over synthetic sources, in BOTH directions: every erasure shape
 // proved to REPORT, and every canonical spelling proved to stay SILENT.
@@ -84,7 +89,7 @@
 // purpose: a case asserting completeness would pin a rule this gate does not
 // have, and would go red the day someone reads it as a bug.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -218,11 +223,45 @@ async function measure(drop) {
     repoRoot,
   });
   const counts = {};
+  const linted = new Set();
   for (const result of results) {
+    const rel = relative(repoRoot, result.filePath).replace(/\\/g, '/');
+    linted.add(rel);
     const hits = countRuleHits(result.messages);
-    if (hits > 0) counts[relative(repoRoot, result.filePath).replace(/\\/g, '/')] = hits;
+    if (hits > 0) counts[rel] = hits;
   }
-  return counts;
+  // Which of the files whose ignore was lifted the rule really RAN on (#26444):
+  // linted, and with the rule in the config ESLint resolved for that file. Only
+  // the lifted files are asked, so this costs one lookup per baselined file.
+  const measured = new Set();
+  for (const file of drop) {
+    if (!linted.has(file)) continue;
+    if (carriesRule(await eslint.calculateConfigForFile(resolve(repoRoot, file)))) measured.add(file);
+  }
+  return { counts, measured };
+}
+
+/**
+ * REFUSAL 3 (#26444): baselined files still ON DISK that this run did not
+ * measure, sorted. While the ratchet was two-sided, a file the run lost — not
+ * linted at all, or linted with its ignore not really lifted, so the rule never
+ * ran on it — dropped out of `current` and the DOWN direction redded. Now that
+ * drop would be a passing report, so it is refused here instead. A deleted file
+ * is not on disk and a swept file was measured, so both still pass. `exists` is
+ * injected for the self-test.
+ */
+function unmeasuredBaselined(baseline, measured, exists = (f) => existsSync(resolve(repoRoot, f))) {
+  return Object.keys(baseline).filter((file) => exists(file) && !measured.has(file)).sort();
+}
+
+function unmeasuredBaselinedMessage(unmeasured) {
+  return (
+    `check-slot-lookup-ratchet: ${unmeasured.length} baselined file(s) are still on disk but the ` +
+    `rule did not run on them this time:\n${unmeasured.map((f) => `  ${f}`).join('\n')}\n` +
+    'Either ESLint did not lint them or their `ignores` entry was not lifted. Since the ratchet\n' +
+    'went one-sided (#26444) a file that drops out of the measurement would otherwise pass as a\n' +
+    'decrease — refusing rather than reporting a sweep that never happened.'
+  );
 }
 
 const sortKeys = (counts) =>
@@ -295,21 +334,6 @@ function diffRatchet({ baseline, current, addedBaselineKeys }) {
     }
   }
 
-  for (const [file, allowed] of Object.entries(baseline)) {
-    const now = current[file];
-    if (now === undefined) {
-      errors.push(
-        `${file}: baselined file is clean/gone (was ${allowed}) — ratchet DOWN: run ` +
-        `\`pnpm check:slot-lookup --update\` and commit the baseline.`,
-      );
-    } else if (now < allowed) {
-      errors.push(
-        `${file}: erasure count fell ${allowed} → ${now} — ratchet DOWN: run ` +
-        `\`pnpm check:slot-lookup --update\` and commit the baseline.`,
-      );
-    }
-  }
-
   // The key set must only ever SHRINK. Counts alone cannot see the last move:
   // a genuinely-erasing NEW file added to the baseline matches its own count and
   // sails through, which would turn the grandfather list into a general-purpose
@@ -322,6 +346,32 @@ function diffRatchet({ baseline, current, addedBaselineKeys }) {
   }
 
   return errors;
+}
+
+/**
+ * The decrease direction, as a REPORT rather than an error (#26444). A file whose
+ * count fell, or that is clean/gone, passes: deleting or sweeping a file is
+ * progress, and a PR that only did that must not red here. Each line names the
+ * headroom the stale entry leaves — the old count stays the ceiling until
+ * `--update` writes the lower one down — which is the report `--update` exists for.
+ */
+function ratchetDownReport({ baseline, current }) {
+  const lines = [];
+  for (const [file, allowed] of Object.entries(baseline)) {
+    const now = current[file];
+    if (now === undefined) {
+      lines.push(
+        `${file}: baselined file is clean/gone (was ${allowed}). Passing; ` +
+        `\`pnpm check:slot-lookup --update\` drops the entry.`,
+      );
+    } else if (now < allowed) {
+      lines.push(
+        `${file}: erasure count fell ${allowed} → ${now}. Passing; until ` +
+        `\`pnpm check:slot-lookup --update\` records it, ${allowed} stays this file's ceiling.`,
+      );
+    }
+  }
+  return lines;
 }
 
 /**
@@ -418,9 +468,22 @@ const DIFF_CASES = (() => {
     ['identical is clean', { baseline, current: { ...baseline }, addedBaselineKeys: [] }, 0],
     ['a new file fails', { baseline, current: { ...baseline, 'c.ts': 1 }, addedBaselineKeys: [] }, 1],
     ['growth in a baselined file fails', { baseline, current: { 'a.ts': 3, 'b.ts': 1 }, addedBaselineKeys: [] }, 1],
-    ['a fall must be ratcheted down', { baseline, current: { 'a.ts': 1, 'b.ts': 1 }, addedBaselineKeys: [] }, 1],
-    ['a cleaned file must be dropped', { baseline, current: { 'a.ts': 2 }, addedBaselineKeys: [] }, 1],
+    ['a fall passes (one-sided)', { baseline, current: { 'a.ts': 1, 'b.ts': 1 }, addedBaselineKeys: [] }, 0],
+    ['a cleaned/gone file passes (one-sided)', { baseline, current: { 'a.ts': 2 }, addedBaselineKeys: [] }, 0],
+    ['growth still fails beside a fall elsewhere', { baseline, current: { 'a.ts': 1, 'b.ts': 2 }, addedBaselineKeys: [] }, 1],
     ['a key added to the baseline fails', { baseline, current: { ...baseline }, addedBaselineKeys: ['b.ts'] }, 1],
+  ];
+})();
+
+// The decrease direction's REPORT, driven over the same fixtures: a fall and a
+// clean/gone file each print one line; an unchanged or grown file prints none.
+const DOWN_REPORT_CASES = (() => {
+  const baseline = { 'a.ts': 2, 'b.ts': 1 };
+  return [
+    ['identical reports nothing', { baseline, current: { ...baseline } }, 0],
+    ['a fall is reported', { baseline, current: { 'a.ts': 1, 'b.ts': 1 } }, 1],
+    ['a cleaned/gone file is reported', { baseline, current: { 'a.ts': 2 } }, 1],
+    ['growth is not a decrease', { baseline, current: { 'a.ts': 3, 'b.ts': 1 } }, 0],
   ];
 })();
 
@@ -449,14 +512,15 @@ const SELF_TEST_VERDICT = 'check-slot-lookup-ratchet self-test reached its verdi
 const SELF_TEST_BATTERIES = Object.freeze({
   '1. The rule, in both directions, over synthetic sources.': 26,
   '2. The grandfathering channel, as a synthetic witness pair.': 10,
-  '3. The ratchet comparison, in both directions.': 6,
+  '3. The ratchet comparison, in both directions.': 11,
   '4. Both refusals, in both directions.': 5,
   '5. The counter and the rule cannot disagree.': 2,
+  '6. A baselined file the run did not MEASURE is refused (#26444).': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -571,6 +635,15 @@ async function selfTest() {
     const got = diffRatchet(input).length;
     assert(got === expected, `diffRatchet: ${name} — expected ${expected} error(s), got ${got}`);
   }
+  for (const [name, input, expected] of DOWN_REPORT_CASES) {
+    const got = ratchetDownReport(input).length;
+    assert(got === expected, `ratchetDownReport: ${name} — expected ${expected} line(s), got ${got}`);
+  }
+  // The headroom is NAMED: the report states the ceiling a stale count leaves.
+  assert(
+    ratchetDownReport({ baseline: { 'a.ts': 3 }, current: { 'a.ts': 1 } })[0]?.includes('3 stays'),
+    'ratchetDownReport: a fall must name the old count as the ceiling it leaves until --update',
+  );
 
   // ── 4. Both refusals, in both directions. ─────────────────────────────────
   //
@@ -624,6 +697,42 @@ async function selfTest() {
     'channel — this repo lints with --no-inline-config, so an author who reads only the ' +
     'message must still be told where a legitimate `any` is declared',
   );
+
+  // ── 6. A baselined file the run did not MEASURE is refused (#26444). ──────
+  //
+  // The pure legs prove the predicate tells a lost file from a deleted or swept
+  // one. The live legs prove the measurement can SEE a lift that did not take:
+  // with the file's ignore left in place the resolved config carries no rule
+  // for it, and with the ignore dropped it does.
+  battery('6. A baselined file the run did not MEASURE is refused (#26444).');
+  {
+    const ledger = { 'a.ts': 2, 'b.ts': 1 };
+    const onDisk = () => true;
+    assert(unmeasuredBaselined(ledger, new Set(), onDisk).length === 2,
+      'an EMPTY measurement with every baselined file still on disk must refuse every one');
+    assert(unmeasuredBaselined(ledger, new Set(['a.ts']), onDisk).join(',') === 'b.ts',
+      'a partial measurement must refuse only the file it lost');
+    assert(unmeasuredBaselined(ledger, new Set(['a.ts']), (f) => f !== 'b.ts').length === 0,
+      'a DELETED baselined file must not be refused — it is a decrease, and decreases pass');
+    assert(unmeasuredBaselined(ledger, new Set(['a.ts', 'b.ts']), onDisk).length === 0,
+      'a measured file must not be refused, whatever its count now');
+    assert(unmeasuredBaselinedMessage(['b.ts']).includes('b.ts'),
+      'the refusal must name the file it lost');
+
+    const liveBaseline = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
+    const probe = Object.keys(liveBaseline).find((f) => existsSync(resolve(repoRoot, f)));
+    if (probe === undefined) {
+      assert(false, 'the live-lift legs need one baselined file on disk; re-express them before the ledger empties');
+    } else {
+      const resolvedFor = async (drop) => new ESLint({
+        cwd: repoRoot, overrideConfigFile: true, baseConfig: measuringConfig(drop),
+      }).calculateConfigForFile(resolve(repoRoot, probe));
+      assert(!carriesRule(await resolvedFor(new Set())),
+        `with its ignore NOT lifted, ${probe} must resolve without the rule (the blind lift this refusal sees)`);
+      assert(carriesRule(await resolvedFor(new Set([probe]))),
+        `with its ignore lifted, ${probe} must resolve WITH the rule`);
+    }
+  }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -682,7 +791,9 @@ async function selfTest() {
     `(including the narrow per-consumer interface #11681 closed not_planned — this gate ` +
     `checks TYPED, never COMPLETE); the grandfathering channel proved both ways on a ` +
     `synthetic witness pair that survives baseline zero; ${DIFF_CASES.length} ratchet ` +
-    `comparison case(s); and both refusals proved in both directions.`,
+    `comparison case(s) (one-sided: a decrease passes) and ${DOWN_REPORT_CASES.length} ` +
+    `decrease-report case(s); both refusals proved in both directions; and a baselined file ` +
+    `the run did not measure is refused, with a lift that did not take visible to it (#26444).`,
   );
 
   return SELF_TEST_VERDICT;
@@ -700,7 +811,8 @@ async function main() {
 
   const update = process.argv.includes('--update');
   const baseline = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
-  const sorted = sortKeys(await measure(new Set(Object.keys(baseline))));
+  const { counts, measured } = await measure(new Set(Object.keys(baseline)));
+  const sorted = sortKeys(counts);
 
   if (update) {
     writeFileSync(resolve(repoRoot, BASELINE_PATH), JSON.stringify(sorted, null, 2) + '\n');
@@ -708,6 +820,12 @@ async function main() {
     const sites = Object.values(sorted).reduce((a, b) => a + b, 0);
     console.log(`slot-lookup baseline updated: ${sites} site(s) in ${files} file(s).`);
     process.exit(0);
+  }
+
+  const unmeasured = unmeasuredBaselined(baseline, measured);
+  if (unmeasured.length > 0) {
+    console.error(unmeasuredBaselinedMessage(unmeasured));
+    process.exit(2);
   }
 
   const monotonicity = baselineKeysAddedSinceMergeBase(Object.keys(baseline));
@@ -719,6 +837,11 @@ async function main() {
 
   const totalSites = Object.values(sorted).reduce((a, b) => a + b, 0);
   const totalFiles = Object.keys(sorted).length;
+  const down = ratchetDownReport({ baseline, current: sorted });
+  if (down.length > 0) {
+    console.log(`↓ slot-lookup ratchet: ${down.length} baselined file(s) improved (passing, reported):`);
+    for (const line of down) console.log(`  • ${line}`);
+  }
 
   if (errors.length > 0) {
     console.error(`✗ slot-lookup ratchet (${errors.length} problem(s)):\n`);

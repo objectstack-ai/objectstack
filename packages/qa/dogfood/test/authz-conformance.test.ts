@@ -1626,8 +1626,7 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     expect(hits(MECHANICS.re, src)).toEqual([]);
     expect(hits(ROUTES.re, src)).toEqual([]);
     // [#23050 slice 3] …and on every file `RestServer`'s registrars live in:
-    // 0 over the list, whose length is pinned so a module added to it makes this
-    // re-read. The control is that both probes really READ the list — their
+    // 0 over the list. The control is that both probes really READ the list — their
     // text is every file on it, in order — so the zero is not a list ignored.
     // [#23050 slice 4] Length 4 → 5 (`sharing-routes.ts`), still 0 over it.
     // [#23050 slice 5] Length 5 → 6 (`analytics-routes.ts`), still 0 over it.
@@ -1643,7 +1642,8 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     // [#23050 slice 13c] Length 15 → 16 (`meta-item-write-routes.ts`), still 0 over it.
     // [#23050 slice 13d] Length 16 → 17 (`meta-item-history-routes.ts`), still 0 over it.
     // [#23050 slice 13e] Length 17 → 18 (`meta-object-state-routes.ts`), still 0 over it.
-    expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+    // [#26524] The length pin is gone: the list is the authority, and a module
+    // added to it is read by both probes with no edit here.
     expect(REST_SERVER_REGISTRAR_PATHS[0]).toBe(REST_SERVER);
     const listed = REST_SERVER_REGISTRAR_PATHS.map((file) => readFileSync(join(REPO_ROOT, file), 'utf8'));
     for (const probe of [MECHANICS, ROUTES]) {

@@ -84,8 +84,8 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // `registerBatchEndpoints`' body moved to. [#23050 slice 3] …and every module
 // on THE list of the files RestServer's registrars live in, read off that list
 // (`rest-server-registrar-files.ts`) rather than named here, so the slice that
-// moves the next body widens these checks by adding its module there. The
-// reverse checks pin the list's length.
+// moves the next body widens these checks by adding its module there.
+// [#26433] The list's length is not pinned: the list is the authority.
 const REGISTRAR_SOURCES = REST_SERVER_REGISTRAR_FILES
     .map((file) => (file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'))).join('\n');
 // [#23050 slice 10] `registerUiEndpoints`' BODY moved to `ui-routes.ts`; the
@@ -400,7 +400,7 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // (which joined `meta-item-history-routes.ts`) calls `resolveExecCtx` or
         // `enforceAuth`, so neither host literal the inner method builds for them
         // forwards either, and no call site moved.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        // [#26433] The list's length is no longer pinned: the list is the authority.
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });
