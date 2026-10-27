@@ -18210,8 +18210,9 @@ export class ObjectQL implements IObjectQLEngine {
    * required lookup that escalation is decided per ROW after the dependents
    * probe (#9688): a row that keeps another member takes the member removal,
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
-   * only those rows. Only runs for single-id deletes — multi/predicate
-   * deletes skip cascade (logged).
+   * only those rows. A by-id delete runs it for its one record; a predicate
+   * delete (`multi: true`) runs it for every row it matched ([#26871], see
+   * `delete()`'s predicate arm).
    *
    * [#22305] Two phases, so the walk knows its own set before it judges
    * anything:
@@ -19683,7 +19684,64 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
                // `deleteMany` presence is part of the ladder verdict resolved above.
-               result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               //
+               // [#26871] A predicate delete honours `deleteBehavior` as the
+               // by-id branch does: a `restrict` refuses, a `cascade` (a
+               // `master_detail` by default) deletes the dependents, a
+               // `set_null` clears them. This arm used to go straight to
+               // `deleteMany`, so a flow's `delete_record` with `multi: true`
+               // skipped every declared rule the same delete done record by
+               // record honours.
+               //
+               // `planCascadeAtomicity` is the by-id branch's own question:
+               // `'none'` means no relation of the delete family points at
+               // this object, so the walk could write nothing and the arm keeps
+               // its single `deleteMany`, no rows read and no transaction.
+               const plan = this.planCascadeAtomicity(object);
+               if (plan === 'none') {
+                 result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               } else {
+                 // Otherwise: resolve the matched rows through the composed,
+                 // row-scoped AST, run `cascadeDeleteRelations` for each, then
+                 // delete exactly those rows by id. By id, not by re-running the
+                 // predicate: the walk's own writes (a `set_null` on a
+                 // self-reference) can move a row into or out of the predicate,
+                 // and the rows deleted must be the rows walked. The ids were
+                 // read under this caller's scope inside the same unit of work,
+                 // as the by-id branch deletes its id after reading its
+                 // pre-image under that scope. The unit of work is the by-id
+                 // branch's, for the same reasons (#7413).
+                 const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
+                   const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id'] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   for (const matchedId of matchedIds) {
+                     await this.cascadeDeleteRelations(object, matchedId, writeContext);
+                   }
+                   // The id set rides an `$in`; batched so one statement never
+                   // outgrows a driver's bind-parameter limit.
+                   const batchSize = 500;
+                   let removed = 0;
+                   for (let i = 0; i < matchedIds.length; i += batchSize) {
+                     const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };
+                     const count = await driver.deleteMany!(object, batchAst, writeOptions);
+                     // A non-count answer goes back as the driver gave it, so
+                     // the `isDeleteResultShape` check below refuses it.
+                     if (typeof count !== 'number') return count;
+                     removed += count;
+                   }
+                   return removed;
+                 };
+                 if (plan === 'atomic') {
+                   result = await this.transaction(
+                     async (trxCtx: any) => await runPredicateDelete(trxCtx as ExecutionContext),
+                     opCtx.context,
+                   );
+                 } else {
+                   this.warnCascadeNotAtomic(object);
+                   result = await runPredicateDelete(opCtx.context);
+                 }
+               }
                isPredicateWrite = true;
           }
 

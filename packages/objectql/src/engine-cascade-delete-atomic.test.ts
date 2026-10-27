@@ -68,6 +68,11 @@ function makeDriver(opts: { transactional?: boolean } = {}) {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
       if (k.startsWith('$')) continue;
+      // [#26871] The predicate delete removes the rows it walked by id set.
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+        if (!(v as any).$in.some((x: unknown) => String(x) === String(row[k]))) return false;
+        continue;
+      }
       const exp = v && typeof v === 'object' && '$eq' in (v as any) ? (v as any).$eq : v;
       if ((row[k] ?? null) !== (exp ?? null)) return false;
     }
