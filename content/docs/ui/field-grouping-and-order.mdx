@@ -52,6 +52,8 @@ export const Contact = ObjectSchema.create({
 });
 ```
 
+A group can also hide itself: `visibleWhen` on a `fieldGroups` entry is a CEL predicate over `record`, and it gates the **whole** section, header included. The gate is **fail-closed**: when the predicate is false, or cannot evaluate at all, the section disappears. `os validate`, `os build` and the metadata save door check it with the same rules as a field's own `visibleWhen`, so a predicate that names a field the object does not have (`record.stauts == 'won'`) is refused as **`expression-invalid`** at the group's key instead of silently hiding the section on every form.
+
 **2. Layout grouping — form `sections` (on a view).** A specific form's explicit arrangement: which fields, which section, how many columns, collapsible. It can **inherit** the object's declared groups as its default or **override** them per form.
 
 ```ts
