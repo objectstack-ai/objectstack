@@ -34,7 +34,7 @@
     {
       "id": 4,
       "prompt": "Demo opportunities should close 45 days after the package is installed, and a formula should show how many days remain until close.",
-      "expected_output": "Seed value as a CEL envelope, `close_date: cel`daysFromNow(45)``, never `new Date()` / `Date.now()` (the determinism gate: two `os build` runs must be byte-identical). Days remaining is `daysBetween(today(), record.close_date)` — never `record.close_date - today()` (a duration stored as `{}`) and never `today() + 45` (date arithmetic faults).",
+      "expected_output": "Seed value as a CEL envelope, `close_date: cel`daysFromNow(45)``, never a JS `Date` / `Date.now()` (the determinism gate: two `os build` runs must be byte-identical). Days remaining is `daysBetween(today(), record.close_date)` — never `record.close_date - today()` (a duration stored as `{}`) and never date arithmetic on `today()` (it faults).",
       "files": [],
       "assertions": {
         "must_contain": ["cel`", "daysFromNow(", "daysBetween("],
