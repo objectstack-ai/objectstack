@@ -62,6 +62,14 @@ const SUITE_BUDGET_MS = 20 * 60_000;
  */
 const smokePort = (): number => 41_000 + Math.floor(Math.random() * 4_000);
 
+/**
+ * What a vitest worker adds to `process.env` beyond the `VITEST*` names, read
+ * off a worker of this package's own config under an empty `env -i` shell:
+ * vite's `import.meta.env` mirror (`BASE_URL`, `MODE`, `DEV`, `PROD`, `SSR`),
+ * `NODE_ENV=test`, `TEST`, `FORCE_TTY`, and this config's own `test.env`.
+ */
+const VITEST_WORKER_ENV = ['NODE_ENV', 'TEST', 'BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR', 'FORCE_TTY', 'OS_REGISTRY_LOG'];
+
 interface ReportTest {
   readonly status?: string;
 }
@@ -100,12 +108,17 @@ describe('showcase browser smoke (live tier)', () => {
 
       const scratch = mkdtempSync(`${tmpdir()}/showcase-smoke-`);
       const reportFile = `${scratch}/report.json`;
-      // The child is not a vitest worker: drop vitest's own variables, as the
-      // teardown-race pin does for its nested run.
+      // The child is not a vitest worker: drop what vitest put into this
+      // worker's environment, so the backend boots as it does from a shell.
+      // `NODE_ENV` is the one that bites: vitest sets it to `test`, `serve
+      // --dev` then keeps it, and the dev-admin seed is armed only under
+      // `development` — so `e2e/global-setup.ts` meets an empty user table and
+      // its sign-in answers 401 (measured: that is this file's first red).
       const env: Record<string, string | undefined> = { ...process.env };
       for (const key of Object.keys(env)) {
         if (key.startsWith('VITEST')) delete env[key];
       }
+      for (const key of VITEST_WORKER_ENV) delete env[key];
       delete env.FORCE_COLOR;
       env.NO_COLOR = '1';
       // `CI` selects the config's CI posture: one retry (a flaky-green is
@@ -137,15 +150,18 @@ describe('showcase browser smoke (live tier)', () => {
         const ran = (stats.expected ?? 0) + (stats.unexpected ?? 0) + (stats.flaky ?? 0);
         const errors = (report.errors ?? []).map((e) => (e.message ?? '').split('\n')[0]);
 
-        expect(ran, 'playwright reported no test that ran — a smoke that ran nothing is not a green smoke').toBeGreaterThan(0);
+        // Run-level errors first: a global setup that could not sign in, or a
+        // backend that never served, fails before any test and leaves `ran` at
+        // 0 — the error names the cause, the count would not.
         expect(
           { failing, errors },
-          `${failing.length} of ${ran} showcase smoke test(s) failed` +
-            (failing.length > 0 && failing.length === ran
-              ? ' — ALL of them: read it as an environment failure first (Console SPA not built, browser not launchable, ' +
-                'backend not serving) before filing a product defect'
+          `${failing.length} of ${ran} showcase smoke test(s) failed, ${errors.length} run-level error(s)` +
+            (errors.length > 0 || (failing.length > 0 && failing.length === ran)
+              ? ' — the whole run: read it as an environment failure first (Console SPA not built, browser not ' +
+                'launchable, backend not serving, no seeded admin) before filing a product defect'
               : ''),
         ).toEqual({ failing: [], errors: [] });
+        expect(ran, 'playwright reported no test that ran — a smoke that ran nothing is not a green smoke').toBeGreaterThan(0);
         expect(run.status, `playwright exited ${run.status} with every test passing — read its output above`).toBe(0);
       } finally {
         rmSync(scratch, { recursive: true, force: true });
