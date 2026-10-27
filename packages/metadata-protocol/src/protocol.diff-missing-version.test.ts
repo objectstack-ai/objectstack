@@ -51,8 +51,9 @@ function makeStubEngine() {
         sys_metadata_history: [],
     };
     const engine: any = {
-        async find(table: string, o: { where: Record<string, unknown> }) {
-            return (tables[table] ?? []).filter((r) => matches(r, o.where));
+        async find(table: string, o: { where: Record<string, unknown>; limit?: number }) {
+            const rows = (tables[table] ?? []).filter((r) => matches(r, o.where));
+            return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, o);
