@@ -647,6 +647,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.appNav.docHint': 'Choose a doc page, a book, or both.',
   'engine.inspector.appNav.groupHint': 'A group is a titled section of the menu. Items are not nested under it from this editor.',
   'engine.inspector.appNav.separatorHint': 'A separator is a divider: it has no label and opens nothing.',
+  // objectstack#26740 — the Studio nav inspector's fields for the keys the
+  // spec's shared base declares and the rows above did not carry: the badge
+  // and its variant, the order, and the `visible` condition's hints.
+  'engine.inspector.appNav.badge': 'Badge',
+  'engine.inspector.appNav.badgeHint': 'Text or a count shown beside the entry in the menu. Leave it empty for none.',
+  'engine.inspector.appNav.badgeVariant': 'Badge style',
+  'engine.inspector.appNav.badgeVariant.default': 'Default',
+  'engine.inspector.appNav.badgeVariant.secondary': 'Subtle',
+  'engine.inspector.appNav.badgeVariant.destructive': 'Alert',
+  'engine.inspector.appNav.badgeVariant.outline': 'Outline',
+  'engine.inspector.appNav.order': 'Order',
+  'engine.inspector.appNav.orderHint': 'Entries with a lower number come first in the menu; an entry without one counts as 0.',
+  'engine.inspector.appNav.visibleHint': 'Shows this entry only to people for whom the condition is true. Leave it empty to show it to everyone.',
+  'engine.inspector.appNav.visibleNotSaved': 'Not saved yet: the entry keeps its previous condition until this one has no errors.',
   // Page block inspector
   'engine.inspector.pageBlock.kind': 'Block',
   'engine.inspector.pageBlock.close': 'Close block',
