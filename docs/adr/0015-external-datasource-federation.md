@@ -4,6 +4,15 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below.
+
+> **Amendment note (2026-10-27, ADR-0143) — attribution only, no decision changes.** ADR-0018,
+> ADR-0022, ADR-0023, ADR-0024 and ADR-0097 put OAuth2 refresh and per-tenant connection lifecycle
+> in the enterprise tier "per ADR-0015", and the code repeats it (`connector-auth.zod.ts`,
+> `credential-resolver.ts`). This record draws no such line. It names neither OAuth nor an
+> enterprise tier; its §10 says only that credentials are a `credentialsRef` into a secrets service.
+> ADR-0143 moves outbound connector auth into the open tier. Nothing here changes; cite ADR-0143,
+> not this record, for where connector auth sits.
 
 > **Path note (2026-09), paths only — no decision changes.** Five paths this record cites are
 > historical and deliberately unlinked: `packages/spec/src/data/external-lookup.zod.ts` (retired
