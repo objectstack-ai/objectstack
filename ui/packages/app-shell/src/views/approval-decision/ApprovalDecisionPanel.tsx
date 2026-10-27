@@ -11,7 +11,7 @@
  * of objectui#2763; ruling 6079807016, letter 乙), the page component type
  * `record:approval_decision`.
  *
- * One node, six parts, each drawn by a piece already shipped:
+ * One node, six parts, five of them drawn, each by a piece already shipped:
  *
  *  0. **Where the request came from** (objectui#12491) — a request no person
  *     submitted (opened by a flow run with no user context, such as a
@@ -24,11 +24,13 @@
  *     object's `hidden: true` fields and the reader's unreadable fields left
  *     out. `RecordSnapshotSummary` draws it from the bound row's `payload`
  *     and `payload_display`; see its header for what it reads.
- *  2. **Where the flow stands** (objectui#12491) — the vertical step line of
- *     the owning flow, from the bound row's `flow_steps`, when the flow has
- *     more than one approval step, at ANY status: a decided request and a
- *     `first_response` node draw it too, as the sheet draws it. The markup is
- *     `ApprovalStepLine`, the one the business record's approvals panel draws.
+ *  2. **Where the flow stands** — NOT drawn (objectstack#26563). The bound
+ *     row's `flow_steps` is the flow graph's trunk, not the route this request
+ *     takes, so a request a decision sent down another branch was shown on
+ *     rungs it never visits. The row proves only its own step, which the
+ *     page's header already names, and one step is no line; the step line
+ *     (`ApprovalStepLine`) returns here once the approvals read serves the
+ *     route the run takes.
  *  3. **Progress** — `DecisionProgressIndicator` (A3), drawn from the request's
  *     server-computed `decision_progress` tally. It is present only on a
  *     pending node that aggregates more than one decision, and the panel draws
@@ -84,9 +86,9 @@
  * (AGENTS.md #0.1). The flow's display name is the served page's highlights
  * strip's to show, not this panel's.
  *
- * Why not inside `DecisionProgressIndicator` either: the step line and the
- * origin, like the names, are drawn where no tally exists, so each is its own
- * part under its own gate.
+ * Why not inside `DecisionProgressIndicator` either: the origin, like the
+ * names, is drawn where no tally exists, so each is its own part under its own
+ * gate.
  *
  * ## No authorable props
  *
@@ -133,7 +135,6 @@ import * as React from 'react';
 import { notifyDataChanged, useObjectTranslation, useRecordContext } from '@object-ui/react';
 import { cn, Badge } from '@object-ui/components';
 import { Workflow } from 'lucide-react';
-import { ApprovalStepLine } from '../approval-progress/ApprovalStepLine.js';
 import { DecisionProgressIndicator } from '../approval-progress/DecisionProgressIndicator.js';
 import { eligibleApproverCount } from '../approval-progress/eligibleApprovers.js';
 import { DeclaredActionsBar } from '../DeclaredActionsBar.js';
@@ -252,7 +253,6 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
         snapshot={request.payload}
         display={request.payload_display}
       />
-      <ApprovalStepLine steps={request.flow_steps} />
       {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
       <PendingApprovers request={request} />
       <DeclaredActionsBar
