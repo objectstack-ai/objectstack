@@ -900,9 +900,45 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     already has. ⛔ Nor does either gate happening to go quiet: three of the
  *     five measured instances involved a green that proved nothing, because a
  *     sweep that cannot see your file is not evidence about your file.
+ *   - ui-scripts-suite entry: when a workflow runs the `ui/scripts/__tests__`
+ *     suite as a step of its own, under an invocation the discovery reads, the
+ *     row can name that family instead of standing in for a CI job — and when
+ *     the `Test UI` job stops running the suite at all, the binding goes STALE
+ *     by itself. ⛔ A path predicate that narrows the four roots to the files
+ *     each test "really" reads does NOT qualify: that map is a second thing
+ *     that goes stale, and the run is cheap enough not to need one (measured
+ *     below).
  *
  *
  *   Delete an entry the day its criterion is met, not before.
+ *
+ * ## Why the ui-scripts-suite entry stands in for a CI JOB (#26318)
+ *
+ * The 178 test files under `ui/scripts/__tests__/` belong to no package and run
+ * only inside the 16 `Test UI` shards, as the "always-on" files the affected-test
+ * selector adds to every run because no package owns them. They pin facts a
+ * change under ui package source, the Console app, the objectui skill bundle or
+ * `ui/scripts` itself moves — turbo build inputs, the skill-examples floor, the
+ * SchemaRenderer channel keys — and no derived family named them: measured on
+ * PR #26274's head 1ef5c482, three reds there were that PR's own and had passed
+ * every derived local gate.
+ *
+ * Every other gate in this table is a family the workflows run, resolved by
+ * name. This one cannot be: the only step that runs the suite is the `Test UI`
+ * job's vitest line, which carries a shard and the selector's filter list, and
+ * no workflow spells a narrower invocation. So its gate declares the job and the
+ * runner prefix it narrows (`ciJob`, `ciRunner`), and the engine's
+ * `ciJobRunsRunner` resolves it against the live workflows the same way a family
+ * is resolved: a job renamed or a runner respelled renders it STALE, and the
+ * census guard in the self-test reds on the PR that does it.
+ *
+ * It names the WHOLE suite, never an affected subset: a subset map is a second
+ * list that rots, and the whole run is about a minute. What it does not see is
+ * stated rather than hidden: a ui path outside the four roots (a ui package's
+ * tests outside `src`, its `package.json`, a root config) is not named here,
+ * though CI's `Test UI` job still schedules the suite for it — the full battery
+ * on `main` remains the backstop for that, as it is for the selector's own
+ * misses.
  */
 export const CHANGE_KIND_ROWS = [
   {
@@ -1013,7 +1049,36 @@ export const CHANGE_KIND_ROWS = [
       },
     ],
   },
+  {
+    kind: 'edits a file the ui/scripts/__tests__ suite reads (ui package source, the ui apps, the objectui skill bundle, or ui/scripts itself)',
+    matches: 'ui-scripts-suite-input',
+    gates: [
+      {
+        name: 'pnpm --dir ui exec vitest run scripts/',
+        ciJob: 'Test UI',
+        ciRunner: 'pnpm --dir ui exec vitest run',
+        why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change under ui package source, the ui apps, skills/objectui or ui/scripts moves. The whole suite, never a subset: about a minute locally. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
+      },
+    ],
+  },
 ];
+
+/**
+ * The roots whose change the `ui/scripts/__tests__` suite can see (#26318), in CI's own `paths:` language
+ * — the engine matches them with `triggerListCovers`, the reader of every workflow trigger. They are the
+ * card's four, as written there: ui package SOURCE (any depth below `ui/packages`, so a nested package
+ * counts), the ui apps, the objectui skill bundle the suite reads through `ui/scripts/skill-bundle-root.mjs`,
+ * and the suite's own tree. The bare `src` directory form is listed beside its subtree because a dispatch
+ * surface is often given as that directory, and the trigger language reads a directory only through a
+ * pattern's literal prefix.
+ */
+export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
+  'ui/packages/**/src',
+  'ui/packages/**/src/**',
+  'ui/apps/**',
+  'skills/objectui/**',
+  'ui/scripts/**',
+]);
 
 /**
  * The globs that MANDATE a model tier for any card whose file surface touches
