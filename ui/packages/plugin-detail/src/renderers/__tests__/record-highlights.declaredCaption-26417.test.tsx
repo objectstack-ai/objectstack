@@ -157,8 +157,11 @@ describe('a highlight chip with no bundle entry is captioned by its declared lab
   });
 
   it('the strip and the details body name the same field the same way', async () => {
-    mountStrip(['owner', 'customer']);
-    const stripCaptions = [captionOf('陈静'), captionOf('周明轩')];
+    // `customer` and `stage`, not `owner`: with no name field declared, the body
+    // drops the first text field as the record's title (its own dedupe rule).
+    mountStrip(['customer', 'stage']);
+    const stripCaptions = [captionOf('周明轩'), captionOf('design-stage')];
+    expect(stripCaptions).toEqual(['关联客户', '阶段']);
     cleanup();
     render(
       withI18n(
@@ -170,14 +173,15 @@ describe('a highlight chip with no bundle entry is captioned by its declared lab
           objectSchema={objectSchema as never}
         >
           <div data-testid="body">
-            <RecordDetailsRenderer schema={{ sections: [{ label: 'Main', fields: ['owner', 'customer'] }] } as never} />
+            <RecordDetailsRenderer schema={{ sections: [{ label: 'Main', fields: ['customer', 'stage'] }] } as never} />
           </div>
         </RecordContextProvider>,
       ),
     );
     const body = within(screen.getByTestId('body'));
     // Live control: the body drew the record's values.
-    expect(await body.findByText('陈静')).toBeInTheDocument();
+    expect(await body.findByText('周明轩')).toBeInTheDocument();
+    expect(body.getByText('design-stage')).toBeInTheDocument();
     for (const caption of stripCaptions) expect(body.getByText(caption as string)).toBeInTheDocument();
   });
 });
