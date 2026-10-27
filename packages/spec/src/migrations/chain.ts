@@ -13,7 +13,6 @@
  */
 
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version.js';
-import { PROTOCOL_UPGRADE_GUIDE_URL } from '../shared/protocol-upgrade-guide.js';
 import { ALL_CONVERSIONS } from '../conversions/registry.js';
 import type { MetadataConversion } from '../conversions/types.js';
 import { MIGRATIONS_BY_MAJOR, MIGRATION_MAJORS, MIGRATION_SUPPORT_FLOOR } from './registry.js';
@@ -176,12 +175,7 @@ export class MigrationFloorError extends Error {
   ) {
     super(
       `Cannot migrate from protocol ${fromMajor}: the chain's support floor is ${floor} ` +
-        `(ADR-0087 D3). Upgrade to protocol ${floor} by another path first, then re-run. ` +
-        // A kit retired at or below the floor is gone with its step (one major
-        // past its retirement, ADR-0087 amendment #25767): the keys are refused
-        // as unknown keys and their prescriptions live only in the upgrade guide.
-        `Keys retired at or below protocol ${floor - 1} are refused as unknown keys and ` +
-        `prescribed in the protocol upgrade guide: ${PROTOCOL_UPGRADE_GUIDE_URL}`,
+        `(ADR-0087 D3). Upgrade to protocol ${floor} by another path first, then re-run.`,
     );
     this.name = 'MigrationFloorError';
   }

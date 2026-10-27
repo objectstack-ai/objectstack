@@ -122,14 +122,14 @@ describe('compareTo — every retired spelling is rejected WITH its upgrade', ()
     expect(period).not.toMatch(/#\d{3,5}\b/);
     expect(period).toContain("kind: ");
     expect(period).toContain('previousPeriod');
-    // The protocol-16.x step aged out on #25767 (support floor 17): the sentence
-    // says so instead of naming a `--from 16` run the tool refuses.
-    expect(period).toContain('support floor 17');
+    // The protocol-16.x conversion aged out with its kit on #25767: the sentence
+    // says so instead of naming a `--from 16` run that no longer lists the edit.
+    expect(period).toContain('protocol-16.x conversions');
     expect(period).not.toContain('--from 16');
 
     const year = reject('previousYear');
     expect(year).toContain('previousYear');
-    expect(year).toContain('support floor 17');
+    expect(year).toContain('protocol-16.x conversions');
   });
 
   /**

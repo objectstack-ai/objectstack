@@ -91,7 +91,7 @@ const AGG_RETIRED_TAIL =
   'There is no replacement in the query vocabulary: read the rows with an ordinary `fields` '
   + 'query and shape them in the caller, or model the roll-up as a stored field. It returns '
   + 'only WITH a portable lowering — ADR-0049\'s enforce leg, implementation first. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 const ARRAY_AGG_RETIRED =
   '`array_agg`' + AGG_RETIRED_MIDDLE

@@ -4035,9 +4035,9 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
     expect(message).toMatch(/a printable document \(an invoice, a delivery order, a letter\) is a page that declares\s+`print`/);
     expect(message).not.toMatch(/#\d{3,5}\b/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
-    // [#25767] The protocol-16.x step aged out (support floor 17): the sentence
-    // says so instead of naming a `--from 16` run the tool refuses.
-    expect(message).toMatch(/left `os migrate meta` with the protocol-16\.x step \(support floor 17\)/);
+    // [#25767] The protocol-16.x conversion aged out with its kit: the sentence
+    // says so instead of naming a `--from 16` run that no longer lists the edit.
+    expect(message).toMatch(/left `os migrate meta` with the protocol-16\.x conversions/);
     expect(message).not.toMatch(/--from 16/);
   });
 

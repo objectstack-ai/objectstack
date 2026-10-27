@@ -156,19 +156,20 @@ const CORPORA: Corpus[] = [
   },
 ];
 
-const MARKER = /(?:Run )?`os migrate meta --from \d+`|This edit left `os migrate meta` with the protocol-\d+\.x step/g;
+const MARKER = /(?:Run )?`os migrate meta --from \d+`|This edit left `os migrate meta` with the protocol-\d+\.x conversions/g;
 
 /**
- * [#25767] The POST-FLOOR house form. A 17.x retirement's prescription used to
- * name `os migrate meta --from 16`; the support floor is 17 since the 2026-10-26
- * ruling (ADR-0087 D2 = A), so that command refuses, and the sentence says what
- * is still true: the step exists on a release that carries it, the edit is
- * applied by hand otherwise, and the protocol upgrade guide is where the
- * prescription lives from here. Same anchoring as the `--from` house form: last
- * sentence of its literal, nothing after the closing period.
+ * [#25767] The AGED-OUT house form. A tombstone whose conversion aged out
+ * with its 16.x kit used to name `os migrate meta --from 16`; that command
+ * still replays the chain (the support floor stays 16, ruling 6434038284) but
+ * no longer carries this edit, so the sentence says what is still true: the
+ * edit is applied by hand, or by the tool on a release that still carries the
+ * conversion, and the protocol upgrade guide is where the prescription lives
+ * from here. Same anchoring as the `--from` house form: last sentence of its
+ * literal, nothing after the closing period.
  */
 const POST_FLOOR_AT_MARKER =
-  /^This edit left `os migrate meta` with the protocol-\d+\.x step \(support floor \d+\): apply it by hand, or run the tool on a release that still carries the step — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.['"]/;
+  /^This edit left `os migrate meta` with the protocol-\d+\.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.['"]/;
 
 /**
  * House form, anchored at the marker: the sentence must be the LAST sentence

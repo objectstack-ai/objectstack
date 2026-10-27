@@ -288,7 +288,7 @@ beforeAll(async () => {
   // engine instead of failing.
   unreachableDir = mkdtempSync(join(tmpdir(), 'os-24899-unreachable-'));
   writeArtifact(unreachableDir, [
-    { name: 'archive', driver: 'postgres', config: { host: '127.0.0.1', port: 1, database: 'archive', username: 'os24899' }, autoConnect: true },
+    { name: 'archive', driver: 'postgres', config: { host: '127.0.0.1', port: 1, database: 'archive', user: 'os24899' }, autoConnect: true },
   ]);
   unreachableRun = await runCommand(unreachableDir, join(unreachableDir, 'main.db'), ['--apply', '--yes', '--json']);
 }, HOOK_TIMEOUT_MS);

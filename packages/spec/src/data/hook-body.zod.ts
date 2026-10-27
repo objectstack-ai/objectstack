@@ -18,7 +18,7 @@ const CRYPTO_HASH_RETIRED =
   + 'in the host (a Connector recipe, or an engine-side hook) instead. If you need hashing in '
   + 'a body, reopen it through the capability admission process — implementation first, the '
   + 'declaration lands with the implementation. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Capability tokens a script body may request.

@@ -1547,14 +1547,14 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
       // The prescription: names the value, says it was removed, points at the
       // live alternatives (a served location, or the headless `locations: []`),
       // and closes with the house `os migrate meta` sentence (#6856 route D) —
-      // in its post-floor form since #25767: the protocol-17 step that carried
-      // the rewrite aged out, so the sentence says so and links the guide.
+      // in its aged-out form since #25767: the 16.x conversion that carried
+      // the rewrite aged out with its kit, so the sentence says so and links the guide.
       const prescribes = (fn: () => unknown) => {
         expect(fn).toThrow(/`global_nav` was removed from `ACTION_LOCATIONS`/s);
         expect(fn).toThrow(/ADR-0049 enforce-or-remove/s);
         expect(fn).not.toThrow(/#\d{3,5}\b/);
         expect(fn).toThrow(/locations: \[\]/s);
-        expect(fn).toThrow(/support floor 17/s);
+        expect(fn).toThrow(/protocol-16\.x conversions/s);
         expect(fn).not.toThrow(/os migrate meta --from 16/s);
       };
 

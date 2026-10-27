@@ -162,14 +162,14 @@ const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'AI/template-emitted alias the loader rewrote to `function` until this release. Use `function`. Rename the '
     + 'key; the value (the callable reference) is unchanged. If `function` is also present, the two name DIFFERENT '
     + 'callables — decide which one runs, put it on `function`, and delete `functionName`. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   input:
     'The `script` node config key `input` was removed in @objectstack/spec 18 (ADR-0087 D2) — the singular '
     + "spelling leaked in from `connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical "
     + 'surface (do not "fix" that one), and the loader rewrote it to `inputs` until this release. Use `inputs`. '
     + 'Rename the key; the value (the input map) is unchanged. If `inputs` is also present with DIFFERENT values, '
     + 'reconcile them onto `inputs`. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /** `subflow` prescriptions — one retired spelling, one wrong layer. */
@@ -180,7 +180,7 @@ const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'release. Use `flowName`. Rename the key; the value (the invoked flow\'s name) is unchanged. If `flowName` '
     + 'is also present, the two name DIFFERENT flows — decide which one this step invokes, put it on `flowName`, '
     + 'and delete `flow`. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   timeoutMs:
     "A subflow step's timeout is the engine's per-node guard, so it belongs on the NODE, not in its config: "
     + '`{ id, type: "subflow", timeoutMs: 30000, config: { … } }`. `FlowNodeSchema.timeoutMs` is the declared key.',

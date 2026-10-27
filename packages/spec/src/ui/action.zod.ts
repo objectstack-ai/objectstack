@@ -615,7 +615,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * only handler slot, so no consumer has a second slot to disagree about. An
  * authored `execute` is rejected with the rename prescription rather than
  * silently stripped; `os migrate meta --from 16` listed the edit until the
- * protocol-16.x step aged out with the support floor (#25767).
+ * protocol-16.x conversion aged out with its kit (#25767).
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -649,7 +649,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -1329,7 +1329,7 @@ const actionObject = () => strictObject({
           + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
           + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed. "
           + 'Expected an array of ActionParam, received an object. '
-          + 'The inline `element:button` case left `os migrate meta` with the protocol-16.x step (support floor 17): move it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade; a registered action keeps its object form until you move it by hand.'
+          + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),

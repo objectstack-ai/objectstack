@@ -190,7 +190,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     // only the edits it can prove — never the unqualified claim. Pinned here AND class-wide in
     // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
     expect(rest[0].message).toMatch(
-      /This edit left `os migrate meta` with the protocol-16\.x step \(support floor 17\): apply it by hand, or run the tool on a release that still carries the step — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.$/,
+      /This edit left `os migrate meta` with the protocol-16\.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.$/,
     );
     expect(rest[0].message).not.toMatch(/rewrite it automatically/);
     expect(rest[0].message).not.toMatch(/rewrite existing sources automatically/);

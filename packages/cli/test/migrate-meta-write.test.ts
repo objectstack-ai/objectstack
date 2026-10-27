@@ -130,7 +130,7 @@ async function runMeta(dir: string, flags: string[]): Promise<Run> {
   const error = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { err.push(a.join(' ')); });
   let exitCode: number | undefined;
   try {
-    await MigrateMeta.run([join(dir, 'objectstack.config.ts'), '--from', '17', ...flags], { root: CLI_ROOT });
+    await MigrateMeta.run([join(dir, 'objectstack.config.ts'), '--from', '16', ...flags], { root: CLI_ROOT });
   } catch (e: any) {
     if (typeof e?.oclif?.exit !== 'number') throw e;
     exitCode = e.oclif.exit;
@@ -168,7 +168,7 @@ beforeAll(() => {
   writeFileSync(join(root, 'node_modules', 'fake-kit', 'package.json'), JSON.stringify({ name: 'fake-kit', main: 'index.js' }));
   writeFileSync(
     join(root, 'node_modules', 'fake-kit', 'index.js'),
-    "exports.KitView = { object: 'rf_ticket', list: { type: 'grid', columns: ['title'], filterableFields: ['title'] } };\n",
+    "exports.KitView = { object: 'rf_ticket', list: { type: 'grid', columns: ['title'], striped: true } };\n",
   );
 });
 
@@ -192,6 +192,8 @@ import { allFlows } from './src/flows/index.js';
 export default defineStack({
   manifest: { id: 'com.example.write', name: 'Write fixture', version: '1.0.0', type: 'app' },
   objects: [TicketObject],
+  // The document store, spelled the old way.
+  datasources: [{ name: 'docs', label: 'Docs', driver: 'mongo', config: {} }],
   dashboards: Object.values(dashboards),
   views: Object.values(views),
   agents: [SupportAgent],
@@ -210,11 +212,6 @@ export const OpsDashboard = Dashboard.create({
   refreshInterval: 300, // seconds
 });
 `,
-  // [#25767] The three `compareTo` spellings below were the protocol-17 step's
-  // (`dashboard-widget-compareto-converged`), a ≤16.x kit the floor retired:
-  // `--write` leaves them as written now, and the schema still refuses them
-  // with the floor named — the control that an aged-out spelling is not
-  // silently rewritten by a step that no longer exists.
   'src/dashboards/kpi.dashboard.ts': `import { Dashboard } from '@objectstack/spec/ui';
 
 export const KpiDashboard = Dashboard.create({
@@ -236,8 +233,9 @@ export const TicketView = defineView({
   list: {
     type: 'grid',
     columns: ['title'],
-    // Filter-panel whitelist.
-    filterableFields: ['title'],
+    // Zebra rows.
+    striped: true,
+    bordered: false, // no borders
   },
 });
 `,
@@ -248,10 +246,9 @@ export const SupportAgent = defineAgent({
   label: 'Support',
   role: 'Support assistant',
   instructions: 'Help customers.',
-  lifecycle: {
-    id: 'support',
-    initial: 'open',
-    states: { open: {} },
+  knowledge: {
+    sources: ['faq'],
+    indexes: ['docs'],
   },
 });
 `,
@@ -265,6 +262,7 @@ export const EscalateFlow = defineFlow({
   name: 'escalate',
   label: 'Escalate',
   type: 'autolaunched',
+  active: false,
   nodes: [
     { id: 'start', type: 'start', label: 'Start' },
     { id: 'done', type: 'end', label: 'Done' },
@@ -278,7 +276,7 @@ export const TicketObject = ObjectSchema.create({
   name: 'wr_ticket',
   label: 'Ticket',
   fields: { title: { type: 'text', label: 'Title' } },
-  externalSharingModel: 'private',
+  tenancy: { enabled: true, organizationField: 'organization_id' },
 });
 `,
 };
@@ -288,22 +286,42 @@ function expectedAfterWrite(): Record<string, string> {
   const p = PROJECT;
   return {
     ...p,
+    'objectstack.config.ts': edit(p['objectstack.config.ts']!, "driver: 'mongo'", "driver: 'mongodb'"),
     'src/dashboards/ops.dashboard.ts': edit(p['src/dashboards/ops.dashboard.ts']!, 'refreshInterval: 300,', 'refreshIntervalSeconds: 300,'),
-    'src/views/ticket.view.ts': edit(p['src/views/ticket.view.ts']!, "    filterableFields: ['title'],\n", ''),
-    'src/agents/support.agent.ts': edit(
-      p['src/agents/support.agent.ts']!,
-      "  lifecycle: {\n    id: 'support',\n    initial: 'open',\n    states: { open: {} },\n  },\n",
+    'src/dashboards/kpi.dashboard.ts': edit(
+      edit(p['src/dashboards/kpi.dashboard.ts']!, "compareTo: 'previousPeriod'", "compareTo: { kind: 'previousPeriod' }"),
+      "compareTo: { offset: '1y' }",
+      "compareTo: { kind: 'previousYear' }",
+    ),
+    'src/views/ticket.view.ts': edit(
+      edit(p['src/views/ticket.view.ts']!, '    striped: true,\n', ''),
+      '    bordered: false, // no borders\n',
       '',
     ),
-    'src/objects/ticket.object.ts': edit(p['src/objects/ticket.object.ts']!, "  externalSharingModel: 'private',\n", ''),
+    'src/agents/support.agent.ts': edit(
+      p['src/agents/support.agent.ts']!,
+      "  knowledge: {\n    sources: ['faq'],\n    indexes: ['docs'],\n  },\n",
+      '',
+    ),
+    'src/flows/escalate.flow.ts': edit(p['src/flows/escalate.flow.ts']!, '  active: false,\n', ''),
+    'src/objects/ticket.object.ts': edit(
+      p['src/objects/ticket.object.ts']!,
+      "tenancy: { enabled: true, organizationField: 'organization_id' }",
+      'tenancy: { enabled: true }',
+    ),
   };
 }
 
 const EXPECTED_SITES = [
-  'agents[0].lifecycle (agent-lifecycle-removed)',
+  'agents[0].knowledge (agent-knowledge-removed)',
+  'dashboards[0].widgets[0].compareTo (dashboard-widget-compareto-converged)',
+  'dashboards[0].widgets[1].compareTo (dashboard-widget-compareto-converged)',
   'dashboards[1].refreshIntervalSeconds (dashboard-refresh-interval-to-refresh-interval-seconds)',
-  'objects[0].externalSharingModel (object-external-sharing-model-removed)',
-  'views[0].list.filterableFields (view-list-filterable-fields-removed)',
+  'datasources[0].driver (datasource-driver-mongo-to-mongodb)',
+  'flows[0].active (flow-inert-keys-removed)',
+  'objects[0].tenancy.organizationField (object-tenancy-organization-field-removed)',
+  'views[0].list.bordered (view-list-passthrough-keys-removed)',
+  'views[0].list.striped (view-list-passthrough-keys-removed)',
 ];
 
 describe('os migrate meta --write over per-artifact modules', () => {
@@ -334,8 +352,11 @@ describe('os migrate meta --write over per-artifact modules', () => {
     // Byte-for-byte, every file: the barrels and `index.ts` files included.
     expect(snapshot(dir)).toEqual(expectedAfterWrite());
     expect(firstJson.write.files.map((f: any) => f.file).sort()).toEqual([
+      'objectstack.config.ts',
       'src/agents/support.agent.ts',
+      'src/dashboards/kpi.dashboard.ts',
       'src/dashboards/ops.dashboard.ts',
+      'src/flows/escalate.flow.ts',
       'src/objects/ticket.object.ts',
       'src/views/ticket.view.ts',
     ]);
@@ -343,10 +364,10 @@ describe('os migrate meta --write over per-artifact modules', () => {
 
   it('reports each written site at its file and line as read', () => {
     const at = Object.fromEntries(firstJson.write.written.map((w: any) => [w.path, `${w.file}:${w.line}`]));
-    expect(at['agents[0].lifecycle']).toBe('src/agents/support.agent.ts:8');
+    expect(at['datasources[0].driver']).toBe('objectstack.config.ts:12');
     expect(at['dashboards[1].refreshIntervalSeconds']).toBe('src/dashboards/ops.dashboard.ts:7');
-    expect(at['objects[0].externalSharingModel']).toBe('src/objects/ticket.object.ts:7');
-    expect(at['views[0].list.filterableFields']).toBe('src/views/ticket.view.ts:9');
+    expect(at['views[0].list.striped']).toBe('src/views/ticket.view.ts:9');
+    expect(at['views[0].list.bordered']).toBe('src/views/ticket.view.ts:10');
   });
 
   it('writes the applied set and nothing else: every site it reports is an applied entry', () => {
@@ -359,17 +380,9 @@ describe('os migrate meta --write over per-artifact modules', () => {
     // Relative to the dry run of the same build, not a pinned listing: which
     // notices the default list carries is the chain's business, not --write's.
     expect(firstJson.todos.map((t: any) => t.id)).toEqual(dry.todos.map((t: any) => t.id));
-  });
-
-  it('leaves an aged-out spelling as written (#25767): no step rewrites it, and the schema still refuses it', () => {
-    // The `compareTo` spellings rode the protocol-17 step, which the support
-    // floor retired: nothing is attributed to them, their bytes stay, and the
-    // stack is still schema-invalid after the write — the refusal, not a
-    // silent rewrite, is the upgrade channel for a kit one major past its own.
-    expect(firstJson.applied.map((a: any) => a.conversionId)).not.toContain('dashboard-widget-compareto-converged');
-    const kpi = readFileSync(join(dir, 'src/dashboards/kpi.dashboard.ts'), 'utf8');
-    expect(kpi).toContain("compareTo: 'previousPeriod'");
-    expect(kpi).toContain("compareTo: { offset: '7d' }");
+    // The `compareTo` arm the conversion declines has no mechanical change, so
+    // its bytes stay — and the schema still refuses it, as before the write.
+    expect(readFileSync(join(dir, 'src/dashboards/kpi.dashboard.ts'), 'utf8')).toContain("compareTo: { offset: '7d' }");
     expect(firstJson.schemaValid).toBe(false);
   });
 
@@ -392,7 +405,7 @@ describe('os migrate meta without --write (controls)', () => {
     const run = await runMeta(dir, ['--json', '--out', out]);
     expect(run.exitCode, run.stderr).toBeUndefined();
     expect(snapshot(dir)).toEqual(before);
-    expect(JSON.parse(readFileSync(out, 'utf8')).dashboards[1].refreshIntervalSeconds).toBe(300);
+    expect(JSON.parse(readFileSync(out, 'utf8')).datasources[0].driver).toBe('mongodb');
   }, RUN_TIMEOUT);
 
   it('prints the human report with --write, naming no capability it lacks', async () => {
@@ -400,7 +413,7 @@ describe('os migrate meta without --write (controls)', () => {
     const run = await runMeta(dir, ['--write']);
     expect(run.exitCode, run.stderr).toBeUndefined();
     const group = run.stdout.slice(run.stdout.indexOf('Wrote '));
-    expect(group).toMatch(/^Wrote 4 of 4 mechanical change\(s\) into 4 file\(s\):/);
+    expect(group).toMatch(/^Wrote 9 of 9 mechanical change\(s\) into 7 file\(s\):/);
     expect(group).toContain('Re-ran the chain over the written sources: no mechanical change remains.');
     // The group's own words; the spec's notices above it are the spec's.
     expect(group).not.toMatch(/automatic/i);
@@ -523,20 +536,17 @@ const REFUSALS: Record<string, string> = {
   'objectstack.config.ts': `import { defineStack } from '@objectstack/spec';
 import { KitView } from 'fake-kit';
 
-const START = '10:00Z';
-const sharedList = { type: 'grid', columns: ['title'], filterableFields: ['title'] };
-const listBase = { filterableFields: ['title'] };
+const MONGO = 'mongo';
+const sharedList = { type: 'grid', columns: ['title'], striped: true };
+const listBase = { bordered: true };
 function makeAgent(name: string) {
-  return { name, label: name, role: 'r', instructions: 'i', lifecycle: 'draft' };
+  return { name, label: name, role: 'r', instructions: 'i', knowledge: { sources: ['faq'] } };
 }
 
 export default defineStack({
   manifest: { id: 'com.example.refusals', name: 'Refusals', version: '1.0.0', type: 'app' },
-  objects: [{
-    name: 'rf_ticket', label: 'Ticket',
-    externalSharingModel: 'private',
-    fields: { title: { type: 'text', label: 'Title' }, starts_at: { type: 'time', label: 'Starts', defaultValue: START } },
-  }],
+  objects: [{ name: 'rf_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } }],
+  datasources: [{ name: 'docs', label: 'Docs', driver: MONGO, config: {} }],
   views: [
     { object: 'rf_ticket', list: sharedList },
     { object: 'rf_ticket', list: sharedList },
@@ -544,13 +554,14 @@ export default defineStack({
     {
       object: 'rf_ticket',
       list: {
-        type: 'grid', filterableFields: ['title'],
+        type: 'grid', virtualScroll: true,
         columns: ['title'],
       },
     },
     KitView,
   ],
   agents: [makeAgent('helper_agent')],
+  flows: [{ name: 'plain', label: 'Plain', type: 'autolaunched', active: true, nodes: [], edges: [] }],
 });
 `,
 };
@@ -570,21 +581,21 @@ describe('os migrate meta --write refuses what it cannot prove, and says why', (
     payload.write.manual.find((m: any) => m.path === path)?.kind;
 
   it('names the refusal kind of every site it leaves', () => {
-    expect(kindOf('objects[0].fields.starts_at.defaultValue')).toBe('computed');
-    expect(kindOf('views[0].list.filterableFields')).toBe('shared');
-    expect(kindOf('views[1].list.filterableFields')).toBe('shared');
-    expect(kindOf('views[2].list.filterableFields')).toBe('spread');
-    expect(kindOf('views[3].list.filterableFields')).toBe('layout');
-    expect(kindOf('views[4].list.filterableFields')).toBe('outside-project');
-    expect(kindOf('agents[0].lifecycle')).toBe('helper');
+    expect(kindOf('datasources[0].driver')).toBe('computed');
+    expect(kindOf('views[0].list.striped')).toBe('shared');
+    expect(kindOf('views[1].list.striped')).toBe('shared');
+    expect(kindOf('views[2].list.bordered')).toBe('spread');
+    expect(kindOf('views[3].list.virtualScroll')).toBe('layout');
+    expect(kindOf('views[4].list.striped')).toBe('outside-project');
+    expect(kindOf('agents[0].knowledge')).toBe('helper');
     expect(payload.write.manual).toHaveLength(7);
     for (const m of payload.write.manual) expect(m.reason.length).toBeGreaterThan(0);
   });
 
   it('still writes the site it can prove, beside them — and nothing else', () => {
-    expect(sites(payload.write.written)).toEqual(['objects[0].externalSharingModel (object-external-sharing-model-removed)']);
+    expect(sites(payload.write.written)).toEqual(['flows[0].active (flow-inert-keys-removed)']);
     expect(snapshot(dir)).toEqual({
-      'objectstack.config.ts': edit(REFUSALS['objectstack.config.ts']!, "    externalSharingModel: 'private',\n", ''),
+      'objectstack.config.ts': edit(REFUSALS['objectstack.config.ts']!, ' active: true,', ''),
     });
     expect(payload.write.verification.ok).toBe(true);
   });

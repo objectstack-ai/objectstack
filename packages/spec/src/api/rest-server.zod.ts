@@ -196,7 +196,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "
     + 'opening the whole data plane. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   ),
 
   /**

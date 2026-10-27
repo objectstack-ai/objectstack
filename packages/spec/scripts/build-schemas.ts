@@ -783,9 +783,9 @@ const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
  *     a line that was ALREADY `[RETIRED]` on the authorable surface the day that
  *     major was cut predates the cut, so its kit has lived its one major. The
  *     tag is immutable and lives on origin, so neither the registry row a PR can
- *     write nor the one it can delete moves this clock — which is also why a
- *     region whose rows have left the registry (every ≤16.x row did on #25767)
- *     stays datable without a backfill.
+ *     write nor the one it can delete moves this clock — which is also why the
+ *     tombstones that predate the table (46 of the 61 lines #25767 deleted) are
+ *     datable without a backfill.
  */
 const TOMBSTONE_AGE_MAJORS = 1;
 

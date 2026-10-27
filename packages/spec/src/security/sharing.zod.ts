@@ -76,7 +76,7 @@ export const SharingLevel = enumWithRetiredValues([
     + "to `edit` until this release. Use `accessLevel: 'edit'`. Change the value; the access it grants is "
     + 'unchanged. A sharing rule grants read or edit; delete and transfer come from object permissions and '
     + 'ownership. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 });
 
 /**

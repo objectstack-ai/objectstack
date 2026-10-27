@@ -7,13 +7,10 @@
  * It was measured on a spelling the load still converted: `driver: 'mongo'`
  * until #23543 F1, then a flow-level retry policy's `retryDelayMs` until F2
  * retired `retry-policy-converged` from the load path too. After F2 no load-path
- * conversion is a step the chain replays from its floor (`--from 17` replays
- * step 18, and every entry of it is retired), so the defect's own reading —
- * the chain missing what the load converted — has no subject on this tree.
- * What the fix changed is read directly instead (see "What is pinned").
- * [#25767] The protocol-17 step itself is below the support floor now, so the
- * refused spelling the chain converts here is a protocol-18 one (a dashboard's
- * `refreshInterval`); the flow policy stays canonical throughout.
+ * conversion is a step the chain replays from its floor (`--from 16` replays
+ * steps 17 and 18, and every entry of either is retired), so the defect's own
+ * reading — the chain missing what the load converted — has no subject on this
+ * tree. What the fix changed is read directly instead (see "What is pinned").
  *
  * ## The defect
  *
@@ -37,9 +34,9 @@
  *  2. A stack defined twice starts from the innermost argument.
  *  3. The control: an already-canonical source writes nothing, and its
  *     `--json` summary equals the one the built stack gives.
- *  4. A stack the schema refuses for two spellings the protocol-18 step
- *     converts: each conversion is applied once, both are written, and a
- *     stack defined twice is listed once.
+ *  4. A stack the schema refuses for two spellings the chain converts (one
+ *     step-17, one step-18): each conversion is applied once, both are
+ *     written, and a stack defined twice is listed once.
  *
  * Retired at F2: "lists a conversion the load already applied; --write writes
  * it, and the load stops converting". Its first half has no subject (above);
@@ -180,14 +177,14 @@ afterAll(() => {
 });
 
 /**
- * A stack the schema accepts as written, its flow-level retry policy in the
- * canonical spelling. It carried `retryDelayMs` (`retry-policy-converged`, the
- * protocol-17 step) until [#25767] raised the support floor to 17: that
- * spelling is a strict unknown key now, which the chain no longer converts.
- * {@link REFRESH_SOURCE} is the same stack with one spelling the protocol-18
- * step converts.
+ * A stack whose one non-canonical spelling is the flow-level retry policy's
+ * `retryDelayMs`. The current schema REFUSES it at the `retryDelayMs`
+ * tombstone (`retry-policy-converged` is retired from the load path, #23543
+ * F2), and the chain's step 17 renames it `backoffMs`. {@link CANONICAL_SOURCE}
+ * is the same stack as the author would write it today, which the schema
+ * accepts.
  */
-const CANONICAL_SOURCE = `import { defineStack } from '@objectstack/spec';
+const RETRY_SOURCE = `import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
   manifest: { id: 'com.probe.svc', name: 'Probe Service', namespace: 'probe', version: '1.0.0', type: 'module' },
@@ -205,7 +202,7 @@ export default defineStack({
       name: 'probe_sync',
       label: 'Sync',
       type: 'autolaunched',
-      errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 2000 },
+      errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
       nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
       edges: [{ id: 'e1', source: 'start', target: 'end' }],
     },
@@ -213,24 +210,11 @@ export default defineStack({
 });
 `;
 
-/**
- * The same stack with a dashboard whose refresh cadence is spelled the old
- * way: the current schema REFUSES it at the `refreshInterval` tombstone, and
- * the protocol-18 step renames it `refreshIntervalSeconds`.
- */
-const AUTHORED_CADENCE = 'refreshInterval: 300';
-const CANONICAL_CADENCE = 'refreshIntervalSeconds: 300';
-const REFRESH_SOURCE = edit(
-  CANONICAL_SOURCE,
-  '  flows: [\n',
-  `  dashboards: [{ name: 'probe_ops', label: 'Ops', widgets: [], ${AUTHORED_CADENCE} }],\n  flows: [\n`,
-);
-const REFRESH_SITE = {
-  conversionId: 'dashboard-refresh-interval-to-refresh-interval-seconds',
-  path: 'dashboards[0].refreshIntervalSeconds',
-  from: 'refreshInterval',
-  to: 'refreshIntervalSeconds',
-};
+const RETRY_CONVERSION = 'retry-policy-converged';
+const RETRY_SITE = { conversionId: RETRY_CONVERSION, path: 'flows[0].errorHandling.backoffMs', from: 'retryDelayMs', to: 'backoffMs' };
+const AUTHORED_DELAY = 'retryDelayMs: 2000';
+const CANONICAL_DELAY = 'backoffMs: 2000';
+const CANONICAL_SOURCE = edit(RETRY_SOURCE, AUTHORED_DELAY, CANONICAL_DELAY);
 /** The flow's policy exactly as the author wrote it … */
 const AUTHORED_POLICY = { strategy: 'retry', maxRetries: 3, backoffMs: 2000 };
 /** … and as the strict parse returns it: the declared defaults filled in. */
@@ -273,7 +257,7 @@ describe('an accepted stack: the authored-source load hands back what the author
     const authored = await quietLoad(dir, true);
     expect(authored.config.flows[0].errorHandling).toEqual(AUTHORED_POLICY);
 
-    const out = json(await runMeta(dir, ['--from', '17', '--json']));
+    const out = json(await runMeta(dir, ['--from', '16', '--json']));
     expect(out.applied).toEqual([]);
     expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
@@ -286,7 +270,7 @@ describe('control: an already-canonical source', () => {
     const dir = writeProject({ 'objectstack.config.ts': CANONICAL });
     const before = snapshot(dir);
 
-    const run = await runMeta(dir, ['--from', '17', '--write', '--json']);
+    const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
     expect(out.applied).toEqual([]);
@@ -306,13 +290,12 @@ describe('control: an already-canonical source', () => {
 });
 
 describe('a stack with two refused spellings the chain converts', () => {
-  // The `time` default with the UTC suffix and the dashboard's
-  // `refreshInterval` (both protocol-18 step) are refused by the current
-  // schema, so this call hands its argument through. It carried a load-path
-  // spelling until #23543 F2; with none left that the chain replays, both
-  // arms are refusals.
+  // The `time` default with the UTC suffix (step 18) and the flow's
+  // `retryDelayMs` (step 17) are both refused by the current schema, so this
+  // call hands its argument through. It carried a load-path spelling until
+  // #23543 F2; with none left that the chain replays, both arms are refusals.
   const MIXED = edit(
-    REFRESH_SOURCE,
+    RETRY_SOURCE,
     "        name: { type: 'text', label: 'Name' },\n",
     "        name: { type: 'text', label: 'Name' },\n        starts_at: { type: 'time', label: 'Starts', defaultValue: '10:00Z' },\n",
   );
@@ -320,20 +303,20 @@ describe('a stack with two refused spellings the chain converts', () => {
   it('applies each conversion once, and --write writes both', async () => {
     const dir = writeProject({ 'objectstack.config.ts': MIXED });
 
-    const dry = json(await runMeta(dir, ['--from', '17', '--json']));
-    expect(sites(dry.applied)).toEqual([REFRESH_SITE, TIME_SITE]);
+    const dry = json(await runMeta(dir, ['--from', '16', '--json']));
+    expect(sites(dry.applied)).toEqual([RETRY_SITE, TIME_SITE]);
 
-    const run = await runMeta(dir, ['--from', '17', '--write', '--json']);
+    const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
-    expect(sites(out.applied)).toEqual([REFRESH_SITE, TIME_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_SITE, TIME_SITE]);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'objectstack.config.ts', sites: 2 }]);
     expect(readFileSync(join(dir, 'objectstack.config.ts'), 'utf8')).toBe(
-      edit(edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"), AUTHORED_CADENCE, CANONICAL_CADENCE),
+      edit(edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"), AUTHORED_DELAY, CANONICAL_DELAY),
     );
 
-    const again = json(await runMeta(dir, ['--from', '17', '--json']));
+    const again = json(await runMeta(dir, ['--from', '16', '--json']));
     expect(again.applied).toEqual([]);
 
     const strict = await quietLoad(dir);
@@ -344,13 +327,13 @@ describe('a stack with two refused spellings the chain converts', () => {
   it('a stack defined twice starts from the innermost argument, and is listed once', async () => {
     const dir = writeProject({
       'objectstack.config.ts': edit(
-        edit(REFRESH_SOURCE, 'export default defineStack({', 'export default defineStack(defineStack({'),
+        edit(RETRY_SOURCE, 'export default defineStack({', 'export default defineStack(defineStack({'),
         '\n});\n',
         '\n}));\n',
       ),
     });
-    const out = json(await runMeta(dir, ['--from', '17', '--json']));
-    expect(sites(out.applied)).toEqual([REFRESH_SITE]);
+    const out = json(await runMeta(dir, ['--from', '16', '--json']));
+    expect(sites(out.applied)).toEqual([RETRY_SITE]);
     expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
 });

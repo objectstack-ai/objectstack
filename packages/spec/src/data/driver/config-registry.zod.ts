@@ -215,16 +215,16 @@ export interface DriverVocabularyEntry {
  * The prescription for an authored `datasource.driver: 'mongo'` — the
  * `mongodb` row's one {@link DriverVocabularyEntry.retiredAliases} entry.
  * Written to `enumWithRetiredValues`' conventions: the value first, the release
- * and ADR that removed it, why, the one-line fix, and the post-floor `os migrate
+ * and ADR that removed it, why, the one-line fix, and the house `os migrate
  * meta` sentence (`datasource-driver-mongo-to-mongodb` is a `toMajor: 17`
- * entry whose step left the chain when the support floor rose to 17, #25767).
+ * entry, so its step is reached by `--from 16`).
  */
 const MONGO_DRIVER_ID_RETIRED =
   "Datasource `driver: 'mongo'` was removed in @objectstack/spec 18 (ADR-0087 D2) — the MongoDB driver's "
   + 'id has been `mongodb` since 17, the spelling both boot hosts, the `@objectstack/driver-mongodb` package '
   + "and every connection URL scheme use, and the loader rewrote `mongo` to it until this release. Use `driver: 'mongodb'`. "
   + 'Change the value; the driver it builds and the `config` contract it is judged against are unchanged. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * THE table. Everything else in this module is a projection of it.

@@ -59,7 +59,6 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
-import { MIGRATION_SUPPORT_FLOOR } from '@objectstack/spec/migrations';
 import { AppPlugin } from '@objectstack/runtime';
 import MigrateMeta, { planProtocolRange } from '../src/commands/migrate/meta.js';
 import { loadConfig } from '../src/utils/config.js';
@@ -88,14 +87,19 @@ const RUN_TIMEOUT = 120_000;
 
 /**
  * The shapes the load refuses on this runtime, one row per major migrated
- * FROM, from the support floor up: the major, and one authored member the
- * chain converts out of it — a key the current schema tombstones, so the
- * authored-source load hands it to the chain as written. The `--from 17`
- * row's member is converted by the protocol-18 step. [#25767] The `--from 16`
- * row (`striped`, the protocol-17 step) left with the ≤16.x kit: 16 is below
- * the floor now, and the refusal it meets is pinned in §3 instead.
+ * FROM: the major, and one authored member the chain converts out of it — a
+ * key the current schema tombstones, so the authored-source load hands it to
+ * the chain as written. The `--from 16` row's member is converted by the
+ * protocol-17 step, and the `--from 17` row's by the protocol-18 step.
  */
 const SHAPES = [
+  {
+    from: 16,
+    member: "views: [{ object: 'rg_item', list: { type: 'grid', columns: ['title'], striped: true } }]",
+    converted: ['view-list-passthrough-keys-removed'],
+    before: ', striped: true',
+    after: '',
+  },
   { from: 17, member: "dashboards: [{ name: 'ops', label: 'Ops', widgets: [], refreshInterval: 300 }]", converted: ['dashboard-refresh-interval-to-refresh-interval-seconds'], before: 'refreshInterval: 300', after: 'refreshIntervalSeconds: 300' },
 ];
 
@@ -396,15 +400,15 @@ describe('a range the load already admits is left alone', () => {
 
 describe('a range in a legacy home is rewritten where the handshake read it', () => {
   it.each([
-    ['engines.platform', "engines: { platform: '^17' }", '^17', `engines: { platform: '${TARGET}' }`],
+    ['engines.platform', "engines: { platform: '^16' }", '^16', `engines: { platform: '${TARGET}' }`],
     // Its schema refuses a range short of a full version, so the full version is written.
-    ['engine.objectstack', "engine: { objectstack: '^17.0.0' }", '^17.0.0', `engine: { objectstack: '^${PROTOCOL_MAJOR}.0.0' }`],
+    ['engine.objectstack', "engine: { objectstack: '^16.0.0' }", '^16.0.0', `engine: { objectstack: '^${PROTOCOL_MAJOR}.0.0' }`],
   ])('%s', async (source, engines, range, rewritten) => {
     const text = config(engines);
     const dir = writeProject({ 'objectstack.config.ts': text });
-    expect(await load(dir)).toEqual({ refused: expect.objectContaining(refusal(17, range, source)) });
+    expect(await load(dir)).toEqual({ refused: expect.objectContaining(refusal(16, range, source)) });
 
-    const run = await runMeta(dir, 17, ['--write', '--json']);
+    const run = await runMeta(dir, 16, ['--write', '--json']);
     expect(run.exitCode, run.stderr).toBeUndefined();
     expect(JSON.parse(run.stdout).write.range).toMatchObject({ status: 'written', path: `manifest.${source}`, from: range });
     expect(snapshot(dir)).toEqual({ 'objectstack.config.ts': edit(text, engines, rewritten) });
@@ -428,12 +432,10 @@ describe('which range is written', () => {
     const dir = writeProject({ 'objectstack.config.ts': source });
     const run = await runMeta(dir, PROTOCOL_MAJOR, ['--write']);
     expect(run.exitCode, run.stderr).toBeUndefined();
-    // [#25767] The lowest `--from` that moves the range is never under the
-    // chain's floor: the range declares 16, and the run it names starts at 17.
     expect(run.stdout).toContain(
       `manifest.engines.protocol '^16' declares protocol 16, below --from ${PROTOCOL_MAJOR}: this run did not `
-      + `replay protocol ${MIGRATION_SUPPORT_FLOOR} → ${PROTOCOL_MAJOR}, so the range is left as written and the load still refuses it. `
-      + `Run with --from ${MIGRATION_SUPPORT_FLOOR}.`,
+      + `replay protocol 16 → ${PROTOCOL_MAJOR}, so the range is left as written and the load still refuses it. `
+      + 'Run with --from 16.',
     );
     expect(snapshot(dir)).toEqual({ 'objectstack.config.ts': source });
   }, RUN_TIMEOUT);
@@ -528,21 +530,4 @@ describe('the range rides the plan, the write and the re-check', () => {
       vanished: ['manifest.engines.protocol (declared protocol range)'],
     });
   });
-});
-
-// ── 3: below the floor (#25767) ────────────────────────────────────────────
-
-describe('--from 16: below the support floor, the command refuses before it reads the range', () => {
-  it('is refused with the floor error naming the floor and the upgrade guide, and writes nothing', async () => {
-    const source = config(`engines: { protocol: '^16' }`, SHAPES[0]!.member);
-    const dir = writeProject({ 'objectstack.config.ts': source });
-    const run = await runMeta(dir, 16, ['--write', '--json']);
-    expect(run.exitCode).toBe(1);
-    const payload = JSON.parse(run.stdout);
-    expect(payload.error).toBe('unsupported_from_major');
-    expect(payload.message).toContain('support floor is 17');
-    expect(payload.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
-    // Nothing written: not the chain's edit, not the range.
-    expect(snapshot(dir)).toEqual({ 'objectstack.config.ts': source });
-  }, RUN_TIMEOUT);
 });

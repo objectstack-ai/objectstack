@@ -428,8 +428,7 @@ function handshakeSlice(manifest: Record<string, unknown>): ProtocolHandshakeMan
  * `--to`, capped at the protocol this runtime implements. `--to` defaults to
  * {@link CHAIN_TERMINUS_MAJOR}, which runs AHEAD of {@link PROTOCOL_MAJOR} while
  * this build carries the next major's conversions — measured on a protocol-17
- * build, `--from 16` replayed 16 → 18 (the floor has been 17 since #25767,
- * so that range now refuses). Those conversions map shapes the
+ * build, `--from 16` replays 16 → 18. Those conversions map shapes the
  * installed schemas refuse onto ones they accept, so the migrated source is
  * what THIS runtime loads, and `'^18'` would be refused by the same handshake
  * (measured: "targets protocol ^18 … Run: objectstack migrate meta --from 18").

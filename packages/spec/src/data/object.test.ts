@@ -78,9 +78,9 @@ describe('ObjectCapabilities', () => {
       expect(message).toContain(`\`${key}\``);
       expect(message, 'the migration command is the durable reference').not.toMatch(/#\d{3,5}/);
       // The prescription names the source rewrite the #3207 conversion used to
-      // perform; the step aged out with the 16.x kits (#25767), so the house
+      // perform; the conversion aged out with the 16.x kits (#25767), so the house
       // sentence says so and links the guide instead of naming `--from 16`.
-      expect(message).toContain('This edit left `os migrate meta` with the protocol-16.x step (support floor 17)');
+      expect(message).toContain('This edit left `os migrate meta` with the protocol-16.x conversions');
       expect(message).not.toContain('os migrate meta --from 16');
     }
     // `trash` additionally points at the parked soft-delete issue — the
@@ -470,7 +470,7 @@ describe('IndexSchema retired keys', () => {
       .toThrow(/Unrecognized key\(s\) on this index: `partial`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
-  it('no longer names a migrate step — the floor rose past the one that carried these', () => {
+  it('no longer names a migrate step — the conversion that carried these aged out with its kit', () => {
     for (const bad of [{ fields: ['a'], type: 'btree' }, { fields: ['a'], partial: 'x' }]) {
       expect(() => IndexSchema.parse(bad)).not.toThrow(/os migrate meta --from/);
       expect(() => IndexSchema.parse(bad)).toThrow();
@@ -2712,9 +2712,9 @@ describe('managedBy: retiring the overloaded `system` bucket', () => {
     expect(msg).toMatch(/managedBy/s);
     expect(msg).toMatch(/removed in @objectstack\/spec 17/s);
     expect(msg).toMatch(/system-data/s);
-    // The automated fix rode the protocol-17 step, which aged out with the 16.x
-    // kits (#25767): the house sentence says so and links the guide.
-    expect(msg).toMatch(/support floor 17/s);
+    // The automated fix rode a 16.x conversion, which aged out with its kit
+    // (#25767): the house sentence says so and links the guide.
+    expect(msg).toMatch(/protocol-16\.x conversions/s);
     expect(msg).not.toMatch(/os migrate meta --from 16/s);
   });
 

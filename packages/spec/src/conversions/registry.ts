@@ -513,10 +513,9 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
  *     carries them — and the generated upgrade guide and the `spec_changes` MCP
  *     tool are projections of that record, composed across however many majors
  *     the consumer is jumping;
- *   - the step-17 chain entry referenced them by id, so
- *     `os migrate meta --from 16` REWROTE the consumer's source mechanically
- *     instead of asking them to hand-edit — until the support floor rose to 17
- *     and retired the step (#25767).
+ *   - the step-17 chain entry references them by id, so
+ *     `os migrate meta --from 16` REWRITES the consumer's source mechanically
+ *     instead of asking them to hand-edit.
  *
  * The tombstone error is the backstop for someone who did neither, and it says
  * so by pointing at `migrate meta`.
@@ -594,9 +593,8 @@ function mapObjectFieldsKey(stack: Dict, collection: string, from: string, to: s
  * release, so that refusal is what an author meets at every door that judges
  * a sharing rule (`os validate` / `os build` / `os lint`). Stored rows keep
  * healing: stored-row rehydration (`applyConversionsToStoredItem`) replays the
- * full chain, this entry included, and so does the artifact-ingestion door
- * (inside its window); `os migrate meta --from 16` did too, until the support
- * floor retired the step (#25767).
+ * full chain, this entry included, and so do the artifact-ingestion door
+ * (inside its window) and `os migrate meta --from 16`.
  */
 const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   id: 'sharing-rule-access-level-full-to-edit',
@@ -679,9 +677,8 @@ function renameFlowConfigAliases(
  * `os build` / `os lint`. Stored flows keep healing: the automation
  * engine's flow rehydration and stored-row rehydration
  * (`applyConversionsToStoredItem`) replay the full chain, this entry
- * included, and so does the artifact-ingestion door (inside its window);
- * `os migrate meta --from 16` did too, until the support floor retired the
- * step (#25767).
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeCrudObjectAlias: MetadataConversion = {
   id: 'flow-node-crud-object-alias',
@@ -813,9 +810,8 @@ function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
  * `os build` / `os lint`. Stored flows keep healing: the automation
  * engine's flow rehydration and stored-row rehydration
  * (`applyConversionsToStoredItem`) replay the full chain, this entry
- * included, and so does the artifact-ingestion door (inside its window);
- * `os migrate meta --from 16` did too, until the support floor retired the
- * step (#25767).
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeNotifyConfigAliases: MetadataConversion = {
   id: 'flow-node-notify-config-aliases',
@@ -1051,8 +1047,7 @@ function liftWaitEventConfig(stack: Dict, emit: Emit): Dict {
  * Stored flows are the `includeRetired` seams: the automation engine's flow
  * rehydration, stored-row rehydration (`applyConversionsToStoredItem`), the
  * metadata save door's flow fallback, the artifact-ingestion door inside its
- * window; `os migrate meta --from 16` replayed it too (a step-17 member),
- * until the support floor retired the step (#25767).
+ * window, and `os migrate meta --from 16` (a step-17 member).
  */
 const flowNodeWaitEventConfigLift: MetadataConversion = {
   id: 'flow-node-wait-event-config-lift',
@@ -1140,9 +1135,8 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
  * `os build` / `os lint`. Stored flows keep healing: the automation
  * engine's flow rehydration and stored-row rehydration
  * (`applyConversionsToStoredItem`) replay the full chain, this entry
- * included, and so does the artifact-ingestion door (inside its window);
- * `os migrate meta --from 16` did too, until the support floor retired the
- * step (#25767).
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeMapFlowAlias: MetadataConversion = {
   id: 'flow-node-map-flow-alias',
@@ -1210,9 +1204,8 @@ const flowNodeMapFlowAlias: MetadataConversion = {
  * `os build` / `os lint`. Stored flows keep healing: the automation
  * engine's flow rehydration and stored-row rehydration
  * (`applyConversionsToStoredItem`) replay the full chain, this entry
- * included, and so does the artifact-ingestion door (inside its window);
- * `os migrate meta --from 16` did too, until the support floor retired the
- * step (#25767).
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeSubflowFlowAlias: MetadataConversion = {
   id: 'flow-node-subflow-flow-alias',
@@ -1476,9 +1469,8 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
  * `os build` / `os lint`. Stored flows keep healing: the automation
  * engine's flow rehydration and stored-row rehydration
  * (`applyConversionsToStoredItem`) replay the full chain, this entry
- * included, and so does the artifact-ingestion door (inside its window);
- * `os migrate meta --from 16` did too, until the support floor retired the
- * step (#25767).
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  *
  * The fixture below carried `actionType: 'invoke_function'` through both sides
  * until #4343 retired that key — an end state protocol 17 no longer reaches, so
@@ -1668,10 +1660,8 @@ const stripKeys = (
  * replays this entry, and an author is taught the canonical id instead of
  * being rewritten. Stored rows are the `includeRetired` seams: stored-row
  * rehydration (`applyConversionsToStoredItem`) and the artifact door still
- * rewrite them; `os migrate meta --from 16` listed the edit for existing
- * sources, as step 17's mechanical member, until the support floor retired the
- * step (#25767) — the D3 entry `datasource-driver-mongo-alias-retired` names
- * the hand edit since. The spelling keeps resolving the
+ * rewrite them, and `os migrate meta --from 16` lists the edit for existing
+ * sources, as step 17's mechanical member. The spelling keeps resolving the
  * mongodb CONTRACT, which is what let the retired
  * `datasource-config-driver-key-aliases` — ordered ahead of this entry while
  * it existed (#25767) — reach a stored `driver: 'mongo'` row's legacy config
@@ -1812,9 +1802,8 @@ const datasourceDriverMongoToMongodb: MetadataConversion = {
  * stored-row rehydration (`applyConversionsToStoredItem`), the automation
  * engine's flow rehydration, the metadata save door's flow fallback, the
  * artifact-ingestion door inside its window — so a job stored before 17 keeps
- * the three retries it ran with. `os migrate meta --from 16` replayed it too,
- * until the support floor rose to 17 and retired the step (#25767); since then
- * the D3 entry `job-retry-policy-without-attempts-refused` names the hand edit.
+ * the three retries it ran with. `os migrate meta --from 16` replays it too (a
+ * step-17 member, carried by the D3 entry `job-retry-policy-without-attempts-refused`).
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',

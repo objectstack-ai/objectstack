@@ -268,19 +268,21 @@ export default defineStack({
   ],
 });
 `;
-  // The same stack with a dashboard whose refresh cadence is spelled the old
-  // way: a second refused spelling, which the protocol-18 step renames. The
-  // raw hand-back keeps it visible to the chain. The second spelling was a
-  // conversion the load still applied — a datasource `driver: 'mongo'` until
-  // #23543 F1, then a flow's `retryDelayMs` until F2 retired
-  // `retry-policy-converged` from the load path — and [#25767] the protocol-17
-  // step those rode is below the support floor now, so the row reads a
-  // protocol-18 spelling.
+  // The same stack with a flow whose retry policy spells its delay the old
+  // way: a second refused spelling, which the chain's step 17 renames. The raw
+  // hand-back keeps it visible to the chain. It was a conversion the load
+  // still applied — a datasource `driver: 'mongo'` until #23543 F1, then this
+  // `retryDelayMs` until F2 retired `retry-policy-converged` from the load
+  // path — and no load-path conversion is a step the chain replays from its
+  // floor any more, so the row reads the two-spelling refused arm.
   const SINGLE_WITH_SECOND_REFUSED_SPELLING = edit(
     SINGLE,
     '  ],\n});\n',
     '  ],\n'
-      + "  dashboards: [{ name: 'probe_ops', label: 'Ops', widgets: [], refreshInterval: 300 }],\n"
+      + "  flows: [{ name: 'probe_sync', label: 'Sync', type: 'autolaunched', "
+      + "errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 }, "
+      + "nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }], "
+      + "edges: [{ id: 'e1', source: 'start', target: 'end' }] }],\n"
       + '});\n',
   );
   const TIME_SITE = {
@@ -289,28 +291,28 @@ export default defineStack({
     from: '"10:00Z"',
     to: '"10:00"',
   };
-  const REFRESH_SITE = {
-    conversionId: 'dashboard-refresh-interval-to-refresh-interval-seconds',
-    path: 'dashboards[0].refreshIntervalSeconds',
-    from: 'refreshInterval',
-    to: 'refreshIntervalSeconds',
+  const RETRY_SITE = {
+    conversionId: 'retry-policy-converged',
+    path: 'flows[0].errorHandling.backoffMs',
+    from: 'retryDelayMs',
+    to: 'backoffMs',
   };
 
   it.each([
     { name: 'a refused stack', source: SINGLE, applied: [TIME_SITE], writtenSites: 1 },
-    { name: 'a refused stack carrying a second refused spelling', source: SINGLE_WITH_SECOND_REFUSED_SPELLING, applied: [REFRESH_SITE, TIME_SITE], writtenSites: 2 },
+    { name: 'a refused stack carrying a second refused spelling', source: SINGLE_WITH_SECOND_REFUSED_SPELLING, applied: [RETRY_SITE, TIME_SITE], writtenSites: 2 },
   ])('$name: `applied` and `write.files` as measured before the change', async ({ source, applied, writtenSites }) => {
     const dir = writeProject({ 'objectstack.config.ts': source });
-    const dry = json(await runMeta(dir, ['--from', '17', '--json']));
+    const dry = json(await runMeta(dir, ['--from', '16', '--json']));
     expect(sites(dry.applied)).toEqual(applied);
 
-    const run = await runMeta(dir, ['--from', '17', '--write', '--json']);
+    const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     const out = json(run);
     expect(sites(out.applied)).toEqual(applied);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'objectstack.config.ts', sites: writtenSites }]);
     let expected = edit(source, "defaultValue: '10:00Z'", "defaultValue: '10:00'");
-    if (writtenSites === 2) expected = edit(expected, 'refreshInterval: 300', 'refreshIntervalSeconds: 300');
+    if (writtenSites === 2) expected = edit(expected, 'retryDelayMs: 2000', 'backoffMs: 2000');
     expect(readFileSync(join(dir, 'objectstack.config.ts'), 'utf8')).toBe(expected);
   }, RUN_TIMEOUT);
 });

@@ -10,13 +10,15 @@
  * an ordinary unknown key: the `strictObject` refusal names it, offers the
  * nearest declared spelling, and points HERE, because the prescription that
  * used to ride on the tombstone is now only in the generated upgrade guide
- * (`scripts/build-upgrade-guide.ts`, one page per migrated major). The
- * migration chain's floor rises on the same clock, so `os migrate meta --from
- * N` below the floor refuses with the same link instead of converting.
+ * (`scripts/build-upgrade-guide.ts`, one page per migrated major). The kit
+ * ages out; the migration chain's STEP stays: `os migrate meta --from N` still
+ * replays down to the ruled support floor (`MIGRATION_SUPPORT_FLOOR`, 16), and
+ * moving that floor is its own release-policy ruling (#25767 ruling
+ * 6434038284, ADR-0087 D3).
  *
- * One spelling, shared by the strict refusal (`suggestions.zod.ts`), the floor
- * error (`migrations/chain.ts`) and the CLI's own `--from` examples, so the
- * three doors an author can hit all send them to the same page.
+ * One spelling, shared by the strict refusal (`suggestions.zod.ts`) and the
+ * console's own aged-out refusals (`@object-ui/types`), so every door an author
+ * can hit sends them to the same page.
  */
 export const PROTOCOL_UPGRADE_GUIDE_URL = 'https://objectstack.ai/docs/protocol-upgrade';
 

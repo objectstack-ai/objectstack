@@ -392,8 +392,8 @@ const COMPARE_TO_OFFSET_RETIRED =
   + "(`'7d'`, `'1M'`, …) there is no faithful one-key rewrite: state the window you want on the "
   + "widget's own `filter` and compare it with `previousPeriod`, which shifts by whatever length "
   + 'that window resolves to. '
-  + 'The `1y` case left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool '
-  + 'on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade; the other durations you re-state yourself.';
+  + 'The `1y` case left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool '
+  + 'on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade; the other durations you re-state yourself.';
 
 // The two string arms. They parsed, and on a dataset widget they then did
 // NOTHING — DatasetWidget dropped them deliberately, because forwarding one made
@@ -407,7 +407,7 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
   + 'when the selection has more than one dated time dimension; with one, the executor resolves '
   + 'it. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * The one widget `type` that reads `options.stageOrder`.

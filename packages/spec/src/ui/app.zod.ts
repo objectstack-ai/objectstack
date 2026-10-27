@@ -1233,7 +1233,7 @@ const AREA_ORDER_RETIRED =
   + 'ever sorted areas; both the sidebar and the schema renderer iterate the array as '
   + 'authored, so declaration order already IS display order. Delete the key and reorder the '
   + '`areas` array itself. NOTE the neighbour that behaves differently: a navigation ITEM\'s '
-  + '`order` is genuinely sorted — this removal does not touch it. This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + '`order` is genuinely sorted — this removal does not touch it. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * `app.areas[].visible` and `app.areas[].requiredPermissions`, retired in
@@ -1283,7 +1283,7 @@ const AREA_VISIBLE_RETIRED =
   + 'tree — the app\'s top-level `navigation` AND every `areas[].navigation`, both stripped '
   + 'server-side. The distinction survives at every level: `visible` is CEL '
   + 'evaluated in the browser, so it hides an entry that has already been sent, while '
-  + '`requiredPermissions` stops that entry from being served at all. This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + '`requiredPermissions` stops that entry from being served at all. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
   '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (ADR-0049) — '
@@ -1298,7 +1298,7 @@ const AREA_REQUIRED_PERMISSIONS_RETIRED =
   + 'area-level key is not revived. Still evaluated client-side ONLY, at every level: '
   + '`visible` (CEL) and `requiresObject` — so anything that must never reach the browser '
   + 'goes in `requiredPermissions`, never in `visible`. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Navigation Area Schema
@@ -1438,7 +1438,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + 'offered an All row regardless of this flag, so `includeAll: false` hardened nothing '
     + 'and `includeAll: true` unlocked nothing. Delete the key. To widen what a selector '
     + 'offers, widen `optionsSource.filter` instead. '
-    + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.',
+    + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   showall:
     '`contextSelectors[].includeAll` (which `showall` aliased) was removed in '
     + '@objectstack/spec 17.0.0 — selectors are mandatory-scope and never render an '
@@ -1446,7 +1446,7 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
   placement:
     '`contextSelectors[].placement` was removed in @objectstack/spec 17.0.0 ('
     + 'ADR-0049) — no renderer ever read it. Selectors always render in the sidebar header '
-    + "block, and `'topbar'` placed nothing in the topbar. Delete the key. This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.",
+    + "block, and `'topbar'` placed nothing in the topbar. Delete the key. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.",
   location:
     '`contextSelectors[].placement` (which `location` aliased) was removed in '
     + '@objectstack/spec 17.0.0 — selectors always render in the sidebar header. '
@@ -1629,7 +1629,7 @@ const HOME_PAGE_ID_RETIRED =
   + 'follows `isDefault` routing. Delete the key; to change where an app opens, '
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
   + 'should own the root landing. '
-  + 'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * The prescription for every author-shaped spelling of the ADR-0045 publish

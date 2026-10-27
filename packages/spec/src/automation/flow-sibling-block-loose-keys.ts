@@ -46,9 +46,9 @@ export const WAIT_EVENT_CONFIG_LOOSE_KEYS: ReadonlyArray<readonly [target: strin
 /** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
 export const CONNECTOR_CONFIG_LOOSE_KEYS = ['connectorId', 'actionId', 'input'] as const;
 
-/** The post-floor sentence for an edit whose step aged out with the support floor (#25767; both lifts were step-17 members). */
+/** The house sentence for an edit `os migrate meta --from 16` lists (both lifts are step-17 members). */
 const MIGRATE_META_SENTENCE =
-  'This edit left `os migrate meta` with the protocol-16.x step (support floor 17): apply it by hand, or run the tool on a release that still carries the step — https://objectstack.ai/docs/protocol-upgrade.';
+  'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /** A plain object (not an array, not `null`). */
 function isRecord(value: unknown): value is Record<string, unknown> {
