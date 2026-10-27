@@ -66,13 +66,14 @@ const REFUSED_POST: ReadonlyArray<readonly [string, Record<string, unknown>, str
  * [#26909] The body's published schema (`FindDataRequestSchema`) now declares
  * the projection the normalizer enforces, so these are refused where every
  * other malformed body is: at the schema, `400 VALIDATION_FAILED`, `fields[0]`
- * naming `query.<key>` (the #25269 precedent for the page window).
+ * naming `query.<key>`, and the member for a blank name (the #25269 precedent
+ * for the page window).
  */
 const REFUSED_POST_AT_SCHEMA: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
   ['select: ""', { select: '' }, 'query.select'],
   ['$select: ","', { $select: ',' }, 'query.$select'],
   ['select: []', { select: [] }, 'query.select'],
-  ['select: ["label", ""]', { select: ['label', ''] }, 'query.select'],
+  ['select: ["label", ""] (the blank member)', { select: ['label', ''] }, 'query.select.1'],
 ];
 
 function createMockServer() {

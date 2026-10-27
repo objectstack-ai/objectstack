@@ -129,13 +129,14 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
     // [#26909] The body's published schema (`FindDataRequestSchema`) now
     // declares the projection the normalizer enforces, so `select` / `$select`
     // naming no field is refused where every other malformed body is: at the
-    // schema, `400 VALIDATION_FAILED` naming `query.<key>` (the #25269
-    // precedent for the page window). Still a 400, still before any read.
+    // schema, `400 VALIDATION_FAILED` naming `query.<key>`, and the member for
+    // a blank name (the #25269 precedent for the page window). Still a 400,
+    // still before any read.
     it.each<[string, Record<string, unknown>, string]>([
         ['{"select":""}', { select: '' }, 'query.select'],
         ['{"$select":","}', { $select: ',' }, 'query.$select'],
         ['{"select":[]}', { select: [] }, 'query.select'],
-        ['{"select":["name",""]}', { select: ['name', ''] }, 'query.select'],
+        ['{"select":["name",""]} (the blank member)', { select: ['name', ''] }, 'query.select.1'],
     ])('POST query %s: 400 VALIDATION_FAILED naming the body key at the schema — no read', async (_name, body, field) => {
         const before = reads.n;
 
