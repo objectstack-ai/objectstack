@@ -15,12 +15,13 @@ import { useDisplayLocale } from '@object-ui/i18n';
 // the spec's INLINE locale map — see `BaseSchema.label` (objectui#4580).
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { FilterBuilder } from '../../custom/filter-builder';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('filter-builder',
   // `value` is declared because it is read by name: a host that binds the node
   // (a form field) forwards the group it holds, the same authored `FilterGroup`
   // the node's own `value` is.
-  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; value?: FilterGroup; [key: string]: any }) => {
+  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; value?: FilterGroup; [key: string]: unknown } & RendererHostProps) => {
     // Read-time resolution against the display locale (objectui#4580 revised
     // Q1-A). `BaseSchema.label` accepts `string | I18nLabel`; rendering the map
     // straight into a text node THREW "Objects are not valid as a React child".

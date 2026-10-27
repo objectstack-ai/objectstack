@@ -1,6 +1,6 @@
 # ADR-0121: 声明式端点的路由归属与通道分工 —— 命名空间制、actions/apis 按调用方分工、`type: flow` 保留
 
-- **状态**: Accepted（2026-08-04，维护者裁决；本记录只立规则，执行体由 #5040 的 E 系列实施）
+**Status**: Accepted（2026-08-04，维护者裁决；本记录只立规则，执行体由 #5040 的 E 系列实施）
 - **日期**: 2026-08-04
 - **关联**: [ADR-0076](./0076-objectql-core-tiering.md)（D11 —— 一条路由一个属主；本 ADR **扩充**它，不取代）、
   [ADR-0049](./0049-no-unenforced-security-properties.md)（enforce-or-remove，本 ADR 落在它的时序上）、

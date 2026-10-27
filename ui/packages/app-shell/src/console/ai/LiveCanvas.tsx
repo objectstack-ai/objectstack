@@ -26,8 +26,19 @@ import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 
 export interface LiveCanvasProps {
-  /** The drafted app to render (its `app` metadata name) — used for display. */
+  /** The drafted app to render (its `app` metadata name). */
   appName: string;
+  /**
+   * The app's display label, as the chat's build card names it
+   * (`checklist.app.label`). The header shows it in place of `appName`.
+   */
+  appLabel?: string;
+  /**
+   * The chat's build card says the app is live (published). The header then
+   * names the app as live and drops the unlisted note, whatever
+   * `materialized` says — the card is the one source of the publish state.
+   */
+  live?: boolean;
   /**
    * ADR-0048: the app's ROUTE SEGMENT — its package id (`app.<slug>`), which is
    * globally unique, unlike the display name (two AI apps can both be `library`).
@@ -73,12 +84,22 @@ function canvasSrc(appName: string, materialized: boolean, path?: string): strin
   return path ? `${spaBase()}${path}` : `${base}?preview=draft`;
 }
 
-export function LiveCanvas({ appName, appSegment, materialized = false, path, refreshKey, onClose }: LiveCanvasProps) {
+export function LiveCanvas({
+  appName,
+  appLabel,
+  live = false,
+  appSegment,
+  materialized = false,
+  path,
+  refreshKey,
+  onClose,
+}: LiveCanvasProps) {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Route on the package-id segment (unique), display by name (friendly).
   const routeSeg = appSegment && appSegment.length ? appSegment : appName;
+  const displayName = appLabel || appName;
   // Materialized world swap: changing src on the SAME iframe element
   // navigates it in place (no white-flash remount).
   useEffect(() => {
@@ -108,15 +129,20 @@ export function LiveCanvas({ appName, appSegment, materialized = false, path, re
       <div className="flex shrink-0 items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
         <Eye className="h-3.5 w-3.5" />
         <span className="min-w-0 flex-1 truncate">
-          {materialized
-            ? t('console.ai.liveCanvasUnlisted', {
-                app: appName,
-                defaultValue: 'Live app — {{app}} (unlisted until published)',
+          {live
+            ? t('console.ai.liveCanvasLive', {
+                app: displayName,
+                defaultValue: 'Live app — {{app}}',
               })
-            : t('console.ai.liveCanvas', {
-                app: appName,
-                defaultValue: 'Live preview — {{app}} (draft)',
-              })}
+            : materialized
+              ? t('console.ai.liveCanvasUnlisted', {
+                  app: displayName,
+                  defaultValue: 'Live app — {{app}} (unlisted until published)',
+                })
+              : t('console.ai.liveCanvas', {
+                  app: displayName,
+                  defaultValue: 'Live preview — {{app}} (draft)',
+                })}
         </span>
         {/* Bridge to the design surface — this pane is the RUNNING app, so the
             builder needs an explicit way to jump into the Studio designer to
@@ -149,7 +175,7 @@ export function LiveCanvas({ appName, appSegment, materialized = false, path, re
       </div>
       <iframe
         ref={iframeRef}
-        title={`Draft preview: ${appName}`}
+        title={`Draft preview: ${displayName}`}
         src={canvasSrc(routeSeg, materialized, path)}
         className="h-full w-full flex-1 border-0 bg-background"
         data-testid="live-canvas-frame"

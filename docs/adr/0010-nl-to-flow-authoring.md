@@ -1,6 +1,7 @@
 # ADR-0010: Natural-Language → Flow Authoring (Platform Capability)
 
 **Status**: Draft (2026-05-24)
+**Shares its number with**: [`0010-metadata-protection-model`](./0010-metadata-protection-model.md) (Metadata Protection Model) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0010-nl-to-flow-authoring`.
 **Authors**: HotCRM (objectstack-ai/hotcrm) — surfacing requirements from the v1 launch story
 **Consumers**: `@objectstack/service-ai`, `@objectstack/spec` (automation), `objectui` (plugin-designer, plugin-chatbot), every app that ships flows
 

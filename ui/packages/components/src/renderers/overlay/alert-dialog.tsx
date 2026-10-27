@@ -23,7 +23,7 @@ import {
 import { renderChildren, renderTriggerSlot } from '../../lib/utils';
 
 ComponentRegistry.register('alert-dialog', 
-  ({ schema, className, ...props }: { schema: AlertDialogSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: AlertDialogSchema; className?: string; [key: string]: unknown }) => (
     <AlertDialog defaultOpen={schema.defaultOpen} {...props}>
       {renderTriggerSlot(AlertDialogTrigger, schema.trigger)}
       <AlertDialogContent className={className}>

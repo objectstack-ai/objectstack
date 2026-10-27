@@ -74,7 +74,7 @@ function firstSelectedDay(selection: unknown): Date | undefined {
 }
 
 ComponentRegistry.register('calendar',
-  ({ schema, className, ...props }: { schema: CalendarSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: CalendarSchema; className?: string; [key: string]: unknown }) => {
     const mode = schema.mode || 'single';
     const selected = toSelection(mode, schema.value || schema.defaultValue);
     return (

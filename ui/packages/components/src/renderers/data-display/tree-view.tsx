@@ -118,7 +118,7 @@ const TreeNodeComponent = ({
 };
 
 ComponentRegistry.register('tree-view',
-  ({ schema, className, ...props }: { schema: TreeViewSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: TreeViewSchema; className?: string; [key: string]: unknown }) => {
     const handleNodeClick = (node: TreeNode) => {
       if (schema.onNodeClick) {
         schema.onNodeClick(node);

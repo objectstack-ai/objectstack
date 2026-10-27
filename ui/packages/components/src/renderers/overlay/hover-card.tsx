@@ -16,7 +16,7 @@ import {
 import { renderChildren, renderTriggerSlot } from '../../lib/utils';
 
 ComponentRegistry.register('hover-card', 
-  ({ schema, className, ...props }: { schema: HoverCardSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: HoverCardSchema; className?: string; [key: string]: unknown }) => (
     <HoverCard openDelay={schema.openDelayMs} closeDelay={schema.closeDelayMs} {...props}>
       {renderTriggerSlot(HoverCardTrigger, schema.trigger)}
       <HoverCardContent align={schema.align} side={schema.side} className={className}>

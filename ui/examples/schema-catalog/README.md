@@ -4,8 +4,8 @@ Canonical JSON schema catalog for ObjectUI. **Private** (not published to npm).
 
 > Naming note: this package lives under `examples/` (alongside the runnable
 > example apps), but it is **not** itself a runnable app — it is a data
-> package + smoke tests. The runnable apps are `examples/hello-world`,
-> `examples/console-starter`, etc.
+> package + smoke tests. Its sibling `examples/hello-world` is a snippet to
+> paste into your own app.
 
 This package is the **single source of truth** for every schema example we ship.
 It is consumed by:

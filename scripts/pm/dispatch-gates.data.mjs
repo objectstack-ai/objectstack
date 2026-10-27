@@ -344,8 +344,8 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  *
  * 324 code-position matches over the tracked JS/TS corpus, 24 of them under
  * `ui/` since the objectui import (objectstack#25803). 290 are the bare
- * `selfTest`; the remaining 34 carry compound names over 29 distinct spellings,
- * and they are the rows below. 23 are genuine self-test batteries — the
+ * `selfTest`; the remaining 35 carry compound names over 29 distinct spellings,
+ * and they are the rows below. 24 are genuine self-test batteries — the
  * anchor firing on them is the anchor working. ELEVEN are production code:
  *
  *   scripts/check-self-test-wired.mjs             carriesSelfTest
@@ -372,7 +372,7 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement, redone over the table's current 23 genuine rows,
+ * The same measurement, redone over the table's current 24 genuine rows,
  * is still NOT zero, and that asymmetry is what makes the classification
  * load-bearing rather than decorative: `fixtureSelfTest` drops
  * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
@@ -401,8 +401,8 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 34, the mask keeps
- * blanking all 34, and the cost of the eleven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 35, the mask keeps
+ * blanking all 35, and the cost of the eleven accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -426,6 +426,10 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
 export const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  // #26076: the ADR index generator's battery, reached from its `--self-test` guard and run again
+  // (never exited on) by its report-only `--report` mode, so a broken generator warns in CI instead
+  // of going quiet. A battery, so its fixture filenames are masked away as hints — genuine.
+  ['scripts/adr-index.mjs', 'runSelfTest', false],
   ['scripts/audits/14744-before-update-per-row-value-census.mjs', 'runSelfTest', false],
   ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
   ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],

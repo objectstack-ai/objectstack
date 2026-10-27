@@ -163,6 +163,13 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // reference tells. Not a registry rule: it reads the filesystem. `os build`
   // then writes the bytes it read into the artifact (`placeSeedFiles`, below).
   'collectSeedFiles',
+  // ADR-0141 D2, author side: every `manifest.dependencies` range of the
+  // packages one install act delivers, judged by the install's own predicate
+  // (`checkDeclaredDependencies`). Not a registry rule: an in-artifact range is
+  // judged against a SIBLING package's `manifest.version`, so it is
+  // cross-package by construction, and the per-package stack a rule is handed
+  // sees one side only. Both doors refuse the same errors at the same step.
+  'checkDependencyRanges',
 ];
 
 /**
@@ -338,6 +345,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'formatConversionNotice',
       'formatZodErrors',
       'formatPermissionSetNameCollisions',
+      'formatDependencyRangeDiagnostic',
       'formatUnknownAuthoringKey',
       'JSON_FULL_LIST_REMEDY',
       'renderCapabilityMessage',

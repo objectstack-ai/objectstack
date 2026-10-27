@@ -392,8 +392,8 @@ ones); the engine-side aliasing alternative (deferred); any change to how
    before the refusal exists.
 3. **D3/D6** — refusal ON by default with no opt-out, plus the `v17.mdx`
    migration entry. Same PR flips this
-   ADR to `Accepted — implemented` with evidence (the PRIORITIZATION
-   status-hygiene rule).
+   ADR to `Accepted — implemented` with evidence (the status-hygiene rule,
+   kept in `docs/adr/README.md`).
 
 Steps 1→3 may land in separate PRs but **must not ship in separate
 releases**: step 3 without step 1 refuses correctly-declared actions.

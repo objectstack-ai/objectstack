@@ -9,6 +9,7 @@
 import { ComponentRegistry, toDomProps } from '@object-ui/core';
 import type { TextSchema } from '@object-ui/types';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 type TextVariant = NonNullable<TextSchema['variant']>;
 type TextAlign = NonNullable<TextSchema['align']>;
@@ -110,7 +111,7 @@ const ALIGN_CLASS: Record<TextAlign, string> = {
 };
 
 ComponentRegistry.register('text', 
-  ({ schema, ...props }: { schema: TextSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: TextSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Text is a special case as it might be rendered as a fragment or span depending on usage.
     // However, to support drag and drop in designer, it MUST be wrapped in an element if props are passed.
     

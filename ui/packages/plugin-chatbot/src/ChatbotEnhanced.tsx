@@ -206,8 +206,11 @@ export interface ChatBuildProgress {
   phase: ChatBuildPhase;
   /** Human label for the app being built (for the panel header). */
   appLabel?: string;
-  /** Artifacts drafted so far, cumulative. */
-  items: Array<{ type: string; name: string }>;
+  /**
+   * Artifacts drafted so far, cumulative. `label` is the artifact's display
+   * label when the frame carries one; the panel shows it in place of `name`.
+   */
+  items: Array<{ type: string; name: string; label?: string }>;
   /** Count of artifacts done and the rough total (for the progress bar). */
   done: number;
   total: number;
@@ -754,6 +757,15 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   onBuildMaterialized?: (appName: string) => void;
   /**
+   * The finished build card's own answer about the app it built: the app's
+   * machine `appName`, the `label` the card shows, and whether the card says
+   * it is live (published). Fires when a build card finishes and again
+   * whenever that answer changes (on publish, for one), so a host that shows
+   * the same app elsewhere — the Live Canvas header — reads the card's state
+   * rather than deriving its own.
+   */
+  onBuildResult?: (result: { appName: string; label?: string; live: boolean }) => void;
+  /**
    * objectui#11666 — reports whether this thread's NEWEST proposed plan is
    * still waiting for the user's approval: its card offers "Build it", i.e.
    * {@link resolveProposalCardState} reads `pending` for it. Fires once on
@@ -907,6 +919,16 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * in-memory snapshot remains the fallback when the prop is absent.
    */
   fetchPendingDraftCount?: (packageId: string) => Promise<number>;
+  /**
+   * The host's live-metadata pulse (app-shell's `subscribeMetadataRefresh`):
+   * called once with a listener, returns the unsubscriber. On every pulse
+   * each draft card re-reads its package's count through
+   * `fetchPendingDraftCount`, so a publish this card did not run (the chat
+   * banner, Studio) still turns its Publish (N) into Published. Ignored
+   * without `fetchPendingDraftCount`; absent, the count refreshes only on the
+   * card's own publish / discard, as before.
+   */
+  subscribeMetadataRefresh?: (listener: () => void) => () => void;
   /**
    * Auto-fire `onPublishDrafts` the moment a turn finishes drafting an app —
    * the self-use "magic moment" where the user refreshes and the app is already
@@ -2037,6 +2059,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onPreviewDraft,
       onDraftArtifacts,
       onBuildMaterialized,
+      onBuildResult,
       onPlanApprovalPendingChange,
       publishDraftsLabel = 'Publish',
       publishedLabel = 'Published',
@@ -2077,6 +2100,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       surfaceContextLabel,
       surfaceContextTitle,
       fetchPendingDraftCount,
+      subscribeMetadataRefresh,
       autoPublishDrafts = false,
       processVisibility = 'summary',
       surface = 'card',
@@ -2222,6 +2246,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       ReadonlyMap<string, number>
     >(() => new Map());
     const pendingFetchedRef = React.useRef<Set<string>>(new Set());
+    // Every package a draft card on screen is bound to — what a metadata
+    // pulse re-reads.
+    const pendingPackagesRef = React.useRef<Set<string>>(new Set());
     const refreshPendingCount = React.useCallback(
       async (packageId: string) => {
         if (!fetchPendingDraftCount) return;
@@ -2255,12 +2282,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           const key = tool.toolCallId;
           if (pkg && key && !pendingFetchedRef.current.has(key)) {
             pendingFetchedRef.current.add(key);
+            pendingPackagesRef.current.add(pkg);
             due.add(pkg);
           }
         }
       }
       for (const pkg of due) void refreshPendingCount(pkg);
     }, [messages, isLoading, fetchPendingDraftCount, refreshPendingCount]);
+    // A publish this card did not run (the chat banner, Studio, another
+    // card's package) changes the server's count without touching this
+    // component; the host's metadata pulse is the one signal that it did.
+    // Subscribed once per host subscriber, not per render; the pulse re-reads
+    // the same source the first fetch used.
+    React.useEffect(() => {
+      if (!subscribeMetadataRefresh || !fetchPendingDraftCount) return;
+      return subscribeMetadataRefresh(() => {
+        for (const pkg of pendingPackagesRef.current) void refreshPendingCount(pkg);
+      });
+    }, [subscribeMetadataRefresh, fetchPendingDraftCount, refreshPendingCount]);
     // Publish a package's drafts and reflect success on exactly the cards that
     // were pending for it at publish time. The host's onPublishDrafts returns
     // `false` / `{ok:false}` on failure (and surfaces its own error); any other
@@ -4176,8 +4215,13 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     buildChecklist = detectBuildChecklist(tools[i].result);
                   }
                 }
+                // A materialized build whose envelope says the app is already
+                // listed (`appHidden: false`) is published: ADR-0045 publish
+                // = live AND visible.
                 const buildIsLive =
                   publishedBuild !== undefined ||
+                  (builtAppDraft?.draftReview?.materialized === true &&
+                    builtAppDraft.draftReview.appHidden === false) ||
                   (builtAppDraft !== undefined &&
                     (builtPackageId !== undefined && pendingByPackage.has(builtPackageId)
                       ? pendingByPackage.get(builtPackageId) === 0
@@ -4261,6 +4305,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           getArtifactAction={getArtifactAction}
                           onPreviewDraftApp={onPreviewDraftApp}
                           previewDraftLabel={previewDraftLabel}
+                          onBuildResult={onBuildResult}
                           waitingLabel={L.connectionWaiting}
                           stalledLabel={L.connectionStalledLabel}
                           offlineLabel={L.connectionOfflineLabel}
@@ -5289,6 +5334,7 @@ function BuildProgressPanel({
   getArtifactAction,
   onPreviewDraftApp,
   previewDraftLabel = 'Preview',
+  onBuildResult,
   live = false,
   nextSteps,
   checklist,
@@ -5324,6 +5370,8 @@ function BuildProgressPanel({
   ) => (() => void) | null;
   onPreviewDraftApp?: (appName: string) => void;
   previewDraftLabel?: string;
+  /** {@link ChatbotEnhancedProps.onBuildResult}: this card's app, label and live state. */
+  onBuildResult?: ChatbotEnhancedProps['onBuildResult'];
   waitingLabel?: string;
   stalledLabel?: string;
   offlineLabel?: string;
@@ -5361,12 +5409,26 @@ function BuildProgressPanel({
   const stagedApp = items.find((it) => it.type === 'app');
   const builtApp = checklist?.app ?? stagedApp;
   const studioSegment = checklist?.packageId ?? appSegment;
+  // The card's own answer, handed to the host as the card shows it: the label
+  // its title names the app by and whether that title says the app is live.
+  const resultAppName = builtApp?.name;
+  const resultLabel = checklist?.app?.label ?? appLabel;
+  const resultLive = isDone && live;
+  React.useEffect(() => {
+    if (!onBuildResult || !resultAppName) return;
+    onBuildResult({
+      appName: resultAppName,
+      ...(resultLabel ? { label: resultLabel } : {}),
+      live: resultLive,
+    });
+  }, [onBuildResult, resultAppName, resultLabel, resultLive]);
   const showChecklist = isDone && checklist !== undefined;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : isDone ? 100 : 6;
   const groups = new Map<string, Array<{ name: string; display: string }>>();
   for (const it of items) {
     const arr = groups.get(it.type) ?? [];
-    arr.push({ name: it.name, display: it.name.replace(/_sample$/, '') });
+    // The frame's label when it carries one; the machine name otherwise.
+    arr.push({ name: it.name, display: it.label || it.name.replace(/_sample$/, '') });
     groups.set(it.type, arr);
   }
   const orderedTypes = [
@@ -5575,7 +5637,7 @@ function BuildProgressPanel({
           ) : null}
           <span data-testid="build-result-posture">
             {t('chatbot.build.draftPosture', {
-              defaultValue: 'Later changes are saved as drafts, and you publish them in Studio.',
+              defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
             })}
           </span>
         </p>

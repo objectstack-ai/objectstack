@@ -1974,6 +1974,7 @@ const ar = {
       assistant: "المساعد",
       liveCanvas: "معاينة حية — {{app}} (مسودة)",
       liveCanvasUnlisted: "تطبيق حي — {{app}} (غير مُدرج حتى النشر)",
+      liveCanvasLive: "تطبيق حي — {{app}}",
       loadingAgents: "جارٍ تحميل الوكلاء…",
       askAnything: "اسأل عن أي شيء…",
       askOrChangeApp: "اسأل عن بياناتك، أو اطلب مني تعديل هذا التطبيق…",
@@ -4009,7 +4010,7 @@ const ar = {
       unknownPhase: "مرحلة إنشاء غير معروفة",
       nextStepsLead: "بعد ذلك يمكنك أن تقول: {{steps}}",
       nextStepQuote: "«{{step}}»",
-      draftPosture: "تُحفظ التغييرات اللاحقة كمسودات، وأنت من ينشرها في Studio.",
+      draftPosture: "تُحفظ التغييرات اللاحقة كمسودات، وتنشرها بزر «نشر» هنا في المحادثة.",
       checksPassed: "اجتازت الفحوصات {{passed}}/{{total}}",
     },
     changes: {

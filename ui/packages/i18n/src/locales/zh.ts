@@ -1949,6 +1949,7 @@ const zh = {
       assistant: '助手',
       liveCanvas: '草稿预览 · {{app}}',
       liveCanvasUnlisted: '运行预览 · {{app}}(未发布 · 仅自己可见)',
+      liveCanvasLive: '运行预览 · {{app}}',
       loadingAgents: '正在加载助手…',
       askAnything: '输入你的问题…',
       askOrChangeApp: '问问数据，或让我改改这个应用…',
@@ -3902,7 +3903,7 @@ const zh = {
       unknownPhase: '未知的构建阶段',
       nextStepsLead: '接下来可以说：{{steps}}',
       nextStepQuote: '「{{step}}」',
-      draftPosture: '之后的修改先存草稿，由你在 Studio 发布。',
+      draftPosture: '之后的修改先存草稿，在对话里点「发布」即可上线。',
       checksPassed: '核对通过 {{passed}}/{{total}}',
     },
     changes: {

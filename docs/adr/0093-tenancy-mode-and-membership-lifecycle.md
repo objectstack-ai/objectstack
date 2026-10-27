@@ -1,6 +1,6 @@
 # ADR-0093: Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle
 
-- **Status:** Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts`
+**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts`
 - **Date:** 2026-07-13
 - **Deciders:** ObjectStack Protocol Architects
 - **Implementation:** #2882 (Phase 0 — tactical create-user bind, merged) → this PR (Phases 1–3 — `tenancy` service, fail-fast boot guard, membership reconciler, consumer migration, backfill, docs). One revision from the original plan, ratified in D2: the endpoint-level create-user bind **delegates to the shared reconciler** (one implementation, two call sites) instead of being deleted. Runtime verification confirmed the hook fires for `admin.createUser`, but better-auth *defers* `user.create.after` post-commit (#1881), so the endpoint keeps its delegated call to report `organizationId` / `membershipCreated` deterministically in its response. Cloud-host semantics (personal-org hook precedence, multi-org non-binding, D5 blast radius) verified against `objectstack-ai/cloud` — see D2/D3/D5.
