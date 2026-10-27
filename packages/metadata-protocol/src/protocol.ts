@@ -413,6 +413,10 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
+// [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
+import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
+// [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
+import { saveConflict } from './protocol-save-conflict.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -8492,21 +8496,14 @@ export class ObjectStackProtocolImplementation implements
      * One accessor, no second vocabulary.
      */
     private async listLiveMetadataTypes(): Promise<string[]> {
-        const schemaTypes = this.engine.registry.getRegisteredTypes();
-
-        // Also include types from MetadataService (runtime-registered: agent, tool, etc.)
-        let runtimeTypes: string[] = [];
-        try {
-            const services = this.getServicesRegistry?.();
-            const metadataService = services?.get('metadata');
-            if (metadataService && typeof metadataService.getRegisteredTypes === 'function') {
-                runtimeTypes = await metadataService.getRegisteredTypes();
-            }
-        } catch {
-            // MetadataService not available
-        }
-
-        return Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+        // [#25467 cut 24] The body moved to `protocol-live-metadata-types.ts` (see `LiveMetadataTypesHost`).
+        const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof listLiveMetadataTypes> = {
+            get engine() { return readEngine(); },
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return listLiveMetadataTypes.call(host);
     }
 
     async getMetaTypes() {
@@ -21471,22 +21468,12 @@ export class ObjectStackProtocolImplementation implements
         request: { type: string; name: string; actor?: string; parentVersion?: string | null; mode?: 'draft' | 'publish' },
         writeSource: string,
     ): Promise<Error> {
-        const conflict = await this.metadataConflictRefusal(
-            err,
-            `${request.type}/${request.name}`,
-            `${request.type}/${request.name} has been modified since you loaded it.`,
-            request.parentVersion === null ? (request.mode === 'draft' ? 'draft' : 'active') : undefined,
-        );
-        await this.recordOptimisticConflictAudit({
-            type: request.type,
-            name: request.name,
-            operation: 'save',
-            ...(request.actor ? { actor: request.actor } : {}),
-            source: writeSource,
-            expectedParent: err.expectedParent,
-            actualHead: err.actualHead,
-        });
-        return conflict;
+        // [#25467 cut 24] The body moved to `protocol-save-conflict.ts` (see `SaveConflictHost`).
+        const host: ThisParameterType<typeof saveConflict> = {
+            metadataConflictRefusal: (...a) => this.metadataConflictRefusal(...a),
+            recordOptimisticConflictAudit: (...a) => this.recordOptimisticConflictAudit(...a),
+        };
+        return saveConflict.call(host, err, request, writeSource);
     }
 
     /**

@@ -761,6 +761,9 @@ const zh = {
     addRecord: '添加记录',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: '查看全部',
+    viewAllCount: '查看全部 {{count}} 条',
+    viewAllCount_one: '查看全部 {{count}} 条',
+    viewAllCount_other: '查看全部 {{count}} 条',
     tabs: '标签页',
     allRecords: '全部记录',
     userFilters: {
@@ -2988,6 +2991,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
+      inStudio: '在 Studio 中新建',
     },
     template: {
       title: '从模板开始',
@@ -3890,8 +3894,8 @@ const zh = {
       nameField: '名称：{{field}}',
     },
     build: {
-      building: '正在构建{{app}}…',
-      built: '已构建{{app}}',
+      building: '正在构建 · {{app}}…',
+      built: '已构建 · {{app}}',
       builtAndLive: '已搭建并上线 · {{app}}',
       appFallback: '你的应用',
       addingSampleData: '正在添加示例数据',

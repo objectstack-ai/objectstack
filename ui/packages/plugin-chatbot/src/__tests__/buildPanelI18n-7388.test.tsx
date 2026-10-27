@@ -104,15 +104,18 @@ describe('control: a known phase renders exactly as it did before (en)', () => {
 // SUBJECT — the same panel under a zh console.
 // ---------------------------------------------------------------------------
 describe('the build panel under a zh console (objectui#7388)', () => {
+  // The header composes the verb and the app name with the ` · ` separator
+  // `builtAndLive` already used: a name pasted straight onto the verb ran on
+  // into one word (「已构建Library Lending Management」).
   it('localizes the in-flight header instead of hard-coding "Building X…"', () => {
     renderIn('zh', panel('structure'));
-    expect(screen.getByText('正在构建CRM…')).toBeInTheDocument();
+    expect(screen.getByText('正在构建 · CRM…')).toBeInTheDocument();
     expect(screen.queryByText(/Building/)).not.toBeInTheDocument();
   });
 
   it('localizes the finished header instead of hard-coding "Built X"', () => {
     renderIn('zh', panel('done'));
-    expect(screen.getByText('已构建CRM')).toBeInTheDocument();
+    expect(screen.getByText('已构建 · CRM')).toBeInTheDocument();
     expect(screen.queryByText(/^Built /)).not.toBeInTheDocument();
   });
 
@@ -138,9 +141,11 @@ describe('the build panel under a zh console (objectui#7388)', () => {
     expect(screen.queryByText('App')).not.toBeInTheDocument();
   });
 
+  // The stand-in goes through the same frame, so it reads the way
+  // `builtAndLive` already reads for an unnamed build (「已搭建并上线 · 你的应用」).
   it('localizes the unnamed-build stand-in, so the header is Chinese end to end', () => {
     renderIn('zh', panel('structure', { appLabel: undefined }));
-    expect(screen.getByText('正在构建你的应用…')).toBeInTheDocument();
+    expect(screen.getByText('正在构建 · 你的应用…')).toBeInTheDocument();
     expect(screen.queryByText(/your app/)).not.toBeInTheDocument();
   });
 
@@ -158,5 +163,28 @@ describe('the build panel under a zh console (objectui#7388)', () => {
     renderIn('zh', panel('structure', { items: [{ type: 'flow', name: 'onboarding' }] }));
     expect(screen.getByText('flow')).toBeInTheDocument();
     expect(screen.queryByText(/chatbot\.build/)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other two CJK packs keep their headers as they are: neither runs the
+// verb into the name. ja puts the name first and a particle after it, ko
+// already leaves a space before the verb.
+// ---------------------------------------------------------------------------
+describe('the build panel header under ja and ko consoles', () => {
+  it('ja — the name leads and the particle separates it from the verb', () => {
+    renderIn('ja', panel('structure'));
+    expect(screen.getByText('CRMを構築しています…')).toBeInTheDocument();
+    cleanup();
+    renderIn('ja', panel('done'));
+    expect(screen.getByText('CRMを構築しました')).toBeInTheDocument();
+  });
+
+  it('ko — a space already separates the name from the verb', () => {
+    renderIn('ko', panel('structure'));
+    expect(screen.getByText('CRM 빌드 중…')).toBeInTheDocument();
+    cleanup();
+    renderIn('ko', panel('done'));
+    expect(screen.getByText('CRM 빌드 완료')).toBeInTheDocument();
   });
 });
