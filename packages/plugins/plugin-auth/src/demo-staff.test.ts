@@ -233,3 +233,180 @@ describe('provisioning — a failure after sign-up says the account exists', () 
     expect(outcome.assignmentsAdded).toBe(0);
   });
 });
+
+/**
+ * A `sys_user` table the manager pass reads and writes, behind the engine
+ * surface both the provisioning and the set-manager write use. Every update is
+ * recorded, so "left as it is" is read as "never written", not as a value that
+ * happens to match. `sys_member` answers no rows: no tenancy fact recorded, so
+ * the cross-organization screen stays out of these cases, as it does for any
+ * identity without one.
+ */
+function managerEngine(users: Array<Record<string, unknown>>) {
+  const updates: Array<Record<string, unknown>> = [];
+  const engine: DemoStaffEngine = {
+    async find(object, query) {
+      const matched = object === 'sys_user' ? selectRows(users, (query.where ?? {}) as Record<string, unknown>) : [];
+      return typeof query.limit === 'number' ? matched.slice(0, query.limit) : matched;
+    },
+    async update(object, data, options) {
+      assertEngineUpdateDispatch(data, options as Parameters<typeof assertEngineUpdateDispatch>[1]);
+      updates.push({ object, ...data });
+      const row = users.find((u) => u.id === data.id);
+      if (object === 'sys_user' && row) Object.assign(row, data);
+      return undefined;
+    },
+    async insert() {
+      throw new Error('these entries carry no position or permission set, so nothing is inserted');
+    },
+  };
+  let next = 0;
+  const signUp = async ({ email, name }: { email: string; name: string }) => {
+    users.push({ id: `u_${++next}`, email, name, manager_id: null });
+  };
+  return { engine, updates, signUp };
+}
+
+const managerLinks = (updates: Array<Record<string, unknown>>) =>
+  updates.filter((u) => 'manager_id' in u).map((u) => [u.id, u.manager_id]);
+
+describe('provisioning — each declared manager is linked once every entry has its account', () => {
+  const STAFF = [
+    // Names a manager declared AFTER it: the link waits for the second pass.
+    { name: 'Legal Counsel 1', email: 'counsel1@legal.example', manager: 'LEAD@legal.example' },
+    { name: 'Legal Lead', email: 'lead@legal.example' },
+  ];
+  const deps = (engine: DemoStaffEngine, signUp: (a: { email: string; name: string }) => Promise<void>) => ({
+    engine,
+    password: 'admin123',
+    signUp,
+    defaultOrganizationId: async () => null,
+  });
+
+  it('a fresh database: the manager declared after the entry is linked, through the set-manager write', async () => {
+    const users: Array<Record<string, unknown>> = [];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    const outcome = await provisionDemoStaff(STAFF, deps(engine, signUp));
+
+    expect(outcome).toMatchObject({
+      created: ['counsel1@legal.example', 'lead@legal.example'],
+      failed: [],
+      managersLinked: 1,
+      managersKept: [],
+    });
+    const byEmail = (email: string) => users.find((u) => u.email === email)!;
+    expect(byEmail('counsel1@legal.example').manager_id).toBe(byEmail('lead@legal.example').id);
+    expect(managerLinks(updates)).toEqual([[byEmail('counsel1@legal.example').id, byEmail('lead@legal.example').id]]);
+  });
+
+  it('a re-run writes nothing: the declared link is in place', async () => {
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: 'u_lead' },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    const outcome = await provisionDemoStaff(STAFF, deps(engine, signUp));
+
+    expect(outcome).toMatchObject({ created: [], failed: [], managersLinked: 0, managersKept: [] });
+    expect(managerLinks(updates)).toEqual([]);
+  });
+
+  it('a re-run leaves a manager set by hand as it is, and says so', async () => {
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: 'u_someone_else' },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    const outcome = await provisionDemoStaff(STAFF, deps(engine, signUp));
+
+    expect(outcome).toMatchObject({ failed: [], managersLinked: 0, managersKept: ['counsel1@legal.example'] });
+    expect(managerLinks(updates)).toEqual([]);
+    expect(users[0]!.manager_id).toBe('u_someone_else');
+  });
+
+  it('a re-run writes the declared manager again on an account whose manager was cleared', async () => {
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: null },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    expect(await provisionDemoStaff(STAFF, deps(engine, signUp))).toMatchObject({ failed: [], managersLinked: 1 });
+    expect(managerLinks(updates)).toEqual([['u_c1', 'u_lead']]);
+  });
+
+  it('a manager whose entry could not be provisioned is reported on the subordinate, never skipped', async () => {
+    const users: Array<Record<string, unknown>> = [];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    const outcome = await provisionDemoStaff(
+      STAFF,
+      deps(engine, async (account) => {
+        if (account.email === 'lead@legal.example') throw new Error('the sign-up door refused the address');
+        await signUp(account);
+      }),
+    );
+
+    expect(outcome.created).toEqual(['counsel1@legal.example']);
+    expect(outcome.managersLinked).toBe(0);
+    expect(outcome.failed).toEqual([
+      { email: 'lead@legal.example', message: 'the sign-up door refused the address' },
+      {
+        email: 'counsel1@legal.example',
+        message:
+          'its manager lead@legal.example has no account, so the manager link was not written: that demo account ' +
+          'was not provisioned on this boot (its own line says why).',
+      },
+    ]);
+    expect(managerLinks(updates)).toEqual([]);
+  });
+
+  it('the set-manager write`s own degradation warning reaches the boot logger', async () => {
+    // The cross-organization screen cannot read `sys_member`: the set-manager
+    // write accepts the link without it and says so once, on the logger the
+    // provisioning was handed.
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: null },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+    const find = engine.find.bind(engine);
+    engine.find = async (object, query, options) => {
+      if (object === 'sys_member') throw new Error('sys_member is unreachable');
+      return find(object, query, options);
+    };
+    const warned: string[] = [];
+
+    const outcome = await provisionDemoStaff(STAFF, {
+      ...deps(engine, signUp),
+      logger: { warn: (msg) => warned.push(msg) },
+    });
+
+    expect(outcome).toMatchObject({ failed: [], managersLinked: 1 });
+    expect(managerLinks(updates)).toEqual([['u_c1', 'u_lead']]);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('the cross-organization screen could not read sys_member');
+  });
+
+  it('a link the set-manager write refuses is reported with its code and reason', async () => {
+    // A directory-owned identity: the set-manager write's refusal 5. The
+    // provisioning carries no copy of that rule; this is the shared one.
+    const users: Array<Record<string, unknown>> = [
+      { id: 'u_c1', email: 'counsel1@legal.example', manager_id: null, source: 'idp_provisioned' },
+      { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
+    ];
+    const { engine, updates, signUp } = managerEngine(users);
+
+    const outcome = await provisionDemoStaff(STAFF, deps(engine, signUp));
+
+    expect(outcome.managersLinked).toBe(0);
+    expect(outcome.failed.map((f) => f.email)).toEqual(['counsel1@legal.example']);
+    expect(outcome.failed[0]!.message).toContain(
+      'its manager link to lead@legal.example was refused [PERMISSION_DENIED, idp_provisioned]',
+    );
+    expect(managerLinks(updates)).toEqual([]);
+  });
+});
