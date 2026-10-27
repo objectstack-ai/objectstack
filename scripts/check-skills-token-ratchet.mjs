@@ -407,7 +407,20 @@ export const CEILINGS = new Map([
   // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/SKILL.md', 6164],
+  // 24654 -> 25429 (#26502): one paragraph beside "Elevate the write, not the
+  // flow" — a `runAs: 'system'` flow's insert, update, delete, transfer, restore
+  // or purge of the four identity-assignment objects is refused
+  // `PERMISSION_DENIED`, a dedicated system subflow included, and the refusal's
+  // own remedy (the grant from a `runAs: 'user'` flow, invitations and
+  // memberships through the organization endpoints), linking system-context
+  // row 1b. Paid down first: the file's `runAs` guidance restates nothing
+  // elsewhere in it, nothing to cut (0 bytes). Arithmetic in priced bytes
+  // (stamp line excluded): 24654 -> 25429 (+775) -> ceil(25429 / 4) = 6358;
+  // headroom was 2 bytes, 0 tokens, so the ceiling moves +194, pinned AT
+  // the measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6358],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -807,7 +820,16 @@ export const CEILINGS = new Map([
   // ceiling moves +286, pinned AT the measurement. Same maintainer ruling as
   // the SKILL.md row above (2026-10-27, verbatim and untranslated):
   // 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2427],
+  // 9705 -> 10893 (#26502): eval 11, the counter-case to eval 1's readonly sweep
+  // — an author asks a system flow to grant a permission set; the ideal answer
+  // names the `PERMISSION_DENIED` refusal and routes the grant through a
+  // `runAs: 'user'` flow, written so it never spells either `must_not_contain`
+  // string. Paid down first: the file's ten fixtures share no sentence,
+  // nothing to cut (0 bytes). 9705 -> 10893 bytes (+1188) -> ceil(10893 / 4)
+  // = 2724; headroom was 3 bytes, 0 tokens, so the ceiling moves +297, pinned
+  // AT the measurement. Same maintainer ruling as the SKILL.md row above
+  // (2026-10-27, tap A verbatim and untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2724],
   // 894 -> 1095 (#26179): one regression case for the field permission `when`
   // (the contract prompt: lock the legal terms for finance from approval on,
   // legal keeps the edit) — expected: `when` on the finance set's entries with
