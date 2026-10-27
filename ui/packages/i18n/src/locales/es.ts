@@ -2804,6 +2804,8 @@ const es = {
         dataRead: "Leer registros (dentro de sus propios permisos)",
         dataWrite: "Crear, modificar y eliminar registros (dentro de sus propios permisos)",
         actionsExecute: "Ejecutar acciones en su nombre (dentro de sus propios permisos)",
+        metadataWrite: "Crear y modificar los metadatos de esta aplicación como borradores (dentro de sus propios permisos); una persona los publica",
+        unrecognised: "Permiso no reconocido: {{scope}}",
       },
       deny: "Denegar",
       authorize: "Autorizar",

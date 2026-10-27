@@ -3290,8 +3290,10 @@ const en = {
       unidentified: 'This application could not be identified.',
       clientId: 'Client ID',
       willAllow: 'This app will be able to:',
-      // Only the seven scopes the page maps by name; anything else renders the
-      // raw scope string, which is why there is no generic entry here.
+      // One sentence per scope the page names. The MCP agent scopes take their
+      // English from `@objectstack/spec`'s `MCP_OAUTH_SCOPE_CONSENT_COPY` (the
+      // page passes it as the default) and must read the same here. Any other
+      // scope renders as `unrecognised`, never as its raw spelling.
       scope: {
         openid: 'Confirm your identity',
         profile: 'Read your basic profile (name, picture)',
@@ -3300,6 +3302,8 @@ const en = {
         dataRead: 'Read records, within your own permissions',
         dataWrite: 'Create, change and delete records, within your own permissions',
         actionsExecute: 'Run actions on your behalf, within your own permissions',
+        metadataWrite: "Build and change this app's metadata as drafts, within your own permissions — a person publishes them",
+        unrecognised: 'Unrecognised permission: {{scope}}',
       },
       deny: 'Deny',
       authorize: 'Authorize',

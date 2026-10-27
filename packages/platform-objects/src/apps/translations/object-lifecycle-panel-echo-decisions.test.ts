@@ -1223,9 +1223,12 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 683 since #25760 (ADR-0055 §3 amendment): the object form's `sharing`
       // composite — the block, its `controlledByParent` sub-block and the
       // `ownerMayEdit` toggle — three row labels, authored in all three locales.
-      // 685 since ADR-0142: `queue` and `assignment_rule` joined the registry,
+      // 686 since #26548: the report form's "Period & export" section and its
+      // `dateRange` / `exportOptions` composites — the section label and two
+      // row labels, authored in all three locales.
+      // 688 since ADR-0142: `queue` and `assignment_rule` joined the registry,
       // each with its type-level display pair, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(685);
+      expect(translated.length, `${locale} positive control`).toBe(688);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

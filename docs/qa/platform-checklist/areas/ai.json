@@ -133,7 +133,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -146,7 +146,8 @@
       "variants": [
         "OAuth scope data:read → read-family tools: list_objects, describe_object, validate_expression, query_records, get_record, and aggregate_records where the bridge implements aggregate (packages/mcp/src/mcp-http-tools.ts canRead block; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
         "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
-        "OAuth scope actions:execute → list_actions, run_action"
+        "OAuth scope actions:execute → list_actions, run_action",
+        "OAuth scope metadata:write → the authoring tools the host injects (packages/mcp/src/mcp-server-runtime.ts registerAuthoringTools; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_METADATA_WRITE), served only to an OAuth grant naming metadata:write — a key or a session is served none"
       ],
       "steps": [
         "boot with OS_MCP_SERVER_ENABLED=false; GET /api/v1/mcp/skill and POST /api/v1/mcp; record status + body of both",
@@ -154,7 +155,7 @@
         "POST /api/v1/mcp/skill (wrong method); capture the 405 and its Allow header",
         "POST /api/v1/mcp with NO credentials (an MCP initialize body); capture the 401 body and any WWW-Authenticate header",
         "open an MCP Streamable HTTP session against /api/v1/mcp with the osk_ key: initialize, then tools/list; record the full tool-name set",
-        "if the OAuth track is live in the environment, request /mcp with an OAuth token (to mint one locally, register the client with application_type: 'native' — dynamic client registration refuses a web client whose redirect is http or a loopback host, 'web clients require https redirect URIs on non-loopback hosts', @better-auth/oauth-provider) carrying NONE of the three MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
+        "if the OAuth track is live in the environment, request /mcp with an OAuth token (to mint one locally, register the client with application_type: 'native' — dynamic client registration refuses a web client whose redirect is http or a loopback host, 'web clients require https redirect URIs on non-loopback hosts', @better-auth/oauth-provider) carrying NONE of the four MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
         "capture the dispatcher-vs-hono distinction: the disabled boot's 404 comes from the gate (surface not advertised), never a hang or 500"
       ],
       "acceptance": [
@@ -189,9 +190,9 @@
           "evidence": "the session trace + tool-name list"
         },
         {
-          "clause": "an OAuth token granting none of the MCP scopes is refused 403 up front with insufficient_scope naming all three scopes (data:read, data:write, actions:execute); a partial grant narrows the tool list per the variants matrix (#2698, ADR-0090 D10)",
+          "clause": "an OAuth token granting none of the MCP scopes is refused 403 up front with insufficient_scope naming all four scopes (data:read, data:write, actions:execute, metadata:write); a partial grant narrows the tool list per the variants matrix (#2698, ADR-0090 D10)",
           "oracle": "api",
-          "verify": "403 body 'Forbidden: the access token grants none of the MCP scopes …' + WWW-Authenticate error=\"insufficient_scope\" scope=\"data:read data:write actions:execute\"; for a data:read-only token, tools/list carries the read family only",
+          "verify": "403 body 'Forbidden: the access token grants none of the MCP scopes …' + WWW-Authenticate error=\"insufficient_scope\" scope=\"data:read data:write actions:execute metadata:write\"; for a data:read-only token, tools/list carries the read family only",
           "evidence": "the 403 + the narrowed tools/list"
         }
       ],
@@ -215,7 +216,8 @@
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#24649" },
-        { "revision": 5, "date": "2026-10-26", "change": "automated.ref extended and annotated per clause — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the one-file ref left acceptance[0]–[2] and [5] with no named pin, and the pin asserts acceptance[3]'s status only and acceptance[4] with a session bearer, no initialize and two tool names. Re-read on main at b4199c96: the record's 'no pin at any layer' for acceptance[0]–[2] and [5] no longer holds, since dispatcher-unit and Hono-integration pins in packages/runtime and the scope-narrowing unit in packages/mcp assert parts of them; they join the ref with the layer each reaches and what each leaves unasserted. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 5, "date": "2026-10-26", "change": "automated.ref extended and annotated per clause — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the one-file ref left acceptance[0]–[2] and [5] with no named pin, and the pin asserts acceptance[3]'s status only and acceptance[4] with a session bearer, no initialize and two tool names. Re-read on main at b4199c96: the record's 'no pin at any layer' for acceptance[0]–[2] and [5] no longer holds, since dispatcher-unit and Hono-integration pins in packages/runtime and the scope-narrowing unit in packages/mcp assert parts of them; they join the ref with the layer each reaches and what each leaves unasserted. No clause changed, no status changed", "ref": "#25836" },
+        { "revision": 6, "date": "2026-10-27", "change": "acceptance[5] clause and verify, steps[5] and variants follow the fourth MCP scope, metadata:write: the scopeless 403 names all four scopes in its body and in its WWW-Authenticate scope list (packages/runtime/src/domains/mcp.ts joins MCP_OAUTH_SCOPES), and the variants matrix gains the metadata:write row (the host-injected authoring tools, served only to an OAuth grant naming the scope). Re-read on main at c739de75. No status changed", "ref": "#26587" }
       ]
     },
     {
