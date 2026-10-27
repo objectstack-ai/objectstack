@@ -3144,6 +3144,8 @@ const zh = {
     recordAccessDeniedDescription: '你没有查看此类记录的权限。如需访问，请联系管理员。',
     recordLoadFailed: '无法加载此记录',
     recordLoadFailedDescription: '加载时出错。请检查网络连接后重试。',
+    recordAccessEnded: '你的审批决定已记录',
+    recordAccessEndedDescription: '你的审批环节已结束，对此记录的访问权限也随之结束。',
     pageNotFound: '未找到页面',
     pageNotFoundDescription: '未找到页面 “{{name}}”，可能已被删除或重命名。',
     dashboardNotFound: '未找到仪表板',

@@ -3102,6 +3102,8 @@ const de = {
     recordAccessDeniedDescription: "Sie haben keine Berechtigung, Datensätze dieses Typs anzuzeigen. Wenden Sie sich an Ihren Administrator, wenn Sie Zugriff benötigen.",
     recordLoadFailed: "Dieser Datensatz konnte nicht geladen werden",
     recordLoadFailedDescription: "Beim Laden ist etwas schiefgelaufen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    recordAccessEnded: "Entscheidung erfasst",
+    recordAccessEndedDescription: "Ihr Genehmigungsschritt ist abgeschlossen, damit endet Ihr Zugriff auf diesen Datensatz.",
   },
   actionDialog: {
     title: "Aktionsparameter",

@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -828,14 +828,27 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Every rejection used to land on `missing`, so a refused read told the
   // viewer the record "may have been deleted" — and they reported a lost record
   // instead of asking for access — and a transient failure looked final.
+  //   - `accessEnded` — a `missing` answer that follows this viewer's OWN
+  //     approval decision on this record (objectstack#26589, below).
   const [pageRecordStatus, setPageRecordStatus] = useState<
-    'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed'
+    'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
   // Cleared with the effect, so a Retry can never run a superseded load.
   const reloadPageRecordRef = useRef<(() => void) | null>(null);
+  // objectstack#26589 — the record this viewer just decided an approval on,
+  // as `objectName` + `recordId`. A pending approver with no standing access
+  // reads the record only while their step waits (objectstack#26180): the
+  // server revokes that read when the step ends, so the re-read that follows
+  // their own decision answers 404. That 404 is the read ENDING, not a lost
+  // record, and the load below draws `accessEnded` for it, not "Record not
+  // found". Only `handleApprovalActionDone` sets it, so any 404 that does not
+  // follow this viewer's decision on THIS record is still `missing`. Cleared
+  // when the page moves to another record, and by a read that answers the
+  // record (a viewer with standing access keeps reading it).
+  const decidedRecordRef = useRef<string | null>(null);
 
   // Permissions context.
   //
@@ -919,6 +932,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       setPageRecordStatus('idle');
       return;
     }
+    const decidedKey = `${objectName}:${pureRecordId}`;
+    if (decidedRecordRef.current !== decidedKey) decidedRecordRef.current = null;
     const expandFields: string[] = JSON.parse(pageRecordExpand);
     const params = expandFields.length > 0 ? { $expand: expandFields } : undefined;
     const loadRecord = () => {
@@ -930,11 +945,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         .then((rec: any) => {
           if (cancelled) return;
           if (rec && typeof rec === 'object') {
+            decidedRecordRef.current = null;
             setPageRecord(rec);
             setPageRecordStatus('loaded');
           } else {
             setPageRecord(null);
-            setPageRecordStatus('missing');
+            setPageRecordStatus(decidedRecordRef.current === decidedKey ? 'accessEnded' : 'missing');
           }
         })
         .catch((err: unknown) => {
@@ -1737,10 +1753,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // engine-written mirrors (`approval_status`, stage fields) change with the
   // decision. `refreshAfter: true` on every declared decision action is what
   // calls this.
+  //
+  // objectstack#26589 — it also marks this record as the one this viewer just
+  // decided, BEFORE the re-read goes out, so a 404 that re-read answers draws
+  // the ended-access state instead of "Record not found".
   const handleApprovalActionDone = useCallback(() => {
+    if (objectName && pureRecordId) decidedRecordRef.current = `${objectName}:${pureRecordId}`;
     void approvalsRef.current.refresh();
     notifyRecordChanged();
-  }, [notifyRecordChanged]);
+  }, [notifyRecordChanged, objectName, pureRecordId]);
 
   // Discover reverse references: other objects with lookup/master_detail fields
   // pointing to the current object (e.g., order_item.order → order).
@@ -3316,6 +3337,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 'The record you are looking for does not exist or may have been deleted.',
             })}
           </EmptyDescription>
+        </Empty>
+      </div>
+    );
+  }
+
+  // objectstack#26589 — the read ended with this viewer's own approval
+  // decision: the step that granted it is over (objectstack#26180 revokes it
+  // then), so say the decision landed and where their work continues, never
+  // that the record does not exist. The read is not kept any longer; the
+  // inbox link is the way on.
+  if (pageRecordStatus === 'accessEnded') {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <Empty data-testid="record-access-ended">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <EmptyTitle>{t('empty.recordAccessEnded', { defaultValue: 'Decision recorded' })}</EmptyTitle>
+          <EmptyDescription>
+            {t('empty.recordAccessEndedDescription', {
+              defaultValue: 'Your approval step is complete, so your access to this record has ended.',
+            })}
+          </EmptyDescription>
+          {appName && (
+            <div className="mt-4">
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/apps/${appName}/system/approvals`} data-testid="record-access-ended-inbox">
+                  <Inbox className="mr-1.5 h-4 w-4" />
+                  {t('notifications.openApprovalsInbox', { defaultValue: 'Open Approvals Inbox' })}
+                </Link>
+              </Button>
+            </div>
+          )}
         </Empty>
       </div>
     );

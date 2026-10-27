@@ -3648,6 +3648,8 @@ const en = {
     recordAccessDeniedDescription: 'You don’t have permission to view records of this type. Contact your administrator if you think you should have access.',
     recordLoadFailed: 'Couldn’t load this record',
     recordLoadFailedDescription: 'Something went wrong while loading it. Check your connection and try again.',
+    recordAccessEnded: 'Decision recorded',
+    recordAccessEndedDescription: 'Your approval step is complete, so your access to this record has ended.',
     pageNotFound: 'Page Not Found',
     pageNotFoundDescription: 'The page "{{name}}" could not be found. It may have been removed or renamed.',
     dashboardNotFound: 'Dashboard Not Found',

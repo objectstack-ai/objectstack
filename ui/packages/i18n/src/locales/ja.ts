@@ -3104,6 +3104,8 @@ const ja = {
     recordAccessDeniedDescription: "この種類のレコードを表示する権限がありません。必要な場合は管理者にお問い合わせください。",
     recordLoadFailed: "このレコードを読み込めませんでした",
     recordLoadFailedDescription: "読み込み中に問題が発生しました。接続を確認して再試行してください。",
+    recordAccessEnded: "判断を記録しました",
+    recordAccessEndedDescription: "承認ステップが完了したため、このレコードへのアクセス権は終了しました。",
   },
   actionDialog: {
     title: "アクションパラメーター",
