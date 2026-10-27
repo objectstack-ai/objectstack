@@ -139,12 +139,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '13. Any other 422 still fails; a racer the read cannot see fails loudly, bounded': 8,
   '14. Duplicate releases for one tag are reported, never deleted': 14,
   '15. The Release body is grouped by what the reader must do (ruling A)': 14,
+  '16. A list that moves between page reads is one Release per id': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Raised 14 → 15 with the
-// grouping battery (maintainer ruling A, 2026-10-21, objectstack#25105).
-const SELF_TEST_BATTERY_FLOOR = 15;
+// grouping battery (maintainer ruling A, 2026-10-21, objectstack#25105), and
+// 15 → 16 with the moving-list battery.
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1909,6 +1911,146 @@ async function selfTest() {
     ).warnings.some((w) => w.includes('never appeared')),
     'a tag the list never shows is reported unseen, not silently cleared',
   );
+
+  // ── 16. A list that moves between page reads is one Release per id ───────
+  // Release run 40464600678: one version's Releases share their tag date, so
+  // their order among themselves is not stable across requests, and a create
+  // pushes every row down. The audit listed id 425135424 twice — "2 GitHub
+  // Releases" with an empty surplus — and never saw another tag at all.
+  battery('16. A list that moves between page reads is one Release per id');
+  {
+    const PER = 4;
+    const version = Array.from({ length: 6 }, (_, i) => ({
+      id: 9001 + i,
+      tag_name: `@object-ui/pkg-${i}@18.2.0`,
+      created_at: STUB_TAG_DATE,
+    }));
+    const tagsOf = (rels) => rels.map((r) => r.tag_name);
+    // The tie order flips at the page boundary once page 1 is served: the last
+    // row of page 1 is served again at the top of page 2, and the row it swapped
+    // with is served on no page.
+    const swapAtBoundary = (ordered, page, perPage) => {
+      if (page < 2) return ordered;
+      const moved = [...ordered];
+      [moved[perPage - 1], moved[perPage]] = [moved[perPage], moved[perPage - 1]];
+      return moved;
+    };
+    // A Release created between the two reads lands at the head of the list.
+    const newer = { id: 9999, tag_name: '@objectstack/elsewhere@99.0.0', created_at: '2026-10-03T00:00:00Z', assets: [] };
+    const createdAtHead = (ordered, page) => (page < 2 ? ordered : [newer, ...ordered]);
+
+    const swapped = stubFetch({ seed: [...version, ...olderVersion], listMoves: swapAtBoundary });
+    const swappedClient = clientOver(swapped);
+    const p1 = (await swappedClient.listPage({ page: 1, perPage: PER })).map((r) => r.id);
+    const p2 = (await swappedClient.listPage({ page: 2, perPage: PER })).map((r) => r.id);
+    assert(
+      p1.filter((id) => p2.includes(id)).length === 1 && ![...p1, ...p2].includes(9002),
+      `the fixture really moves: one id on both pages and one on neither (page 1 ${p1}, page 2 ${p2})`,
+    );
+    const swapAudit = await auditDuplicateReleases({
+      client: swappedClient,
+      tagNames: tagsOf(version),
+      createdIds: version.map((r) => r.id),
+      perPage: PER,
+    });
+    assert(
+      swapAudit.duplicates.length === 0 && swapAudit.unseen.length === 0 && swapAudit.complete,
+      `a row served on two pages and a row served on none yield 0 duplicates and 0 unseen (got ${swapAudit.duplicates.length} / ${JSON.stringify(swapAudit.unseen)})`,
+    );
+    assert(
+      swapAudit.rowsServedTwice === 1 && JSON.stringify(swapAudit.foundByTag) === JSON.stringify(['@object-ui/pkg-1@18.2.0']),
+      `the repeated row is counted once, and the tag no page showed is found by tag (got ${swapAudit.rowsServedTwice}, ${JSON.stringify(swapAudit.foundByTag)})`,
+    );
+    const swapReport = describeDuplicates(swapAudit);
+    assert(
+      swapReport.errors.length === 0 && swapReport.warnings.length === 0,
+      `the moved list fails nothing and warns nothing (got ${JSON.stringify(swapReport)})`,
+    );
+    assert(
+      swapReport.notes.length === 1 && swapReport.notes[0].includes('@object-ui/pkg-1@18.2.0') && swapReport.notes[0].includes('1 row(s)'),
+      'the move is logged as a note naming the repeated-row count and the tag read by tag',
+    );
+
+    const shifted = stubFetch({ seed: [...version, ...olderVersion], listMoves: createdAtHead });
+    const shiftAudit = await auditDuplicateReleases({
+      client: clientOver(shifted),
+      tagNames: tagsOf(version),
+      createdIds: version.map((r) => r.id),
+      perPage: PER,
+    });
+    assert(
+      shiftAudit.duplicates.length === 0 && shiftAudit.unseen.length === 0 && shiftAudit.foundByTag.length === 0 &&
+        shiftAudit.rowsServedTwice === 1 && describeDuplicates(shiftAudit).errors.length === 0,
+      `a create landing at the head between two reads repeats one row and yields 0 duplicates and 0 unseen (got ${JSON.stringify(shiftAudit)})`,
+    );
+
+    // Control: a REAL pair — two distinct ids on one tag — still reds under the
+    // same move, and the move does not list either id twice.
+    const dupTag = '@object-ui/pkg-2@18.2.0';
+    const realPair = version.map((r) => (r.id === 9004 ? { ...r, tag_name: dupTag } : r));
+    const pairStub = stubFetch({ seed: [...realPair, ...olderVersion], listMoves: swapAtBoundary });
+    const pairAudit = await auditDuplicateReleases({
+      client: clientOver(pairStub),
+      tagNames: [...new Set(tagsOf(realPair))],
+      createdIds: [9004],
+      perPage: PER,
+    });
+    assert(
+      pairAudit.duplicates.length === 1 &&
+        JSON.stringify(pairAudit.duplicates[0].releases.map((r) => r.id)) === JSON.stringify([9003, 9004]),
+      `a real two-id duplicate under the move is still found, each id once (got ${JSON.stringify(pairAudit.duplicates)})`,
+    );
+    const pairReport = describeDuplicates(pairAudit);
+    assert(
+      pairReport.errors.length === 1 &&
+        pairReport.errors[0].includes(`${dupTag} has 2 GitHub Releases: 9003 (no assets), 9004 (no assets)`) &&
+        pairReport.errors[0].includes('the other(s), 9004, are the surplus') &&
+        pairReport.errors[0].includes('This run created 9004:'),
+      `the real pair is an ERROR naming both ids and a non-empty surplus (got ${JSON.stringify(pairReport.errors)})`,
+    );
+
+    // The 40464600678 audit handed straight to the report: one id twice is no
+    // duplicate, so there is nothing to print — least of all an empty surplus.
+    const sameIdTwice = describeDuplicates({
+      duplicates: [
+        {
+          tagName: '@object-ui/fields@18.2.0',
+          releases: [{ id: 425135424, assets: [] }, { id: 425135424, assets: [] }],
+          byTagId: 425135424,
+          createdByThisRun: [425135424, 425135424],
+        },
+      ],
+      unseen: [],
+      foundByTag: [],
+      rowsServedTwice: 0,
+      pagesRead: 3,
+      complete: true,
+    });
+    assert(
+      sameIdTwice.errors.length === 0 && sameIdTwice.warnings.length === 0 &&
+        ![...sameIdTwice.errors, ...sameIdTwice.warnings].some((l) => /, ,|the other\(s\), ,/.test(l)),
+      `one id listed twice is reported as nothing, never as a pair with an empty surplus (got ${JSON.stringify(sameIdTwice)})`,
+    );
+
+    // A walk that stopped at its cap re-reads nothing: its unseen tags may sit,
+    // twins and all, on the pages it never read.
+    const cappedStub = stubFetch({ seed: [...version, ...olderVersion] });
+    const cappedAudit = await auditDuplicateReleases({
+      client: clientOver(cappedStub),
+      tagNames: tagsOf(version),
+      perPage: 2,
+      maxPages: 1,
+    });
+    assert(
+      !cappedAudit.complete && cappedAudit.unseen.length === 4 && cappedAudit.foundByTag.length === 0 &&
+        !cappedStub.calls.some((c) => c.url.includes('/releases/tags/')),
+      `a capped walk calls its unread tags unseen without a by-tag read (got ${JSON.stringify(cappedAudit.unseen)})`,
+    );
+    assert(
+      describeDuplicates(cappedAudit).warnings.some((w) => w.includes('UNVERIFIED')),
+      'and those tags stay UNVERIFIED in the report',
+    );
+  }
 
   // ── 15. The Release body is grouped by what the reader must do (ruling A) ─
   battery('15. The Release body is grouped by what the reader must do (ruling A)');
