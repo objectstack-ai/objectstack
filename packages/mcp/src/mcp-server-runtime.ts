@@ -3,11 +3,18 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import type { Logger, IMetadataService, AIToolDefinition } from '@objectstack/spec/contracts';
+import type { Logger, IMetadataService, AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
 import type { Agent } from '@objectstack/spec/ai';
 import { PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
-import type { ToolRegistry, ToolExecutionResult } from './types.js';
-import { wireBridgeTools, thrownRefusalEnvelope } from './mcp-http-tools.js';
+import { MCP_TOOL_DOOR } from './types.js';
+import type {
+  McpAuthoringInjection,
+  McpAuthoringToolContext,
+  McpTokenPrincipal,
+  ToolRegistry,
+  ToolExecutionResult,
+} from './types.js';
+import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope } from './mcp-http-tools.js';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -1004,6 +1011,185 @@ function methodNotAllowedResponse(): Response {
 }
 
 /**
+ * Extract the text value from a ToolExecutionResult's output.
+ *
+ * The output may be a `{ type: 'text', value: string }` object (from the
+ * Vercel AI SDK ToolResultPart) or any serialisable value.
+ */
+function formatToolOutput(result: ToolExecutionResult): string {
+  const output = result.output;
+  if (output && typeof output === 'object' && 'value' in output) {
+    return String((output as { value: unknown }).value);
+  }
+  return JSON.stringify(output ?? '');
+}
+
+/**
+ * Register a single tool on an {@link McpServer} from an AIToolDefinition.
+ *
+ * The definition's JSON Schema `parameters` is forwarded as the tool's
+ * `inputSchema` (see {@link toolInputSchema} for why it must be converted
+ * first). Declaring it is what makes the SDK hand the call's arguments to
+ * this handler at all: `McpServer.executeToolHandler()` branches on
+ * `tool.inputSchema` and invokes a schema-less tool as `handler(extra)` —
+ * with no `arguments` anywhere on that `extra` (`RequestHandlerExtra` has no
+ * such member), which is why a bridged tool used to execute with `{}` no
+ * matter what the client sent.
+ *
+ * The safety annotations come from {@link safetyAnnotations}, which reads
+ * what the definition DECLARES and omits the hints it cannot source; the
+ * name-derived `readOnlyHint: false, destructiveHint: false` this call used
+ * to assert over every unlisted tool is gone. `openWorldHint` now goes
+ * through {@link worldAnnotation} on the same principle — asserted `false`
+ * for platform-registered names, omitted for everyone else — but read that
+ * function before assuming the two omissions cost the same thing: the SDK
+ * defaults them in opposite directions.
+ *
+ * [#26464] `execute` is the ONE seam between the two bridges that share this
+ * body: the long-lived stdio bridge passes the registry's own
+ * `execute(call)`, one argument, as it always has; the per-request HTTP
+ * authoring bridge ({@link registerAuthoringTools}) passes a closure that
+ * adds the door provenance as the second argument. Everything a client can
+ * observe — the registration options, the call envelope, the error shape —
+ * is the same code for both.
+ */
+function registerToolFromDefinition(
+  server: McpServer,
+  tool: AIToolDefinition,
+  execute: (toolCall: ToolCallPart) => Promise<ToolExecutionResult>,
+  logger: Logger | undefined,
+): void {
+  server.registerTool(
+    tool.name,
+    {
+      description: tool.description,
+      inputSchema: toolInputSchema(tool, logger),
+      annotations: {
+        // Only the hints these two can source — a tool that declares nothing
+        // and is not a platform name is served neither set, so the MCP
+        // defaults apply. Those defaults are NOT symmetrical between them;
+        // {@link worldAnnotation} is where that is written down.
+        ...safetyAnnotations(tool),
+        ...worldAnnotation(tool),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await execute({
+          type: 'tool-call',
+          toolCallId: `mcp-${tool.name}-${Date.now()}`,
+          toolName: tool.name,
+          input: args,
+        });
+
+        const outputText = formatToolOutput(result);
+
+        if (result.isError) {
+          return {
+            content: [{ type: 'text' as const, text: outputText }],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: outputText }],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger?.warn(`[MCP] Tool "${tool.name}" execution failed:`, { error: message });
+        return {
+          content: [{ type: 'text' as const, text: message }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+/**
+ * [#26464] Bridge a host-injected authoring registry onto ONE per-request HTTP
+ * server, behind the `metadata:write` scope.
+ *
+ * ## The gate
+ *
+ * Registers nothing unless {@link grantsAuthoringTools} admits the request's
+ * grant — a scope list that names `metadata:write`. A `data:write` or
+ * `actions:execute` token, an empty grant, and the undefined grant of an API
+ * key or a session all register nothing, so `tools/list` omits the family and
+ * `tools/call` on one of its tools is answered by the SDK as an unknown tool:
+ * the same refusal `create_record` gets without `data:write`, from the same
+ * mechanism, not a second one.
+ *
+ * ## The provenance
+ *
+ * Every call into the registry carries a fresh {@link McpAuthoringToolContext}
+ * built HERE from the host's inputs and from nothing else: `door` is the
+ * runtime's own constant, `principal` and `environmentId` are what the host
+ * resolved and passed to `handleHttpRequest`, and `actor.id` is the
+ * principal's user so a reader that knows only `ToolExecutionContext` still
+ * runs as that user. The inbound `Request` is not in scope of this function,
+ * so no header can reach the context — a client sending `x-door`,
+ * `x-environment-id` or any other spelling changes nothing a tool sees. The
+ * host's access check and tier mapping read the door from the context; that is
+ * the whole reason it is stamped on the server side of the transport. The
+ * principal (and its `scopes` array) is copied and frozen per call, so a tool
+ * that writes into its context taints neither the next call nor the host's
+ * object.
+ *
+ * Tool names are the host's to keep unique: the SDK refuses a second
+ * registration under a name already on the server — a native name such as
+ * `describe_object`, or a duplicate within the registry — by throwing, and
+ * the request fails with it. A host checks its names against the native
+ * surface before injecting.
+ *
+ * ## What stays the host's
+ *
+ * Which tools the registry holds (cloud ADR-0112 injects no publish or
+ * discard tool: authoring lands as drafts a human publishes in the UI), how
+ * each one checks the caller's own metadata permission, and which version of
+ * the authoring whitelist it answers. This runtime is door-agnostic; it
+ * registers what it is handed and stamps where the call came from.
+ *
+ * @returns the names registered on this call — empty when the grant admits
+ *   none, so a host's report of its surface reads the same source the
+ *   server does.
+ */
+export function registerAuthoringTools(
+  server: McpServer,
+  authoring: McpAuthoringInjection,
+  grantedScopes: readonly string[] | undefined,
+  logger?: Logger,
+): string[] {
+  const registered: string[] = [];
+  if (!grantsAuthoringTools(grantedScopes)) return registered;
+
+  const { registry, principal, environmentId } = authoring;
+  // Each call gets its own FROZEN copy of the principal (and of its one array,
+  // `scopes`): a tool that writes into its context taints neither the next
+  // call in this request nor the host's own object. The context object itself
+  // is fresh per call for the same reason.
+  const provenance = (): McpAuthoringToolContext => {
+    const frozenPrincipal: McpTokenPrincipal = Object.freeze({
+      ...principal,
+      ...(principal.scopes !== undefined ? { scopes: Object.freeze([...principal.scopes]) } : {}),
+    });
+    return {
+      door: MCP_TOOL_DOOR,
+      actor: Object.freeze({ id: frozenPrincipal.userId }),
+      principal: frozenPrincipal,
+      ...(environmentId !== undefined ? { environmentId } : {}),
+    };
+  };
+
+  for (const tool of registry.getAll()) {
+    registerToolFromDefinition(server, tool, (call) => registry.execute(call, provenance()), logger);
+    registered.push(tool.name);
+  }
+  logger?.debug(`[MCP] Bridged ${registered.length} authoring tools for metadata:write (${registered.join(', ')})`);
+  return registered;
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1092,22 +1278,6 @@ export class MCPServerRuntime {
     return this.started;
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────
-
-  /**
-   * Extract the text value from a ToolExecutionResult's output.
-   *
-   * The output may be a `{ type: 'text', value: string }` object (from the
-   * Vercel AI SDK ToolResultPart) or any serialisable value.
-   */
-  private static formatToolOutput(result: ToolExecutionResult): string {
-    const output = result.output;
-    if (output && typeof output === 'object' && 'value' in output) {
-      return String((output as { value: unknown }).value);
-    }
-    return JSON.stringify(output ?? '');
-  }
-
   // ── Tool Bridge ────────────────────────────────────────────────
 
   /**
@@ -1125,7 +1295,10 @@ export class MCPServerRuntime {
     const logger = this.config.logger;
 
     for (const tool of tools) {
-      this.registerToolFromDefinition(tool, toolRegistry);
+      // The long-lived (stdio) bridge: the registry's own `execute(call)`,
+      // one argument, exactly as before [#26464] moved the registration body
+      // out of this class so the HTTP authoring bridge could share it.
+      registerToolFromDefinition(this.mcpServer, tool, (call) => toolRegistry.execute(call), logger);
     }
 
     logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
@@ -1167,77 +1340,6 @@ export class MCPServerRuntime {
       `[MCP] Bridged ${registered.length} data tools (${registered.join(', ')})`,
     );
     return registered;
-  }
-
-  /**
-   * Register a single tool on the MCP server from an AIToolDefinition.
-   *
-   * The definition's JSON Schema `parameters` is forwarded as the tool's
-   * `inputSchema` (see {@link toolInputSchema} for why it must be converted
-   * first). Declaring it is what makes the SDK hand the call's arguments to
-   * this handler at all: `McpServer.executeToolHandler()` branches on
-   * `tool.inputSchema` and invokes a schema-less tool as `handler(extra)` —
-   * with no `arguments` anywhere on that `extra` (`RequestHandlerExtra` has no
-   * such member), which is why a bridged tool used to execute with `{}` no
-   * matter what the client sent.
-   *
-   * The safety annotations come from {@link safetyAnnotations}, which reads
-   * what the definition DECLARES and omits the hints it cannot source; the
-   * name-derived `readOnlyHint: false, destructiveHint: false` this call used
-   * to assert over every unlisted tool is gone. `openWorldHint` now goes
-   * through {@link worldAnnotation} on the same principle — asserted `false`
-   * for platform-registered names, omitted for everyone else — but read that
-   * function before assuming the two omissions cost the same thing: the SDK
-   * defaults them in opposite directions.
-   */
-  private registerToolFromDefinition(tool: AIToolDefinition, toolRegistry: ToolRegistry): void {
-    const logger = this.config.logger;
-
-    this.mcpServer.registerTool(
-      tool.name,
-      {
-        description: tool.description,
-        inputSchema: toolInputSchema(tool, logger),
-        annotations: {
-          // Only the hints these two can source — a tool that declares nothing
-          // and is not a platform name is served neither set, so the MCP
-          // defaults apply. Those defaults are NOT symmetrical between them;
-          // {@link worldAnnotation} is where that is written down.
-          ...safetyAnnotations(tool),
-          ...worldAnnotation(tool),
-        },
-      },
-      async (args) => {
-        try {
-          const result = await toolRegistry.execute({
-            type: 'tool-call',
-            toolCallId: `mcp-${tool.name}-${Date.now()}`,
-            toolName: tool.name,
-            input: args,
-          });
-
-          const outputText = MCPServerRuntime.formatToolOutput(result);
-
-          if (result.isError) {
-            return {
-              content: [{ type: 'text' as const, text: outputText }],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [{ type: 'text' as const, text: outputText }],
-          };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger?.warn(`[MCP] Tool "${tool.name}" execution failed:`, { error: message });
-          return {
-            content: [{ type: 'text' as const, text: message }],
-            isError: true,
-          };
-        }
-      },
-    );
   }
 
   // ── Resource Bridge ────────────────────────────────────────────
@@ -1662,9 +1764,14 @@ export class MCPServerRuntime {
    * via `bridge`; the runtime wires that bridge to the existing permission +
    * RLS path, so an external agent can never exceed the key's authority.
    *
-   * Only these native tools are exposed here — the internal AI/authoring
-   * toolRegistry (which can mutate metadata) is deliberately NOT bridged onto
-   * the external surface.
+   * The internal AI/authoring `ToolRegistry` the stdio transport bridges is
+   * NOT reachable from here by default. [#26464] A host may inject an authoring
+   * registry for the request (`opts.authoring`); its tools are registered only
+   * when the token's grant names `metadata:write` (cloud ADR-0112, the
+   * maintainer's 2026-10-27 ruling), through {@link registerAuthoringTools},
+   * which also stamps the door provenance on every call into it. A request
+   * without that scope — including the undefined grant of an API key or a
+   * session — serves exactly the native tools above, as before.
    *
    * **Prompts (#3905).** When the bridge can also read this environment's
    * `skill` metadata (`listSkills`), the server additionally serves the MCP
@@ -1680,7 +1787,9 @@ export class MCPServerRuntime {
    * @param opts.bridge       Principal-bound data (+ optional action / skill) accessor (required to expose tools).
    * @param opts.parsedBody   Pre-parsed JSON-RPC body (the dispatcher already read it).
    * @param opts.authInfo     Optional auth info forwarded to message handlers.
-   * @param opts.toolOptions  Tool exposure options (system objects, query limits).
+   * @param opts.toolOptions  Tool exposure options (system objects, query limits, the token's `grantedScopes`).
+   * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
+   *                          that become each call's provenance; registered only for a `metadata:write` grant.
    */
   async handleHttpRequest(
     request: Request,
@@ -1689,6 +1798,7 @@ export class MCPServerRuntime {
       parsedBody?: unknown;
       authInfo?: unknown;
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
+      authoring?: McpAuthoringInjection;
     } = {},
   ): Promise<Response> {
     // [#25759] This transport answers POST and nothing else. It is stateless
@@ -1752,6 +1862,15 @@ export class MCPServerRuntime {
       // {@link bridgeDataTools} — including the by-capability action wiring
       // that used to be open-coded here. Two transports, one call site.
       wireBridgeTools(server, opts.bridge, opts.toolOptions);
+    }
+
+    if (opts.authoring) {
+      // [#26464] The host's authoring family, behind `metadata:write`. The
+      // grant is read from the same `toolOptions.grantedScopes` the native
+      // families read, and the provenance from `opts.authoring` alone — the
+      // `request` is deliberately not passed, so nothing it carries can reach
+      // a tool's context.
+      registerAuthoringTools(server, opts.authoring, opts.toolOptions?.grantedScopes, this.config.logger);
     }
 
     const transport = new WebStandardStreamableHTTPServerTransport({

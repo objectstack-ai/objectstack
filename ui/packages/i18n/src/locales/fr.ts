@@ -2584,6 +2584,9 @@ const fr = {
       invitationDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée.",
       invitationSignUpButton: "Créer un compte et rejoindre",
       invitationSignInDivider: "ou connectez-vous à un compte existant",
+      invitationPreviewTitle: "{{inviter}} vous invite à rejoindre {{organization}}",
+      invitationPreviewTitleNoInviter: "Vous êtes invité à rejoindre {{organization}}",
+      invitationPreviewDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée ({{email}}).",
       showPasswordText: "Afficher le mot de passe",
       hidePasswordText: "Masquer le mot de passe",
       footer: {
@@ -2596,6 +2599,7 @@ const fr = {
       description: "Entrez vos informations pour commencer",
       invitationTitle: "Créez un compte pour rejoindre",
       invitationDescription: "Inscrivez-vous avec l'adresse e-mail à laquelle l'invitation a été envoyée. Elle ne peut être acceptée qu'avec cette adresse.",
+      invitationPreviewDescription: "Inscrivez-vous avec l'adresse e-mail à laquelle l'invitation a été envoyée ({{email}}). Elle ne peut être acceptée qu'avec cette adresse.",
       nameLabel: "Nom",
       namePlaceholder: "Jean Dupont",
       emailLabel: "E-mail",

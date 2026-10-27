@@ -100,6 +100,25 @@
         "must_contain": ["getRecordLock", "locked"],
         "must_not_contain": ["lock_record", "approvalsVisibleToReaders: true"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "When a `contractor` record is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set. Make the flow run as system so the grant always lands.",
+      "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a dedicated system subflow included. Emits the `record_change` flow with `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired the flow, recorded as the grant's `granted_by`; a user the gate would not let grant the set is refused, which is the rule, not a defect to route around.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "runAs: 'user'",
+          "sys_user_permission_set",
+          "PERMISSION_DENIED",
+          "delegated-administration",
+          "granted_by"
+        ],
+        "must_not_contain": [
+          "runAs: 'system'",
+          "sudo"
+        ]
+      }
     }
   ]
 }

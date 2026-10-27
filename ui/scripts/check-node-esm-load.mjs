@@ -150,17 +150,20 @@ import ts from 'typescript';
 
 import { SKIP_DIRS, TOOLING_FILE, discoverPackages, moduleSpecifiers } from './check-phantom-dependencies.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './__tests__/helpers/ui-package-population.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Below this many published packages the scan is broken, not empty.
  *
- * The `fixed` group holds 40 entries today. A collapse to a handful means the
- * release config or the manifest walk stopped answering, and every assertion
- * below would pass while reading nothing.
+ * A collapse to a handful means the release config or the manifest walk stopped
+ * answering, and every assertion below would pass while reading nothing. The
+ * number is the shared ui published-package floor, written once with its
+ * measurement in `__tests__/helpers/ui-package-population.mjs`, so deleting a
+ * package never edits this file.
  */
-export const MIN_PACKAGES = 30;
+export const MIN_PACKAGES = UI_PUBLISHED_PACKAGE_FLOOR;
 
 /**
  * Below this many SUCCESSFUL imports the load leg proved nothing.

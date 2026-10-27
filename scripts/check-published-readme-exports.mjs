@@ -11,9 +11,10 @@
 // ## Exit codes -- and why an UNBUILT CLOSURE has one of its own
 //
 //   0  every published document was read against a BUILT type surface, and
-//      every symbol it documents exists there.
-//   1  a FINDING: a README disagrees with a type entry that EXISTS, or the
-//      baseline went stale. A claim about the tree.
+//      every symbol it documents exists there (a stale baseline entry is
+//      reported, not failed -- #26444).
+//   1  a FINDING: a README disagrees with a type entry that EXISTS. A claim
+//      about the tree.
 //   3  PREREQUISITE NOT MET. The built type entries this gate reads are not
 //      there, so nothing was measured and the run says NOTHING about any
 //      README. NOT a pass, and NOT a finding.
@@ -221,9 +222,11 @@
 //
 // The five packages #9532 measured are recorded in
 // scripts/published-readme-exports.baseline.json. It is SHRINK-ONLY and
-// reconciled in BOTH directions: an entry whose finding no longer occurs is a
-// STALE entry and fails, so fixing a README forces its entry to be deleted in
-// the same PR. Each entry pins the EXACT symbol, so a baselined package that
+// ONE-SIDED (#26444): an entry whose finding no longer occurs is a STALE entry,
+// reported on every run with the instruction to delete it, but it PASSES —
+// deleting or fixing a README must not red a PR that never touched this gate.
+// Until it is deleted a stale entry re-licenses that exact claim, which the
+// report says. Each entry pins the EXACT symbol, so a baselined package that
 // invents a SECOND fabricated symbol still goes red -- a baseline that muted a
 // whole file would be the mute button this gate exists to replace.
 //
@@ -2351,7 +2354,8 @@ function run({ unreadReport: wantsUnreadReport = false, root = ROOT } = {}) {
   const measured = newMeasured();
   for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget, measured));
 
-  // Reconcile against the shrink-only baseline, BOTH directions.
+  // Reconcile against the shrink-only baseline, ONE-SIDED (#26444): a fresh
+  // finding fails, a stale entry is reported and passes.
   const baseline = loadBaseline(root);
   const baselineById = new Map(baseline.map((e) => [e.id, e]));
   const observed = new Set(findings.map((f) => f.id));
@@ -2427,7 +2431,16 @@ function run({ unreadReport: wantsUnreadReport = false, root = ROOT } = {}) {
   // than a complaint, and it changes neither return value below.
   const report = wantsUnreadReport ? unreadReport(measured) : null;
 
-  if (fresh.length === 0 && stale.length === 0) {
+  if (stale.length > 0) {
+    console.log(`↓ check:published-readme-exports — ${stale.length} stale baseline entr(ies) (passing, reported)\n`);
+    for (const e of stale) console.log(`    ${e.id}\n      ${e.why ?? ''}`);
+    console.log(
+      `\nGood news: these README claims now resolve, so their entries in ${BASELINE_REL}\n` +
+        `are dead text. Delete them — until then each one re-licenses that exact claim.\n`,
+    );
+  }
+
+  if (fresh.length === 0) {
     console.log(`✓ check:published-readme-exports — ${header}`);
     console.log(
       successSummary({ measured, baselineCount: baseline.length, memberChecks }),
@@ -2457,16 +2470,6 @@ function run({ unreadReport: wantsUnreadReport = false, root = ROOT } = {}) {
       console.error('');
     }
     console.error(freshRemedy());
-  }
-
-  if (stale.length > 0) {
-    console.error(`✗ check:published-readme-exports — ${stale.length} stale baseline entr(ies)\n`);
-    for (const e of stale) console.error(`    ${e.id}\n      ${e.why ?? ''}`);
-    console.error(
-      `\nGood news, and it is still a failure: these README claims now resolve, so their\n` +
-        `entries in ${BASELINE_REL} are dead text. Delete them in the same PR that fixed the\n` +
-        `README — a baseline that can only grow rots into a list nobody trusts.\n`,
-    );
   }
   if (report) console.log(report);
   return EXIT_FINDINGS;
@@ -2534,11 +2537,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE UNBUILT-CLOSURE PREDICATE, and the two states it excludes (#15600)': 5,
   'THE EXIT-CODE SPLIT, END TO END on a scratch workspace (#15600)': 8,
   'THE `ui/` TREE IS OUT OF THIS POPULATION, BY PATH (#25697)': 5,
+  'THE BASELINE IS ONE-SIDED, END TO END (#26444)': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 27;
+const SELF_TEST_BATTERY_FLOOR = 28;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4331,6 +4335,26 @@ function selfTest() {
 
     writeFileSync(entry, 'export declare const Documented: string;\n');
     eq('END TO END — GREEN CONTROL: a README that agrees passes', drive().exit, EXIT_OK);
+
+    // -- THE BASELINE IS ONE-SIDED (#26444) ----------------------------------
+    //
+    // Same scratch workspace, same production `run`: a ledger row whose finding
+    // no longer occurs PASSES and is reported, and it licenses nothing new.
+    battery('THE BASELINE IS ONE-SIDED, END TO END (#26444)');
+    const staleId = 'import|packages/fixture/README.md|Gone';
+    writeFileSync(
+      join(fixtureRoot, BASELINE_REL),
+      `${JSON.stringify({ entries: [{ id: staleId, why: 'fixture' }] }, null, 2)}\n`,
+    );
+    const staleRun = drive();
+    eq('ONE-SIDED — a STALE entry beside an agreeing README PASSES', staleRun.exit, EXIT_OK);
+    eq('ONE-SIDED — …and the run REPORTS it by id', staleRun.text.includes(staleId), true);
+    writeFileSync(entry, 'export declare const Undocumented: string;\n');
+    eq(
+      'ONE-SIDED — a stale entry does not net against a NEW finding: the finding still fails',
+      drive().exit,
+      EXIT_FINDINGS,
+    );
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }

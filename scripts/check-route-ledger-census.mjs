@@ -32,7 +32,10 @@
  * satisfied by a SHORTER list: for a multi-route domain, any non-last row can
  * be deleted with that suite fully green. That is not this gate's inference --
  * the suite's own header states it, out of the #17038 ablation, and #17075
- * landed the paragraph saying so.
+ * landed the paragraph saying so. Since #26513 the suite also has a per-route
+ * arm, but over what `dispatcher-plugin.ts` MOUNTS only: a row with no mount of
+ * its own spelling (`/meta`, `/data`, `servedBy` rows, raw-app doors) is still
+ * deletable there with the suite green.
  *
  * (b) THE CROSS-LEDGER GATES READ A UNION, WHICH ABSORBS DELETIONS.
  * `packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts`
@@ -51,17 +54,20 @@
  * and needs no boot: it is a set-difference against the union, and if the union
  * still holds the key, the mount is not reported unledgered.
  *
- * ## Why a census and NOT a comparison against registered routes (#17041)
+ * ## Why a census and NOT a comparison against registered routes (#26513)
  *
  * The stronger instrument for this file would be a per-route cross-check
  * against what the dispatcher registers -- and whether the route ledger should
  * be checked at ROUTE granularity, given `DomainHandlerRegistry.list()` exposes
- * domains and not routes, is an OPEN MAINTAINER DECISION tracked in #17041.
- * Building that here would answer it silently. So this gate deliberately takes
- * the census/deletion direction instead: it notices that the list got SHORTER,
- * independent of what the routes are, and stays correct whichever way #17041 is
- * ruled. ⛔ Do not grow this file into a router cross-check; that work belongs
- * to #17041 and to whoever the maintainer rules should do it.
+ * domains and not routes, is an OPEN MAINTAINER DECISION, left open and
+ * tracked at #26513 (the issue it was first filed under no longer resolves).
+ * Building that here would answer it silently. So this gate deliberately
+ * takes the census/deletion direction instead: it notices that the list got
+ * SHORTER, independent of what the routes are, and stays correct whichever
+ * way that is ruled. ⛔ Do not grow this file into a router
+ * cross-check: the cross-check against what the plugin mounts lives in
+ * `route-ledger.conformance.test.ts` (#26513), and whether this census retires
+ * once that lands is #26431's call.
  *
  * ## Why the number is GENERATED and never hand-typed
  *

@@ -147,6 +147,11 @@ import { PagePreview } from './PagePreview';
 import { ValidationPreview } from './ValidationPreview';
 import { FieldsListEditor } from './FieldsListEditor';
 import type { ObjectFieldInfo } from './useObjectFields';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const realFetch = globalThis.fetch;
 

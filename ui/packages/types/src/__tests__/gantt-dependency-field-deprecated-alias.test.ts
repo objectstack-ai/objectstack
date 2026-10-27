@@ -52,6 +52,17 @@
  * asserting only (2) passes on a tree where the tag never shipped. Both halves
  * are pinned.
  *
+ * ## ⏱ objectstack#25923 — both spellings LEFT the published faces
+ *
+ * `ComponentPropsMap['object-gantt']` refuses `dependenciesField` and
+ * `dependencyField` written flat on the node, so neither stays a member of the
+ * published interface or its mirror. The alias, still `@deprecated`, lives on
+ * `plugin-gantt`'s package-local hand-off type `ObjectGanttFlatFields`, where
+ * the flat branch still READS it: its tag, its type and its acceptance are
+ * pinned there, in `ganttHandoffFlatFields-25923.test.ts`. Failure mode (2) above
+ * keeps its guard on that side. What this file pins now is the absence on both
+ * published faces, which is the narrowing the card shipped.
+ *
  * ## Why the TS face is read as SOURCE TEXT and the zod face at RUNTIME
  *
  * They carry the statement in different places, and each is checked where it
@@ -76,153 +87,54 @@ const OBJECTQL_SRC = readFileSync(
   'utf8',
 );
 
-/** The alias member, exactly as `objectql.ts` spells it. */
+/** The alias member, as `objectql.ts` spelled it until objectstack#25923. */
 const ALIAS = 'dependencyField?: string;';
-/** The canonical member, exactly as `objectql.ts` spells it. */
+/** The canonical member, as `objectql.ts` spelled it until objectstack#25923. */
 const CANONICAL = "dependenciesField?: GanttConfig['dependenciesField'];";
 
-/**
- * The JSDoc block immediately preceding a member, or `null` when the member is
- * not preceded by one.
- *
- * Anchored to the member rather than searching the file for `@deprecated`:
- * `objectql.ts` carries fifteen unrelated deprecations, so a file-wide search
- * would go green on any of them and say nothing about this key.
- */
-function docBlockBefore(member: string): string | null {
-  const at = OBJECTQL_SRC.indexOf(member);
-  if (at === -1) return null;
-  const before = OBJECTQL_SRC.slice(0, at);
-  const close = before.lastIndexOf('*/');
-  // Only whitespace may sit between the block and the member, otherwise the
-  // block belongs to some earlier member and says nothing about this one.
-  if (close === -1 || before.slice(close + 2).trim() !== '') return null;
-  const open = before.lastIndexOf('/**', close);
-  if (open === -1) return null;
-  return before.slice(open, close + 2);
-}
+const MINIMAL = { type: 'object-gantt', objectName: 'task' } as const;
 
-describe('ObjectGanttSchema.dependencyField — the TS face declares the deprecation', () => {
-  it('the member is unique in the file, so the anchor cannot drift onto a twin', () => {
-    // Non-vacuity for every `docBlockBefore(ALIAS)` below: `indexOf` takes the
-    // FIRST hit, so a second declaration of the same member would let this suite
-    // report on the wrong one.
-    expect(OBJECTQL_SRC.split(ALIAS)).toHaveLength(2);
+describe('ObjectGanttSchema — neither dependencies spelling is published flat (objectstack#25923)', () => {
+  it('the TS face declares neither member', () => {
+    expect(OBJECTQL_SRC).not.toContain(ALIAS);
+    expect(OBJECTQL_SRC).not.toContain(CANONICAL);
+    // CONTROL: the block that now carries the canonical key is declared, and
+    // the source read is the real file.
+    expect(OBJECTQL_SRC).toContain('export interface ObjectGanttSchema');
+    expect(OBJECTQL_SRC).toMatch(/\bgantt\?: GanttConfig;/);
   });
 
-  it('is still declared — deprecating is not deleting', () => {
-    expect(OBJECTQL_SRC).toContain(ALIAS);
+  it('the zod mirror declares neither key, and declares the block', () => {
+    const shape = Object.keys(ObjectGanttSchema.shape);
+    expect(shape).not.toContain('dependencyField');
+    expect(shape).not.toContain('dependenciesField');
+    expect(shape).toContain('gantt');
   });
 
-  it('carries a JSDoc block attached to the member itself', () => {
-    expect(docBlockBefore(ALIAS)).not.toBeNull();
-  });
-
-  it('tags that block `@deprecated`', () => {
-    expect(docBlockBefore(ALIAS)).toContain('@deprecated');
-  });
-
-  it('names the canonical spelling, so the marker is actionable', () => {
-    // A bare `@deprecated` tells an author to stop, not what to write instead —
-    // and "what to write instead" is the entire content of this card.
-    expect(docBlockBefore(ALIAS)).toContain('dependenciesField');
-  });
-
-  it('says the alias is still READ, so nobody reads the tag as a removal notice', () => {
-    expect(docBlockBefore(ALIAS)).toContain('dependenciesField || dependencyField');
-  });
-
-  it('does NOT deprecate the canonical key — the control', () => {
-    // The tag must be attached to ONE member. If a future edit widened the
-    // block, or moved it, the spec's own key would read as deprecated and this
-    // card would have inverted its own result.
-    const canonicalDoc = docBlockBefore(CANONICAL);
-    expect(canonicalDoc).not.toBeNull();
-    expect(canonicalDoc).not.toContain('@deprecated ');
-    expect(canonicalDoc).toContain('CANONICAL');
-  });
-});
-
-describe('ObjectGanttSchema.dependencyField — the zod mirror declares it too', () => {
-  it('is still declared on the mirror', () => {
-    expect(Object.keys(ObjectGanttSchema.shape)).toContain('dependencyField');
-  });
-
-  it('its description states the deprecation and names the replacement', () => {
-    // Runtime-readable, which is the half a JSDoc cannot give: this string is on
-    // the schema object, so a gate or a generated form can ask.
-    const description = ObjectGanttSchema.shape.dependencyField.description;
-    expect(description).toBeTruthy();
-    expect(description).toMatch(/deprecated/i);
-    expect(description).toContain('dependenciesField');
-  });
-
-  it('follows the ruled idiom rather than a third spelling of "deprecated"', () => {
-    // `KanbanConfig`'s pre-#2231 aliases are the shape this adopts. If that
-    // convention is ever restated differently, this pin makes the divergence a
-    // decision instead of a drift.
-    expect(ObjectGanttSchema.shape.dependencyField.description).toMatch(
-      /^Deprecated alias for /,
-    );
-  });
-
-  it('the canonical key is NOT described as deprecated — the control', () => {
-    const canonical = ObjectGanttSchema.shape.dependenciesField.description;
-    expect(canonical ?? '').not.toMatch(/deprecated/i);
-  });
-});
-
-describe('ObjectGanttSchema.dependencyField — still ACCEPTED (removal was excluded)', () => {
-  const MINIMAL = {
-    type: 'object-gantt',
-    objectName: 'task',
-    startDateField: 'start',
-    endDateField: 'end',
-  } as const;
-
-  it('parses green when the singular is authored alone', () => {
-    const result = ObjectGanttSchema.safeParse({ ...MINIMAL, dependencyField: 'preds' });
-    expect(result.success ? null : result.error.issues).toBe(null);
-  });
-
-  it('parses green when both spellings are authored together', () => {
-    const result = ObjectGanttSchema.safeParse({
-      ...MINIMAL,
-      dependencyField: 'preds',
-      dependenciesField: 'predecessors',
-    });
-    expect(result.success ? null : result.error.issues).toBe(null);
-  });
-
-  it('still TYPE-validates the alias — a deprecated key is not an unchecked one', () => {
-    // Counter-probe for the two greens above: it must be the KEY that is
-    // accepted, not everything. `dependencyField: 5` was refused before this
-    // card and is refused after it.
+  it('the tolerant mirror no longer examines the alias: `dependencyField: 5` rides `.passthrough()`', () => {
+    // Stated so nobody reads the mirror as judging it still (objectui#5155).
     const result = ObjectGanttSchema.safeParse({ ...MINIMAL, dependencyField: 5 });
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.issues.find((i) => i.path[0] === 'dependencyField')).toBeTruthy();
+    expect(result.success ? null : result.error.issues).toBe(null);
   });
-});
 
-describe('ObjectGanttSchema.dependencyField — the TS member is unchanged', () => {
-  it('is still declared `string | undefined`', () => {
-    // Real enforcement: `tsconfig.test.json` compiles this file. When written, a
-    // deleted member resolved to `any` through `BaseSchema`'s
-    // `[key: string]: any` index signature, the assignment below started
-    // succeeding, and the directive failed the build as an unused
-    // `@ts-expect-error` (TS2578) — NAMING the removal. Since objectui#8347 a
-    // deletion makes the indexed access itself an error: the directive swallows
-    // it, and the undirected counter-probe below fails instead. That is the pin against
-    // the deprecation quietly becoming the excluded removal.
+  it('the canonical key is validated inside the `gantt` block, the one spelling left', () => {
+    const block = { startDateField: 'start', endDateField: 'end', titleField: 'name' };
+    const good = ObjectGanttSchema.safeParse({ ...MINIMAL, gantt: { ...block, dependenciesField: 'preds' } });
+    expect(good.success ? null : good.error.issues).toBe(null);
+    const bad = ObjectGanttSchema.safeParse({ ...MINIMAL, gantt: { ...block, dependenciesField: 5 } });
+    expect(bad.success).toBe(false);
+  });
 
-    // @ts-expect-error — `dependencyField` is declared `string | undefined`.
-    const bad: ObjectGanttSchemaTS['dependencyField'] = 5;
-
-    // Counter-probe: without this, a declaration narrowed to `never` would
-    // satisfy the directive above while breaking every existing author.
-    const good: ObjectGanttSchemaTS['dependencyField'] = 'dependent_task_ids';
-
-    expect([bad, good]).toHaveLength(2);
+  it('the TS face refuses either spelling on a fresh literal', () => {
+    // @ts-expect-error — `dependencyField` is no member of the published interface
+    const alias: ObjectGanttSchemaTS = { ...MINIMAL, dependencyField: 'preds' };
+    // @ts-expect-error — `dependenciesField` is written in the `gantt` block
+    const canonical: ObjectGanttSchemaTS = { ...MINIMAL, dependenciesField: 'preds' };
+    // Counter-probe: the same key inside the block compiles.
+    const ok: ObjectGanttSchemaTS = {
+      ...MINIMAL,
+      gantt: { startDateField: 'start', endDateField: 'end', titleField: 'name', dependenciesField: 'preds' },
+    };
+    expect([alias.type, canonical.type, ok.gantt?.dependenciesField]).toEqual(['object-gantt', 'object-gantt', 'preds']);
   });
 });

@@ -2588,6 +2588,9 @@ const es = {
       invitationDescription: "Usa el correo al que se envió la invitación.",
       invitationSignUpButton: "Crear una cuenta y unirme",
       invitationSignInDivider: "o inicia sesión con una cuenta existente",
+      invitationPreviewTitle: "{{inviter}} te invitó a unirte a {{organization}}",
+      invitationPreviewTitleNoInviter: "Te invitaron a unirte a {{organization}}",
+      invitationPreviewDescription: "Usa el correo al que se envió la invitación ({{email}}).",
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2600,6 +2603,7 @@ const es = {
       description: "Ingresa tu información para comenzar",
       invitationTitle: "Crea una cuenta para unirte",
       invitationDescription: "Regístrate con el correo al que se envió la invitación. Solo se puede aceptar con esa dirección.",
+      invitationPreviewDescription: "Regístrate con el correo al que se envió la invitación ({{email}}). Solo se puede aceptar con esa dirección.",
       nameLabel: "Nombre",
       namePlaceholder: "Juan Pérez",
       emailLabel: "Correo electrónico",

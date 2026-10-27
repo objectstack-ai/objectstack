@@ -135,6 +135,17 @@ list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
 is **not registered at all**, so the SDK rejects it as an unknown tool — the
 grant doubles as dispatch-time enforcement.
 
+A fourth scope, `metadata:write`, gates an **authoring** family the host may
+inject per request (`handleHttpRequest(request, { authoring })`): a
+`McpAuthoringToolRegistry` plus the token principal and environment. Its tools
+register only for a grant that names `metadata:write` — an API key or a
+session, which carries no scopes, is served none — and every call into it
+carries `{ door: 'mcp', principal, environmentId }` in the tool context, stamped
+by the runtime from the host's inputs and never read from a request header.
+Which tools the host injects is the host's business (the hosted build door
+injects no publish or discard tool: authoring lands as drafts a person publishes
+in the UI). The served `SKILL.md` names those tools only under the same grant.
+
 `list_actions` enumerates each object's headless-invokable actions (script /
 flow), filtered to what the author exposed and the caller may run: only actions
 opted into the AI surface (`ai: { exposed: true }`, ADR-0011 / #2849) are

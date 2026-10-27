@@ -74,7 +74,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       判据、preflight 与两次实测住在 `.claude/agents/os-dev.md`;⛔ 这里不留第二份拷贝。
 - [ ] `dist/` 已 gitignore —— 安全;永不提交构建产物。
 - [ ] **`/_console` UI 是 *Console 构建*,与框架包的 `dist` 是两回事。** 它由
-      `pnpm console:build` 从本仓 `ui/apps/console` 构建,拷进 `packages/console/dist`。
+      仓库根目录的 `pnpm console:build` 从 `ui/apps/console` 构建,拷进 `packages/console/dist`。
       `ui/` 下已合并的修复在 Console 重建之前**不会活在 :3000 上**:运行中的服务器继续
       提供旧构建产物。所以**在宣布 :3000/_console 上发现 console/Studio UI 缺陷之前,先
       对当前 `ui/` 源码或全新构建核一遍** —— 构建可能是旧的,缺陷可能已修。最快的权威
@@ -83,7 +83,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       (独立 origin → 需要它自己的 `admin@objectos.ai/admin123` 登录)。跳过这步曾在
       一个上游已修掉的 action-create 死路上白付一整圈 spawn-a-fix。
 - [ ] **构建新鲜度由你自核。** `pnpm console:build` 产出的 dist 不盖 SHA 章,`os dev`
-      无从判定它是否陈旧,照常挂载 `/_console`;改过 `ui/` 就先重建再观察。
+      无从判定它是否陈旧,照常挂载 `/_console`;改过 `ui/` 就先在仓库根目录重建再观察。
 
 ## 3. 核验 —— 视觉 / API 先行,DOM 殿后(防误报规则)
 

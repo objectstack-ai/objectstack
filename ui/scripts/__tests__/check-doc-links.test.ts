@@ -22,6 +22,7 @@ import {
   stripCode,
 } from '../check-doc-links.mjs';
 import { GithubSlugger as VendoredSlugger, slug as vendoredSlug } from '../github-slug.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 
 /**
  * objectui#3479 — the behaviour test for `scripts/check-doc-links.mjs`.
@@ -514,16 +515,18 @@ describe('the repo it guards', () => {
     expect(scanned['README.md']).toBe(1);
     expect(scanned['CONTRIBUTING.md']).toBe(1);
     expect(scanned['ROADMAP.md']).toBe(1);
-    // Three READMEs since the two host-console examples were deleted (#25922):
-    // the index, hello-world and schema-catalog.
-    expect(scanned['examples']).toBeGreaterThanOrEqual(3);
+    // A floor against an empty scan, not a census: three READMEs today (the
+    // index, hello-world and schema-catalog, measured on objectstack 6a7c0fe3),
+    // so deleting one example leaves it green.
+    expect(scanned['examples']).toBeGreaterThanOrEqual(2);
     expect(scanned['docs']).toBeGreaterThanOrEqual(15);
     expect(scanned['content/docs']).toBeGreaterThanOrEqual(100);
-    // objectui#3622. 38 of the 39 package directories carry a README today
-    // (`sdui-parser` does not), and this row is the only one whose path needs
-    // expanding before anything is opened — so a floor here is also the floor
-    // under `expandWildcard()`.
-    expect(scanned['packages/*/README.md']).toBeGreaterThanOrEqual(35);
+    // objectui#3622. This row is the only one whose path needs expanding before
+    // anything is opened, so a floor here is also the floor under
+    // `expandWildcard()`. Every published package carries a README, so the
+    // shared published-package floor bounds it (39 READMEs measured on
+    // objectstack 6a7c0fe3); deleting a package moves no floor.
+    expect(scanned['packages/*/README.md']).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
     // objectui#4148. Both apps carry one today; the floor is 2 rather than the
     // exact count because this row exists precisely so the NEXT app is scanned
     // without anyone editing the table.

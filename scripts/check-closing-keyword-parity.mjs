@@ -17,12 +17,13 @@
  *
  *   - `.github/workflows/cross-repo-issue-closer.yml` decides whether an issue
  *     in ANOTHER repository gets closed;
- *   - `.github/workflows/duplicate-fix-guard.yml` decides whether a PR goes RED
- *     for claiming an issue another open PR already claimed;
+ *   - the duplicate-fix guard step of `.github/workflows/pr-body-guards.yml`
+ *     (formerly `duplicate-fix-guard.yml`) decides whether a PR goes RED for
+ *     claiming an issue another open PR already claimed;
  *   - `closingKeywordRe()` in `scripts/pm/check-half-states.mjs` (H7, the
- *     blocking gate behind `.github/workflows/partof-closing-keyword-guard.yml`)
- *     decides whether a `Part of #N` PR is about to close the card it is only
- *     part of.
+ *     blocking gate behind the Part-of closing-keyword guard step of that same
+ *     workflow, formerly `partof-closing-keyword-guard.yml`) decides whether a
+ *     `Part of #N` PR is about to close the card it is only part of.
  *
  * They are three spellings of one judgement, and they HAVE drifted. Measured on
  * 2026-08-20, `Fixes: objectstack-ai/objectui#456` matched the duplicate-fix
@@ -38,9 +39,10 @@
  * that diverged live inside `actions/github-script` blocks, and neither workflow
  * checks this repository out: the closer deliberately never does (it runs on
  * `pull_request_target`, and its header makes the no-checkout posture an
- * invariant rather than an accident), and the duplicate-fix guard has no
- * checkout step at all -- its whole job is one github-script step. `require()`
- * of a repo file therefore resolves to nothing in either. Giving both a checkout
+ * invariant rather than an accident), and the duplicate-fix guard runs BEFORE
+ * its job's checkout -- it is one github-script step, deliberately first of the
+ * four (#26071). `require()` of a repo file therefore resolves to nothing in
+ * either. Giving both a checkout
  * to share ten characters of regex would buy the import by spending the closer's
  * stated security posture, which is the worse trade.
  *
@@ -58,8 +60,8 @@
  * parsers: not "do the three agree" but "which of them binds what in THIS
  * text". It is a pre-flight instrument for a PR body, runnable BEFORE the PR
  * exists -- otherwise the only enforcement that reads a body is the blocking
- * gate behind partof-closing-keyword-guard.yml, which fires after the body is
- * already written.
+ * gate behind the Part-of closing-keyword guard step of pr-body-guards.yml,
+ * which fires after the body is already written.
  *
  * It adds NO grammar. It calls `loadParsers()` and runs whatever that returns,
  * because a fourth spelling transcribed into a body checker is precisely the
@@ -118,7 +120,7 @@
  * That specimen settles two things at once: the colon binds (GitHub parsed
  * `fixed: #10240` as a closing declaration), and the surrounding prose does not
  * (the sentence said the issue was NOT fixed and it was closed anyway, which is
- * the property partof-closing-keyword-guard.yml is built on).
+ * the property the Part-of closing-keyword guard is built on).
  *
  * ## Deliberately NOT asserted
  *
@@ -180,8 +182,8 @@ const PARSERS = [
   },
   {
     id: 'duplicate-fix-guard',
-    file: '.github/workflows/duplicate-fix-guard.yml',
-    job: 'duplicate-fix-guard',
+    file: '.github/workflows/pr-body-guards.yml',
+    job: 'pr-body-guards',
     kind: 'workflow',
     scope: 'same-repo',
   },
@@ -551,7 +553,7 @@ const MUTATIONS = [
   {
     id: 'X2',
     what: 'the duplicate-fix guard drops the optional colon',
-    file: '.github/workflows/duplicate-fix-guard.yml',
+    file: '.github/workflows/pr-body-guards.yml',
     from: '}):?\\\\s+(?:',
     to: '})\\\\s+(?:',
     expect: 'duplicate-fix-guard',

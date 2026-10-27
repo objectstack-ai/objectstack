@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -345,14 +346,16 @@ describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
   });
 });
 
-describe('QUICK_REFERENCE.md — the published-package count is derived', () => {
+describe('QUICK_REFERENCE.md — the published-package count is not written by hand', () => {
   /**
-   * The count kept a number rather than becoming a pointer, because unlike a churning
-   * enumeration it has an exact anchor (`private` in each manifest) and it tells the
-   * reader something a pointer cannot: the scale of the repo. What it may not do is be
-   * written by hand — "39 published packages" counted directories, and
-   * `packages/vscode-extension` (published to the VS Code marketplace, not to npm) is
-   * `private: true`. Off by one, in the direction that overstates.
+   * The row used to state the count ("39 published packages", later 36, then 35), and
+   * this test derived the true number to hold the prose to it. The first hand-written
+   * figure counted directories and missed that `packages/vscode-extension` (published
+   * to the VS Code marketplace, not to npm) is `private: true` — off by one, in the
+   * direction that overstates. Holding it exact then cost a doc edit on every package
+   * retirement, for a number the manifests already answer (`private` in each one). So
+   * the row names the published packages without counting them, and this test keeps it
+   * that way; the private packages it must still name are checked below.
    */
   const packagesRow = (): string => {
     const layout = section('## Repository Layout');
@@ -365,30 +368,37 @@ describe('QUICK_REFERENCE.md — the published-package count is derived', () => 
   const published = inPackages.filter((p) => !p.private);
   const privateOnes = inPackages.filter((p) => p.private);
 
-  it('states the number of packages that are actually published', () => {
+  it('names the published packages without a hand-written count', () => {
+    // Anti-vacuity: a workspace read that found nothing would make the refusal below
+    // pass over an empty population.
+    expect(published.length).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
+    const row = packagesRow();
     expect(
-      packagesRow(),
-      `${docRel} must state "${published.length} published packages" — that is how many manifests ` +
-        `under \`packages/\` are not \`private: true\` (${inPackages.length} directories, ` +
-        `${privateOnes.length} of them private: ${JSON.stringify(privateOnes.map((p) => p.dir))})`,
-    ).toContain(`${published.length} published`);
+      row,
+      `${docRel}'s \`packages/*\` row spells a package count. Drop the number: ${published.length} of ` +
+        `the ${inPackages.length} manifests under \`packages/\` are not \`private: true\` today, and a ` +
+        'written figure goes stale on the next retirement.',
+    ).not.toMatch(/\b\d+\s+(?:published|packages)\b/i);
+    expect(row, `${docRel}'s \`packages/*\` row must still say these are the published packages`).toMatch(
+      /published/i,
+    );
   });
 
   it('accounts for the private packages instead of quietly dropping them', () => {
     if (privateOnes.length === 0) {
-      // Nothing to reconcile: the count and the directory listing agree, so the row
-      // saying only "N published packages" is complete. This branch exists so the
-      // requirement below retires itself the day the last private package leaves.
+      // Nothing to reconcile: every directory publishes, so the row saying only "the
+      // published packages" is complete. This branch exists so the requirement below
+      // retires itself the day the last private package leaves.
       return;
     }
 
     const row = packagesRow();
     expect(
       row,
-      `${docRel}'s \`packages/*\` row states a published count that is smaller than the ` +
-        `${inPackages.length} directories a reader sees there. It must say why — name the private ` +
-        `package(s) ${JSON.stringify(privateOnes.map((p) => p.name))} — or the next reader "corrects" ` +
-        'the number back to the directory count, which is exactly how objectui#4149 happened.',
+      `${docRel}'s \`packages/*\` row calls the packages published, but ${privateOnes.length} of the ` +
+        `${inPackages.length} directories a reader sees there are not. It must say why — name the private ` +
+        `package(s) ${JSON.stringify(privateOnes.map((p) => p.name))} — or the next reader writes ` +
+        'the directory count back in as the published count, which is exactly how objectui#4149 happened.',
     ).toMatch(/private/i);
 
     for (const pkg of privateOnes) {

@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, normalizeTableColumnType } from '@object-ui/types';
-import { parseFilterAST, resolveFieldScale, type FilterCondition } from '@objectstack/spec/data';
+import { resolveFieldScale } from '@objectstack/spec/data';
 import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
@@ -33,7 +33,7 @@ import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeF
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering, gridCellRendererForFixedKey, linkCellRenderer, BADGE_PREFIX_RENDERER_KEY } from './cellRendererResolution';
 import { isMaskedGridColumn, isWithheldGridColumn } from './maskedColumn';
-import { formatCurrency, formatCompactCurrency, formatDate, formatDateTime, formatRelativeDate, formatPercent, percentCellScale, humanizeLabel, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatCompactCurrency, formatDate, formatPercent, percentCellScale, humanizeLabel, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -58,7 +58,7 @@ import {
   toast,
 } from '@object-ui/components';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { resolveConditionalFormatting, isDeadlineSettled, leadWithNameField, declaredNameField, buildExportFileName, columnIdentity, resolveAffordance, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
+import { resolveConditionalFormatting, isDeadlineSettled, leadWithNameField, declaredNameField, buildExportFileName, columnIdentity, resolveAffordance, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -70,11 +70,7 @@ import {
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Type, Hash, Calendar, CheckSquare, User, Tag, Clock, Loader2 } from 'lucide-react';
 import { useRowColor } from './useRowColor';
-import { useGroupedDataInOptionOrder, usableGroupingFields, type GroupOptionRanks, type ServerGroupSource } from './useGroupedData';
-import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
 import { GroupRow } from './GroupRow';
-import { useScopedColumnSummary } from './useColumnSummary';
-import { useWholeSetSummary } from './useWholeSetSummary';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
@@ -98,6 +94,8 @@ import { useObjectGridDiagnostics } from './objectGridDiagnostics';
 import { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
 import { useObjectGridRowLoad } from './objectGridRowLoad';
+import { temporalGroupHeading, useObjectGridGrouping } from './objectGridGrouping';
+import { useObjectGridSummaries } from './objectGridSummaries';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps } from './objectGridProps';
 
@@ -587,61 +585,6 @@ export type ObjectGridDataTableSchemaHolds = {
 /** What this grid is allowed to write into the `data-table` schema slot. */
 export type ObjectGridDataTableSchema =
   DeclaredDataTableSchema & ObjectGridDataTableSchemaHolds;
-
-
-/**
- * [objectui#13234] The face a date-family CELL paints, for one grouping field:
- * the renderer key from the cells' one shared resolve
- * (`resolveGridCellRendering`), and the object field's `format`, which is the
- * `format` the cell's field metadata carries.
- */
-interface TemporalGroupFace {
-  rendererType: 'date' | 'datetime';
-  format?: string;
-}
-
-/**
- * [objectui#13234] A `date` / `datetime` group's key, drawn as the grid's cell
- * draws the same value. `undefined` for a key the cell has no face for (empty
- * or unparsable), so the band keeps the group's own label: "(empty)" for an
- * empty key, the stored text otherwise.
- *
- * The formatting CALLS are the cells' own, with the cells' arguments:
- * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)
- * paints `formatDate(value, format || undefined, …)`, the absolute default
- * face when no `format` is declared;
- * `DateTimeCellRenderer` paints `formatRelativeDate` for `'relative'`, the
- * compact face for no format and for `'short'`, and `formatDateTime` with the
- * authored word otherwise (the compact face's string is the cell's two halves
- * joined by the one space the cell draws between them). No date is formatted
- * here. The face SELECTION is the one part those renderers do not export, and
- * it is restated here only: `groupDateHeading-13234.test.tsx` holds every
- * heading to the cell under it for every face, so a move on either side turns
- * it red.
- *
- * A heading names a DAY, not one row's deadline, so it reads the face's
- * neutral phrase: `dueLike`'s "Overdue" wording and red are a per-row verdict
- * (`settledWhen` is judged per row), and the rows of one group can judge it
- * differently.
- */
-function temporalGroupHeading(
-  face: TemporalGroupFace,
-  key: unknown,
-  locale: string | undefined,
-): string | undefined {
-  if (typeof key !== 'string' && typeof key !== 'number') return undefined;
-  // The cells' floor: every falsy scalar is empty, the numeric epoch included.
-  if (!key) return undefined;
-  // The cells' validity guard, the shared parse step.
-  if (isNaN(toDisplayDate(key).getTime())) return undefined;
-  if (face.rendererType === 'date') return formatDate(key, face.format || undefined, { locale });
-  // A `datetime` cell renders an INSTANT, from the engine's parse.
-  const instant = new Date(key);
-  const style = !face.format || face.format === 'short' ? 'compact' : face.format;
-  return style === 'relative'
-    ? formatRelativeDate(instant, { locale })
-    : formatDateTime(instant, { style, locale });
-}
 
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
@@ -1340,358 +1283,26 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return Object.keys(style).length > 0 ? (style as React.CSSProperties) : undefined;
   }, [schema.conditionalFormatting, predicateScope, objectSchema]);
 
-  // --- Grouping support ---
-  // Build a per-field value formatter so group headers display the human
-  // readable label for select/boolean fields rather than the raw value
-  // (e.g. "In Progress" instead of "in_progress", "Yes" instead of "true").
-  // A select value's label is the OBJECT FIELD's option label (objectui#11544).
-  const groupValueFormatter = React.useMemo(() => {
-    // [objectui#7217] ONE normalized entry list, shared with the
-    // `useGroupedDataInOptionOrder` call below. Reading `grouping.fields` raw here threw
-    // `TypeError: Cannot read properties of null (reading 'field')` on a null
-    // hole — the whole grid gone, during render, before any projection was
-    // built. `usableGroupingFields` admits exactly the entries
-    // `collectGroupingFieldRefs` harvests into the projection, so the grid can
-    // never group by an entry the query never asked for.
-    const groupingFields = usableGroupingFields(schema.grouping?.fields);
-    if (!groupingFields.length) return undefined;
-
-    // Per-field { value -> label } lookup, plus a per-field type so we can
-    // handle booleans / dates / users without dedicated option lists.
-    const lookup = new Map<string, { type?: string; options?: Map<string, string> }>();
-
-    for (const gf of groupingFields) {
-      const fieldName = gf.field;
-      const objectDefField = objectFields?.[fieldName];
-      // The authored column for this field may respell its TYPE — `type` is a
-      // declared `ListColumn` member, and it is how a `"true"` / `"false"` text
-      // value reads Yes / No. It never supplies the value LABELS
-      // (objectui#11544): `options` is not a `ListColumn` member, and the
-      // strict `ListColumnSchema` refuses it at publish, so the labels come
-      // from the object field's `options` only. The lookup is typed as
-      // `ListColumn` so a read of an undeclared column member does not compile.
-      const cols: ReadonlyArray<string | ListColumn> = normalizeColumns(schema.columns) ?? [];
-      const colOverride = cols.find(
-        (c): c is ListColumn => typeof c === 'object' && c !== null && c.field === fieldName,
-      );
-
-      const type = colOverride?.type || objectDefField?.type;
-      const rawOptions = objectDefField?.options;
-
-      const optionsMap = new Map<string, string>();
-      if (Array.isArray(rawOptions) && rawOptions.length > 0) {
-        const translated = schema.objectName
-          ? translateOptions(schema.objectName, fieldName, rawOptions)
-          : rawOptions;
-        for (const opt of translated) {
-          if (opt && opt.value !== undefined && opt.value !== null) {
-            const label = (opt as any).label;
-            optionsMap.set(String(opt.value), label != null ? String(label) : String(opt.value));
-          }
-        }
-      }
-
-      lookup.set(fieldName, {
-        type: type || undefined,
-        options: optionsMap.size > 0 ? optionsMap : undefined,
-      });
-    }
-
-    return (field: string, value: any): string | undefined => {
-      const meta = lookup.get(field);
-      if (!meta) return undefined;
-      // Select / multi-select: resolve from options map first.
-      if (meta.options) {
-        const label = meta.options.get(String(value));
-        if (label !== undefined) return label;
-      }
-      // Boolean fields: render as Yes/No. We use the toolbar i18n bundle so
-      // grids without an objectName still produce a readable label — the same
-      // `grid.yes`/`grid.no` keys the boolean cell renderer and the bulk-action
-      // dialog use, passed as `defaultValue` (a bare string second argument is
-      // read as an options object, so the fallback never applied).
-      if (meta.type === 'boolean' || typeof value === 'boolean') {
-        if (value === true || value === 'true') return t('grid.yes', { defaultValue: 'Yes' });
-        if (value === false || value === 'false') return t('grid.no', { defaultValue: 'No' });
-      }
-      return undefined;
-    };
-  }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t]);
-
-  // [objectui#13234] Per grouping field whose cell paints a date-family face,
-  // that face; `temporalGroupHeading` draws the field's group headings through
-  // it. The type is the one `groupValueFormatter` reads (the authored column's
-  // `type` over the object field's), taken through the cells' one shared
-  // resolve, so a heading is drawn as a date exactly when the cell under it is.
-  //
-  // ⚠️ Drawn at the band (`groupBandsOf`), NOT returned from
-  // `groupValueFormatter`: the grouping hook ORDERS groups by the label that
-  // formatter returns, and a stored day sorts in calendar order only as the
-  // stored string ("Aug 1" < "Oct 1" < "Sep 1" alphabetically). The group keeps
-  // the stored key as its label, so its order and count are what they were;
-  // only the text in its band changes.
-  const temporalGroupFaces = React.useMemo(() => {
-    const faces = new Map<string, TemporalGroupFace>();
-    const cols: ReadonlyArray<string | ListColumn> = normalizeColumns(schema.columns) ?? [];
-    for (const gf of usableGroupingFields(schema.grouping?.fields)) {
-      const objectDefField = objectFields?.[gf.field];
-      const colOverride = cols.find(
-        (c): c is ListColumn => typeof c === 'object' && c !== null && c.field === gf.field,
-      );
-      const { rendererType } = resolveGridCellRendering({
-        type: colOverride?.type || objectDefField?.type,
-        format: objectDefField?.format,
-        widget: objectDefField?.widget,
-      });
-      if (rendererType === 'date' || rendererType === 'datetime') {
-        faces.set(gf.field, { rendererType, format: objectDefField?.format || undefined });
-      }
-    }
-    return faces;
-  }, [schema.grouping, schema.columns, objectFields]);
-
-  const groupingForRender = groupingRefusesNothing || !schema.grouping
-    ? schema.grouping
-    : { ...schema.grouping, fields: unmaskedGroupingFields };
-  // [objectui#7189] The entries the SERVER groups by: the render grouping less
-  // any key this principal may not read (see `groupingKeyReadable`). Keyed on
-  // the names, so a host rebuilding `grouping` every render re-asks nothing.
-  // [objectstack#25786] A level's `orderBy` rides along — the header query
-  // compiles its `min` / `max` column from it — under the same read gate: an
-  // `orderBy` this principal may not read is dropped, and the level orders by
-  // its own key, since the header row would carry that field's value and the
-  // group order would disclose it.
-  const serverGroupingKey = serverGroupedFetch
-    ? JSON.stringify(
-      usableGroupingFields(groupingForRender?.fields)
-        .filter((gf) => groupingKeyReadable(gf.field))
-        .map((gf) => [
-          gf.field,
-          gf.order ?? null,
-          gf.collapsed ?? null,
-          gf.orderBy && groupingKeyReadable(gf.orderBy) ? gf.orderBy : null,
-        ]),
-    )
-    : '[]';
-  const serverGroupingFields = React.useMemo(
-    () => (JSON.parse(serverGroupingKey) as Array<[string, 'asc' | 'desc' | null, boolean | null, string | null]>)
-      .map(([field, order, collapsed, orderBy]) => ({
-        field,
-        ...(order ? { order } : {}),
-        ...(orderBy !== null ? { orderBy } : {}),
-        ...(collapsed !== null ? { collapsed } : {}),
-      })),
-    [serverGroupingKey],
-  );
-  // The view's composed filter as ONE `FilterCondition` — what both compiled
-  // queries take, so the header numbers and the rows they head answer the
-  // same question. Lowered from the AST the flat fetch would have sent; a
-  // filter that does not lower is refused, never dropped (dropping it would
-  // group the unfiltered object).
-  const groupRowQueryKey = JSON.stringify(groupRowQuery);
-  const groupWhere = React.useMemo((): { where?: FilterCondition; error?: Error } => {
-    const query = JSON.parse(groupRowQueryKey) as Record<string, unknown> | null;
-    const ast = query?.$filter;
-    if (ast === undefined || ast === null) return {};
-    try {
-      const where = parseFilterAST(ast);
-      if (where === undefined) {
-        return { error: new Error(`[ObjectGrid] The view filter could not be lowered for server-side grouping: ${JSON.stringify(ast)}`) };
-      }
-      return { where };
-    } catch (err) {
-      return { error: err instanceof Error ? err : new Error(String(err)) };
-    }
-  }, [groupRowQueryKey]);
-  const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
-  const groupHeaders = useServerGroupHeaders({
-    enabled: serverGroupedFetch && !objectTypesPending && groupRowQuery !== null && !groupWhere.error,
-    dataSource,
-    objectName,
-    fields: serverGroupingFields,
-    where: groupWhere.where,
-    // [objectui#11021] The search term, off the same resolved query every
-    // group's row page is asked with: one pair on both queries.
-    ...groupSearchOf(groupRowQuery),
-    aggregations: schema.aggregations,
-    objectFields,
-    reloadKey: groupReloadKey,
+  // The grouping: the group value formatter and date faces, the server group
+  // headers and rows, and the grouped data, in hook order (`./objectGridGrouping`).
+  const {
+    temporalGroupFaces, groupWhere, groupHeaders, groups, isGrouped, toggleGroup, groupRows,
+  } = useObjectGridGrouping({
+    schema, dataSource, objectName, objectFields, objectTypesPending, data, setData,
+    setTotalMatching, t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey,
+    serverPageSize, groupRowQuery, groupingKeyReadable, groupingRefusesNothing,
+    unmaskedGroupingFields, serverGroupedFetch, invalidationNonce,
   });
-  // Keyed on the hook's STATE values (a stable identity React promises), so
-  // the group tree is rebuilt when the server answers, not on every render.
-  const groupHeaderRows = groupHeaders.headers;
-  const groupKeyLabels = groupHeaders.keyLabels;
-  const serverGroupSource: ServerGroupSource | undefined = React.useMemo(
-    () => (serverGroupedFetch ? { headers: groupHeaderRows ?? [], keyLabels: groupKeyLabels } : undefined),
-    [serverGroupedFetch, groupHeaderRows, groupKeyLabels],
-  );
 
-  // [objectui#11809] Each grouping field's DECLARED option order: the object
-  // field's `options` read through core's `buildCategoryOrder` /
-  // `buildCategoryRank`, the same reading the dashboard's category axis and
-  // the funnel use. A select field's groups then follow the order the author
-  // declared (Backlog → To Do → In Progress …), as the Kanban lanes do, rather
-  // than the order of their labels; empty and undeclared values sit last. A
-  // field with no options keeps label order. Keyed on the order itself (a
-  // string), not on `schema.grouping`, which a host rebuilds every render.
-  const groupOptionOrderKey = JSON.stringify(
-    usableGroupingFields(schema.grouping?.fields).flatMap((gf) => {
-      const order = buildCategoryOrder(objectFields?.[gf.field]?.options);
-      return order ? [[gf.field, order]] : [];
-    }),
-  );
-  const groupOptionRanks = React.useMemo((): GroupOptionRanks | undefined => {
-    const ranks = new Map<string, ReadonlyMap<string, number>>();
-    for (const [field, order] of JSON.parse(groupOptionOrderKey) as Array<[string, string[]]>) {
-      const rank = buildCategoryRank(order);
-      if (rank) ranks.set(field, rank);
-    }
-    return ranks.size > 0 ? ranks : undefined;
-  }, [groupOptionOrderKey]);
-
-  const { groups, isGrouped, toggleGroup } = useGroupedDataInOptionOrder(
-    serverGroupedFetch
-      ? (schema.grouping ? { ...schema.grouping, fields: serverGroupingFields } : undefined)
-      : groupingForRender,
-    data,
-    schema.aggregations,
-    groupValueFormatter,
-    serverGroupSource,
-    groupOptionRanks,
-  );
-
-  // Reset grouped pagination to page 1 whenever the grouping config, page size
-  // or the underlying data changes (e.g. switching grouping field, reload).
-  const groupingKey = React.useMemo(
-    () => JSON.stringify(schema.grouping ?? null),
-    [schema.grouping],
-  );
-  React.useEffect(() => {
-    setGroupedPage(1);
-  }, [groupingKey, groupedPageSize, refreshKey]);
-
-  // [objectui#7189] The open LEAF groups on the current page of groups — the
-  // only ones whose rows are on screen, and so the only ones whose rows are
-  // asked for. A collapsed group costs no row query at all.
-  const serverGroupLeaves: ServerGroupLeaf[] = [];
-  if (serverGroupedFetch) {
-    const groupPages = Math.max(1, Math.ceil(groups.length / groupedPageSize));
-    const onPage = Math.min(groupedPage, groupPages);
-    const collectOpenLeaves = (group: typeof groups[number]) => {
-      if (group.collapsed) return;
-      if (group.subgroups.length === 0) serverGroupLeaves.push({ key: group.key, keyValues: group.keyValues });
-      else group.subgroups.forEach(collectOpenLeaves);
-    };
-    groups.slice((onPage - 1) * groupedPageSize, onPage * groupedPageSize).forEach(collectOpenLeaves);
-  }
-  const groupRows = useServerGroupRows({
-    enabled: serverGroupedFetch && !!groupHeaders.headers,
-    dataSource,
-    objectName,
-    fields: serverGroupingFields,
-    where: groupWhere.where,
-    baseParams: groupRowQuery,
-    pageSize: serverPageSize,
-    leaves: serverGroupLeaves,
-    reloadKey: groupReloadKey,
+  // The fan-out query, the resolved match total and the column summaries, in
+  // hook order (`./objectGridSummaries`).
+  const {
+    bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary,
+  } = useObjectGridSummaries({
+    schema, dataSource, objectName, objectSchema, data, hasInlineData, externalManualPagination,
+    hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
+    fetchWindow, serverGroupedFetch, isGrouped,
   });
-  // The rows in hand are the open groups' pages: what everything else that
-  // reads `data` (column inference, the client export, selection) sees.
-  const serverLeafKeys = JSON.stringify(serverGroupLeaves.map((leaf) => leaf.key));
-  useEffect(() => {
-    if (!serverGroupedFetch) return;
-    const keys = JSON.parse(serverLeafKeys) as string[];
-    setData(keys.flatMap((key) => groupRows.pages[key]?.rows ?? []));
-  }, [serverGroupedFetch, serverLeafKeys, groupRows.pages]);
-  // …and the match total is the QUERY's: the top-level group counts summed.
-  const serverGroupTotal = serverGroupedFetch && groupHeaders.headers
-    ? (groupHeaders.headers[0] ?? []).reduce((sum, row) => sum + (Number(row.count) || 0), 0)
-    : undefined;
-  useEffect(() => {
-    if (serverGroupTotal !== undefined) setTotalMatching(serverGroupTotal);
-  }, [serverGroupTotal]);
-
-  // The query the cross-page fan-out would replay — from whichever side owns the
-  // fetch (objectui#4501). ONE value, read by the fan-out AND by the affordance
-  // gate below, so the offer and the thing it promises can never disagree —
-  // and by the footer, whose whole-set figures are this same query's
-  // (objectui#12081 item 3). Declared here, above the footer's hook, rather
-  // than beside the fan-out: hooks run before the component's early returns.
-  //
-  // `hasInlineData` is exactly the data loader's own guard (`if (hasInlineData)
-  // return`), which makes it the precise test for "this grid did not issue the
-  // query behind the rows on screen". In that case `lastFindParamsRef` is not
-  // merely empty, it is WRONG — either never written, or left over from an
-  // earlier own-fetch — so the host's `findParams` is the only admissible
-  // source, and there is deliberately no fallback to the ref and no `?? {}`
-  // default: replaying `{}` is what asked the server for the whole object and
-  // fed up to 5000 unmatched records to bulk delete.
-  const bulkFanoutParams: Record<string, unknown> | null = hasInlineData
-    ? (hostFindParams ?? null)
-    : (lastFindParamsRef.current ?? null);
-
-  // The real match total, from whichever side owns the fetch — ONE derived
-  // value with ONE answer (objectui#4464). The pager has always read it this
-  // way; the cross-page "Select all N matching" affordance read the raw
-  // `totalMatching` STATE instead, whose only writer is this component's own
-  // data loader. Under a host that fetches the rows itself (ListView passing
-  // `manualPagination` + `rowCount`, i.e. the console) that loader never runs,
-  // so the state stayed `undefined` and `BulkActionBar`'s gate was permanently
-  // false while the pager, two lines away, showed the correct page count off
-  // the very number the bar needed.
-  //
-  // Every consumer reads this const — the pager's `rowCount`, both
-  // `BulkActionBar` sites, and the footer's whole-set read, which checks the
-  // count it is answered against this one (objectui#12081 item 3). Do NOT
-  // re-spell the conditional at a second consumption site: two copies of the
-  // fallback is exactly how one of them gets missed again (this defect, and
-  // #4138 before it).
-  //
-  // This answers HOW MANY match, and `canOfferSelectAllMatching` (objectui#4501)
-  // independently answers WHETHER the escalation may be offered at all. The two
-  // compose and neither substitutes for the other: the bar sites read this total
-  // only *through* that floor, so a host with a real `rowCount` but no
-  // `findParams` still gets no offer — a number to display is not a query to
-  // replay. The floor also subsumes the `singleSelection` suppression that used
-  // to be spelled at these sites (`!singleSelection` is its first conjunct).
-  const resolvedTotalMatching = externalManualPagination ? hostRowCount : totalMatching;
-
-  // --- Column summary support ---
-  const summaryColumns = React.useMemo(() => {
-    const cols = normalizeColumns(schema.columns);
-    if (cols && cols.length > 0 && typeof cols[0] === 'object') {
-      return cols as ListColumn[];
-    }
-    return undefined;
-  }, [schema.columns]);
-  // [objectui#12081 item 3] Whether the rows the footer reads ARE the set it
-  // is drawn beside. Under server paging they are one page of it: a host
-  // (`ListView`) hands this grid one window with the set's `rowCount`, or this
-  // grid's own loader asked for one page of `fetchWindow` rows. Rows handed in
-  // without a declared page are the set, and so is a first page that holds
-  // every match. Only the flat table draws the footer, so a grouped grid asks
-  // nothing.
-  const footerRowsAreTheSet = externalManualPagination
-    ? (hostRowCount as number) <= data.length
-    : hasInlineData || (serverPage === 1 && (typeof totalMatching === 'number'
-      ? totalMatching <= data.length
-      : data.length < fetchWindow));
-  const wholeSetSummary = useWholeSetSummary({
-    enabled: !footerRowsAreTheSet && !isGrouped && !serverGroupedFetch && data.length > 0,
-    dataSource,
-    objectName,
-    columns: summaryColumns,
-    findParams: bulkFanoutParams,
-    count: resolvedTotalMatching,
-    reloadKey: String(refreshKey),
-  });
-  const { summaries, hasSummary } = useScopedColumnSummary(
-    summaryColumns,
-    data,
-    objectSchema?.fields,
-    footerRowsAreTheSet ? 'rows' : (wholeSetSummary.status === 'answered' ? 'whole' : 'page'),
-    wholeSetSummary.row,
-  );
 
   // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
   // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).

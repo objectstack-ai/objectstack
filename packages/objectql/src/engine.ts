@@ -49,7 +49,12 @@ import { lowerFilterCondition, type FilterCondition, type FilterLoweringOptions 
 import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
-import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
+import {
+  ActionActivationProjection,
+  type ActionActivationRow,
+  type ActionActivationStore,
+  type ActionActivationWriteOptions,
+} from './action-activation.js';
 import {
   assertListComparandShapes,
   assertFilterIsMaterializable,
@@ -5755,10 +5760,12 @@ export class ObjectQL implements IObjectQLEngine {
    * the projection only after that write returns. Throws (503
    * `SERVICE_UNAVAILABLE`) when no ledger is attached rather than reporting a
    * durable switch that did not persist; the write AUTHORITY (§5) is enforced
-   * one tier up, at the route, because it needs the caller.
+   * one tier up, at the route, because it needs the caller. That route also
+   * names the caller in `options.context` (elevated), so the ledger row and
+   * its audit row record who switched the action.
    */
-  async setActionActive(row: ActionActivationRow): Promise<void> {
-    await this.actionActivation.setActive(row);
+  async setActionActive(row: ActionActivationRow, options?: ActionActivationWriteOptions): Promise<void> {
+    await this.actionActivation.setActive(row, options);
   }
 
   /**

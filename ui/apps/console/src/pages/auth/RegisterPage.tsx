@@ -40,6 +40,8 @@ import {
   isInvitationRedirect,
   needsBootstrapProbe,
   useBootstrapStatus,
+  invitationArrivalCopy,
+  useInvitationPreview,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
@@ -138,6 +140,11 @@ export function RegisterPage() {
       needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
+  // #26473 — who invited this visitor, and to what; `null` keeps the generic copy.
+  const invitationPreview = useInvitationPreview(redirect);
+  const invitationCopy = invitationRedirect
+    ? invitationArrivalCopy('register', invitationPreview, t)
+    : null;
 
   // Sign-up switched off — bounce to /login.
   useEffect(() => {
@@ -263,18 +270,17 @@ export function RegisterPage() {
       <Card className="border-border/60 px-4 py-8 shadow-sm shadow-primary/5 backdrop-blur supports-[backdrop-filter]:bg-card/95">
       <RegisterForm
         // #25886 — an invitee is told to register the invited address: the
-        // invitation is accepted only by the account that carries it.
+        // invitation is accepted only by the account that carries it. #26473 —
+        // with the preview, the card names the inviter and the organization,
+        // and shows the masked address; the email field stays empty.
         title={
-          invitationRedirect
-            ? t('auth.register.invitationTitle', { defaultValue: 'Create an account to join' })
+          invitationCopy
+            ? invitationCopy.title
             : t('auth.register.title', { defaultValue: 'Create an account' })
         }
         description={
-          invitationRedirect
-            ? t('auth.register.invitationDescription', {
-                defaultValue:
-                  'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
-              })
+          invitationCopy
+            ? invitationCopy.description
             : t('auth.register.description', {
                 defaultValue: 'Create your account to start building.',
               })

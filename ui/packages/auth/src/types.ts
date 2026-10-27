@@ -460,6 +460,13 @@ export interface AuthClient {
   cancelInvitation: (invitationId: string) => Promise<void>;
   /** Get an invitation by id (used by accept-invitation landing page) */
   getInvitation: (invitationId: string) => Promise<AuthInvitation>;
+  /**
+   * The signed-out preview of an invitation (organization, inviter, masked
+   * address). Needs no session. Resolves `null` for the server's one
+   * not-found answer (unknown, expired, used or withdrawn id); rejects on any
+   * other failure.
+   */
+  getInvitationPreview: (invitationId: string) => Promise<AuthInvitationPreview | null>;
   /** Accept an invitation as the current user */
   acceptInvitation: (invitationId: string) => Promise<void>;
   /** Reject an invitation as the current user */
@@ -542,6 +549,23 @@ export interface AuthInvitation {
   organizationName?: string;
   /** Organization slug snapshot */
   organizationSlug?: string;
+}
+
+/**
+ * What a signed-out visitor may learn about an invitation from the id its link
+ * carries: the server's `GET {authUrl}/organization/invitation-preview?id=ID`
+ * (objectstack `plugin-auth` `invitation-preview.ts`). Exactly these three keys.
+ */
+export interface AuthInvitationPreview {
+  /** The inviting organization's display name. */
+  organizationName: string;
+  /** The inviter's name; `null` when that account is gone or carries no name. */
+  inviterName: string | null;
+  /**
+   * The invited address, MASKED by the server (`a***@acme.com`). A hint for
+   * the visitor to recognise, never a value to prefill: it is not an address.
+   */
+  email: string;
 }
 
 /** Organization member */

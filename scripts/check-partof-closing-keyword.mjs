@@ -361,7 +361,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const PREDICATE_SOURCE = 'scripts/pm/check-half-states.mjs';
 
 /** The wiring that gives this gate a PR to judge. */
-const WIRING_WORKFLOW = '.github/workflows/partof-closing-keyword-guard.yml';
+const WIRING_WORKFLOW = '.github/workflows/pr-body-guards.yml';
 
 export const EXIT_CLEAN = 0;
 export const EXIT_CONTRADICTION = 1;

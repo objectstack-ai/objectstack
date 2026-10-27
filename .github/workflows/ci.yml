@@ -3722,6 +3722,74 @@ jobs:
             pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
           fi
 
+  test-ui-gate:
+    # Stable required-check name for the sharded Test UI matrix (#26460, ruling
+    # A, comment 6435318516), in test-gate's shape and for test-gate's reason
+    # (#3622): a matrix publishes only `Test UI (k/16)`, so the bare `Test UI`
+    # context the ruleset requires can come from nothing but this job, and the
+    # shard count stays free to move without a settings edit. Until this job,
+    # none of the 16 shards was required and the queue landed PRs whose Test UI
+    # was red (#26419 → #26421).
+    #
+    # `name:` and `if: always()` are both load-bearing, as on test-gate. The
+    # name IS the required context (`check:required-contexts` pins the
+    # literal), and a gate that skips because a dependency failed publishes no
+    # context at all, which leaves the PR permanently pending (#3622). ⛔ Never
+    # `if: !cancelled()` here.
+    #
+    # The verdict reads the matrix rollup `needs.test-ui.result`, and only
+    # `success` passes, with one exception: `skipped`, when `filter` concluded
+    # `success` AND said the diff reaches no ui path (the shards' own `if:`).
+    # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
+    # queue build or PR that touches no ui path read green here the way Lint
+    # UI and Build & E2E UI read `skipped` there. Everything else is red:
+    # `failure`; `cancelled`, which is also what a shard killed by its own
+    # `timeout-minutes` reads (on a superseded push this paints the OLD sha
+    # red, which no required check reads); a `skipped` that `filter` does not
+    # explain; and any lifecycle value such as the `abandoned` test-gate met
+    # (run 31120902911). Unlike test-gate it counts no shard credentials: the
+    # Test UI shards publish none, and adding them is a change to `test-ui`,
+    # which is the ui lane's job.
+    name: Test UI
+    needs: [test-ui, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # `check:aggregator-roster` holds this equal to `needs:` in both
+    # directions. `filter` is the #4928 input, not a lane.
+    env:
+      OS_AGGREGATOR_MEMBERS: test-ui
+      OS_AGGREGATOR_NON_MEMBERS: filter
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify Test UI shard results
+        env:
+          OS_TEST_UI_RESULT: ${{ needs['test-ui'].result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
+          OS_UI: ${{ needs.filter.outputs.ui }}
+        run: |
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI')."
+          case "$OS_TEST_UI_RESULT" in
+            success)
+              echo "✓ Test UI: every shard concluded success."
+              ;;
+            skipped)
+              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || [ "$OS_UI" = 'false' ]; }; then
+                echo "✓ Test UI: the shards were skipped because filter found no ui path in this diff."
+              else
+                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path (#4928)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error title=Test UI::the Test UI shards concluded '$OS_TEST_UI_RESULT', not success. Read the red 'Test UI (k/16)' check-runs on this sha for the failing test; a shard killed by its timeout reads 'cancelled'."
+              exit 1
+              ;;
+          esac
+
   # ── Lint UI and Build & E2E UI: the ceilings (#25869 row F13) ──────────
   # objectui's rule (its lint.yml `Lint` ceiling): the smallest round number
   # that is both >= 3x the slowest successful run and >= that run + 15 min, so
