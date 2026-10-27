@@ -4871,20 +4871,20 @@ describe('ListViewSchema — `viewType` is not a spelling of `type`', () => {
     }
   });
 
-  // ⚠️ The overlay door is `PUT /api/v1/meta/view` — the only door a Studio
-  // tenant or an MCP/AI author has — and it is `.strip()`ed by design (it
-  // carries Studio's round-trip keys). So `viewType` is DROPPED there and the
-  // view parses as the defaulted `type: 'grid'`: an author who spells the
-  // retired alias gets a 200 and a grid, never a calendar. Pinned because the
-  // finding assumed the opposite, and because accepted-and-ignored is the
-  // failure mode this file's `VIEW_HISTORY` exists to record.
-  it("is STRIPPED at the overlay write door, leaving the defaulted `type: 'grid'`", () => {
+  // The overlay door is `PUT /api/v1/meta/view` — the only door a Studio
+  // tenant or an MCP/AI author has. It used to be `.strip()`ed, so `viewType`
+  // was DROPPED there and the view parsed as the defaulted `type: 'grid'`: an
+  // author who spelled the retired alias got a 200 and a grid, never a
+  // calendar. [#26711] The door is closed now and refuses it by name, like the
+  // two authoring doors — accepted-and-ignored was the failure mode this
+  // file's `VIEW_HISTORY` exists to record.
+  it('is an UNKNOWN key at the overlay write door too — refused, not dropped', () => {
     const r = VIEW_METADATA_MEMBERS.listOverlay.safeParse({
       object: 'crm_lead', viewKind: 'list', viewType: 'calendar', columns: ['name'],
     });
-    expect(r.success).toBe(true);
-    expect((r as { data: Record<string, unknown> }).data).not.toHaveProperty('viewType');
-    expect((r as { data: { type?: unknown } }).data.type).toBe('grid');
+    expect(r.success).toBe(false);
+    const issue = (r as { error: z.ZodError }).error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect((issue as { keys?: string[] } | undefined)?.keys).toEqual(['viewType']);
   });
 });
 
