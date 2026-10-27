@@ -4276,12 +4276,12 @@ jobs:
       # 81bba6c3f), then it enumerates the registry under plain Node (~8 s; ~6 s
       # for the whole run when nothing moved). It serialises through the
       # @objectstack/sdui-parser the step above built, so a parser edit moves
-      # this verdict too, which no committed digest does. On merge_group it runs
-      # on the queue's combined tree, the one run that sees two entries' effect
-      # on the manifest together. Only the artefact is compared: the records the
-      # generator rewrites beside it are held by `check-sdui-manifest` in
-      # lint.yml. The Console build below reads the registry through its src/
-      # aliases, so the dist this step builds does not reach it.
+      # this verdict too. On merge_group it runs on the queue's combined tree,
+      # the one run that sees two entries' effect on the manifest together.
+      # Only the artefact is compared: the record the generator rewrites beside
+      # it is held by `check-sdui-manifest` in lint.yml. The Console build below
+      # reads the registry through its src/ aliases, so the dist this step
+      # builds does not reach it.
       - name: The committed SDUI manifest is the one this tree generates
         run: |
           node scripts/gen-sdui-manifest-node.mjs
