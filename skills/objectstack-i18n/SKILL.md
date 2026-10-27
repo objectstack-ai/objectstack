@@ -179,13 +179,14 @@ Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
 one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, both keys included. Both deeper keys, as the shipped `app-crm` and
-`app-showcase` bundles spell them for `zh-CN`:
+`settingsCommon`, both keys included. The `inlineTitle` and report-block keys, as the
+shipped `app-crm` and `app-showcase` bundles spell them for `zh-CN`:
 
 ```typescript
 objects: { crm_opportunity_line_item: { fields: { opportunity: { inlineTitle: '产品明细' } } } },
 reports: { showcase_task_overview: { blocks: { open_block: { label: '未完成任务' } } } },
 ```
+
 `settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
 the platform declares one, so an app bundle carrying it is refused by name.
 

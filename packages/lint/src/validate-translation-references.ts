@@ -160,7 +160,9 @@
  * `reports.<name>` resolves against `Report.name`, the name `translateReport`
  * looks a served report up by, with the same verdict: a name no package of
  * this stack declares is an orphan, `translation-target-unknown` (`error`).
- * Leaf keys below the name are the schema's (`label` / `description`, strict).
+ * Leaf keys below the name are the schema's: `label` / `description`, and a
+ * joined report's `blocks.<block_name>.label` / `.description` by the block's
+ * `name` (strict).
  *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
