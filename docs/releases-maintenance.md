@@ -85,6 +85,16 @@ the same package, or a PR that changes the artefact, still conflict once, and th
 later one merges `main` and re-runs the command. ⛔ There is no npm install route to the manifest; that was
 deleted by ruling 丙 on #17735.
 
+CI also regenerates the manifest and compares it with the committed bytes (#26137):
+the `Build & E2E UI` step "The committed SDUI manifest is the one this tree
+generates" runs the same command after the registry is built, on every PR that
+touches `ui/`, one of the seven packages objectui consumes (the parser among them)
+or the manifest's own files, and again on the merge queue's combined tree. A
+difference fails the step with the diff and the command to run. That covers what
+the source digests cannot see: an edit to `@objectstack/sdui-parser`, to a package
+the registry imports, and two queued PRs whose effect on the manifest only shows
+together.
+
 **One producer, one artefact.** `packages/console/build-dist.sh` copies the tracked
 `sdui.manifest.json` into `packages/console/dist/`, so the published console carries the
 same bytes CI gates.

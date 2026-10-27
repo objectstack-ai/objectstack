@@ -50,8 +50,28 @@
  * node writes the id into an object's `file` field, and that write claims the
  * file. While an upload is in flight the value is not an id yet, so the runtime
  * holds Submit until it settles (`FlowRunner`).
+ *
+ * ## A `type: 'record_link'` field shows a record, as a link (objectstack#25872)
+ *
+ * The read-only record link (the spec's `SCREEN_FIELD_RECORD_LINK_TYPE`, ruling
+ * B on the screen-flow result screen): it shows the `reference` record whose id
+ * its `defaultValue` was served with, by the record's display name (ADR-0079
+ * `nameField`), as a link to the record's page. The name comes from the object
+ * form's own `LookupField` in its `readonly` branch, which fetches the record
+ * and names it from the referenced object's schema; the link is the console's
+ * record route (`appRecordPath`, the builder the record page's related lists
+ * use), drawn by the router's `Link` so a new tab or a copied address carries
+ * the router's basename. An empty id draws the platform's empty glyph ("—")
+ * and no link, and so does a record the console cannot route to (no app
+ * segment, an object outside this console's metadata, or no router at all, as
+ * in a bare preview): the name stays readable either way.
+ *
+ * The field takes no input. It is never seeded into the collected values
+ * ({@link initialScreenValues}) and never posted ({@link screenResumeValues}):
+ * the engine refuses a resume that carries any value under its name.
  */
 import { Suspense } from 'react';
+import { Link, useInRouterContext, useParams } from 'react-router-dom';
 import {
   Input,
   Label,
@@ -68,7 +88,8 @@ import { ObjectForm } from '@object-ui/plugin-form';
 import { evalFieldPredicate } from '@object-ui/core';
 import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { SCREEN_FIELD_RECORD_LINK_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 
 /**
  * The object form's lookup picker (`LookupField`), through the shared lazy
@@ -80,6 +101,15 @@ const LookupFieldWidget = getLazyFieldWidget('lookup');
 
 /** The object form's upload widget (`FileField`), resolved the same way. */
 const FileFieldWidget = getLazyFieldWidget('file');
+
+/**
+ * Whether a screen field is the read-only record link. Matched exactly, as the
+ * spec's refinement and the engine's resume rule match it, so the console never
+ * draws a link for a field the server would accept a value for.
+ */
+export function isRecordLinkScreenField(field: ScreenFieldSpec): boolean {
+  return field.type === SCREEN_FIELD_RECORD_LINK_TYPE;
+}
 
 /** Whether a screen field is the upload widget — the widget hint, read as the renderer reads it. */
 function isFileScreenField(field: ScreenFieldSpec): boolean {
@@ -192,10 +222,17 @@ export function screenPredicateScope(
   return scope;
 }
 
-/** Seed flat-field values from each field's `defaultValue`. */
+/**
+ * Seed flat-field values from each field's `defaultValue`. A record link's
+ * `defaultValue` is the id it SHOWS, not a value it collects, so it is not
+ * seeded: it would otherwise ride the resume the engine refuses for it.
+ */
 export function initialScreenValues(screen: ScreenSpec): Record<string, unknown> {
   const v: Record<string, unknown> = {};
-  for (const f of screenFields(screen)) if (f.defaultValue !== undefined) v[f.name] = f.defaultValue;
+  for (const f of screenFields(screen)) {
+    if (isRecordLinkScreenField(f)) continue;
+    if (f.defaultValue !== undefined) v[f.name] = f.defaultValue;
+  }
   return v;
 }
 
@@ -245,11 +282,19 @@ export function screenFieldBoundViolations(
  * so the reduction is `fileIdOf`, the extractor `ActionParamDialog`'s
  * `serializeParamValues` applies to file params — one rule for both surfaces.
  * A value carrying no id is sent as it is, so the engine's refusal names it
- * rather than the dialog posting `undefined`. Every other value passes through.
+ * rather than the dialog posting `undefined`. Every other value passes through,
+ * except a record link's: that field takes no value and the engine refuses one
+ * under its name, so any key it holds is left out.
  */
 export function screenResumeValues(screen: ScreenSpec, values: Record<string, unknown>): Record<string, unknown> {
   let out: Record<string, unknown> | undefined;
   for (const field of screenFields(screen)) {
+    if (isRecordLinkScreenField(field)) {
+      if (!Object.prototype.hasOwnProperty.call(values, field.name)) continue;
+      out ??= { ...values };
+      delete out[field.name];
+      continue;
+    }
     if (!isFileScreenField(field)) continue;
     const value = values[field.name];
     if (value == null) continue;
@@ -362,6 +407,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
               onChange={(v) => onValueChange(f.name, v)}
               describedBy={helpId}
               dataSource={dataSource}
+              objects={objects}
             />
             {helpId && (
               <p id={helpId} className="text-xs text-muted-foreground">{f.inlineHelpText}</p>
@@ -389,6 +435,7 @@ export function ScreenFieldInput({
   onChange,
   describedBy,
   dataSource,
+  objects,
 }: {
   field: ScreenFieldSpec;
   value: unknown;
@@ -397,6 +444,8 @@ export function ScreenFieldInput({
   describedBy?: string;
   /** Data source a `type: 'lookup'` picker queries its `reference` object through. */
   dataSource?: unknown;
+  /** The console's object definitions: the objects a `record_link` field may link to a page of. */
+  objects?: ReadonlyArray<unknown>;
 }) {
   const { t } = useObjectTranslation();
   const id = `ff-${field.name}`;
@@ -408,6 +457,15 @@ export function ScreenFieldInput({
   // browser's own verdict beside it — on a checkbox it means "must be checked".
   // `undefined` when optional, so the attribute is omitted rather than "false".
   const ariaRequired = field.required ? true : undefined;
+
+  // The read-only record link (objectstack#25872): the record's display name,
+  // drawn by the lookup widget's `readonly` branch, inside a link to its page.
+  // It reads the served `defaultValue`, never `value`: nothing is collected.
+  if (isRecordLinkScreenField(field)) {
+    return (
+      <ScreenRecordLink id={id} field={field} dataSource={dataSource} objects={objects} describedBy={describedBy} />
+    );
+  }
 
   // A lookup with a declared target resolves its picker from it (objectstack#17306).
   // The widget is the object form's own `LookupField`, through the shared lazy
@@ -503,5 +561,87 @@ export function ScreenFieldInput({
       placeholder={field.placeholder}
       onChange={(e) => onChange(numeric ? (e.target.value === '' ? undefined : Number(e.target.value)) : e.target.value)}
     />
+  );
+}
+
+/** No-op change handler for the read-only lookup widget: a record link collects nothing. */
+function ignoreChange(): void {}
+
+/** The record id a record link was served with, or `undefined` when it holds none. */
+function recordLinkId(field: ScreenFieldSpec): string | number | undefined {
+  const id = field.defaultValue;
+  if (typeof id === 'number' && Number.isFinite(id)) return id;
+  if (typeof id === 'string' && id.trim() !== '') return id;
+  return undefined;
+}
+
+/**
+ * A `type: 'record_link'` screen field: the record's display name, from the
+ * lookup widget's `readonly` branch (which fetches the record and names it from
+ * the referenced object's schema, or draws "—" when there is no id), wrapped in
+ * a link to the record's page when the console can route there.
+ */
+function ScreenRecordLink({
+  id,
+  field,
+  dataSource,
+  objects,
+  describedBy,
+}: {
+  id: string;
+  field: ScreenFieldSpec;
+  dataSource?: unknown;
+  objects?: ReadonlyArray<unknown>;
+  describedBy?: string;
+}) {
+  const recordId = recordLinkId(field);
+  const name = (
+    <Suspense fallback={<span className="inline-block h-4 w-24 animate-pulse rounded bg-muted" aria-hidden="true" />}>
+      <LookupFieldWidget
+        value={recordId ?? null}
+        onChange={ignoreChange}
+        readonly
+        field={{ name: field.name, label: field.label, type: 'lookup', reference: field.reference }}
+        dataSource={dataSource}
+      />
+    </Suspense>
+  );
+  // Rules-of-hooks safe: whether a router sits above is a fact about the mount,
+  // and cannot change under it.
+  const routed = useInRouterContext();
+  return (
+    <div id={id} aria-describedby={describedBy} data-screen-record-link={field.name} className="min-h-9 flex items-center">
+      {routed && recordId !== undefined && typeof field.reference === 'string' ? (
+        <RoutedRecordLink objectName={field.reference} recordId={recordId} objects={objects}>{name}</RoutedRecordLink>
+      ) : (
+        name
+      )}
+    </div>
+  );
+}
+
+/**
+ * The link to a record's page, under a router: the record route the record
+ * page's related lists build (`appRecordPath`), or the bare name when this
+ * console cannot route there.
+ */
+function RoutedRecordLink({
+  objectName,
+  recordId,
+  objects,
+  children,
+}: {
+  objectName: string;
+  recordId: string | number;
+  objects?: ReadonlyArray<unknown>;
+  children: React.ReactNode;
+}) {
+  const { appName } = useParams<{ appName?: string }>();
+  const path = appRecordPath(appName, routableObjectNames(objects), objectName, recordId);
+  if (path === null) return <>{children}</>;
+  return (
+    <Link to={path} className="text-primary underline-offset-4 hover:underline">
+      {children}
+    </Link>
   );
 }

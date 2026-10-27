@@ -57,7 +57,15 @@ const OBJECTUI_STRUCTURAL_KEYS: readonly string[] = [
   'className',
   'style',
   'placeholder',
-  // Conditional rendering and interaction state.
+  // Conditional rendering and interaction state. `visibleOn` / `hiddenOn` /
+  // `disabledOn` are RETIRED spellings of `visibleWhen` / `hidden` /
+  // `disabled` (`?: never` tombstones, refused by name on the zod mirror),
+  // kept here for the same reason `body` is: a file authored under a retired
+  // spelling must still be RECOGNISED as an ObjectUI node. This sweep then
+  // reports it as "recognised but not validated" and sends the reader to
+  // `objectui validate`, whose strict parse refuses the key by name and names
+  // the canonical one; dropping the marker would let a leaf file carrying only
+  // a retired key and an unregistered `type` fall out of the sweep unmentioned.
   'visible',
   'visibleWhen',
   'visibleOn',

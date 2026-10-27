@@ -204,9 +204,13 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   // its edits; OK, or a clean page, goes at once.
   const leaveTo = (to: string) => runCommand(() => confirmUnsavedLeave(() => navigate(to)));
 
-  // Extract navigation items from active app, filtering by visibility expressions
+  // Extract navigation items from active app, filtering by the spec's one
+  // navigation gate, `visible`. The `?? item.visibleOn` fallback this read
+  // once carried was a consumer-side alias of a key the spec never declared on
+  // a navigation entry (`NavigationItem.visible` is the gate) — dropped with the
+  // node-level dialects.
   const navItems = flattenNavigation(activeApp?.navigation || []).filter(
-    (item) => evalVis(item.visible ?? item.visibleOn, item)
+    (item) => evalVis(item.visible, item)
   );
 
   // The entries the palette shows for the query: a navigation entry or app by
