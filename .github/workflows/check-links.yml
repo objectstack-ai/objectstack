@@ -20,16 +20,56 @@ name: Check Links
 # "the anchors are fine". The fragment half is owned by `pnpm check:doc-anchors`
 # in `lint.yml`, which is REQUIRED where this lane is advisory; `lychee.toml`'s
 # `include_fragments` comment records why the enum is not the fix.
+#
+# `paths:` is what the two checks read: lychee's input globs in `LYCHEE_ARGS`
+# below (taken as whole `content/` and `docs/` trees, so an image or page a
+# link points at inside them counts too), its config, and the ADR step's
+# `docs/adr/**` and script. Measured on the last 49 landings of `main`
+# (6390fe52): 10 touched one of these, so the other 39 would not have run it.
+# ⚠️ The filter is blind to the TARGET side outside those trees: a PR that
+# only renames or deletes a file a doc links to (a `packages/*` directory
+# from CONTRIBUTING.md, `LICENSE` from LICENSING.md) skips this lane, and the
+# break shows on the next PR that touches a doc, or on a `workflow_dispatch`
+# run. Keep this list equal to `LYCHEE_ARGS`. ⛔ Promoting the lane into the
+# required set removes this filter in the same change: a required check
+# skipped by `paths:` never reports, the #6121 stall above.
 on:
   workflow_dispatch:
   pull_request:
     branches:
       - main
+    paths:
+      - 'content/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'ARCHITECTURE.md'
+      - 'CHANGELOG.md'
+      - 'RELEASE_NOTES.md'
+      - 'CONTRIBUTING.md'
+      - 'ROADMAP.md'
+      - 'LICENSING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'lychee.toml'
+      - '.lycheeignore'
+      - 'scripts/check-adr-links.mjs'
+      - 'scripts/invoked-as.mjs'
+      - '.github/workflows/check-links.yml'
+
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled.
+concurrency:
+  group: check-links-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   link-checker:
     name: Check Documentation Links
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.8 min, max
+    # 1.0. The bound covers the lychee retry path (two binary downloads and the 15 s wait)
+    # with headroom.
+    timeout-minutes: 10
     # Least privilege: the job only reads the tree and runs lychee offline.
     # There is no issue-filing step, and `--offline` makes zero network
     # requests, so neither `issues: write` nor a GITHUB_TOKEN is needed.

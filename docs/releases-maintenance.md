@@ -55,12 +55,11 @@ ships the Console from the same commit as the spec it builds against.
 > root `.changeset/` before the first joint Version PR is #25831. New frontend
 > changesets go in the root `.changeset/`.
 
-#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712, #26051)
+#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712, #26137)
 
 The repo-root `sdui.manifest.json` (ADR-0080, the Console's public-tier component
-manifest), its provenance record `scripts/sdui-manifest.record.json` and one record
-per registry package under `scripts/sdui-manifest.sources/` are generated, and one
-command writes them:
+manifest) and its provenance record `scripts/sdui-manifest.record.json` are
+generated, and one command writes them:
 
 ```bash
 node scripts/gen-sdui-manifest-node.mjs   # no arguments
@@ -69,21 +68,26 @@ node scripts/gen-sdui-manifest-node.mjs   # no arguments
 It builds the registry packages under `ui/packages/`, enumerates them from
 `ui/apps/console` under plain Node, and serializes them through
 `@objectstack/sdui-parser` (it needs `packages/sdui-parser/dist`:
-`pnpm --filter @objectstack/sdui-parser build`). Each package record is one line:
-a digest of that package's own `src/` and the `sha256` of the artefact it was
-verified against. A run rewrites only the records whose line changed, so a PR that
-edits one registry package re-records that package alone; the shared record moves
-only when the artefact does, and then every package record names the new `sha256`.
+`pnpm --filter @objectstack/sdui-parser build`). The record moves only when the
+artefact does, so a PR that does not change the manifest touches neither file.
+⛔ There is no npm install route to the manifest; that was deleted by ruling 丙 on
+#17735.
 
-A required lint step reads the tracked files on **every PR**:
-`node scripts/check-sdui-manifest.mjs` checks the shape, the `sha256` against the
-record, and recomputes each package's source digest from the index. A PR that edits
-a registry package's source without regenerating goes red there, naming the package,
-and the failure text prints the regeneration call. Two PRs that edit different
-registry packages touch different record files and do not conflict; two that edit
-the same package, or a PR that changes the artefact, still conflict once, and the
-later one merges `main` and re-runs the command. ⛔ There is no npm install route to the manifest; that was
-deleted by ruling 丙 on #17735.
+CI regenerates the manifest and compares it with the committed bytes (#26137):
+the `Build & E2E UI` step "The committed SDUI manifest is the one this tree
+generates" runs the same command after the registry is built, on every PR that
+touches `ui/`, one of the seven packages objectui consumes (the parser among them)
+or the manifest's own files, and again on the merge queue's combined tree. A
+difference fails the step with the diff and the command to run. Two PRs conflict
+on the manifest only when both change it, and the later one merges `main` and
+re-runs the command; two queued PRs whose effect on the manifest only shows
+together fail in the queue.
+
+A required lint step, `node scripts/check-sdui-manifest.mjs`, reads the tracked
+files on **every PR**: the artefact is present and is a component manifest, and
+its `sha256` and component count are the record's. It builds nothing, so it does
+not judge freshness. (The per-package source records under
+`scripts/sdui-manifest.sources/` that it used to recompute, #26051, are retired.)
 
 **One producer, one artefact.** `packages/console/build-dist.sh` copies the tracked
 `sdui.manifest.json` into `packages/console/dist/`, so the published console carries the
@@ -224,9 +228,9 @@ What it does, in order:
    re-reads `main`, so **`main` may keep moving for the whole run**.
 2. Builds the workspace, both scopes, then the Console (`pnpm run build`, then
    `pnpm run console:build`) from that snapshot. The dist carries the tracked
-   `sdui.manifest.json`, whose freshness the required lint job already held on the
-   PR that changed it. A Console that cannot build stops the cut before anything is
-   written.
+   `sdui.manifest.json`, whose freshness the required `Build & E2E UI` job already
+   held on the PR that changed it and in the merge queue. A Console that cannot build
+   stops the cut before anything is written.
 3. Runs the gates that read `.changeset/*`, before versioning consumes it.
 4. Runs `pnpm run version` — the repo script, never a bare `changeset version` —
    and **fails unless the computed version equals the one you typed**.

@@ -72,7 +72,7 @@ export type { PredicateScopeTier } from './utils/visibilityDiagnostic.js';
 //
 // ⚠️ More than two members: read the union for the set. `'concealment'`
 // (objectui#6503) was added for
-// the `hidden` / `hiddenOn` legs, whose verdict `SchemaRenderer` does NOT
+// the `hidden` leg, whose verdict `SchemaRenderer` does NOT
 // negate — the same fail-soft `true` that shows a node on the four negated legs
 // REMOVES it there, so "the gate did NOT bite" was the one sentence that could
 // not be true for them; `'withholding'` (objectui#12700) for the app-shell's

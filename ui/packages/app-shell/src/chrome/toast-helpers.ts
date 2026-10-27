@@ -22,7 +22,7 @@
  *
  * Usage:
  *
- *   import { toastWithUndo } from '@object-ui/app-shell';
+ *   import { toastWithUndo } from './chrome/toast-helpers.js'; // from `src/`; not on the package entry
  *
  *   toastWithUndo('Lead deleted', {
  *     onUndo: () => dataSource.restore('lead', id),

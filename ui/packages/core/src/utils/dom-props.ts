@@ -77,7 +77,7 @@
  *
  * A semantic prop is CONSUMED, never forwarded: a widget that can be disabled
  * reads `disabled` and applies it (see `plugin-chatbot`'s registrations), which
- * is what keeps `disabledOn` working without putting `disabled="true"` on a
+ * is what keeps a `disabled` predicate working without putting `disabled="true"` on a
  * `<div>`.
  *
  * Deliberate DOM pass-through beyond this set stays available the objectui#4435

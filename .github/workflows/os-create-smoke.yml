@@ -66,6 +66,14 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. The group key is ci.yml's shape; `cancel-in-progress` is true only on
+# `pull_request`, so no other event's run is ever cancelled. The schedule and dispatch
+# runs share a group keyed on their own event and wait for each other instead.
+concurrency:
+  group: os-create-smoke-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   create-scaffold-smoke:
     name: Scaffold outside the monorepo, install, build

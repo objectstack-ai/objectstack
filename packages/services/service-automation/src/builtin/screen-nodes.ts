@@ -68,9 +68,9 @@ import { judgeHeadlessScreen } from '../screen-input-contract.js';
  */
 const LOOKUP_TARGET_COLUMN = {
   type: 'string',
-  title: 'Lookup object',
+  title: 'Target object',
   xRef: { kind: 'object' },
-  description: "Object whose records a `lookup` field picks from. Required on a `lookup` field — a picker with no target object resolves nothing.",
+  description: "Object whose records a `lookup` field picks from, or that a `record_link` field's record belongs to. Required on both — a picker with no target object resolves nothing, and a link with none cannot name its record.",
 };
 
 /** How a refusal names a value that is not a record id — `null`, a number (`42`), a map. */
