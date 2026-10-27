@@ -863,7 +863,18 @@ export const CEILINGS = new Map([
   // Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 1050],
-  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
+  // 1046 -> 1352 (card #26760): two eval cases for the `label(record.FIELD)`
+  // teaching — case 6 asks for a record name built from a select field and
+  // expects `label(record.kind)`, never a hard-coded label ternary; case 7
+  // asks for a validation and a `visibleWhen` and refuses `label(` there,
+  // where it faults and aborts the write. Maintainer ruling 2026-10-27 on the
+  // decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A,
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST:
+  // four sentences in cases 1, 2, 3 and 5 that restated their own
+  // `must_not_contain` assertions, 212 bytes = 53 units (1046 -> 993); the two
+  // cases add 1438 bytes = 359 units (993 -> 1352); pinned AT the measurement,
+  // zero headroom. The raising PR's body carries the same arithmetic.
+  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1352],
   // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
   // audit): two eval prompts for the teaching that card adds — the `reports`,
   // `positions`, `permissions` and `picklists` groups; a form view `title`, a
