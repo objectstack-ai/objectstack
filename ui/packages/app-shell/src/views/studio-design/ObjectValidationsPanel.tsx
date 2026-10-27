@@ -23,11 +23,13 @@
  * Adding a rule starts from the "New" menu, which opens on a few common rules in
  * plain words (objectui#11861, `validationPresets.ts`) and keeps every spec type
  * under "Advanced" — see "Starting points" below. A new rule starts on
- * Create + Update (objectui#11820). A type whose rule carries a CEL guard
- * (`script`, `cross_field`, `conditional`) is NOT written to the object draft
- * until the author gives it a condition — see "A new rule waits for its
- * condition" below. The other types are written at once, each seeded with a
- * VALID skeleton so the object-draft save never 422s. The common fields
+ * Create + Update (objectui#11820). A new rule is NOT written to the object
+ * draft until the author has filled in what its type needs: a type whose rule
+ * carries a CEL guard (`script`, `cross_field`, `conditional`) waits for a
+ * condition, and a type whose rule names one field (`state_machine`, `format`,
+ * `json_schema`) waits for that field and an error message — see "A new rule
+ * waits until it is complete" below. Each is seeded with a skeleton the spec
+ * accepts, so the object-draft save never 422s. The common fields
  * (name / label / message / severity / events / priority / active) are shared
  * by all types; the type-specific fields render below them. CEL conditions
  * reuse the metadata-admin `ConditionBuilder`, fed the DRAFT field list so
@@ -37,7 +39,7 @@
  * calls `onPatch({ validations })` and the Data pillar's Save draft owns the
  * write. Nothing here fetches or saves on its own.
  *
- * ## A new rule waits for its condition (objectui#11820)
+ * ## A new rule waits until it is complete (objectui#11820, objectstack#26731)
  *
  * A guard-bearing rule used to be written at once with the placeholder guard
  * `'false'`: the draft autosave stored a rule that can never fire, and nothing
@@ -49,6 +51,13 @@
  * first edit that gives it a guard writes it to the draft; from then on it is an
  * ordinary rule.
  *
+ * The field-bearing types (`state_machine`, `format`, `json_schema`) were
+ * still written at once, seeded with the object's first field and no message,
+ * so the autosave stored a live rule on a field the author never chose
+ * (objectstack#26731 saw `created_at`). They now take the same hold: a new one
+ * starts with no field, and waits for a field and an error message, with the
+ * hint under whichever input it waits on. See {@link missingPart}.
+ *
  * Why the panel and not the pillar's hold: the pillar holds a draft its write
  * guard would refuse (`objectHeldEdit` in `metadataError.ts`) and routes "Show
  * me" to a field. A rule that has never been written is not an edit of that
@@ -58,8 +67,8 @@
  * in the draft, and the line says it is not saved).
  *
  * An EXISTING rule is edited exactly as before, including a type switch, which
- * still seeds the `'false'` placeholder: a rule already in the draft must stay
- * saveable while it is being reshaped.
+ * still seeds the `'false'` placeholder and the first field: a rule already in
+ * the draft must stay saveable while it is being reshaped.
  *
  * ## Starting points (objectui#11861)
  *
@@ -311,6 +320,23 @@ const BUILTIN_FORMATS = ['', 'url', 'email', 'phone', 'json'] as const;
 /** The rule types whose rule carries a CEL guard (`guardKey` names its key). */
 const GUARDED_TYPES: ReadonlySet<string> = new Set(['script', 'cross_field', 'conditional']);
 
+/**
+ * The rule types whose rule names one `field` and carries no guard. A new one
+ * waits for that field and an error message (objectstack#26731).
+ */
+const FIELD_TYPES: ReadonlySet<string> = new Set(['state_machine', 'format', 'json_schema']);
+
+/** What a new, not-yet-saved rule still lacks ({@link missingPart}). */
+type MissingPart = 'rule' | 'then' | 'field' | 'message';
+
+/** The held line's clause and the rule list's not-saved mark, per {@link MissingPart}. */
+const MISSING_WORDING: Readonly<Record<MissingPart, { clause: string; mark: string }>> = {
+  rule: { clause: 'engine.studio.held.needsCondition', mark: 'engine.studio.rules.notSaved' },
+  then: { clause: 'engine.studio.held.needsThenCondition', mark: 'engine.studio.rules.notSaved' },
+  field: { clause: 'engine.studio.held.needsRuleField', mark: 'engine.studio.rules.notSavedField' },
+  message: { clause: 'engine.studio.held.needsRuleMessage', mark: 'engine.studio.rules.notSavedMessage' },
+};
+
 function readRules(input: unknown): ValidationRuleDraft[] {
   if (!Array.isArray(input)) return [];
   return input.filter((r): r is ValidationRuleDraft => !!r && typeof r === 'object');
@@ -343,20 +369,22 @@ function guardKey(type: unknown): 'when' | 'condition' {
 }
 
 /**
- * A minimal skeleton for a rule of `type`; required `field`/`fields` seed from
- * the first field. The guard's KEY is per-type (`guardKey`) — `conditional`
- * spells it `when`.
+ * A minimal skeleton for a rule of `type`. The guard's KEY is per-type
+ * (`guardKey`) — `conditional` spells it `when`.
  *
- * `guard` is what the guard-bearing types are seeded with:
+ * `guard` says whose skeleton it is, and so what it is seeded with:
  *
  *   - `'false'` — a VALID skeleton (an empty guard is rejected by the spec's
  *     ExpressionInputSchema), used when an EXISTING rule switches type: it is
  *     already in the draft, so the next save must not 422. `'false'` never
- *     fires, which the editor's guard caption says.
+ *     fires, which the editor's guard caption says. A required `field` seeds
+ *     from the first field.
  *   - `''` — a NEW rule (objectui#11820): the guard is left for the author,
  *     and the panel keeps the rule out of the draft until it is filled
- *     ({@link missingGuard}). The conditional's nested `then` gets the same
- *     empty `condition`, so its JSON shows where the condition goes.
+ *     ({@link missingPart}). The conditional's nested `then` gets the same
+ *     empty `condition`, so its JSON shows where the condition goes. A
+ *     required `field` is left for the author too (objectstack#26731): the
+ *     first field is whatever the object lists first, often a system column.
  *
  * "Valid" is a claim about a foreign schema, so it is pinned against that
  * schema rather than asserted in prose: `whenKeyPin` parses what this panel
@@ -368,17 +396,18 @@ function makeSkeleton(type: RuleType, name: string, firstField: string | undefin
   const base = { name, message: '', severity: 'error' as const, active: true };
   // A new rule leaves its guard key out; `missingGuard` reads absent as empty.
   const own = guard ? { [guardKey(type)]: guard } : {};
+  const field = guard ? (firstField ?? '') : '';
   switch (type) {
     case 'script':
       return { ...base, type, ...own };
     case 'cross_field':
       return { ...base, type, ...own, fields: firstField ? [firstField] : [] };
     case 'state_machine':
-      return { ...base, type, field: firstField ?? '', transitions: {} };
+      return { ...base, type, field, transitions: {} };
     case 'format':
-      return { ...base, type, field: firstField ?? '' };
+      return { ...base, type, field };
     case 'json_schema':
-      return { ...base, type, field: firstField ?? '', schema: {} };
+      return { ...base, type, field, schema: {} };
     case 'conditional':
       return {
         ...base,
@@ -409,6 +438,22 @@ function missingGuard(rule: ValidationRuleDraft): 'rule' | 'then' | null {
     if (missingGuard(rule.then as ValidationRuleDraft) !== null) return 'then';
   }
   return null;
+}
+
+/**
+ * What a new rule still lacks before the panel writes it, or `null` when it is
+ * complete for its type: a guarded type's guard ({@link missingGuard}), or a
+ * field type's `'field'`, then its `'message'` (objectstack#26731) — each
+ * lacking while blank. The spec accepts both blank; the author has simply not
+ * said yet which field the rule checks, or what it tells the user.
+ */
+function missingPart(rule: ValidationRuleDraft): MissingPart | null {
+  if (typeof rule.type === 'string' && FIELD_TYPES.has(rule.type)) {
+    if (!(typeof rule.field === 'string' && rule.field.trim())) return 'field';
+    if (!(typeof rule.message === 'string' && rule.message.trim())) return 'message';
+    return null;
+  }
+  return missingGuard(rule);
 }
 
 /** A JSON <textarea> that keeps invalid text local and only commits parsed objects. */
@@ -470,7 +515,15 @@ function JsonField({
   );
 }
 
-/** State-machine `transitions` editor: from-state → allowed next states (CSV). */
+/**
+ * State-machine `transitions` editor: from-state → allowed next states (CSV).
+ *
+ * objectstack#26731 — the row "Add transition" opens is kept HERE until it has
+ * a from-state. It used to be written as the key `""`, which is no transition:
+ * the autosave stored it and Publish shipped it. The blank row renders at the
+ * index, and so under the key, its row takes once written, so typing its first
+ * letter keeps the focus in the input.
+ */
 function TransitionsField({
   transitions,
   onCommit,
@@ -483,7 +536,20 @@ function TransitionsField({
   locale: string;
 }) {
   const rows = Object.entries(transitions);
+  // The next states typed into the blank row, or `null` while there is none.
+  const [blank, setBlank] = React.useState<string[] | null>(null);
+  const shown: Array<[string, string[]]> = blank ? [...rows, ['', blank]] : rows;
   const setRow = (idx: number, from: string, to: string[]) => {
+    if (idx === rows.length) {
+      // The blank row: written once it has a from-state, kept here until then.
+      if (!from) {
+        setBlank(to);
+        return;
+      }
+      setBlank(null);
+      onCommit({ ...transitions, [from]: to });
+      return;
+    }
     const next: Record<string, string[]> = {};
     rows.forEach(([k, v], i) => {
       if (i === idx) {
@@ -497,7 +563,7 @@ function TransitionsField({
   return (
     <div className="space-y-2">
       <span className="block text-[11px] text-muted-foreground">{t('engine.studio.rules.transitions', locale)}</span>
-      {rows.map(([from, to], i) => (
+      {shown.map(([from, to], i) => (
         <div key={i} className="flex items-center gap-1.5">
           <input
             value={from}
@@ -520,7 +586,7 @@ function TransitionsField({
             <button
               type="button"
               aria-label={t('engine.studio.rules.delete', locale)}
-              onClick={() => setRow(i, '', [])}
+              onClick={() => (i === rows.length ? setBlank(null) : setRow(i, '', []))}
               className="rounded border border-destructive/40 p-1 text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="h-3 w-3" />
@@ -531,14 +597,26 @@ function TransitionsField({
       {!disabled && (
         <button
           type="button"
-          onClick={() => onCommit({ ...transitions, '': [] })}
-          disabled={'' in transitions}
+          onClick={() => setBlank([])}
+          disabled={blank !== null || '' in transitions}
           className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] hover:bg-muted disabled:opacity-50"
         >
           <Plus className="h-3 w-3" /> {t('engine.studio.rules.addTransition', locale)}
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * The hint the Data pillar's hold puts under the input an edit waits on
+ * (objectui#11786), under the input a new rule waits on.
+ */
+function HeldHint({ locale }: { locale: string }) {
+  return (
+    <span data-testid="rule-held-hint" className="mt-1 block text-[11px] text-muted-foreground">
+      {t('engine.studio.held.inputHint', locale)}
+    </span>
   );
 }
 
@@ -561,10 +639,10 @@ function RuleTypeFields({
   /** Blocking CEL error count for this rule's guard (objectui#4527). */
   onBlockingIssuesChange?: (count: number) => void;
   /**
-   * objectui#11820 — the guard a new, not-yet-saved rule still needs
-   * ({@link missingGuard}); the input it names carries the hold's hint.
+   * objectui#11820 — what a new, not-yet-saved rule still needs
+   * ({@link missingPart}); the input it names carries the hold's hint.
    */
-  missing?: 'rule' | 'then' | null;
+  missing?: MissingPart | null;
   /**
    * objectui#11861 — the condition group, which the panel focuses when a
    * preset leaves the condition to the author.
@@ -572,31 +650,28 @@ function RuleTypeFields({
   guardRef?: React.Ref<HTMLDivElement>;
 }) {
   const captionId = React.useId();
-  // The hint the Data pillar's hold puts under the input an edit waits on
-  // (objectui#11786), under the input this rule waits on.
-  const heldHint = (
-    <span data-testid="rule-held-hint" className="mt-1 block text-[11px] text-muted-foreground">
-      {t('engine.studio.held.inputHint', locale)}
-    </span>
-  );
+  const heldHint = <HeldHint locale={locale} />;
   const fieldSelect = (label: string, value: string | undefined, onSet: (v: string) => void) => (
-    <label className="block">
-      <span className="mb-1 block text-[11px] text-muted-foreground">{label}</span>
-      <RulePicker
-        testId="rule-field"
-        value={value ?? ''}
-        disabled={disabled}
-        onPick={onSet}
-        className={PICKER_FULL}
-        options={[
-          { value: '', label: t('engine.studio.rules.pickField', locale) },
-          ...fields.map((f) => ({
-            value: f.name,
-            label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name,
-          })),
-        ]}
-      />
-    </label>
+    <div>
+      <label className="block">
+        <span className="mb-1 block text-[11px] text-muted-foreground">{label}</span>
+        <RulePicker
+          testId="rule-field"
+          value={value ?? ''}
+          disabled={disabled}
+          onPick={onSet}
+          className={PICKER_FULL}
+          options={[
+            { value: '', label: t('engine.studio.rules.pickField', locale) },
+            ...fields.map((f) => ({
+              value: f.name,
+              label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name,
+            })),
+          ]}
+        />
+      </label>
+      {missing === 'field' && heldHint}
+    </div>
   );
 
   // ONE element serves `script`, `cross_field` and `conditional`, and the spec
@@ -616,10 +691,13 @@ function RuleTypeFields({
       tabIndex={-1}
       className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
+      {/* A `conditional`'s `when` is no fail condition: it says WHEN the
+          `then` rule applies (`ConditionalValidationSchema`), so it has its
+          own caption (objectstack#26731). */}
       <span id={captionId} className="mb-1 block text-[11px] text-muted-foreground">
-        {t('engine.studio.rules.celPre', locale)}
+        {t(rule.type === 'conditional' ? 'engine.studio.rules.whenPre' : 'engine.studio.rules.celPre', locale)}
         <b>{t('engine.studio.rules.celTrue', locale)}</b>
-        {t('engine.studio.rules.celMid', locale)}
+        {t(rule.type === 'conditional' ? 'engine.studio.rules.whenMid' : 'engine.studio.rules.celMid', locale)}
       </span>
       {/* `scope="record"` (objectui#8167). The authority for a validation rule
           is the SERVER: objectql's rule validator evaluates a `script` /
@@ -703,6 +781,8 @@ function RuleTypeFields({
         <>
           {fieldSelect(t('engine.studio.rules.statusField', locale), rule.field, (v) => patch({ field: v }))}
           <TransitionsField
+            /* Its blank row belongs to this rule, not to the next one opened. */
+            key={rule.name}
             transitions={rule.transitions && typeof rule.transitions === 'object' ? rule.transitions : {}}
             onCommit={(next) => patch({ transitions: next })}
             disabled={disabled}
@@ -895,11 +975,11 @@ export function ObjectValidationsPanel({
 
   /**
    * objectui#11820 — put `next` in place of the unsaved rule named `name`: it
-   * stays here while it still lacks a guard, and is written to the draft (and
-   * leaves this list) the moment it has every guard its type carries.
+   * stays here while it still lacks a part ({@link missingPart}), and is
+   * written to the draft (and leaves this list) the moment it lacks none.
    */
   const settleUnsaved = (name: string, next: ValidationRuleDraft) => {
-    if (missingGuard(next) === null) {
+    if (missingPart(next) === null) {
       commit([...rules, next]);
       setUnsaved((prev) => prev.filter((r) => r.name !== name));
       return;
@@ -916,10 +996,9 @@ export function ObjectValidationsPanel({
     commit(rules.map((r) => (r.name === name ? { ...r, ...patch } : r)));
   };
 
-  /** Put a new rule in place: written when it lacks no guard, held otherwise (objectui#11820). */
+  /** Put a new rule in place: written when it lacks nothing, held otherwise (objectui#11820, objectstack#26731). */
   const placeNewRule = (rule: ValidationRuleDraft) => {
-    // A type with no guard has nothing to wait for: written at once, as before.
-    if (missingGuard(rule) === null) commit([...rules, rule]);
+    if (missingPart(rule) === null) commit([...rules, rule]);
     else setUnsaved((prev) => [...prev, rule]);
     setSelected(rule.name ?? null);
   };
@@ -953,7 +1032,7 @@ export function ObjectValidationsPanel({
   const sel = listed.find((r) => r.name === effectiveSelected) ?? null;
   const selType = (typeof sel?.type === 'string' ? sel.type : 'script') as RuleType;
   const selUnsaved = sel !== null && isUnsaved(sel.name);
-  const selMissing = selUnsaved && sel ? missingGuard(sel) : null;
+  const selMissing = selUnsaved && sel ? missingPart(sel) : null;
 
   // Switching a rule's type REPLACES it with a fresh valid skeleton (so stale
   // type-specific keys — a state_machine's `transitions`, a format's `regex` —
@@ -1170,7 +1249,7 @@ export function ObjectValidationsPanel({
                 </span>
                 {isUnsaved(r.name) && (
                   <span data-testid="rule-unsaved" className="block truncate text-[11px] italic text-muted-foreground">
-                    {t('engine.studio.rules.notSaved', locale)}
+                    {t(MISSING_WORDING[missingPart(r) ?? 'rule'].mark, locale)}
                   </span>
                 )}
               </span>
@@ -1196,11 +1275,7 @@ export function ObjectValidationsPanel({
                 className="rounded-md border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground"
               >
                 {tFormat('engine.studio.held.line', locale, {
-                  clause: tFormat(
-                    selMissing === 'then' ? 'engine.studio.held.needsThenCondition' : 'engine.studio.held.needsCondition',
-                    locale,
-                    { rule: sel.label || sel.name || '' },
-                  ),
+                  clause: tFormat(MISSING_WORDING[selMissing].clause, locale, { rule: sel.label || sel.name || '' }),
                 })}
               </p>
             )}
@@ -1237,16 +1312,19 @@ export function ObjectValidationsPanel({
                 className={`w-full rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
               />
             </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] text-muted-foreground">{t('engine.studio.rules.messageLabel', locale)}</span>
-              <input
-                value={sel.message ?? ''}
-                disabled={disabled}
-                onChange={(e) => patchRule(sel.name!, { message: e.target.value })}
-                placeholder={t('engine.studio.rules.messagePlaceholder', locale)}
-                className={`w-full rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
-              />
-            </label>
+            <div>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-muted-foreground">{t('engine.studio.rules.messageLabel', locale)}</span>
+                <input
+                  value={sel.message ?? ''}
+                  disabled={disabled}
+                  onChange={(e) => patchRule(sel.name!, { message: e.target.value })}
+                  placeholder={t('engine.studio.rules.messagePlaceholder', locale)}
+                  className={`w-full rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
+                />
+              </label>
+              {selMissing === 'message' && <HeldHint locale={locale} />}
+            </div>
 
             {/* type-specific configuration */}
             <RuleTypeFields

@@ -336,7 +336,7 @@ Predicates are **bare CEL** — `record.status == 'paid'`, not `${record.status 
 
 #### Saying why: `disabledReason`
 
-A greyed action says **why** with `disabledReason`, the sentence beside the `disabled` predicate. It is meant for the button's hover title and its accessible description (a menu item, under its label). The console does not show it yet: until its greyed-action readers ship, every greyed action shows the console's default reason, "Not available for this record", and `os validate` warns an author who declares the key.
+A greyed action says **why** with `disabledReason`, the sentence beside the `disabled` predicate. The console shows it while the predicate is true, as the button's hover title and its accessible description (a menu item shows it under its label). Without it the reason is the console's default, "Not available for this record".
 
 ```yaml
 name: submit_for_approval

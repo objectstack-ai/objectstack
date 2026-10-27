@@ -19,6 +19,13 @@
 import { describe, expect, it } from 'vitest';
 import { t } from './i18n';
 
+// `engine.studio.auto.*` lives in `@object-ui/i18n`'s `studio` namespace, whose
+// `zh` catalogue is fetched on demand (objectstack#25922). Resident before any
+// case: this file runs in the `unit` project, whose shared module graph would
+// otherwise let it pass only when another file had loaded `zh` first.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 /** The automation pillar's chrome: every `engine.studio.auto.*` row it renders as prose. */
 const PILLAR_ROWS = [
   'engine.studio.auto.heading',

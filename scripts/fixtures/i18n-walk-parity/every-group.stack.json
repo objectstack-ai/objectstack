@@ -178,5 +178,13 @@
   ],
   "permissions": [
     { "name": "parity_auditor", "label": "Parity Auditor", "description": "Reads parity findings" }
+  ],
+  "books": [
+    {
+      "name": "parity_handbook",
+      "label": "Parity Handbook",
+      "description": "How parity is measured",
+      "groups": [{ "key": "basics", "label": "Basics", "include": "parity_*" }]
+    }
   ]
 }

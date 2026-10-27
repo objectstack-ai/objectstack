@@ -5,11 +5,7 @@ import type {
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
-// [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
-// `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
-// this question with it is a bug (cloud#1020, #5233) — so the posture, and only
-// the posture, is what the runtime authoring gate is told.
-import { judgePermissionSetOwnerBinding, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { judgePermissionSetOwnerBinding, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -27,7 +23,6 @@ import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // admits anything. See the module header for the predicate and its controls.
 import { markErasedAuthoringInput } from './erased-authoring-mark.js';
 import {
-    HIERARCHY_SCOPE_RESOLVER_SERVICE,
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
@@ -105,10 +100,6 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
-    // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
-    // the anonymous form doors read it — the runtime authoring gate's input for
-    // its public-form intake advisory (see `tenancyPostureInForce()`).
-    anonymousFormIntakePosture,
     // [ADR-0131 D6/D7] A legacy organization's rows, off the physical column,
     // on a database the ceremony has not migrated — see migrateStoredMetadata.
     readLegacyOrganizationRows,
@@ -167,7 +158,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -217,6 +208,7 @@ import {
     decorateMetadataItem,
     decorateMetadataItems,
     type MetadataDiagnostics,
+    withPublishVerdict,
 } from './metadata-diagnostics.js';
 // [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
 // composes `redactMetadataItem` (see its ordering note), which covers the
@@ -360,6 +352,7 @@ import {
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
     restoredBodyWriter,
@@ -414,12 +407,15 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
+import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 // [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
 import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 // [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
 import { saveConflict } from './protocol-save-conflict.js';
 // [#25467 cut 25] The post-persistence mutation fan-out: projector, local listeners, cluster publish, publish listeners.
 import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
+// [#25467 cut 26] The runtime authoring gate's deployment-posture probes: org wall, tenancy, RLS keys, hierarchy.
+import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7178,6 +7174,52 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#26707] What publishing a stored draft would answer from the runtime
+     * authoring gate, without publishing it: the refusal's `issues` (rule id,
+     * path, message, exactly as the publish 422 carries them), or `[]` when
+     * the publish would pass the gate.
+     *
+     * The draft save stays ungated (#4463 D1): a draft may be half-finished and
+     * is stored as before. What changes is what its READ says about it. The
+     * draft's `_diagnostics` used to be the schema parse alone, so a draft the
+     * publish refuses (`expression-invalid` on a flow edge, a summary field
+     * with no operations, …) read `valid: true` in every editor until the
+     * author pressed Publish, and in a package publish it rolled back every
+     * other draft with it.
+     *
+     * One judgement, never a second copy of the rules: this reads
+     * `judgeRuntimeAuthoringRules`, the function the publish gate
+     * ({@link assertRuntimeAuthoringRules}) throws from, with the arguments the
+     * draft→active promotion states — the draft row's package (whose other
+     * drafts are the closure "Publish all" judges it against, read by the
+     * batch door's own collector) and the credential channel's held positions.
+     * Computed on every draft read rather than stored at save: the verdict
+     * depends on the live universe and the package's other drafts, which a
+     * stored verdict would not see change.
+     */
+    private draftPublishVerdict(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+    }): Promise<RuntimeAuthoringIssue[]> {
+        const readAuthoringChannel = () => this.authoringChannel;
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof draftPublishVerdict> = {
+            get authoringChannel() { return readAuthoringChannel(); },
+            get engine() { return readEngine(); },
+            collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
+            credentialChannelFor: (...a) => this.credentialChannelFor(...a),
+            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
+            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
+        };
+        return draftPublishVerdict.call(host, draft);
+    }
+
+    /**
      * [#15950] Fold the STORED half of a resolution universe onto the registry
      * half {@link assertRuntimeAuthoringRules} gathers.
      *
@@ -7460,11 +7502,8 @@ export class ObjectStackProtocolImplementation implements
      * refusal combination to be turned away.
      */
     private orgWallEnforced(): boolean {
-        try {
-            return postureEnforcesWall(resolveTenancyPosture());
-        } catch {
-            return true;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts`; it reads no member.
+        return orgWallEnforced();
     }
 
     /**
@@ -7494,11 +7533,12 @@ export class ObjectStackProtocolImplementation implements
      * reports none, and the advisory is simply not raised.
      */
     private tenancyPostureInForce(): TenancyPosture | undefined {
-        try {
-            return anonymousFormIntakePosture(this.getServicesRegistry?.().get('tenancy'));
-        } catch {
-            return undefined;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof tenancyPostureInForce> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return tenancyPostureInForce.call(host);
     }
 
     /**
@@ -7516,18 +7556,12 @@ export class ObjectStackProtocolImplementation implements
      * wrong ones.
      */
     private rlsMembershipResolverKeys(): readonly string[] | undefined {
-        const registry = this.getServicesRegistry?.();
-        if (!registry) return undefined;
-        let resolver: unknown;
-        try {
-            resolver = registry.get(RLS_MEMBERSHIP_RESOLVER_SERVICE);
-        } catch {
-            return undefined;
-        }
-        if (resolver === undefined || resolver === null) return [];
-        const keys = (resolver as { keys?: unknown }).keys;
-        if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) return undefined;
-        return keys as readonly string[];
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof rlsMembershipResolverKeys> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return rlsMembershipResolverKeys.call(host);
     }
 
     /**
@@ -7544,14 +7578,12 @@ export class ObjectStackProtocolImplementation implements
      * throws.
      */
     private hierarchyResolverMounted(): boolean | undefined {
-        const registry = this.getServicesRegistry?.();
-        if (!registry) return undefined;
-        try {
-            const resolver = registry.get(HIERARCHY_SCOPE_RESOLVER_SERVICE);
-            return resolver !== undefined && resolver !== null;
-        } catch {
-            return undefined;
-        }
+        // [#25467 cut 26] The body moved to `protocol-authoring-posture-probes.ts` (see `AuthoringPostureProbesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof hierarchyResolverMounted> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return hierarchyResolverMounted.call(host);
     }
 
     /**
@@ -10744,6 +10776,25 @@ export class ObjectStackProtocolImplementation implements
         // Every read of `execution` below is one of those exits.
         const execution = opts.face === 'execution';
         const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
+        // [#26707] A served DRAFT is decorated as above and then told what its
+        // publish would refuse: the runtime gate's verdict on the stored draft
+        // body ({@link draftPublishVerdict}), folded into `_diagnostics`
+        // ({@link withPublishVerdict}). Judged on the row as stored — the body
+        // the promotion judges — never on the governed, converted or redacted
+        // copy this read serves. The execution face serves no `_diagnostics`.
+        const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
+            const served = serveItem(resolved);
+            if (execution || !served || typeof served !== 'object') return served;
+            const issues = await this.draftPublishVerdict({
+                type: request.type,
+                name: request.name,
+                body: storedRowDocument(row),
+                packageId: row.package_id ?? null,
+            });
+            const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
+            const after = withPublishVerdict(request.type, request.name, before, issues);
+            return after === before ? served : { ...served, _diagnostics: after };
+        };
         // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
         //
         // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
@@ -10891,7 +10942,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: serveItem(this.governServedObject(request.type, draftItem)),
+                        item: await serveDraft(this.governServedObject(request.type, draftItem), draftRec),
                     };
                 }
             } catch (error) {
@@ -10917,6 +10968,8 @@ export class ObjectStackProtocolImplementation implements
         // [#24395] The served draft row's per-key provenance — read off the
         // row this read serves, so it can never describe another body.
         let draftChanges: ReturnType<typeof storedDraftChanges>;
+        // [#26707] The draft row this read serves, for its publish verdict.
+        let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
         try {
             let record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -10952,7 +11005,10 @@ export class ObjectStackProtocolImplementation implements
                 if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
-                if (readState === 'draft') draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                if (readState === 'draft') {
+                    draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                    servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+                }
             }
         } catch (error) {
             // [#5532] THE site this issue was raised on. Falling through to the
@@ -10972,10 +11028,11 @@ export class ObjectStackProtocolImplementation implements
         // envelope shape. See ADR-0005 §draft-lifecycle.
         if (readState === 'draft') {
             if (item === undefined) throw noPendingDraftError(request.type, request.name);
+            const governedDraft = this.governServedObject(request.type, item);
             return {
                 type: request.type,
                 name: request.name,
-                item: serveItem(this.governServedObject(request.type, item)),
+                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : serveItem(governedDraft),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
                 // [#22877] The member's own row's, as a save of that member's
@@ -11343,6 +11400,8 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         packageId?: string;
+        /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         type: string;
         name: string;
@@ -11389,6 +11448,18 @@ export class ObjectStackProtocolImplementation implements
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
+        // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
+        // option-A ruling on #26649: ONE member of a bundled type, the
+        // selector's or else the canonical one, read exactly as
+        // {@link getMetaItem} reads it. Every layer below is that member's or
+        // nothing — the code layer's service copy, artifact and registry entry,
+        // and the stored row — so a named member nothing holds answers no
+        // layer, which the door answers as an absent item, ⛔ never with the
+        // canonical member's layers.
+        const member = resolveBundleMemberSelector(request.type, request.member);
+        const wantedMember = bundleMemberDiscriminator(request.type, member);
+        const isWantedMember = (candidate: unknown): boolean =>
+            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
 
         // [ADR-0131 D6] Environment → code: the overlay layer is the
         // environment's stored row; no organization's row is read.
@@ -11405,15 +11476,22 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
+                // [#26699] …when it is the member this read addresses, as in
+                // {@link getMetaItem}: the service keys a type's items by name
+                // alone, so for a bundle it holds whichever member it
+                // registered last. Another member's copy is no layer of this
+                // one; the artifact and registry lookups below ask for it.
                 // [#7556] The CODE layer of an object is D9.6's "owner's
                 // declaration with its extenders folded on", so the
                 // MetadataService copy is its base, not the layer itself.
                 // `effective` is `overlay ?? code`, so an object with no
                 // overlay row — the ordinary shape — is corrected by this
                 // single fold on both layers the diagnostic reports.
-                code = this.foldObjectExtendersFromRegistry(
-                    request.type, request.name, fromService.data,
-                );
+                if (isWantedMember(fromService.data)) {
+                    code = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
+                }
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -11452,13 +11530,25 @@ export class ObjectStackProtocolImplementation implements
             // item-lock resolution below). A
             // runtime-registered item with no package carries no tenant marker
             // and keeps its code layer.
+            //
+            //
+            // [#26699] Each lookup is asked for the addressed member, exactly
+            // as {@link getMetaItem}'s are: the artifact at the member (the
+            // canonical one when none was named), and the registry for the
+            // member named. The registry's bare-name read still answers a
+            // bundle that ships no canonical member; a registry that does not
+            // narrow by member can answer another one for a NAMED member, and
+            // that answer is not this member's layer.
             const runtimeOnly = (item: unknown): unknown =>
                 item !== undefined && isTenantAuthored(item) ? undefined : item;
-            let regItem = this.lookupArtifactItem(request.type, request.name, request.packageId)
-                ?? runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId));
+            const namedMemberOnly = (item: unknown): unknown =>
+                member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
+            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+            let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
+                ?? namedMemberOnly(runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId, member)));
             if (regItem === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId));
+                if (alt) regItem = namedMemberOnly(runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId, member)));
             }
             if (regItem !== undefined) code = regItem;
         }
@@ -11501,15 +11591,17 @@ export class ObjectStackProtocolImplementation implements
         // lock stays at the request's address, as the `_lock` gate judges it.
         // Asked outside the `try` below: its own failed read already answers
         // the #5532 envelope, with the driver's error as `cause`.
-        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
+            // [#26699] At the addressed member, as that read asks it.
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
                 ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -20983,6 +21075,10 @@ export class ObjectStackProtocolImplementation implements
                         graftFoldedFormSections(request.item, parsed.data),
                         parsed.data,
                     );
+                    // [#26723] …and an action is stored as its parse, so its
+                    // `requiresFeature` / `requiresMembershipReach` is lowered
+                    // into `visible`. See {@link withParsedStoredActions}.
+                    request.item = withParsedStoredActions(singularType, request.item, parsed.data);
                 }
                 // [#20101] …and a page's declared `type` default, the one
                 // default that a reader of the served body selects on. It is

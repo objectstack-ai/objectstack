@@ -70,6 +70,13 @@
  *   is, and the action runner, which has no language, only ever receives a
  *   string. `errorMessage` has no bundle key (the spec's action translation
  *   declares none), so the collapse is all it gets (objectui#12757).
+ * - **`disabledReason` follows the same declared-only rule**
+ *   (objectstack#26619): the reason a greyed action gives resolves
+ *   `_actions.<name>.disabledReason` only when the action declares one, after
+ *   its `I18nLabel` map is collapsed like `label`. A bundle entry for an action
+ *   that declares none is never read, so every such action keeps the
+ *   surface's default reason ("Not available for this record"). It is display
+ *   copy only: nothing here, nor the runner, reads it as a condition.
  * - **The success copy stays a template.** A `${result.*}` token, in a bundle
  *   entry or in the authored text, passes through this hook untouched: the
  *   action has not run yet, so there is no result to read. The runner fills
@@ -99,8 +106,8 @@ export interface ActionTextLocalizerOptions {
 
 /**
  * Returns a copy of `action` with `label` — plus `confirmText`,
- * `successMessage`, `errorMessage` and `outcomeMessages` when the action
- * declares them —
+ * `successMessage`, `errorMessage`, `outcomeMessages` and `disabledReason`
+ * when the action declares them —
  * resolved from the active locale's bundle, falling back to the authored
  * literals. `objectName` is the host object the action is drawn on; the
  * action's own declared `objectName` wins over it when present.
@@ -141,7 +148,7 @@ function resolveCopy(
 }
 
 export function useActionTextLocalizer(): ActionTextLocalizer {
-  const { actionLabel, actionConfirm, actionSuccess, actionOutcome } = useObjectLabel();
+  const { actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason } = useObjectLabel();
   const { language } = useObjectTranslation();
 
   return useMemo<ActionTextLocalizer>(() => {
@@ -171,6 +178,15 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
         if (collapsed[key] !== declaredCopy) changed = true;
       }
 
+      // The greyed action's reason is an `I18nLabel` too, collapsed the same
+      // way; it never reaches the runner, so it is held apart from the copy
+      // keys above.
+      const declaredReason: unknown = (action as any).disabledReason;
+      if (declaredReason !== undefined) {
+        collapsed.disabledReason = pickLocalized(declaredReason, language);
+        if (collapsed.disabledReason !== declaredReason) changed = true;
+      }
+
       // No name, no translation key: the literals are the answer. They are
       // still normalized (map to string, last-resort placeholder applied) so
       // every caller reads one shape.
@@ -195,6 +211,9 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       if ((action as any).successMessage !== undefined) {
         out.successMessage = resolveCopy(collapsed.successMessage, (fallback) => actionSuccess(keyObject, name, fallback));
       }
+      if (declaredReason !== undefined) {
+        out.disabledReason = actionDisabledReason(keyObject, name, collapsed.disabledReason);
+      }
       // The map is an authored bag (outcome → copy), so the one "is this a
       // real bag?" predicate in this package answers whether to read it.
       const authoredOutcomes: unknown = action.outcomeMessages;
@@ -208,5 +227,5 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       }
       return out as T;
     }) as ActionTextLocalizer;
-  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, language]);
+  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, language]);
 }

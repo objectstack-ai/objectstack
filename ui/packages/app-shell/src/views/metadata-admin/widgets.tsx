@@ -2730,6 +2730,23 @@ function ActionMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy 
 
 interface FilterRuleLite { field: string; operator: string; value?: unknown }
 
+/** The builder's row group for a stored rule list. */
+function groupOfStoredRules(rules: FilterRuleLite[]) {
+  return {
+    id: 'g',
+    logic: 'and' as const,
+    conditions: rules.map((r, i) => ({
+      id: `c${i}`,
+      // Handed over as stored: the builder reads it through the spec's fold
+      // (objectui#9306), and a spelling nothing folds is kept verbatim so it
+      // round-trips on save instead of being rewritten.
+      operator: r.operator ?? 'equals',
+      field: r.field,
+      value: (r.value as any) ?? '',
+    })),
+  };
+}
+
 function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterRuleLite[];
   onChange: (rules: FilterRuleLite[]) => void;
@@ -2762,19 +2779,26 @@ function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelle
   // platform translator (same one ObjectView's toolbar toasts use).
   const { t: tr } = useObjectTranslation();
   const rules = Array.isArray(value) ? value : [];
-  const group = {
-    id: 'g',
-    logic: 'and' as const,
-    conditions: rules.map((r, i) => ({
-      id: `c${i}`,
-      // Handed over as stored: the builder reads it through the spec's fold
-      // (objectui#9306), and a spelling nothing folds is kept verbatim so it
-      // round-trips on save instead of being rewritten.
-      operator: r.operator ?? 'equals',
-      field: r.field,
-      value: (r.value as any) ?? '',
-    })),
-  };
+  // The stored rules by CONTENT, so a re-render handing over an equal array is
+  // not a change (ui/AGENTS.md #10: never key on an identity).
+  const rulesKey = JSON.stringify(rules);
+  // The builder's rows are HELD here rather than re-derived from `value` on
+  // every render. The fold below drops a row that is not complete yet — the
+  // blank row "Add filter" inserts, a row with a column but no value — and
+  // must keep dropping it (what is not applied is not persisted). Re-deriving
+  // the rows from the stored rules therefore erased the new row on the next
+  // render, so no filter could be authored here at all. The held group keeps
+  // such a row on screen until it is complete; only the fold's rules leave.
+  const [draft, setDraft] = React.useState(() => groupOfStoredRules(rules));
+  const [seededFrom, setSeededFrom] = React.useState(rulesKey);
+  if (seededFrom !== rulesKey) {
+    // The stored rules moved. When they are the echo of this builder's own
+    // write, the held rows already fold to them; anything else (another
+    // editor, a reload, an undo) re-seeds the rows from what is stored.
+    setSeededFrom(rulesKey);
+    const held = foldFilterGroupToSpecRules(draft);
+    if (!held.ok || JSON.stringify(held.rules) !== rulesKey) setDraft(groupOfStoredRules(rules));
+  }
   const fbFields = fields.map((f) => ({ value: f.name, label: f.label || f.name, type: f.type }));
   const summary = rules.length
     ? rules.map((r) => `${fields.find((f) => f.name === r.field)?.label || r.field}`).filter(Boolean).join(', ')
@@ -2789,6 +2813,10 @@ function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelle
       toast.error(tr(FILTER_FOLD_REFUSAL_KEYS[folded.reason]));
       return;
     }
+    setDraft(g);
+    // A row added or edited without completing it folds to the rules already
+    // stored: the view has not changed, so nothing is written.
+    if (JSON.stringify(folded.rules) === rulesKey) return;
     onChange(folded.rules as FilterRuleLite[]);
   };
   return (
@@ -2810,7 +2838,7 @@ function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelle
         ) : fields.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('engine.form.bindObjectForConditions', locale)}</p>
         ) : (
-          <FilterBuilder fields={fbFields} value={group as any} onChange={handle} />
+          <FilterBuilder fields={fbFields} value={draft as any} onChange={handle} />
         )}
       </PopoverContent>
     </Popover>

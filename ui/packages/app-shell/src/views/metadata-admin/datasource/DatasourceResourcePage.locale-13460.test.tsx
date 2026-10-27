@@ -37,6 +37,12 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { t } from '../i18n';
 import { DatasourceResourcePage } from './DatasourceResourcePage';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 afterEach(cleanup);
 
 const DRIVER = { id: 'sqlite', label: 'SQLite', configSchema: { properties: {} } };

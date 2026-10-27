@@ -266,6 +266,40 @@
         }
       }
     },
+    "books": {
+      "status": "live",
+      "verifiedAt": "2026-10-27",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateBook (`books.<name>.label` / `.description` and `books.<name>.groups.<key>.label`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/rest/src/meta-item-read-gate.ts#translateMetaList (the /meta list read that applies it per request locale); packages/rest/src/meta-item-read-gate.ts#createMetaBookTreeAnswer (the book tree translates the book it resolves through the same table)",
+      "note": "Seeded LIVE with its readers in the same change (the datasets precedent): a served `book` document is localized at the REST boundary, list and item, and `GET /meta/book` is what the console's docs portal builds its sidebar from; the tree route translates the resolved book before rendering the spine. Retires nothing: the book's inline `translations` map stays a tombstone, and its prescription now points here.",
+      "children": {
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookAttr (`books.<name>.label`, read by translateBook)",
+          "note": "Overlays the served book's own `label` — the docs sidebar title."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookAttr (`books.<name>.description`, read by translateBook)",
+          "note": "Overlays the served book's own `description`."
+        },
+        "groups": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
+          "note": "Overlays each group's `label`, addressed by the group's stable `key` — the sidebar's section titles.",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
+              "note": "The group's section title in the docs sidebar and in the resolved tree's `groups[].label`."
+            }
+          }
+        }
+      }
+    },
     "metadataForms": {
       "status": "live",
       "verifiedAt": "2026-08-28",

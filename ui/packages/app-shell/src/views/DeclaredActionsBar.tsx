@@ -373,8 +373,11 @@ const DeclaredActionButton: React.FC<{
   }, [record, approverDirectory, t]);
   // The declared label, localized — resolved ONCE here so the button text, the
   // param dialog's title and the override framing below can never come from
-  // different bundle reads (objectui#4265).
-  const declaredLabel = (localizeActionTexts(objectName, action as Record<string, any>).label as string) || '';
+  // different bundle reads (objectui#4265). The greyed button's declared
+  // reason (objectstack#26619) comes off the same localized copy.
+  const localizedTexts = localizeActionTexts(objectName, action as Record<string, any>);
+  const declaredLabel = (localizedTexts.label as string) || '';
+  const declaredReason = typeof localizedTexts.disabledReason === 'string' ? localizedTexts.disabledReason : '';
   /**
    * The override framing wrapped around the declared label. A placeholder
    * rather than a hard-coded prefix so a translator can reorder it — `Approve`
@@ -591,12 +594,12 @@ const DeclaredActionButton: React.FC<{
   // a fact about the record, so only it earns the "not available" reason. A
   // button greyed out while its own action runs already says why — the spinner.
   const disabledByPredicate = hasDeclaredVisibilityGate(action.disabled) ? isDisabledPred : false;
-  // The generic reason (objectui#11811). An author-written reason beside the
-  // predicate would be a spec key, which is objectstack's to declare — not one
-  // this bar may invent — so every predicate-disabled action says the same
-  // thing for now.
+  // The action's declared `disabledReason` (objectstack#26619), localized
+  // above, else the generic reason (objectui#11811).
   const disabledReason = disabledByPredicate
-    ? String(t('actions.notAvailableForRecord', { defaultValue: 'Not available for this record' }))
+    ? (declaredReason.trim() !== ''
+      ? declaredReason
+      : String(t('actions.notAvailableForRecord', { defaultValue: 'Not available for this record' })))
     : undefined;
 
   if (asMenuItem) {

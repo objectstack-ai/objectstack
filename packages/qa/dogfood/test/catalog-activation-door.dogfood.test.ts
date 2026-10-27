@@ -262,6 +262,19 @@ describe('the catalog activation door, on a booted showcase', () => {
         expect(await rowsOf('position', 'no_such_position')).toEqual([]);
     });
 
+    // [#26571] access-security.security-catalog-activation-and-clone-doors
+    // acceptance[2] over HTTP: the audience anchors are not switchable here.
+    for (const anchor of ['everyone', 'guest']) {
+        it(`the audience anchor \`${anchor}\` is refused 400 and nothing is written`, async () => {
+            const res = await flip('position', anchor, { enabled: false });
+            const text = await res.text();
+
+            expect(res.status, text).toBe(400);
+            expect(text).toContain(`'${anchor}' is an audience anchor`);
+            expect(await rowsOf('position', anchor)).toEqual([]);
+        });
+    }
+
     it('a type with no switch is refused 400 by the door itself — the route is the door\'s, not a router miss', async () => {
         const res = await flip('capability', 'manage_metadata', { enabled: false });
         const text = await res.text();

@@ -747,6 +747,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1173,6 +1188,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.named-base-every-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1703,6 +1733,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.stored-action-gate-lowering.test.ts",
       "verb": "update",
       "pinned": 1
     },

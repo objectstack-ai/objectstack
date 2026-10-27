@@ -277,7 +277,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -298,7 +298,8 @@
         "remove a field from the config + `os build`; run `os migrate apply --yes` WITHOUT --allow-destructive (the drop must be SKIPPED with a warning), then with `--allow-destructive --yes` (applied)",
         "with the dev server booted and holding the DB, run `os migrate apply --yes; echo $?` (expect the busy refusal, exit 1, without --force) and `os migrate plan` (proceeds with a warning — a plan writes nothing either way)",
         "run `os migrate apply --json` WITHOUT --yes on a pending change: the payload must say confirmation_required with the pass--yes hint and mutate nothing",
-        "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`"
+        "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`",
+        "the #4873 --json sweep over every subcommand: read the set from the CLI itself, never from a list typed into this item. `os migrate --help` prints it under COMMANDS (oclif pattern strategy: one default-exported Command per non-test file in packages/cli/src/commands/migrate/, index.ts being the bare command); capture that list. For each listed subcommand the steps above did not already run, run its dry-run form `os migrate <name> --json; echo $?` on the scratch DB, adding only what that subcommand's own `os migrate <name> --help` USAGE line marks required (unmapped-columns takes --object <name>). audit-key-material (#26772) is in the set and takes the same flags as audit-mail-bodies (--apply, --yes, --force, --json), so its dry run is the probe. ⛔ The one exception: duplicates (#8928) is ALWAYS JSON on stdout and has NO --json flag, so run it bare (`os migrate duplicates; echo $?`) and never feed it --json, whose oclif Nonexistent-flag exit 2 is not a #4873 violation (deep coverage at cli.migrate-duplicates-inventory). A subcommand added later joins the sweep through the --help list, with no edit here, unless it too lacks --json"
       ],
       "acceptance": [
         {
@@ -316,8 +317,8 @@
         {
           "clause": "#4873 exit-code honesty: EVERY migrate subcommand with --json exits 0 on success — never the elapsed-ms leak (recorded-by/resume once passed timer.elapsed() into the exit-code slot, so the shell saw duration & 0xFF: a different bogus nonzero on every successful run)",
           "oracle": "log",
-          "verify": "echo $? after plan/apply/recorded-by/resume --json successes is exactly 0; the CliExitCode 0|1 type now makes the mistake a compile error",
-          "evidence": "the collected exit codes per subcommand"
+          "verify": "echo $? after plan/apply/recorded-by/resume --json successes, and after every other subcommand the sweep step read from `os migrate --help` (duplicates run bare), is exactly 0; the CliExitCode 0|1 type now makes the mistake a compile error",
+          "evidence": "the captured `os migrate --help` COMMANDS list + the collected exit code per listed subcommand"
         },
         {
           "clause": "apply is safe-by-default: a destructive change is SKIPPED with an explicit warning until --allow-destructive, then applied with it — both sides captured",
@@ -348,32 +349,11 @@
         "an apply that performs a drop WITHOUT --allow-destructive is the FAIL the safe-by-default split exists for",
         "exit 0 from a refused (busy) apply, or ANY nonzero exit from a successful --json run, is a FAIL — exit codes are the load-bearing CI contract here"
       ],
-      "variants": [
-        "plan (default of the bare command)",
-        "apply",
-        "resume",
-        "recorded-by",
-        "duplicates (#8928 read-only cross-partition duplicate-identifier inventory — ALWAYS JSON on stdout with NO --json flag, so the #4873 --json sweep must not probe it with one; deep coverage at cli.migrate-duplicates-inventory)",
-        "meta",
-        "files-to-references",
-        "summary-nulls",
-        "value-shapes",
-        "account-issuer",
-        "audit-metadata-bodies",
-        "multi-value-columns",
-        "unmapped-columns",
-        "organization-ownership",
-        "security-catalog-overlays",
-        "comment-reactions",
-        "activity-changed-fields",
-        "comment-parent-pair",
-        "audit-mail-bodies"
-      ],
       "traps": ["stale-dist"],
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the 19 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
+        "packages/cli/src/commands/migrate/ (the registered subcommands under `os migrate`, besides the bare command — oclif pattern strategy, one default-exported Command per non-test file, listed by `os migrate --help`; the sweep step reads the set from there at run time, so this item carries no count and no list)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
@@ -408,6 +388,12 @@
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[0] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said format.exit-code.test.ts covers acceptance[2]. That pin calls emitJson / emitText in-process, while acceptance[2] asks for `echo $?` after each subcommand's --json success, which only a spawned CLI answers. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin does assert. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "variants list removed; the #4873 sweep now reads the subcommand set from the CLI. #26772 added audit-key-material, the 20th registered subcommand, and the typed list (19 names, the source note saying 19) missed it, as revisions 2, 3, 4 and 6 each had to re-count it before. Under the #26431 rule a retyped list of a set that already has an authority goes, so a new steps entry derives the set from `os migrate --help` (oclif pattern strategy over packages/cli/src/commands/migrate/), keeps the duplicates exception explicit (always JSON, no --json flag, run bare), takes each subcommand's required inputs from its own --help USAGE line, and names audit-key-material, which takes the audit-mail-bodies flags. acceptance[2] verify and evidence name the derived list; the source note drops the count. No gate added: the list it would hold equal to the tree is the one removed. Clause text unchanged. Read at base 4c29f384, where `os migrate --help` lists 20 subcommands",
+          "ref": "#26795"
         }
       ]
     },

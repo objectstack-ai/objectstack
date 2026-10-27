@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#25922 slices S2 and S3 — the designer rows that moved into
- * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row, and
- * `engine.packages.*`, `engine.form.*`, `engine.edit.*`), and app-shell's `t()`
- * / `tOptional()` still answer every one of them the way they did when the rows
+ * objectstack#25922 slices S2 to S4 — the designer rows that moved into
+ * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row;
+ * `engine.packages.*`, `engine.form.*`, `engine.edit.*`; five `engine.studio.*`
+ * pillars, the data source pages and the field types), and app-shell's `t()` /
+ * `tOptional()` still answer every one of them the way they did when the rows
  * sat in its own table.
  *
  * What would break it:
@@ -41,6 +42,18 @@ const FAMILY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.packages.': 120,
   'engine.form.': 90,
   'engine.edit.': 90,
+  // S4 — five Studio pillars, the data source pages, the field types
+  'engine.studio.access.': 120,
+  'engine.studio.if.': 50,
+  'engine.studio.data.': 45,
+  'engine.studio.auto.': 40,
+  'engine.studio.settings.': 35,
+  'engine.datasource.': 50,
+  'engine.externalDatasource.': 45,
+  'engine.datasourcePreview.': 10,
+  'engine.fieldType.': 45,
+  'engine.fieldTypeDesc.': 45,
+  'engine.fieldCategory.': 9,
 });
 
 /**
