@@ -62,6 +62,8 @@ export function checkProjectName(name: string): ProjectNameVerdict {
 /** One name segment → lowercase, hyphen-separated, npm-safe characters only. */
 function slugSegment(segment: string): string {
   return segment
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // Ünïcode -> Unicode: drop combining marks
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2') // MyApp -> My-App
     .toLowerCase()
     .replace(/[^a-z0-9._]+/g, '-')
