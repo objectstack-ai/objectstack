@@ -79,7 +79,11 @@ export interface McpToolDescriptor {
  * (mirrors `fetchImpl` injection in `connector-rest`).
  */
 export interface McpClientLike {
-    /** List the server's tools (`tools/list`). */
+    /**
+     * List the server's tools (`tools/list`) — **every page**: a paginating
+     * server's `nextCursor` is followed until exhausted, so the result is the
+     * whole tool list, never just its first page.
+     */
     listTools(): Promise<McpToolDescriptor[]>;
     /** Invoke a tool (`tools/call`); returns the raw MCP result. */
     callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
@@ -172,6 +176,14 @@ function normalizeResult(raw: unknown): Record<string, unknown> {
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * Upper bound on the `tools/list` pages one discovery follows. A server that
+ * still answers a `nextCursor` after this many pages (a cursor loop, or a tool
+ * list far beyond any palette) fails discovery loudly with an error naming the
+ * bound — the connector is never built from a truncated tool list.
+ */
+export const MCP_TOOLS_LIST_MAX_PAGES = 100;
+
+/**
  * The default {@link McpClientLike} — lazily imports the official MCP SDK so it
  * is only loaded when a real connection is made (tests inject their own client).
  */
@@ -206,8 +218,21 @@ async function defaultClientFactory(
 
     return {
         async listTools() {
-            const res = await client.listTools(undefined, { timeout: MCP_REQUEST_TIMEOUT_MS });
-            return (res.tools ?? []) as McpToolDescriptor[];
+            const tools: McpToolDescriptor[] = [];
+            let cursor: string | undefined;
+            for (let page = 0; page < MCP_TOOLS_LIST_MAX_PAGES; page++) {
+                const res = await client.listTools(cursor === undefined ? undefined : { cursor }, {
+                    timeout: MCP_REQUEST_TIMEOUT_MS,
+                });
+                tools.push(...((res.tools ?? []) as McpToolDescriptor[]));
+                // MCP pagination: an absent (or empty) `nextCursor` is the last page.
+                if (typeof res.nextCursor !== 'string' || res.nextCursor.length === 0) return tools;
+                cursor = res.nextCursor;
+            }
+            throw new Error(
+                `MCP server still returned a tools/list nextCursor after ${MCP_TOOLS_LIST_MAX_PAGES} pages ` +
+                    `(${tools.length} tools so far); refusing to build the connector from a truncated tool list.`,
+            );
         },
         async callTool(name, args) {
             return client.callTool({ name, arguments: args }, undefined, { timeout: MCP_REQUEST_TIMEOUT_MS });
