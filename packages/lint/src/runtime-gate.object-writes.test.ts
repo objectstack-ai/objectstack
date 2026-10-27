@@ -260,10 +260,16 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     // Each was measured over the shipped object corpus before crossing (116
     // objects, 0 findings, precision 1.0); the comments on the members carry
     // the populations, and the four controls below are the non-vacuity half.
+    // [#26847] `validateChartBindings` is the fourth, for an object's built-in
+    // `listViews` charts: resolved against `stack.datasets`, a collection every
+    // per-write snapshot carries. Measured over the shipped object corpus (no
+    // object list view charts, 0 findings); its door pins live in
+    // `validate-chart-bindings.test.ts`.
     expect(crossed).toEqual([
       'validateSearchableFields',
       'validateListViewFieldRefs',
       'validateObjectFieldRefs',
+      'validateChartBindings',
     ]);
     // `validateSortableFields` measured equally clean but was NOT crossed:
     // that is its own adjudication, and this pin is where it has to be made.
