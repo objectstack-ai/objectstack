@@ -1,5 +1,268 @@
 # @objectstack/metadata-protocol
 
+## 18.2.0
+
+### Minor Changes
+
+- 493a6c4: feat(spec,metadata-protocol): a seed dataset column can be written only when its row is created (`columns.FIELD.applyOn: 'create'`)
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A seed is replayed on every dev-server boot and every package re-publish, and an `upsert` replay re-asserts every column a record declares on the row it matched. That reverts the columns an app's own jobs write after the first seed (a status a payment job advances, a flag a renewal job sets), so a re-run undid the jobs' work with nothing in the log.
+  
+  A seed dataset now takes a per-column write policy, keyed by field name:
+  
+  ```ts
+  defineSeed(Instalment, {
+    externalId: 'code',
+    columns: {
+      status:      { applyOn: 'create' },
+      is_expiring: { applyOn: 'create' },
+    },
+    records: [{ code: 'INS-001', amount: 1200, status: 'pending', is_expiring: false }],
+  });
+  ```
+  
+  - **`applyOn: 'create'`** writes the column when the seed creates the row and leaves it out of every write to a row the seed matched by its `externalId`: an `upsert` replay over an existing row, and every row of an `update` dataset. The matched row keeps the value it holds, while the `always` columns are refreshed. A row whose only differences are create-only columns is not written at all. A create-only reference column on a matched row is not resolved and not deferred to pass 2, so nothing later in the load writes it back. A column of the `externalId` is the key the row was matched by and stays in its update. `insert`, `ignore` and `replace` never update a matched row, so nothing changes on those modes.
+  - **`applyOn: 'always'`** (the default, and every column without a `columns` entry) is the behaviour before this change.
+  - The values, the default and the meaning are those of the import door's `FieldMappingEntry.applyOn`. Both doors now read one enum, exported as `ColumnApplyOnSchema` from `@objectstack/spec/data`. `SeedColumnSchema` (with `SeedColumn` / `SeedColumnParsed`) is the per-column shape.
+  - A `columns` key must name a column the object has: a declared field, or a system column the platform injects on it such as `owner_id`. `defineSeed` refuses one that does not when it runs (and at compile time for an object literal), naming the key with a near miss. The seed loader logs an `error` naming the column, once per dataset, whenever it loads a seed that names one, since a stored seed never passes through `defineSeed`. The rows still load.
+  - `SeedSchema` refuses an unknown key on a column (`unrecognized_keys`), and a dataset-level `applyOn` is pointed at `columns`.
+  
+  `@objectstack/skills` only regenerates its schema reference indexes, which now list `SeedColumnSchema` and `ColumnApplyOnSchema`.
+- 2163e80: feat(spec,metadata-protocol,service-storage,runtime,cli)!: a seed record can carry a file the package ships, `seedFile(path)`, and a file field's id that names no stored file is refused
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped. The narrowing is a seed load refusing a value it used to write: an id-shaped string in a file field that names no stored file. There is nothing for `objectstack migrate meta` to rewrite and no tombstone; the fix is the author's choice of the file the field should hold. -->
+  
+  A `file`, `image`, `avatar`, `video` or `audio` field stores the id of a stored file, and only an upload made one, so a seed could not fill a required file field at all. A seed record now names the file by the path the package ships it at:
+  
+  ```ts
+  import { defineSeed, seedFile } from '@objectstack/spec/data';
+  
+  defineSeed(ContractVersion, {
+    externalId: 'code',
+    records: [
+      { code: 'NDA-001-V1', file: seedFile('fixtures/nda-v1.pdf') },
+      { code: 'NDA-002-V1', file: seedFile('fixtures/nda-v2', { name: 'NDA v2.pdf', contentType: 'application/pdf' }) },
+    ],
+  });
+  ```
+  
+  - **The path** is relative to the directory holding `objectstack.config.ts`, uses `/`, and stays inside it: an absolute path, a drive letter, a `\`, or an empty, `.` or `..` segment is refused at parse. A `multiple: true` file field takes an array of `seedFile(...)` values. `defineSeed` refuses `seedFile(...)` in a field that does not store a file.
+  - **`os build` / `os compile`** reads each referenced file and writes its bytes into the dataset's new `files` map (`{ contentType, size, sha256, data }`, base64), so the compiled artifact carries them to every boot that loads it: `os dev`, `os serve`, a published package, an artifact URL. A path that names no file, or a file whose type is neither named with `contentType` nor known by its extension, fails the build, and `os validate` refuses the same paths. `os serve` / `os dev` booting a config rather than an artifact reads the files the same way, so both boots seed the same files.
+  - **The seed loader** stores the bytes through the new `field-files` service (`FIELD_FILE_SERVICE`, `IFieldFileService`, registered by `@objectstack/service-storage`), writes the file's id into the field, and makes the written record the file's owner, the (object, record, field) ownership an upload gets. Each row gets a file of its own. A replay that finds the row holding a file stored from the same path with the same bytes, name and type keeps it, so a restart does not store a new file for an unchanged fixture. A file stays `pending` until its row lands, so a file whose row is refused is reclaimed by the pending-upload retention.
+  - **Refused, by row, before the row is written**: a reference whose bytes the dataset does not carry, bytes that do not match their recorded size and SHA-256, a load with no `field-files` service, a field mixing `seedFile(...)` with other values, and several `seedFile(...)` values in a one-file field. Each is counted, reported in the load's errors and logged at `error`.
+  - **The inline boot seed** of an app whose datasets carry seed files runs at `kernel:bootstrapped` (as one with `demoStaff` already does), once the storage service has read its settings, so the files land in the store the deployment serves from.
+  - `SeedLoaderService` takes an optional fourth argument, `{ getFieldFiles }`; every platform caller passes the kernel's `field-files` service.
+  
+  **BREAKING** (a seed-load narrowing). A seed record whose file field holds an id-shaped string (letters, digits, `_` and `-`, at most 64 characters) that names no stored file in the row's organization is now refused, by row, with an error naming the field and the value. Before, it was written as given, and the field then read as holding no file. An external URL or an inline value is not an id and is written as before; so is any value on a deployment without `@objectstack/service-storage`.
+  
+  **What to do.** If a seed load now reports `… holds '<value>', which names no stored file`, replace the value with the file the field should hold, `seedFile('<path in the package>')`, or remove it.
+- dd5e355: feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  An app authored in one language listed its reports (`reports[].label`, `reports[].description`) in that language on the app's report index and the report page heading. Before this change the translation bundle had no key for them: `reports` was a retired object-first dialect key, so a bundle carrying it was refused by `os validate`, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `reports`, keyed by the report's `name`, carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the singular spelling `report` with a message pointing at `reports`). `reports` leaves `LEGACY_OBJECT_FIRST_KEYS`, so a stored translation row carrying it now loads through the authored-row sync instead of being skipped as a retired dialect; the key's measured footprint in the legacy dialect was zero (#3778). A new translator, `translateReport`, overlays the two strings and is registered in the metadata-document dispatch, so `GET /meta/report` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. A report is overlay-editable (ADR-0126 Regime O), so the translator honours the packaged base: a label or description an org re-authored is served as written (ADR-0029 D9.2a), and the strings it did not touch are still translated.
+  - **`@objectstack/metadata-protocol`:** `getPackagedReportBase(name)` returns the shipped report document beneath any overlay, the base the REST read path hands the translator.
+  - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+  - **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
+  
+  Example (`zh-CN` bundle of an English-authored app):
+  
+  ```ts
+  reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } },
+  ```
+
+### Patch Changes
+
+- f1d6be0: fix(service-analytics)!: an analytics read gate that could not decide answers `503 SERVICE_UNAVAILABLE`, not the `403 PERMISSION_DENIED` of a real denial
+  
+  Three of the analytics door's refusals are operator-side faults: the object-level read admission provider threw, the field-level read permissions could not be resolved, or the API exposure declaration could not be read. Each refused the query, which is right, but each answered with the same body as a real denial, `403 PERMISSION_DENIED`. A caller could not tell "you may not read this" from "the server could not decide", except by parsing the English message. All three now answer `503 SERVICE_UNAVAILABLE`. That is an existing ADR-0112 code, and it is the spelling `@objectstack/core` already uses when the permission store is unreachable. The refusal names the object and nothing else; it names no gate, grant or existence fact. The cause stays in the server log, as before. Fail-closed is unchanged: nothing that was refused is now admitted. Real denials keep their answers byte for byte: `403 PERMISSION_DENIED` when the caller holds no read grant or reads a hidden field, and `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED` for an unexposed object. `POST /api/v1/analytics/dataset/query` relays the declared fault as `503 SERVICE_UNAVAILABLE`, with the message withheld as for every declared server fault. It does not answer `500 ANALYTICS_QUERY_FAILED`. The cube query door relays the status the same way.
+  
+  The publish build probe (`@objectstack/metadata-protocol`) reads the code too. A widget query that fails with `SERVICE_UNAVAILABLE` now gets a `widget_query_failed` fix that names the server-side fault: the dataset is not the cause, and the server could not decide read access to the named object. Before, it fell to "Fix the dataset definition…", which is wrong for an outage. The finding's `code`, `severity` and `message` are unchanged.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored shape or exported declaration is added, removed, renamed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the code and status three analytics refusals answer when a permission or exposure resolver fails (403 PERMISSION_DENIED to 503 SERVICE_UNAVAILABLE); every request that was refused is still refused and every request that was served is still served. The remedy is on the consumer's side, reading the code, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the wire answer of three fault refusals changes; no request that was served is refused and none that was refused is served), shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before:** when the analytics read-admission provider threw, or the field-level read permissions or the API exposure declaration could not be resolved, the query was refused `403 PERMISSION_DENIED`. That was the same code and status as a caller who genuinely may not read the object.
+  - **Now:** the same refusals answer `503 SERVICE_UNAVAILABLE` (`status: 503`, `object` naming the object). On `POST /api/v1/analytics/dataset/query` the body is `{"code":"SERVICE_UNAVAILABLE","error":"Internal server error"}`. Real denials still answer `403 PERMISSION_DENIED` (and `404` / `405` for exposure), unchanged.
+  - **Fix:** a client that treated every analytics `403` as "no access" should treat `503 SERVICE_UNAVAILABLE` as a server-side fault: retry once the permission or exposure resolver is healthy, and check the server log for the cause. Do not show it as a missing grant.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- 1ac2bb5: perf(metadata-protocol,runtime): served metadata lists parse each unchanged document once, and the dispatcher's `/meta/app` reads objects on the execution face
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Diagnostics verdicts are memoized.** `computeMetadataDiagnostics` remembers a verdict per schema object and per document content (a SHA-256 of an encoding that keeps apart everything the parse keeps apart), so a served list of unchanged documents parses each one once instead of on every read. A replaced type schema starts from nothing, each caller gets its own copy, and a document with no faithful key is parsed every time as before. The served bytes are unchanged. Measured on the showcase app (108 objects, local, main-thread CPU per request): `GET /meta/object` 85.75 ms → 37 ms.
+  - **The dispatcher's `/meta/app`** (the `${prefix}/*` catch-all) reads each object's `enable` for its nav prune through `getMetaItemsForExecution` where the protocol has it, as `RestServer` does, and `getMetaItems` otherwise.
+  - **No public surface moves.** The built `dist/index.d.ts` of both packages is byte-identical at `cb0a2fcf` and at this head.
+- 3446d43: feat(install): installing a package checks its declared `dependencies` first — every entry must name a package installed at a version inside its range, or one the same artifact delivers, or the install is refused `422 DEPENDENCY_MISSING` (ADR-0141 D2)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the answer the three install doors give a package whose declared dependencies the target environment does not satisfy. -->
+  
+  **BREAKING** (an install-acceptance narrowing) for a package whose manifest declares a `dependencies` entry the target environment does not satisfy. The three install doors — `POST /api/v1/packages` (both its protocol arm and its no-protocol fallback), the protocol's `installPackage` called in-process, and `POST /api/v1/marketplace/install-local` — used to install such a package and let the gap surface at its first cross-app save. They now refuse the whole install, before anything is registered, written or synced, with `422 DEPENDENCY_MISSING`.
+  
+  An entry `(id, range)` is satisfied when `id` is installed at a `manifest.version` inside `range`, or is delivered by the same artifact (presence only: the packages of one artifact are one tested unit). Ranges are read at exact-version granularity in npm style: `^`, `~`, `>=`, `>`, `<=`, `<`, `=`, an exact version, `x` / `*` wildcards, hyphen ranges, space- or comma-joined intersections and `||` unions. A range outside that grammar (`latest` included) or an installed version that is not `MAJOR.MINOR.PATCH` does not satisfy — the check fails closed.
+  
+  The refusal names every unmet entry in one answer: `error.details.issues` carries one `AppCompatibilityCheck` issue per entry (`severity: 'error'`, `category: 'dependency_missing'`), and `error.details.unmet` the facts per entry — `packageId`, `dependency`, `range`, `found` (`absent`, `out-of-range`, `unreadable-range`, `unreadable-version` or `unreadable-declaration`) and the `installedVersion` when one is installed.
+  
+  Unchanged: a package that declares no dependencies installs exactly as before; a boot never runs the check (what an install admitted stays admitted); `PATCH /api/v1/packages/:id` still applies a `dependencies` edit as given.
+  
+  **What changes for you.** Install a package's dependencies, at versions inside its declared ranges, before the package itself; the refusal says which and at what range. `@objectstack/metadata-core` exports the check (`checkDeclaredDependencies`, `assertDeclaredDependencies`), its error (`DependencyMissingError`, `isDependencyMissingError`, `dependencyMissingAnswer`) and the range reader (`rangeAdmitsVersion`, `readExactVersion`, `DEPENDENCY_RANGE_GRAMMAR`). `DEPENDENCY_MISSING` is registered in the error-code ledger under `@objectstack/metadata-core`.
+- 7a04ba2: fix(objectql,metadata-protocol): an aggregate query that would answer a wrong table is refused 400, and an empty aggregate list no longer answers "not registered"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Date bucket on a non-date field.** `engine.aggregate` refuses a `groupBy` entry whose `dateGranularity` buckets a field the object declares neither a `date` nor a `datetime`: `INVALID_FIELD` / 400, `path: 'groupBy.N.dateGranularity'`. Before, every row fell into one `null` bucket (a `number` field into a `1970-01` bucket) under 200. A `formula` or undeclared field is not judged.
+  - **Two columns under one name.** `engine.aggregate` refuses a query whose aggregated row would carry two values under one column: an aggregation `alias` used twice, an alias equal to a group column (the field name, or the entry's own `alias`), or two group entries projecting one column. `INVALID_QUERY` / 400, `path` at the second position (`aggregations.1.alias`, `groupBy.1.field`). Before, the last value written won under 200: a count overwritten by a sum, or the group keys replaced by counts. Give the entry its own `alias`.
+  - Both refusals run at the engine's `aggregate` entry, before any driver is asked, so the REST query door, its dispatcher twin, the analytics ObjectQL strategy and the MCP data bridge answer alike.
+  - **Empty aggregate list.** `POST /data/:object/query` with `aggregations: []` (or `groupBy: []`, or both) and no non-empty axis beside it answers `400 INVALID_QUERY` naming `query.aggregations` (or `query.groupBy`) as empty. Before, it answered `404 OBJECT_NOT_FOUND`, "Object '…' is not registered", for a registered object. An empty list beside a non-empty axis is served as before.
+- 2409c9c: chore(packages): ship a LICENSE in the 14 published packages that had none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  npm packs a package's own `LICENSE` whatever its `files` says, and nothing in the release tooling copies the repository's root `LICENSE` into a package, so these 14 published tarballs carried no licence text at all while declaring `"license": "Apache-2.0"`. Each now carries a byte-for-byte copy of the root `LICENSE`, the same file the other 59 published packages already ship. With this, every one of the 73 published packages outside `ui/` ships a LICENSE and a README.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- b029c90: fix(metadata-protocol)!: a permission set that grants a hierarchy scope is refused on publish, and warned on a draft save, when the runtime mounts no hierarchy resolver; explain names the absent resolver (#26188)
+  
+  Clause-②: yes (narrowing: on a runtime with no hierarchy resolver, publishing a permission set whose grant uses `own_and_reports`, `unit` or `unit_and_below` is refused, where it used to answer 200; widened: `@objectstack/spec/security` gains the export `findHierarchyScopeGrants`, and `@objectstack/plugin-security`'s `ExplainEngineDeps` gains the optional member `hierarchyResolverMounted`)
+  Metadata-protocol: none
+  Ruling-ref: #26059 ruling Q3 / Q4 (`6416233738`), items 9a and 9b of the item reading (`6415971852`)
+  
+  `own_and_reports`, `unit` and `unit_and_below` are enforced only by the enterprise hierarchy resolver (capability `hierarchy-security`, ADR-0057). Without it the open sharing service evaluates them as `own`. `defineStack` already refuses such a grant unless the stack declares `requires: ['hierarchy-security']`, but a runtime save of the same permission set answered 200 with no word, and explain then told a manager that a subordinate's record was outside their unit.
+  
+  What changes:
+  
+  - The runtime authoring gate reads whether a hierarchy resolver is mounted (the kernel service `hierarchy-scope-resolver`) on every metadata write. When none is, a permission set whose `readScope` or `writeScope` is a hierarchy depth is refused on publish: a direct active save, the per-item publish of a draft, the package batch publish and a restore to such a version all answer 422 `INVALID_METADATA`, with one `issues[]` entry per grant under the rule `hierarchy-scope-capability-required`. The entry is located at the grant and names the `hierarchy-security` requirement.
+  - A draft save of the same body still succeeds. Its answer carries the same finding, at `severity: 'warning'`, in `advisories`.
+  - With a resolver mounted, nothing changes. A host with no service registry (the CLI) judges nothing here; `defineStack` is that host's door.
+  - `explainAccess`: on a deployment with no resolver, the depth layer's record cell for a hierarchy read depth now reads "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'." instead of saying the owner is outside the caller's read depth.
+  - `@objectstack/spec/security` exports `findHierarchyScopeGrants`, the one list of hierarchy depths and the one finding sentence. `defineStack`'s refusal reads it too, and its message is unchanged.
+  
+  **BREAKING** for a runtime with no hierarchy resolver that publishes hierarchy-scope grants at runtime.
+  
+  - **Before.** The publish answered 200 and the grant was enforced as owner-only.
+  - **Now.** The publish answers 422 `INVALID_METADATA` with the rule `hierarchy-scope-capability-required`. A draft save warns.
+  - **Fix.** Set the grant's `readScope` / `writeScope` to `own` or `org`, or run the permission set on a runtime that mounts the enterprise hierarchy resolver (`hierarchy-security`). Rows already stored are read as before.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time narrowing at the metadata publish door, conditional on a deployment fact (no hierarchy resolver mounted). No authorable key, spelling or stored shape moves: the permission-set schema parses exactly as before, `defineStack` already refused the same grant, and no stored row is read, rewritten or converted. The repair is the author's choice between a non-hierarchy depth and an enterprise runtime, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); the one spec export is added, not moved, renamed or removed; and nothing a stored artifact carries changes type, so no conversion has a source to rewrite. -->
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [6ad226a]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [8faba89]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [e843b5b]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [13136f7]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/lint@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/sdui-parser@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

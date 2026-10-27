@@ -1,5 +1,225 @@
 # @object-ui/i18n
 
+## 18.2.0
+
+### Minor Changes
+
+- dd5e355: feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  An app authored in one language listed its reports (`reports[].label`, `reports[].description`) in that language on the app's report index and the report page heading. Before this change the translation bundle had no key for them: `reports` was a retired object-first dialect key, so a bundle carrying it was refused by `os validate`, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `reports`, keyed by the report's `name`, carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the singular spelling `report` with a message pointing at `reports`). `reports` leaves `LEGACY_OBJECT_FIRST_KEYS`, so a stored translation row carrying it now loads through the authored-row sync instead of being skipped as a retired dialect; the key's measured footprint in the legacy dialect was zero (#3778). A new translator, `translateReport`, overlays the two strings and is registered in the metadata-document dispatch, so `GET /meta/report` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. A report is overlay-editable (ADR-0126 Regime O), so the translator honours the packaged base: a label or description an org re-authored is served as written (ADR-0029 D9.2a), and the strings it did not touch are still translated.
+  - **`@objectstack/metadata-protocol`:** `getPackagedReportBase(name)` returns the shipped report document beneath any overlay, the base the REST read path hands the translator.
+  - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+  - **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
+  
+  Example (`zh-CN` bundle of an English-authored app):
+  
+  ```ts
+  reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } },
+  ```
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+
+### Patch Changes
+
+- 934810c: feat(app-shell,i18n): the Console draws the install refusal `DEPENDENCY_MISSING` in the author's terms, one line per unmet dependency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0141 D2 refuses to install a package whose declared `dependencies` the environment does not satisfy (`422 DEPENDENCY_MISSING`, `details.unmet[]` naming each entry's `dependency`, `range`, what was `found` and the `installedVersion`). The Console showed the envelope's English sentence, the same in every locale and without the ranges.
+  
+  - **`@object-ui/app-shell`:** the three install surfaces that go through `install-local` (the package page's Install, the catalog page's organization install on a self-hosted runtime, and Setup → Packages → Import) draw the refusal from its facts: a heading saying nothing was installed, then one line per unmet entry, such as 「请先安装 app.objectstack.hotcrm 6.x。」 or "Install com.acme.billing ^2.1.0 first. Version 1.4.0 is installed." `installLocal()` now carries the envelope's `details` on the error it throws, and the Packages page's request helper carries `code` and `details`. A refusal whose facts the Console cannot read in full (an older runtime, or a `found` value it does not know) keeps the server's message.
+  - **`@object-ui/i18n`:** `marketplace.install.dependencyMissing.*` (a heading and one line for each `found` value) in all ten locale packs.
+  
+  What to do: nothing.
+- c7aa9cd: fix(i18n): the Chinese account menu's sign-out item reads 「退出登录」, not 「注销」
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the `zh` pack, `user.logout` read 「注销」, which a Chinese reader takes as "delete my account", on the menu every signed-in user opens. It now reads 「退出登录」, the wording the same pack already uses for signing out elsewhere. No key is added or removed; other locales are unchanged.
+- 326a559: fix(components): a refused submit moves focus to the first invalid field and no longer toasts the field list over the dialog's title
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A submit refused by field validation, on the client or by the server's `fields[]`, raised an error toast naming the fields ("Please check the highlighted fields: First name, Last name, Company…") on top of the message already written under each input. The toast cut its list after three names, and in a record create / edit dialog it was drawn over the title row.
+  - **Now.** The form raises no toast for a refusal that every field carries inline. It scrolls to the first invalid field in form order and focuses it, and first activates that field's tab when it is on a background tab. The message under each input is the whole report.
+  - **A field with nothing drawn to carry it.** When the server rejects a field that has no drawn input, for example one on a tab or section a `visibleWhen` predicate hides, the form shows the form-level banner and its toast with the server's sentence, the same path a rejection naming an unknown field already takes. The hidden tab is not activated.
+  - **Earlier outcomes retire.** A refusal on the client now takes down the previous attempt's banner and toast, and a clear-on-hide notice, as an attempt that passes validation already did. Before, the refusal toast replaced them under the form's outcome id.
+  - **`validation.formInvalid` removed.** The toast's sentence ("Please check the highlighted fields: {{fields}}") had no other reader, so it leaves the form's default map and all ten `@object-ui/i18n` locale packs. `validation.formInvalidJoiner` stays: the clear-on-hide notice, the faulted-`visibleWhen` refusal and the option-group hint still join field labels with it. A host bundle that overrides `validation.formInvalid` can drop the entry; nothing reads it.
+- 326a559: fix(app-shell,console): an invitee who opens the invitation link signed out is greeted for the invitation, offered "Create an account and join" first, and the accept page names the inviter
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Login page.** A signed-out visitor arriving at `/login?redirect=/accept-invitation/ID` used to see the returning-user card ("Welcome back · Sign in to continue your work") with a small "Sign up" link under the form. Both login pages (the console's own and `DefaultLoginPage`) now title the card "Accept your invitation · Use the email address the invitation was sent to." Where the server offers sign-up to this visitor, a full-width "Create an account and join" link (the new `InvitationSignUpPrompt` export) sits above the sign-in form in place of the small link. With sign-up switched off, the visitor gets the invitation header and the sign-in form only.
+  - **Register page.** From an invitation redirect, both register pages title the form "Create an account to join" and ask for the address the invitation was sent to, because only that account can accept it.
+  - **Accept page.** `DefaultAcceptInvitationPage` shows an "Invited by" row with the inviting member's email, which `GET /organization/get-invitation` already returns as `inviterEmail`. That route returns no inviter name.
+  - **Not in this change.** The signed-out pages name no organization, inviter or invited address, and do not prefill the email. The only invitation read the server serves answers a signed-out caller `401`, so a preview for signed-out visitors needs a new server read first.
+  - New locale keys in all ten packs: `auth.login.invitationTitle`, `auth.login.invitationDescription`, `auth.login.invitationSignUpButton`, `auth.login.invitationSignInDivider`, `auth.register.invitationTitle`, `auth.register.invitationDescription`, `organization.accept.invitedBy`.
+- 326a559: fix(plugin-map): a map whose style or tiles fail to load shows the record list with a translated notice, instead of a grey canvas under an English alert
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-map`:** when MapLibre reports a style or tile load failure (an intranet or proxied deployment that cannot reach the tile host, an unreachable style URL), the map view now removes the map and lists its records in its place, the same list a browser without WebGL2 already got: searchable, and each row opens the record the way its marker did. A "Try the map again" button brings the map back. The notice above the list keeps MapLibre's reason and names a remedy that exists: a view with its own map style is told to check that URL, and a view on the public default style is told to ask an administrator to set a map style for the view. It no longer says the markers are "listed in the search box" or asks for a "custom map style for production use" setting that does not exist. That notice, the WebGL2 notice, the list's label and empty text, and the "records excluded for missing or invalid coordinates" count now read the translation bundle, so a zh-CN console shows them in Chinese.
+  - **`@object-ui/i18n`:** eight new `element.map.*` keys in all ten packs.
+  
+  What to do: nothing. A deployment-wide map style setting is not part of this change.
+- 7bbc0b9: fix(app-shell): pending changes folds what the platform wrote into one collapsed line
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Publishing a new object from Studio listed the platform's injected system columns (`created_at`, `created_by`, `owner_id`, `updated_at`, `updated_by`) as fields the author added, and the object's derived `nameField` under "Also changed", beside the one field the author typed.
+  
+  - A field the publish adds or removes whose every definition carries `system: true` (the spec's mark for an auto-injected system/audit column), and a `nameField` equal to the registry's own `provisionPrimary` derivation, now fold into one collapsed "Generated by the platform (N)" line; opening it shows those rows. A system field whose definition differs between the published and draft bodies is an edit and stays an author row, as does a `nameField` the derivation would not pick.
+  - A new item's top-level keys are headed "Includes:" rather than "Also changed:": every key of an item that does not exist yet is part of it.
+  - The columns the platform injects and hides (`__search`, `organization_id`, `owning_business_unit_id`) are still not listed at all.
+  
+  New strings `preview.changes.detailNewKeys` and `preview.changes.generatedGroup` ship in all ten locale packs.
+- cc378e9: fix(plugin-list,plugin-grid): an empty list tells "no records you can see" and "nothing of yours yet" apart from "no records"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An empty list chose its copy from the user's query and the view's filter alone. A member who may read none of an object's records and may not create one was told "Nothing here yet / Create your first record to get started." beside no Create button, and every "my …" view (`owner` equals the current user) told someone who owns nothing "No records match this view's filter."
+  
+  - **No filter, no create grant.** When the permission answer has loaded and the caller does not hold the create grant (the `listNew` row of the affordance-to-grant map, the verdict the page's own New reads), the empty state reads "No records you can see" and asks the reader to contact an administrator. The add-record action is not drawn for that caller, even on a view that enables `addRecord`.
+  - **A filter naming the signed-in user.** When the view's declared filter compares a field to the caller's own id (or still carries the `{current_user_id}` placeholder), the empty state reads "Nothing of yours yet", with the add-record action only under the create grant.
+  - **Unchanged.** The first-run copy and action for a caller who may create, the user-query and view-filter copy, an authored `emptyState`, the 403 error panel, and every surface with no permission provider mounted.
+  
+  `ListView` (grid and gallery), the standalone `ObjectGallery` and `ObjectGrid`'s default empty state decide the same way. `@object-ui/i18n` gains `list.ownedNoneTitle`, `list.ownedNoneMessage`, `list.noneVisibleTitle` and `list.noneVisibleMessage` in all ten locale packs.
+  
+  What to do: nothing. A view that authors its own `emptyState` keeps it.
+- c86c823: fix(i18n): the last English literals on the data table, the chart view, react pages, the References sheet and Flow Runs read the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Data table.** The hover "open record" affordance and the inline-edit row's cancel and save buttons are titled from `table.openRecord`, `table.cancelChanges` and `table.saveRow`.
+  - **Chart view.** A chart view's loading fallback reads the existing `chart.loading` row.
+  - **`kind:'react'` pages.** The capability notice, the empty-source refusal, the loading line and the two error titles read `reactPage.*`. Sentences with an inline code chip are one translated string, so each language decides where the chip sits.
+  - **References sheet (Studio).** The table's column headers read `engine.edit.refsColFromType`, `refsColFromName` and `refsColPath` from the Studio's own table, in English and Chinese.
+  - **Flow Runs.** When the client lacks the method a panel calls (`meta.getItems`, `automation.execute`, `automation.listRuns`), the panel keeps the method's name and words the diagnostic at render from `console.developer.flowRuns.clientMethodUnavailable`. A message the call threw is still shown as it came.
+  
+  All ten locale packs carry the new rows. With no i18n provider every surface still renders its English.
+- 326a559: chore(i18n): delete 92 message keys nothing reads from all ten locale packs
+  
+  Clause-②: yes (TranslationKeys narrows by 92 unread members; patch per the #4730 retirement precedent)
+  Metadata-protocol: none
+  
+  `ui/scripts/check-i18n-dead-keys.mjs` listed 122 keys with no call site and no textual occurrence anywhere in the repository. 92 of them are deleted from `ar`, `de`, `en`, `es`, `fr`, `ja`, `ko`, `pt`, `ru` and `zh`; no key is renamed or added, and no screen changes, because no code asked for any of them. The largest groups are `appDesigner.*` (20 keys), `report.*` (9), `publicForm.*` (8), `table.*` (7) and `layout.appSwitcher.*` (7).
+  
+  Two groups the script also listed stay:
+  
+  - 28 `_one` / `_other` plural forms (`preview.changes.typeCount.*`, `notifications.arrivalMany` / `arrivalRepeats`, `fields.relativeDate.overdue`). Their base keys are called with `count`, and i18next reads the plural form, so they are in use.
+  - `console.ai.agentLabels.dataChat` and `metadataAssistant`, which the pack keeps on purpose for external overrides.
+  
+  `TranslationKeys` (`typeof en`) and the other pack objects' types lose the 92 members. A host that reads one of them by property gets a type error; nothing in this repository does, and no `t()` call anywhere asks for one.
+- 0b76a1f: feat(plugin-detail): the record activity timeline folds consecutive updates by one actor into one row with a count
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Before.** Every `sys_activity` update was its own feed row. When a flow, a rollup or a seed updated a record repeatedly, the system's rows buried the people's comments: a demo campaign showed thirteen consecutive "System · Updated Campaign …" rows in its discussion feed.
+  - **Now.** `RecordActivityTimeline` folds a run of adjacent `updated` entries by the same actor (`actor_id`, `null` for the system, and the same display name), each no more than 10 minutes after the one before it, into one row. The row shows the actor, the time of the latest entry, the entry count and the union of the changed fields, by their field labels where the page has the object schema and by machine name otherwise (`Updated Number Sent, Leads, Responses · 13 updates`). A toggle (`aria-expanded`) expands it to every entry.
+  - **Rendering only.** No entry is dropped or merged in the data, and the panel heading still counts every entry. Create, delete, assign, share, comment, completed and milestone rows never fold, and any of them between two updates ends the run. An entry without a summary still folds and still counts. Field names come from `sys_activity.changed_fields`, never from the recorded values.
+  - **`FeedItem` (`@object-ui/types`).** Four new optional members, set by `activityRowToFeedItem`: `activityType` (the row's own `sys_activity.type`), `activityKind` (`metadata.kind`, e.g. `'milestone'`), `actorId` and `changedFields`. A host item without them renders as before and never folds.
+  - **Strings.** `detail.foldedUpdates`, `detail.foldedUpdateCount`, `detail.foldedMoreFields`, `detail.expandFolded` and `detail.collapseFolded`, in all ten packs.
+- f00cbe3: fix(cli,i18n,console): the hosted product reads "ObjectOS Cloud" everywhere a user reads it; the Community Console carries a "Powered by ObjectStack" mark
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ObjectOS is one product in three editions — Community (this repository's runtime and Console, open source), Cloud (cloud.objectos.ai) and Enterprise — and ObjectStack is the name of the protocol, SDK, CLI and framework. The hosted product is "ObjectOS Cloud" wherever a user reads it; it was still "ObjectStack Cloud" in the CLI and in the Console's cloud-install strings.
+  
+  - **`@objectstack/cli`.** `os cloud login`, `os cloud logout`, `os cloud whoami`, `os package publish` and `os plugin publish` say "ObjectOS Cloud" in their `--help` descriptions, their `--url` / `--server` / `--token` / `--visibility` flag descriptions, their headers and their "Not logged in" prescriptions; so do the `os serve` welcome page's link to the cloud console and the shared "Authentication required" message. The CLI README and the deployment CLI reference follow. Internal identifiers are unchanged: `~/.objectstack/cloud.json`, `OS_CLOUD_API_KEY`, `OS_CLOUD_URL`, the `os cloud …` command names.
+  - **`@object-ui/i18n`.** The cloud-connection "Connected to …" title and the three cloud-install dialog sentences ("You need to be signed into …", "… sign into … first") name "ObjectOS Cloud" in all ten locales, the product name kept untranslated inside each locale's sentence. New key `auth.shell.poweredBy` ("Powered by ObjectStack") in all ten locales.
+  - **`@object-ui/app-shell`.** New `isDefaultProductName()`: true while the deployment carries the default `branding.productName` ("ObjectOS"), false once a runtime has pushed its own.
+  - **`@object-ui/console`.** The sign-in layout (login, register, forgot/reset password, verify email, setup, consent, device, invitation) shows a small "Powered by ObjectStack" link to objectstack.ai under the form when `isDefaultProductName()` is true. A deployment that pushes its own product name — ObjectOS Cloud, Enterprise, a cloud-connected workspace — shows its own name and no second brand line. The default product name, `logo.svg`, `manifest.json` and `admin@objectos.ai` are unchanged.
+  
+  What to do: nothing. An operator who rebrands the Console through `branding.productName` keeps a single brand line, as before.
+- 9f16f16: feat(plugin-map): a map view with no style of its own draws the deployment's default map style before the public demo style
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An operator who sets `OS_CONSOLE_MAP_STYLE_URL` now gets that style on every map view that names none. A map draws the first style it finds, in this order:
+  
+  1. the view's own style: `mapStyle`, then `map.style`;
+  2. the deployment's default style, the runtime-config `mapStyleUrl`;
+  3. the public MapLibre demo style.
+  
+  - **`@object-ui/react`:** `HostMapStyleProvider` and `useHostMapStyle()` let a host hand the deployment's default map style to the map renderer. Outside a provider, the hook answers `undefined` and the map keeps the demo style.
+  - **`@object-ui/app-shell`:** the runtime config reads the top-level `mapStyleUrl` into `AppShellRuntimeConfig.mapStyleUrl`, re-read from each payload, and `ConsoleShell` supplies it through `HostMapStyleProvider`.
+  - **`@object-ui/plugin-map`:** `ObjectMap` reads the host's style after the view's own. When the deployment's style fails to load, the notice above the record list says the deployment's default map style could not be loaded and asks the reader to have an administrator check it. It no longer blames the public default tiles, which that map never drew.
+  - **`@object-ui/i18n`:** one new key, `element.map.styleFailedDeployment`, in all ten packs.
+  
+  What to do: nothing. A deployment that sets no `OS_CONSOLE_MAP_STYLE_URL` draws the demo style as before, and a view's own `mapStyle` still wins.
+- b3ed6c8: fix(app-shell): the record create and update toasts name the saved record
+  
+  Clause-②: no (adds or rewords message keys; no key is removed, so `TranslationKeys` only widens; no exported runtime contract changes)
+  Metadata-protocol: none
+  
+  A user entering several records in a row saw "Task created successfully" after each save and could not tell which record was just written. The Console's record-form save toasts now carry the saved record's display name (ADR-0079), for example `Task "Quarterly review" created` and `Task "Quarterly review" updated`. This covers the record-form overlay on a list and the child-record form opened over a parent record's page.
+  
+  - **`@object-ui/app-shell`:** the name comes from the same display-name resolver the record page title and lookups use, read through the saved object's declared name field. A record with nothing nameable (the resolver would only answer `Record #ID`) keeps the object-label toast it showed before.
+  - **`@object-ui/i18n`:** two new keys under `form.` in all ten packs, `createdNamed` and `updatedNamed`, each with `{{object}}` (the object label) and `{{title}}` (the record's name). The existing `form.createSuccess` / `form.updateSuccess` strings are unchanged and remain the toast for a record with no name.
+  
+  Settings saves and flow-completion toasts are unchanged.
+- Updated dependencies [dc71845]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [ef025fe]
+- Updated dependencies [4f48d2b]
+- Updated dependencies [14b5597]
+- Updated dependencies [48a9d9d]
+  - @object-ui/core@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

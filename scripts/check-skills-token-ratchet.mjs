@@ -467,7 +467,13 @@ export const CEILINGS = new Map([
   // text is 23924 bytes -> 5981 tokens: the 4 tokens of headroom are absorbed
   // and the ceiling moves 5828 -> 5981 (+153). Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23924 / 4)
-  ['skills/objectstack-platform/SKILL.md', 5981],
+  // 5981 -> 5997 (card #26302, the follow-up its contract review ordered): the
+  // section's opening reason reworded — a `sys_user` row written through
+  // `data` is not refused, it lands as a directory row with no account — +61
+  // bytes, so the priced text is 23924 -> 23985 bytes -> 5997 tokens, ceiling
+  // +16, pinned AT the measurement. Same ruling, same arithmetic rule as above.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23985 / 4)
+  ['skills/objectstack-platform/SKILL.md', 5997],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -790,7 +796,18 @@ export const CEILINGS = new Map([
   // ceiling moves +318, pinned AT the measurement. Same maintainer ruling as
   // the SKILL.md row above (2026-10-27, verbatim and untranslated):
   // 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2141],
+  // 2141 -> 2427 (card #26362): one eval prompt for the record-anchored
+  // approval lock read — a record page that offers an edit to a member who is
+  // not on the approval, whose save the lock hook then refuses; the ideal
+  // answer reads the lock (`client.approvals.getRecordLock`) rather than a
+  // request row the non-participant is never served, written so it never
+  // spells either `must_not_contain` string. Paid down first: the file's nine
+  // fixtures share no sentence, nothing to cut (0 bytes). 8561 -> 9705 bytes
+  // (+1144) -> ceil(9705 / 4) = 2427; headroom was 3 bytes, 0 tokens, so the
+  // ceiling moves +286, pinned AT the measurement. Same maintainer ruling as
+  // the SKILL.md row above (2026-10-27, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2427],
   // 894 -> 1095 (#26179): one regression case for the field permission `when`
   // (the contract prompt: lock the legal terms for finance from approval on,
   // legal keeps the edit) — expected: `when` on the finance set's entries with
@@ -837,7 +854,12 @@ export const CEILINGS = new Map([
   // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
   // ceiling +247, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1458],
+  // 1458 -> 1469 (card #26302 follow-up): eval 7's expected output says what a
+  // seeded `sys_user` row becomes instead of "(refused)" — +42 bytes, so the
+  // file is 5831 -> 5873 bytes -> 1469 tokens, ceiling +11, pinned AT the
+  // measurement.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5873 / 4)
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1469],
   // 955 -> 1175: one regression case for the now-anchored comparand (the
   // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
   // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored
@@ -871,7 +893,18 @@ export const CEILINGS = new Map([
   // bullets and were deleted (~73 tokens). Landed 5555 -> 5587: +32 net, 14
   // absorbed by headroom, ceiling +18. Same maintainer ruling as the SKILL.md
   // row above (2026-10-27, verbatim and untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5587],
+  // 5587 -> 5730 (card #26362): one short section, "Reading the lock" — the
+  // record-anchored approval lock read every reader may ask (the route, the
+  // SDK call, `locked` alone with request content behind
+  // `approvalsVisibleToReaders`, an unreadable record answered as a missing
+  // one), +782 bytes. Paid down first, two genuine restatements of the
+  // Send-back section cut to pointers: the config table's `maxRevisions` row
+  // (-76 bytes) and the Branching section's send-back bullet (-134 bytes).
+  // 22346 -> 22918 bytes (+572 net) -> ceil(22918 / 4) = 5730; headroom was 2
+  // bytes, 0 tokens, so the ceiling moves +143, pinned AT the measurement.
+  // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
+  // untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5730],
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the

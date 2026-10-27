@@ -196,15 +196,15 @@ const READERS: Record<string, Row> = {
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
   // as the caller outright, so its federated answer is the caller's own read.
-  'engine.ts#resolveOneHopRelated :: isFederatedObject()': {
+  'engine-master-detail-related.ts#resolveOneHopRelated :: isFederatedObject()': {
     disposition: 'exempt',
     why: "a federated related object is read through the caller's own read, never through a wall",
   },
-  'engine.ts#resolveOneHopRelated :: referenceTargetOf()': {
+  'engine-master-detail-related.ts#resolveOneHopRelated :: referenceTargetOf()': {
     disposition: 'exempt',
     why: 'reads the related object by id; a federated one is routed through the caller',
   },
-  'engine.ts#resolveOneHopRelated :: resolveTenantFieldName()': {
+  'engine-master-detail-related.ts#resolveOneHopRelated :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'decides the routing beside the federated test, on the related object, never as a filter',
   },
@@ -216,7 +216,7 @@ const READERS: Record<string, Row> = {
   },
   // [#24468] The predicate read names each reference's target to judge, per
   // validation rule, the related fields that target does not declare.
-  'engine.ts#resolvePredicateRelated :: referenceTargetOf()': {
+  'engine-master-detail-related.ts#resolvePredicateRelated :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "judges a validation rule's own hop against the target's declared field map; no row is read here",
   },
