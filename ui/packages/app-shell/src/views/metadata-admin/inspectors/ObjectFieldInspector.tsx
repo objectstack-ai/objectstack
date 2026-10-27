@@ -46,8 +46,10 @@ import {
   FieldSchema,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
+  SelectOptionSchema,
   SINGLE_OPTION_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
+  type SelectOptionKind,
 } from '@objectstack/spec/data';
 import { ValueDomainSchema } from '@objectstack/spec/shared';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
@@ -71,7 +73,17 @@ import {
   InspectorEmptyState,
   moveArray,
 } from './_shared.js';
-import { Button, Input, Label, Badge } from '@object-ui/components';
+import {
+  Button,
+  Input,
+  Label,
+  Badge,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@object-ui/components';
 import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
 import { ObjectPicker } from './ObjectPicker.js';
@@ -98,8 +110,14 @@ import { usePickerLoad, type LoadState } from '../loadState.js';
 /**
  * One row of the picklist option editor.
  *
- * `value` / `label` / `color` are the keys this editor DISPLAYS and owns — it
- * renders a control for each and is authoritative for their values. `rest`
+ * `value` / `label` / `color` / `kind` are the keys this editor DISPLAYS and
+ * owns — it renders a control for each and is authoritative for their values.
+ * `kind` is the option's lifecycle category (`SelectOptionSchema.kind`,
+ * objectstack#23809); its control is drawn only on a single-value `select` /
+ * `radio`, the one field shape the spec lets carry it (`takesOptionKind`).
+ * Before objectstack#26729 it rode in `rest`: an existing `kind` survived, but
+ * nothing here could author one, so a Studio-built select could never become
+ * the object's `stageField`, whose every option must declare it. `rest`
  * carries every OTHER authored key of the same option verbatim, so a round
  * trip through this inspector is not lossy for keys it has no opinion about.
  * Today that is `default` and `visibleWhen`: both are ACCEPTED by
@@ -124,6 +142,8 @@ interface Option {
   value: string;
   label?: string;
   color?: string;
+  /** Absent = the author declared none (reads as `open`, but not under `stageField`). */
+  kind?: SelectOptionKind;
   /** Authored keys this editor has no control for, carried through untouched. */
   rest?: Record<string, unknown>;
 }
@@ -153,7 +173,9 @@ type MalformedReason =
   /** `label` is present with a non-string type. */
   | 'label-not-text'
   /** `color` is present with a non-string type. */
-  | 'color-not-text';
+  | 'color-not-text'
+  /** `kind` is present but is not one of the spec's lifecycle kinds. */
+  | 'kind-not-valid';
 
 interface MalformedOption {
   /** The authored entry, untouched. Written back byte-for-byte on commit. */
@@ -228,6 +250,9 @@ function classifyOption(raw: unknown): OptionRow {
   if (o.color !== undefined && typeof o.color !== 'string') {
     return { kind: 'malformed', malformed: { raw, reason: 'color-not-text' } };
   }
+  if (o.kind !== undefined && !isOptionKind(o.kind)) {
+    return { kind: 'malformed', malformed: { raw, reason: 'kind-not-valid' } };
+  }
   // Representable. Everything below is the projection this reader has always
   // produced for a well-formed option, unchanged — see the round-trip control
   // in `ObjectFieldInspector.malformedOptions.test.tsx`.
@@ -237,11 +262,13 @@ function classifyOption(raw: unknown): OptionRow {
   delete rest.value;
   delete rest.label;
   delete rest.color;
+  delete rest.kind;
   const option: Option = {
     value: o.value,
     label: typeof o.label === 'string' ? o.label : undefined,
     color: typeof o.color === 'string' ? o.color : undefined,
   };
+  if (isOptionKind(o.kind)) option.kind = o.kind;
   // Only attach the carrier when there is something to carry, so an option
   // with nothing extra stays byte-identical to what this reader used to
   // produce.
@@ -271,8 +298,9 @@ function classifyOption(raw: unknown): OptionRow {
  * the same way (its `...rest`), stripping only the named keys a shipped build
  * actually wrote that the spec now refuses (`RETIRED_FIELD_KEYS`). There is no
  * counterpart tombstone list for OPTION keys and none is owed: this editor has
- * only ever written `value` / `label` / `color`, so no key it authored can
- * come back as one the spec rejects.
+ * only ever written `value` / `label` / `color`, and `kind` only on a field
+ * that takes one (`takesOptionKind`), so no key it authored can come back as
+ * one the spec rejects.
  */
 function readOptions(def: Record<string, unknown>): OptionRow[] {
   const raw = def.options;
@@ -297,6 +325,39 @@ function isPicklist(type: string): boolean {
  */
 function takesPicklist(type: string): boolean {
   return SINGLE_OPTION_TYPES.has(type) || MULTI_OPTION_TYPES.has(type);
+}
+
+/**
+ * The option lifecycle kinds, in the spec's order, read from the installed
+ * `SelectOptionSchema` rather than re-listed (objectstack#26729).
+ */
+const OPTION_KINDS: ReadonlyArray<SelectOptionKind> = SelectOptionSchema.shape.kind.unwrap().options;
+
+function isOptionKind(raw: unknown): raw is SelectOptionKind {
+  return typeof raw === 'string' && (OPTION_KINDS as ReadonlyArray<string>).includes(raw);
+}
+
+/**
+ * Whether this field's options may carry a lifecycle `kind`: a single-value
+ * `select` / `radio`, as `FieldSchema` judges it (a `multiple: true` select
+ * holds no single option code per record). On any other field the spec refuses
+ * an option's `kind`, so the editor draws no control there and writes none.
+ */
+function takesOptionKind(type: string, multiple: unknown): boolean {
+  return SINGLE_OPTION_TYPES.has(type) && multiple !== true;
+}
+
+/**
+ * `options` with every option object's `kind` removed — what a retype to a
+ * field that cannot carry one writes, as a retype drops a `picklist` the new
+ * type cannot name. Entries that are not option objects are kept as they are.
+ */
+function withoutOptionKinds(options: unknown[]): unknown[] {
+  return options.map((o) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o) || !('kind' in o)) return o;
+    const { kind: _dropped, ...kept } = o as Record<string, unknown>;
+    return kept;
+  });
 }
 
 function isLookup(type: string): boolean {
@@ -750,13 +811,21 @@ export function ObjectFieldInspector({
       nextType === 'master_detail'
       && def.required !== true
       && (draft.sharingModel === 'controlled_by_parent' || def.required === undefined);
-    if (def.picklist === undefined || takesPicklist(nextType)) {
+    const keepsPicklist = def.picklist === undefined || takesPicklist(nextType);
+    // objectstack#26729 — the spec refuses an option `kind` on any field but a
+    // single-value select / radio, so a retype away from one drops the kinds.
+    const dropsKinds =
+      Array.isArray(def.options)
+      && !takesOptionKind(nextType, def.multiple)
+      && withoutOptionKinds(def.options).some((o, i) => o !== (def.options as unknown[])[i]);
+    if (keepsPicklist && !dropsKinds) {
       patchDef(requireMaster ? { type: nextType, required: true } : { type: nextType });
       return;
     }
     const nextDef: Record<string, unknown> = { ...def, type: nextType };
     if (requireMaster) nextDef.required = true;
-    delete nextDef.picklist;
+    if (!keepsPicklist) delete nextDef.picklist;
+    if (dropsKinds) nextDef.options = withoutOptionKinds(def.options as unknown[]);
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: nextDef };
     writeView({ shape: view.shape, entries: nextEntries });
@@ -861,6 +930,11 @@ export function ObjectFieldInspector({
 
   const optionRows = readOptions(def);
   const options = representableOptions(optionRows);
+  const kindAllowed = takesOptionKind(type, def.multiple);
+  // objectstack#26729 — the object names this field as its lifecycle field, so
+  // ObjectSchema refuses the save until every option declares a kind.
+  const stageNeedsKinds =
+    kindAllowed && draft.stageField === entry.name && options.some((o) => o.kind === undefined);
   // objectui#10202 — a picklist-bound field offers the LIST's values: the
   // served field's resolved copy when it carries one, else the named list's
   // own options from the roster (a binding made in this session, or a stored
@@ -921,6 +995,10 @@ export function ObjectFieldInspector({
         label: o.label ?? '',
       };
       if (o.color) out.color = o.color;
+      // `kind` is written only where the spec accepts it: an option the author
+      // left without one stays without the key, and a field that cannot carry
+      // it never gets it (objectstack#26729).
+      if (o.kind && kindAllowed) out.kind = o.kind;
       return out;
     });
     patchDef({ options: clean });
@@ -1099,9 +1177,13 @@ export function ObjectFieldInspector({
               key={entry.name}
               rows={optionRows}
               onChange={patchOptions}
+              kindAllowed={kindAllowed}
               disabled={readOnly}
               locale={locale}
             />
+          )}
+          {isPicklist(type) && def.picklist === undefined && stageNeedsKinds && (
+            <HeldHint>{tr('designer.field.hint.stageKinds')}</HeldHint>
           )}
           {heldNeed === 'options' && <HeldHint>{tr('designer.field.hint.addOption')}</HeldHint>}
           {isLookup(type) && (
@@ -1541,7 +1623,18 @@ const MALFORMED_REASON_KEY: Record<MalformedReason, string> = {
   'value-empty': 'designer.field.optMalformed.valueEmpty',
   'label-not-text': 'designer.field.optMalformed.labelNotText',
   'color-not-text': 'designer.field.optMalformed.colorNotText',
+  'kind-not-valid': 'designer.field.optMalformed.kindNotValid',
 };
+
+/** The label of each lifecycle kind in the option editor's kind picker. */
+const OPTION_KIND_LABEL_KEY: Record<SelectOptionKind, string> = {
+  open: 'designer.field.optKind.open',
+  won: 'designer.field.optKind.won',
+  lost: 'designer.field.optKind.lost',
+};
+
+/** The kind picker's item for "no kind declared"; `SelectItem` refuses `''`. */
+const KIND_UNSET = '__unset__';
 
 /** The authored entry, rendered for a human, with a ceiling so one bad row cannot own the panel. */
 function describeMalformed(raw: unknown): string {
@@ -1559,11 +1652,14 @@ function describeMalformed(raw: unknown): string {
 function OptionsEditor({
   rows: incoming,
   onChange,
+  kindAllowed,
   disabled,
   locale,
 }: {
   rows: OptionRow[];
   onChange: (next: OptionRow[]) => void;
+  /** Draw the lifecycle `kind` picker — a single-value select / radio only. */
+  kindAllowed: boolean;
   disabled?: boolean;
   locale?: string;
 }) {
@@ -1715,6 +1811,29 @@ function OptionsEditor({
                     className="h-6 w-6 rounded border bg-background cursor-pointer p-0.5"
                     title={t('designer.field.optColor', locale)}
                   />
+                  {kindAllowed && (
+                    <Select
+                      value={row.option.kind ?? KIND_UNSET}
+                      onValueChange={(v) => update(i, { kind: isOptionKind(v) ? v : undefined })}
+                      disabled={disabled}
+                    >
+                      <SelectTrigger
+                        data-testid="option-kind"
+                        aria-label={t('designer.field.optKind', locale)}
+                        className="h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px]"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={KIND_UNSET}>{t('designer.field.optKind.unset', locale)}</SelectItem>
+                        {OPTION_KINDS.map((k) => (
+                          <SelectItem key={k} value={k}>
+                            {t(OPTION_KIND_LABEL_KEY[k], locale)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                   <span className="flex-1" />
                   {rowControls(i)}
                 </div>
