@@ -199,10 +199,11 @@
 //   JUDGED      every seated double was actually drivable. "Could not run" is a
 //               failure, not a skip (AGENTS.md, "Absence must be loud"), and is
 //               declared per file in the baseline's `unjudged` count.
-//   RECONCILED  in both directions. An entry whose count is now LOWER, or whose
-//               file is now clean or gone, is an error -- ratchet it down in the
-//               same PR. A ratchet that can only accrete rots into a list nobody
-//               reads.
+//   ONE-SIDED   an entry whose count is now LOWER, or whose file is now clean or
+//               gone, PASSES and is reported with the exact edit that ratchets it
+//               down (#26444) -- deleting or fixing a test file must not red a PR
+//               that never touched this gate. Until that edit lands, the old
+//               count stays the file's ceiling.
 //   MONOTONIC   the baseline key set only ever SHRINKS, measured against the
 //               merge base with origin/main. Counts alone cannot see the last
 //               move: a newly-added file matching its own count would sail
@@ -214,7 +215,7 @@
 // `check-engine-double-contract` gives: a generator would let a new limit-blind
 // double be admitted by "just run the update command", which is precisely how a
 // gate stops meaning anything. Ratcheting down is editing one number by hand --
-// the failure output prints exactly what was measured.
+// the decrease report prints exactly what was measured.
 
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { join, relative, resolve, dirname } from 'node:path';
@@ -812,23 +813,39 @@ export function reconcile(measured, baselineFiles) {
           `grandfathered for its EXISTING doubles only.\n` +
           `      ${v.details.map(describeDetail).join('\n      ')}`,
         );
-      } else if (now[kind] < allowed[kind]) {
-        errors.push(
-          `${file}: ${kind} count fell ${allowed[kind]} -> ${now[kind]} -- ratchet DOWN: set it ` +
-          `to ${now[kind]} in ${BASELINE_PATH} (delete the entry when every count reaches 0).`,
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * The decrease direction, as a REPORT rather than an error (#26444): a fallen
+ * count, or a file that is clean or gone, passes. Each line is the hand edit that
+ * ratchets the entry down -- until it lands, the old count stays the ceiling.
+ */
+export function reconcileDown(measured, baselineFiles) {
+  const lines = [];
+  for (const [file, v] of measured) {
+    if (!baselineFiles[file]) continue;
+    const now = countsOf(v);
+    const allowed = countsOf(baselineFiles[file]);
+    for (const kind of KINDS) {
+      if (now[kind] < allowed[kind]) {
+        lines.push(
+          `${file}: ${kind} count fell ${allowed[kind]} -> ${now[kind]}. Passing; set it to ` +
+          `${now[kind]} in ${BASELINE_PATH} (delete the entry when every count reaches 0) -- until ` +
+          `then ${allowed[kind]} stays this file's ceiling.`,
         );
       }
     }
   }
   for (const file of Object.keys(baselineFiles)) {
     if (!measured.has(file)) {
-      errors.push(
-        `${file}: baselined file is clean or gone -- ratchet DOWN: delete its entry from ` +
-        `${BASELINE_PATH}.`,
-      );
+      lines.push(`${file}: baselined file is clean or gone. Passing; delete its entry from ${BASELINE_PATH}.`);
     }
   }
-  return errors;
+  return lines;
 }
 
 function monotonicity(baselineFiles) {
@@ -1116,7 +1133,7 @@ const SELF_TEST_VERDICT = 'check-objectql-double-limit self-test reached its ver
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-objectql-double-limit self-test': 47,
+  'check-objectql-double-limit self-test': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1236,17 +1253,24 @@ async function selfTest() {
   expect('a module-scope-fixture double is judged, not dropped',
     moduleFixture.r?.verdict === 'BLIND');
 
-  // Reconciliation, both directions.
+  // Reconciliation, ONE-SIDED (#26444): an increase is an error, a decrease is a report.
   const fake = new Map([['a.test.ts', { blind: 1, wrong: 0, unjudged: 0, details: [{ line: 1, result: { verdict: 'BLIND' } }] }]]);
   expect('an unbaselined blind double is an error', reconcile(fake, {}).length === 1);
   expect('a matching baseline entry passes', reconcile(fake, { 'a.test.ts': { blind: 1 } }).length === 0);
   expect('a grown count is an error', reconcile(fake, { 'a.test.ts': { blind: 0 } }).length === 1);
-  expect('a fallen count is an error (ratchet down)', reconcile(fake, { 'a.test.ts': { blind: 2 } }).length === 1);
-  expect('a stale entry is an error', reconcile(new Map(), { 'gone.test.ts': { blind: 1 } }).length === 1);
+  expect('a fallen count PASSES (one-sided)', reconcile(fake, { 'a.test.ts': { blind: 2 } }).length === 0);
+  expect('...and is reported once', reconcileDown(fake, { 'a.test.ts': { blind: 2 } }).length === 1);
+  expect('a clean/gone entry PASSES (one-sided)', reconcile(new Map(), { 'gone.test.ts': { blind: 1 } }).length === 0);
+  expect('...and is reported once', reconcileDown(new Map(), { 'gone.test.ts': { blind: 1 } }).length === 1);
+  expect('a matching entry reports nothing', reconcileDown(fake, { 'a.test.ts': { blind: 1 } }).length === 0);
+  expect('a grown count is not a decrease', reconcileDown(fake, { 'a.test.ts': { blind: 0 } }).length === 0);
+  expect('the report names the old count as the ceiling it leaves',
+    reconcileDown(fake, { 'a.test.ts': { blind: 3 } })[0]?.includes('3 stays'));
   const fakeWrong = new Map([['b.test.ts', { blind: 0, wrong: 1, unjudged: 0, details: [{ line: 2, result: { verdict: 'WRONG', shapes: ['truthiness'] } }] }]]);
   expect('a shape-breaking double is ledgered in its own kind, not folded into blind',
     reconcile(fakeWrong, { 'b.test.ts': { blind: 0, wrong: 1 } }).length === 0
-    && reconcile(fakeWrong, { 'b.test.ts': { blind: 1 } }).length === 2);
+    && reconcile(fakeWrong, { 'b.test.ts': { blind: 1 } }).length === 1
+    && reconcileDown(fakeWrong, { 'b.test.ts': { blind: 1 } }).length === 1);
 
   // -- the dispatch-gates declaration (#12322's landing obligation) ---------
   //
@@ -1347,7 +1371,7 @@ async function selfTest() {
     '    one answering with rows of its own that it could read no evidence from;\n' +
     '    a SHARED helper and a per-file copy grade identically; rows reached through a\n' +
     '    table map and through a module-scope fixture are both driven; the ledger\n' +
-    '    reconciles in both directions.',
+    '    reconciles one-sided (a decrease passes and is reported).',
   );
 
   return SELF_TEST_VERDICT;
@@ -1421,6 +1445,12 @@ if (!isEntrypoint(import.meta.url)) {
       `${file}: ADDED to the baseline (not present at ${mono.base}). The grandfather list is ` +
       `not a mute button -- it only ever shrinks.`,
     );
+  }
+
+  const down = reconcileDown(measured, baselineFiles);
+  if (down.length > 0) {
+    console.log(`ObjectQL double \`limit\` conformance: ${down.length} baselined count(s) fell (passing, reported):`);
+    for (const line of down) console.log(`  - ${line}`);
   }
 
   if (errors.length > 0) {
