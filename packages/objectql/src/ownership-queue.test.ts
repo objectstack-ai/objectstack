@@ -336,6 +336,26 @@ describe('[ADR-0142 D5] the assignment seam', () => {
     expect(await insert({ subject: 'B', priority: 'low' })).toMatchObject({ queue: 'support' });
   });
 
+  it('a `criteria` that cannot be evaluated does not match, warns once, and the next entry decides', async () => {
+    await boot([rule([
+      { name: 'vip', criteria: 'record.priority == (', assignTo: { type: 'user', value: 'u_lead' } },
+      { name: 'rest', assignTo: { type: 'queue', value: 'support' } },
+    ])]);
+    const a = await insert({ subject: 'A', priority: 'high' });
+    await insert({ subject: 'B', priority: 'high' });
+    expect(a.owner_id ?? null).toBeNull();
+    expect(a).toMatchObject({ queue: 'support' });
+    expect(warn.mock.calls.filter((c: unknown[]) => /criteria of rule 'ticket_intake' entry 'vip' could not be evaluated/.test(String(c[0])))).toHaveLength(1);
+  });
+
+  it('a `load` the compiler cannot lower parks the row in the queue and warns; it never counts every row', async () => {
+    await boot([rule([{ name: 'all', assignTo: { type: 'queue', value: 'support' }, strategy: 'least_loaded', load: 'size(record.subject) > 3' }])]);
+    const row = await insert({ subject: 'A' });
+    expect(row).toMatchObject({ queue: 'support' });
+    expect(row.owner_id ?? null).toBeNull();
+    expect(warn.mock.calls.filter((c: unknown[]) => /has no `load` the platform can count by/.test(String(c[0])))).toHaveLength(1);
+  });
+
   it('a rule switched off — `active: false`, or in the activation ledger — routes nothing', async () => {
     await boot([rule([{ name: 'all', assignTo: { type: 'queue', value: 'support' } }], { active: false })]);
     expect((await insert({ subject: 'A' })).queue ?? null).toBeNull();

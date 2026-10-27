@@ -328,9 +328,10 @@ export class AssignmentRuleEvaluator {
     if (!carriesQueueColumn(this.host.getSchema(object))) return null;
     const compiled = entry.load ? compileCelToFilter(entry.load, { variables: {} }) : null;
     if (!compiled || !compiled.ok) {
-      // The schema refuses `least_loaded` without `load`, and the authoring
-      // gate refuses a `load` the compiler cannot lower — so this is a body
-      // that skipped both. Never "count everything".
+      // The schema refuses `least_loaded` without `load`, but nothing before
+      // this point asks whether the compiler can lower it: a body that skipped
+      // the schema, or a `load` the compiler cannot lower, lands here. Never
+      // "count everything".
       this.warnOnce(`load::${rule.name}::${entry.name}`, `[assignment] rule '${rule.name}' entry '${entry.name}' has no \`load\` the platform can count by — the row parks in the queue`, {
         rule: rule.name, entry: entry.name, ...(compiled && !compiled.ok ? { reason: compiled.reason, detail: compiled.detail } : {}),
       });
