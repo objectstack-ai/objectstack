@@ -2502,8 +2502,8 @@ interface ActionEntryContext {
  * dialog that declares none — so declaring the dialog is the whole condition.
  *
  * The leaf keys beside them (`label`, `description`, `confirmText`,
- * `successMessage`) are prose on a node that resolved, read whenever the
- * action is, as on the object branch.
+ * `successMessage`, `disabledReason`) are prose on a node that resolved, read
+ * whenever the action is, as on the object branch.
  *
  * ⛔ One vocabulary: a key naming a target the action does not declare is
  * `translation-target-unknown` at `params`' severity; an OPTION key keyed off

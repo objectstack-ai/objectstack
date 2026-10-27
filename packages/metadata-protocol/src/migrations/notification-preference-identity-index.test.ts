@@ -163,12 +163,16 @@ describe('sys_notification_preference: one admin-global default per key', () => 
 
         it('reports once at ERROR, naming the index, the consequence, and the query that lists the rows', async () => {
             const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
-            await ensureNotificationPreferenceIdentityIndex(exec, logger);
+            // [#26630] A seam that answers a SELECT, so the count has rows to read.
+            const answering: IndexExec = async (sql: string) =>
+                /^\s*SELECT/i.test(sql) ? db.prepare(sql).all() : db.exec(sql);
+            await ensureNotificationPreferenceIdentityIndex(answering, logger);
             expect(logger.error).toHaveBeenCalledTimes(1);
             expect(logger.warn).not.toHaveBeenCalled();
             const [message] = logger.error.mock.calls[0]!;
             expect(message).toContain(NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME);
             expect(message).toContain('The previous index is left in place');
+            expect(message).toContain('(1 duplicated key, held by 2 rows)');
             expect(message).toContain('no row is discarded automatically');
             expect(message).toContain(buildNotificationPreferenceDuplicateProbeSql());
             expect(message).toContain('os migrate duplicates');

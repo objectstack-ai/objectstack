@@ -3621,6 +3621,68 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     expect(self.principal.userId).toBe('u_east_1');
   });
 
+  // [#26641] Explaining ANOTHER user by an id no `sys_user` row has is refused
+  // `404 RECORD_NOT_FOUND`, naming the id: the resolver synthesises a baseline
+  // principal for any id, so it used to answer a verdict about nobody. The
+  // existence read runs only after the caller is admitted to explain others.
+  describe('[#26641] an id no sys_user row has', () => {
+    const GHOST = 'u_no_such_user_26641';
+    /** The ids `sys_user` was asked about, in order. */
+    const userReads = (plugin: any): string[] => {
+      const seen: string[] = [];
+      const ql = (plugin as any).ql;
+      const findOne = ql.findOne.bind(ql);
+      ql.findOne = async (object: string, opts: any) => {
+        if (object === 'sys_user') seen.push(String(opts?.where?.id));
+        return findOne(object, opts);
+      };
+      return seen;
+    };
+
+    it('a caller holding manage_users is refused 404 RECORD_NOT_FOUND naming the id', async () => {
+      const { plugin } = await boot();
+      const caller = { userId: 'u_hr', positions: [], permissions: ['hr_admin'] };
+      for (const operation of ['read', 'create']) {
+        const err: any = await plugin
+          .explainAccessForCaller({ object: 'task', operation, userId: GHOST }, caller)
+          .then(() => null, (e) => e);
+        expect(err, `${operation}: refused, not answered`).toMatchObject({
+          name: 'ExplainUserNotFoundError', code: 'RECORD_NOT_FOUND', status: 404, statusCode: 404, userId: GHOST,
+        });
+        expect(err.message).toContain(`'${GHOST}'`);
+      }
+    });
+
+    it('a caller who may not explain others gets their 403 first, and no existence read is made', async () => {
+      const { plugin } = await boot();
+      const seen = userReads(plugin);
+      for (const caller of [
+        { userId: 'u_east_1', positions: [], permissions: [] },
+        { userId: 'u_delegate', positions: [], permissions: ['sub_admin'] },
+      ]) {
+        await expect(
+          plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: GHOST }, caller),
+          `${caller.userId}: the same refusal an existing user outside their reach gets`,
+        ).rejects.toMatchObject({ name: 'PermissionDeniedError', code: 'PERMISSION_DENIED' });
+      }
+      expect(seen, 'the unknown id is never looked up for a caller refused the right').not.toContain(GHOST);
+    });
+
+    it('an existing user is still explained, and a self-explanation is never refused for its id', async () => {
+      const { plugin } = await boot();
+      const hr = { userId: 'u_hr', positions: [], permissions: ['hr_admin'] };
+      const other = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr);
+      expect(other.principal.userId).toBe('u_west_1');
+      // Explaining yourself is unchanged: no `userId`, or your own, explains the
+      // request's own context, whether or not a row carries its id.
+      const ghostSelf = { userId: GHOST, positions: [], permissions: [] };
+      for (const request of [{}, { userId: GHOST }]) {
+        const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', ...request }, ghostSelf);
+        expect(self.principal.userId).toBe(GHOST);
+      }
+    });
+  });
+
   // [#20515] Explaining ANOTHER user resolves that user's grants in the CALLER's
   // organization — the one the explain right was checked in. A grant scoped to
   // an organization applies only while that organization is the one resolved

@@ -692,7 +692,7 @@ These properties are available on **all** field types:
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |
 | `readonly` | `boolean` | `false` | Server contract — non-system writes to this field are stripped on **both** INSERT and UPDATE (the value falls back to `defaultValue`), not just hidden in the UI (#2948 / #3043) |
-| `externalId` | `boolean` | `false` | External system identifier |
+| `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
 | `defaultValue` | `any` | — | Default value for new records |
 | `group` | `string` | — | Field grouping / section |
 | `inlineHelpText` | `string` | — | Inline help tooltip |

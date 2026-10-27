@@ -12,7 +12,7 @@
 - `objectstack-ai/hotcrm` 全仓:元数据优先的 CRM 样板工程,不入 spec 依赖链。
 - 应用即展品,不是功能实验场 —— 收卡第一问恒为这张卡展现哪项平台能力。
 - 边界:平台相关的功能在平台中实现。
-- 建设 hotcrm 时发现的平台能力缺口,立普通平台卡到 objectstack 或 objectui。
+- 建设 hotcrm 时发现的平台能力缺口,立普通平台卡到 objectstack(渲染器在其 `ui/`)。
 - 那是 file-at-destination、非缝卡、待分诊;hotcrm 侧同笔挂 `pm:blocked` 加 `Blocked-by:` 回链。
 - ⛔ 永不在 hotcrm 内绕行:绕行把平台缺口藏进样板,展品从此示范错误写法。
 - `repo:hotcrm` 缝标签只给真协调卡,跨仓次序即卡的实质。

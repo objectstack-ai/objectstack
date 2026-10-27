@@ -14,27 +14,32 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /**
- * The shape a locale tag must have: a 2–8 letter language subtag, then any
+ * The shape a locale tag must have: a 2–3 letter language subtag, then any
  * number of hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`,
- * `zh-Hans-CN`, `es-419`). The same pattern as `SYS_USER_LOCALE_TAG_PATTERN`
- * (`@objectstack/platform-objects/identity`), the shape a user's own `locale`
- * column accepts, so a translation is stored only under tags a session can
- * ask for.
+ * `zh-Hans-CN`, `es-419`, `yue-HK`). The same pattern as
+ * `SYS_USER_LOCALE_TAG_PATTERN` (`@objectstack/platform-objects/identity`),
+ * the shape a user's own `locale` column accepts, so a translation is stored
+ * only under tags a session can ask for.
  *
  * Shape only, by decision: membership has no registry to check against
  * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
  * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
  * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
- * What it refuses is what no resolver ever matches: an underscore separator
- * (`zh_CN`), whitespace, a language name.
+ * The primary subtag is held to the 2–3 letters of the ISO 639 codes every
+ * tag in use starts with: BCP-47 reserves 4 letters and registers no 5–8
+ * letter language, so the only values that wider grammar ever admitted were
+ * words. What it refuses is what no resolver ever matches: an underscore
+ * separator (`zh_CN`), whitespace, a language name (`Chinese`,
+ * `Chinese (Simplified)`).
  */
-const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
 
 const LOCALE_TAG_REFUSAL =
-  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–8 letter language '
+  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–3 letter language '
   + 'subtag, then hyphen-separated subtags. Refused since @objectstack/spec 18, because a translation '
-  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name) is under a locale no '
-  + 'session ever asks for, so its strings never render. Separate subtags with `-`, not `_`.';
+  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name such as `Chinese`) '
+  + 'is under a locale no session ever asks for, so its strings never render. Separate subtags with '
+  + '`-`, not `_`, and write the tag, not the name (`zh-CN`, not `Chinese`).';
 
 export const LocaleSchema = lazySchema(() => z
   .string()
@@ -192,6 +197,8 @@ const actionTranslationSchema = (surface: string) => strictObject({
     name: 'label', title: 'label',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
   },
@@ -206,6 +213,9 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+  // action shows; overlaid by `translateAction` like the copy keys above.
+  disabledReason: z.string().optional().describe('Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -442,6 +452,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.disabledReason
    *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -958,6 +969,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.disabledReason
    *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
