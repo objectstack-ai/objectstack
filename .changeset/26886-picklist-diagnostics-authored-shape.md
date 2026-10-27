@@ -1,4 +1,5 @@
 ---
+'@objectstack/metadata-core': patch
 '@objectstack/metadata-protocol': patch
 '@objectstack/objectql': patch
 ---
@@ -12,4 +13,4 @@ A select field that names a shared list (`picklist: 'industry'`) is served with 
 
 - **The rule stands.** A field that authors both `picklist` and `options` is still reported, with the same message and severity, at `fields.NAME.options`.
 - **What `/meta` serves is unchanged.** A picklist-bound field is still served with `picklist` and the resolved `options`.
-- **How the two are told apart.** The picklist resolution marks the options array it derives; `@objectstack/metadata-protocol` exports `markResolvedPicklistOptions` and `isResolvedPicklistOptions`, and the diagnostics leave a marked array out of the judgement. The mark is not part of any response or stored row.
+- **How the two are told apart.** The picklist resolution marks the options array it derives; `@objectstack/metadata-core` exports `markResolvedPicklistOptions` and `isResolvedPicklistOptions`, and the diagnostics leave a marked array out of the judgement. The mark is not part of any response or stored row.

@@ -41,6 +41,8 @@ import { redactMetadataItem } from './metadata-redaction.js';
 // runtime gate's own answer, so the publish verdict below is re-spelled
 // against the same prefix the gate wrote it with.
 import { stackKeyForType } from '@objectstack/lint/runtime';
+// [#26886] The resolution's mark on options it derived from a shared picklist.
+import { isResolvedPicklistOptions } from '@objectstack/metadata-core';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
 /**
@@ -187,33 +189,12 @@ function copyDiagnostics(verdict: MetadataDiagnostics): MetadataDiagnostics {
 // every picklist-bound field of every app.
 //
 // The resolution therefore MARKS the options array it derived
-// ({@link markResolvedPicklistOptions}), and only a marked array is left out
-// here. A field that authored its own `options` beside `picklist` arrives
-// unmarked and is still flagged, with the same message and severity. The mark
-// is a non-enumerable property, so no response, stored row or memo key ever
-// carries it, and it is keyed with `Symbol.for` so every loaded copy of this
-// package reads the one mark. A copy of the array (`.map`, a JSON round trip)
-// drops it, and the field is then judged with its `options`: the failure
-// direction is the old false error, never a missed one.
-
-const RESOLVED_PICKLIST_OPTIONS = Symbol.for('@objectstack/metadata-protocol:resolved-picklist-options');
-
-/**
- * Mark an `options` array as resolved from a shared picklist rather than
- * authored on the field. Returns the same array.
- */
-export function markResolvedPicklistOptions<T extends object>(options: T): T {
-    if (!Object.prototype.hasOwnProperty.call(options, RESOLVED_PICKLIST_OPTIONS)) {
-        Object.defineProperty(options, RESOLVED_PICKLIST_OPTIONS, { value: true });
-    }
-    return options;
-}
-
-/** `true` when `options` is an array {@link markResolvedPicklistOptions} marked. */
-export function isResolvedPicklistOptions(options: unknown): boolean {
-    return Array.isArray(options)
-        && (options as unknown as Record<symbol, unknown>)[RESOLVED_PICKLIST_OPTIONS] === true;
-}
+// (`markResolvedPicklistOptions`, `@objectstack/metadata-core`), and only a
+// marked array is left out here. A field that authored its own `options`
+// beside `picklist` arrives unmarked and is still flagged, with the same
+// message and severity. The mark is a non-enumerable property, so it is no
+// part of the memo key either: the key is the content of the candidate the
+// mark has already shaped.
 
 function withoutResolvedOptions(field: unknown): unknown {
     if (!field || typeof field !== 'object') return field;

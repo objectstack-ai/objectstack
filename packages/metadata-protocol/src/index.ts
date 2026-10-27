@@ -164,8 +164,6 @@ export {
   computeViewReferenceDiagnostics,
   decorateMetadataItem,
   decorateMetadataItems,
-  isResolvedPicklistOptions,
-  markResolvedPicklistOptions,
 } from './metadata-diagnostics.js';
 export type { MetadataDiagnostics } from './metadata-diagnostics.js';
 

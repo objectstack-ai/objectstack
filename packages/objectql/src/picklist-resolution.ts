@@ -34,7 +34,7 @@
 // The mark that tells the load-time diagnostics these options were resolved
 // here, not authored: they judge what the author wrote, and the field schema
 // refuses `picklist` and `options` together.
-import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-protocol';
+import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-core';
 
 /** One option, as `SelectOptionSchema` declares it (only `value` is read here). */
 export interface PicklistOptionLike {

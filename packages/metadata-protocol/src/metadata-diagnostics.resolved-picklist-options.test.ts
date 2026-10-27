@@ -20,12 +20,8 @@
  * unmarked one with the same JSON are two verdicts.
  */
 import { describe, expect, it } from 'vitest';
-import {
-    computeMetadataDiagnostics,
-    decorateMetadataItem,
-    isResolvedPicklistOptions,
-    markResolvedPicklistOptions,
-} from './metadata-diagnostics.js';
+import { markResolvedPicklistOptions } from '@objectstack/metadata-core';
+import { computeMetadataDiagnostics, decorateMetadataItem } from './metadata-diagnostics.js';
 
 const BOTH_KEYS = '`picklist` and `options` cannot both be declared';
 
@@ -81,13 +77,5 @@ describe('diagnostics — options resolved from a shared picklist', () => {
         expect(served.fields.industry).toMatchObject({ picklist: 'industry', options: [{ label: 'Tech', value: 'tech' }] });
         expect(JSON.parse(JSON.stringify(served.fields.industry))).toEqual(industry(authored()));
         expect(Object.keys(served.fields.industry.options)).toEqual(['0']);
-    });
-
-    it('a copy of a marked array is unmarked: the failure direction is the old error, never a missed one', () => {
-        const options = resolved();
-        expect(isResolvedPicklistOptions(options)).toBe(true);
-        expect(isResolvedPicklistOptions(options.map((o) => ({ ...o })))).toBe(false);
-        expect(isResolvedPicklistOptions(JSON.parse(JSON.stringify(options)))).toBe(false);
-        expect(isResolvedPicklistOptions([...options])).toBe(false);
     });
 });
