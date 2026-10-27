@@ -27,6 +27,9 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    # Run wall of the 22 analyses that completed (success) in the last 100 runs,
+    # 2026-10-24..26: p99 59.0 min, max 63.1. The bound is that p99 plus about half again.
+    timeout-minutes: 90
     permissions:
       actions: read
       contents: read

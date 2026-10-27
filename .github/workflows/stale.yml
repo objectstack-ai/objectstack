@@ -10,6 +10,10 @@ jobs:
   stale:
     name: Clean up stale issues and PRs
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27 (2026-07-19..10-26):
+    # p99 0.6 min, but one green run took 26.6 min (2026-08-30). The bound keeps that run
+    # inside it.
+    timeout-minutes: 45
     permissions:
       issues: write
       pull-requests: write

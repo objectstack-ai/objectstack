@@ -151,9 +151,61 @@ export const docsRedirects = [
   ['/docs/guides/:path*', '/docs'],
 ];
 
-/** Next.js redirects() entries derived from the table above. */
+/**
+ * The blog moved to the product site. www.objectos.ai is the one blog
+ * (maintainer ruling 2026-10-26: product site vs developer site); the four
+ * posts this site published under `/blog/<slug>` were imported there under the
+ * same slugs, at `/en/blog/<slug>/` (the product site's locales are its own
+ * concern — English is the canonical import). Every old URL answers a permanent
+ * redirect to its counterpart, and the index to the product blog's index.
+ *
+ * Both spellings a reader can hold are listed: the public `/blog/<slug>` and the
+ * locale-prefixed `/en/blog/<slug>` every post was prerendered under (the
+ * default locale of `apps/docs/lib/i18n.ts`, hidden from public URLs by
+ * `proxy.ts`). Next evaluates `redirects()` BEFORE the proxy, so the prefixed
+ * form goes straight to the product site instead of paying the proxy's 307 to
+ * `/blog/<slug>` first.
+ *
+ * Deliberately a second table, not rows in `docsRedirects`:
+ * `scripts/check-docs-redirects.mjs` resolves every destination of that table
+ * against `content/docs` and reports an off-site destination as UNRESOLVABLE
+ * — correct for a docs redirect, meaningless for a cross-site one. This table
+ * is outside that gate's reach; what holds it honest is the product site
+ * serving the slugs below (its import is the precondition for landing this
+ * table at all) and `scripts/check-published-readme-links.mjs`, which reads
+ * `docsRedirects` alone and is unaffected.
+ *
+ * The `.mdx` sources under `content/blog` and the `app/[lang]/blog` route are
+ * still in the tree while these redirects go live; removing them is the
+ * follow-up, once the redirects are measured answering on production.
+ */
+/**
+ * The product site's origin. Declared here — the one dependency-free module
+ * both halves can read — and re-exported by `lib/layout.shared.tsx` as
+ * `PRODUCT_SITE_URL` for the nav, the home page and the footer line, so the
+ * cross-site links and the cross-site redirects can never name two hosts.
+ */
+export const PRODUCT_SITE_ORIGIN = 'https://www.objectos.ai';
+
+/** The posts imported by the product site, by slug — one redirect pair each. */
+export const MOVED_POSTS = [
+  'context-window-is-the-constraint',
+  'metadata-driven-architecture',
+  'protocol-first-development',
+  'the-ontology-is-the-software',
+];
+
+/** `''` is the public spelling; `/en` the prerendered one (see above). */
+const BLOG_PATH_PREFIXES = ['', '/en'];
+
+export const blogRedirects = BLOG_PATH_PREFIXES.flatMap((prefix) => [
+  [`${prefix}/blog`, `${PRODUCT_SITE_ORIGIN}/en/blog/`],
+  ...MOVED_POSTS.map((slug) => [`${prefix}/blog/${slug}`, `${PRODUCT_SITE_ORIGIN}/en/blog/${slug}/`]),
+]);
+
+/** Next.js redirects() entries derived from the two tables above. */
 export function toNextRedirects() {
-  return docsRedirects.map(([source, destination]) => ({
+  return [...docsRedirects, ...blogRedirects].map(([source, destination]) => ({
     source,
     destination,
     permanent: true,

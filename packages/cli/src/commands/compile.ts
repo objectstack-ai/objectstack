@@ -15,6 +15,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
+import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
@@ -1033,6 +1034,28 @@ export default class Compile extends Command {
       }
       if (placed.packages !== finalBundle.packages) {
         finalBundle.packages = placed.packages;
+      }
+
+      // 4a. [#25779] The files seed records name with `seedFile(path)`, read
+      //     relative to the directory holding the config — the gate
+      //     `os validate` runs too — then written into their datasets'
+      //     `files` maps. The artifact is what every boot loads, so the bytes
+      //     travel with the seed; a path that names no file fails the build
+      //     here rather than a row at boot.
+      const seedFiles = collectSeedFiles(absolutePath, finalBundle);
+      if (seedFiles.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'seed file bundling failed', issues: seedFiles.issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Seed file bundling failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
+        for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+      placeSeedFiles(seedFiles);
+      if (seedFiles.files > 0 && !flags.json) {
+        printStep(`Bundling seed files... ${seedFiles.files} file${seedFiles.files === 1 ? '' : 's'} (${(seedFiles.bytes / 1024).toFixed(1)} KB)`);
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`
