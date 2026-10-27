@@ -26,8 +26,9 @@
  * ## The holes
  *
  *  - `{{object}} {{record}}` — the record the notification is about, named by
- *    its object's label and its id (`Deal D_123`, the #23556 / #23594 ruling B
- *    form). `object` is itself rendered in the recipient's language from
+ *    its object's label and its display title as the recipient may read it,
+ *    else its id (`Deal Acme renewal`, `Deal D_123`; #26181 ruling A′).
+ *    `object` is itself rendered in the recipient's language from
  *    `objects.<object>.label` when the app's language pack holds it, else the
  *    schema label;
  *  - `{{person}}` — a display name; `{{action}}` — the escalation action's

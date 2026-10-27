@@ -164,8 +164,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
-import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -404,6 +404,10 @@ import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protoco
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
+// [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
+import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
+// [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
+import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -9330,44 +9334,12 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         packageId?: string,
     ): Promise<{ data: unknown; degraded: boolean; errors: string[] }> {
-        const services = this.getServicesRegistry?.();
-        const metadataService: any = services?.get('metadata');
-        if (!metadataService || typeof metadataService.get !== 'function') {
-            return { data: undefined, degraded: false, errors: [] };
-        }
-        // ADR-0048 — thread the caller's package id so a single-item fetch is
-        // package-scoped. Passed positionally to BOTH reads, so whatever the
-        // occupant of the `metadata` slot makes of a third argument today is
-        // unchanged by which of the two methods answers.
-        const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
-            let answer: { data: unknown; degraded: boolean; errors: string[] };
-            if (typeof metadataService.getDiagnosed === 'function') {
-                const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                answer = {
-                    data: diagnosed?.data,
-                    degraded: diagnosed?.degraded === true,
-                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
-                };
-            } else {
-                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
-            }
-            // [#23645] A stored object row's copy is not a code layer. See the header.
-            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
-                ? { ...answer, data: undefined }
-                : answer;
+        // [#25467 cut 20] The body moved to `protocol-metadata-service-read.ts` (see `MetadataServiceReadHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof readItemFromMetadataService> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-
-        const primary = await read(type);
-        if (primary.data !== undefined && primary.data !== null) return primary;
-        const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        if (!alt) return { data: undefined, degraded: primary.degraded, errors: primary.errors };
-        const secondary = await read(alt);
-        if (secondary.data !== undefined && secondary.data !== null) return secondary;
-        return {
-            data: undefined,
-            degraded: primary.degraded || secondary.degraded,
-            errors: [...primary.errors, ...secondary.errors],
-        };
+        return readItemFromMetadataService.call(host, type, name, packageId);
     }
 
     /**
@@ -23107,6 +23079,9 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof applySeedBodies> = {
             get engine() { return readEngine(); },
             getMetaItem: (...a) => this.getMetaItem(...a),
+            // [#25779] The `field-files` service, so a published seed's files
+            // are stored as the boot seed's are.
+            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
         };
         return applySeedBodies.call(host, bodies);
     }
@@ -28685,30 +28660,8 @@ export class ObjectStackProtocolImplementation implements
      * sealed overlays are still not served.
      */
     private reportSealedOverlayRows(rows: ReadonlyArray<{ type: string; name: string }>): void {
-        if (rows.length === 0) return;
-        const SAMPLE_PER_TYPE = 5;
-        const byType = new Map<string, string[]>();
-        for (const { type, name } of rows) {
-            const names = byType.get(type) ?? [];
-            names.push(name);
-            byType.set(type, names);
-        }
-        const detail = Array.from(byType.entries())
-            .map(([type, names]) => {
-                const shown = names.slice(0, SAMPLE_PER_TYPE);
-                const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
-                return `${type}×${names.length} (${shown.join(', ')}${more})`;
-            })
-            .join('; ');
-        console.warn(
-            `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
-            `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
-            `${detail}. No read serves them — the package's own definition is served. ` +
-            `Each row is kept at rest, untouched (an object's table and its columns stay as they are). To keep ` +
-            `the change, re-express it as a new item under a new ` +
-            `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
-            `stored row.`,
-        );
+        // [#25467 cut 21] The body moved to `protocol-sealed-overlay-report.ts`.
+        return reportSealedOverlayRows(rows);
     }
 
     // ==========================================

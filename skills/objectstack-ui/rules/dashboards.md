@@ -67,7 +67,7 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 |:--|:--|
 | one base object + **to-one** joins (`include`, ≤3 hops) | a join that **changes grain** / a **to-many** rollup onto the parent |
 | 0..N dimensions; date-bucket `day/week/month/quarter/year` | a **computed dimension** / CASE bucket / numeric bin |
-| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) |
+| measures `count/sum/avg/min/max/count_distinct`, `duration` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) |
 | **derived measures** — `ratio/sum/difference/product` of other measures | scalar math on raw fields (`amount*0.8`), aggregate-of-aggregate |
 | WHERE (`$and/$or/$not` on the base object) + measure-scoped filters | **HAVING** (filtering the aggregate result) |
 | `compareTo` (previous period/year) + `totals` (matrix subtotals) | **window** (rank, running total, lag/lead, %-of-total); **union**; reshaping params |
@@ -88,15 +88,18 @@ Standardized answers to the recurring ambiguous cases:
 - **To-one enrichment** ("revenue by `account.industry`") keeps grain — `account`
   in `include`, `account.industry` as a dimension.
 - **Computed column.** Format/currency → the measure's `format`/`currency`;
-  arithmetic over measures → a **derived measure**; CASE / bins /
+  arithmetic over measures → a **derived measure**; time between two
+  `datetime` fields of a record → a **`duration` measure**, not a hook-kept
+  number (`{ name: 'avg_days_to_close', aggregate: 'avg', duration: { from:
+  'created_at', to: 'closed_at', unit: 'days' } }`); CASE / bins /
   `revenue*0.8` / computed dimensions → **not** a dataset.
 - **Total over a computed value.** `sum`/`avg`/`min`/`max` need a STORED numeric
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
   has no column: refused whatever its `returnType` says. Store the number
   (user-entered, a `summary` rollup, or hook-kept) or title the widget the `count`
   it is. Leave days: `sum` over the `formula` `days_requested` (`end - start`) is
-  refused ⇒ a stored `number` `days_count` a `beforeInsert`/`beforeUpdate` hook
-  writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
+  refused (`date` fields: no `duration`) ⇒ a stored `number` `days_count` a
+  `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
   `groupBy` (`INVALID_FIELD`; no per-member buckets). One widget per member,
@@ -168,10 +171,6 @@ export const SalesDashboard: Dashboard = {
       optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' } },
   ],
 
-  // ADR-0021: widgets bind a semantic `dataset` and select dimensions/measures
-  // BY NAME (the `opportunity_metrics` / `order_metrics` datasets define the base
-  // object, measures, and date dimensions — see Guides → Analytics Datasets). The
-  // widget `filter` is the presentation-scope runtimeFilter.
   widgets: [
     {
       id: 'total_pipeline_value', type: 'metric',

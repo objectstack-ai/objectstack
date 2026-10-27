@@ -207,13 +207,13 @@
  * has it run, so deleting BOTH invocations from `lint.yml` now reds there through
  * `check:system-context-census` -- but deleting the production invocation alone
  * still retires this gate with every check green. The self-test therefore reads
- * the workflow text and asserts both legs, the way `check-doc-frontmatter`,
+ * the workflow text and the root alias it runs (#26086) and asserts both legs, the way `check-doc-frontmatter`,
  * `check-aggregator-roster` and `check-ci-filter-parity` each assert their own -- a
  * gate that exists and is not scheduled is the dormant shape seen from the other
  * side.
  *
  * ⚠️ The pin deliberately needs NO workflow edit: `lint.yml` already invokes both
- * legs, in the required `Lint & Repo Gates` job, on a trigger set that includes
+ * legs (through the alias), in the required `Lint & Repo Gates` job, on a trigger set that includes
  * `merge_group` and with no `paths:` filter. It is the repo's busiest file and the
  * assertion reads it rather than adding to it.
  */
@@ -437,7 +437,7 @@ export const NON_READ_ANCHORS = [
     rowSeams: ['`owner_id` is not auto-stamped on INSERT', 'The whole security middleware short-circuits'],
   },
   {
-    file: 'packages/objectql/src/engine.ts',
+    file: 'packages/objectql/src/engine-driver-options.ts',
     symbol: 'buildDriverOptions',
     collapsesOntoRead: true,
     why: 'row 24 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
@@ -2305,11 +2305,22 @@ function selfTest() {
     t(`WIRING: .github/workflows/lint.yml is readable`, false, err.code ?? err.message);
   }
   if (lintYml !== null) {
+    // CI runs the root alias (#26086), so the alias is where both legs live.
     t(
-      'WIRING: lint.yml invokes this gate directly (the GATE INVOCATION IDIOM, not a package.json fence)',
-      lintYml.includes(`node ${SELF}\n`)
+      'WIRING: lint.yml invokes this gate through its root alias',
+      /^\s*pnpm (run )?check:system-context-census\s*$/m.test(lintYml)
     );
-    t('WIRING: lint.yml runs the --self-test leg too', lintYml.includes(`node ${SELF} --self-test`));
+    let alias = null;
+    try {
+      alias = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts?.['check:system-context-census'] ?? null;
+    } catch (err) {
+      t('WIRING: root package.json is readable', false, err.code ?? err.message);
+    }
+    t(
+      'WIRING: the alias runs the --self-test leg, then the gate',
+      alias === `node ${SELF} --self-test && node ${SELF}`,
+      alias
+    );
   }
 
   // ── POPULATION DECLARATION: what the dispatch derivation is told this gate reads ──

@@ -237,6 +237,8 @@ This package is designed to work with TypeScript 5.0+:
 }
 ```
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Best Practices
 
 ### 1. Use Type-Only Imports

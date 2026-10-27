@@ -64,11 +64,33 @@ export interface LedgerEntry {
   children?: Record<string, LedgerEntry>;
 }
 
-/** Flattened, warn-only view of a type's ledger: propPath → entry (incl. `a.b` children). */
+/** Flattened, warn-only view of a type's ledger: propPath → entry (`a.b`, `a.b.c`, … for nested children). */
 type WarnMap = Map<string, LedgerEntry>;
 
 function isRecord(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Every row of a ledger's `props`, at EVERY depth of `children`, as
+ * `[dotted path, entry]` — each row's descendants before the row itself, the
+ * order the warn map has always been filled in.
+ *
+ * `#26146`. Both readers of a ledger's rows — {@link loadWarnMap} and the
+ * vocabulary census {@link ledgerStatusesIn} — used to hand-roll the same
+ * walk, and both stopped one `children` level down: a ledger documented as
+ * that deep had since grown rows two and three levels down (the dashboard's
+ * `widgets.chartConfig.*`, the app's `navigation.dataSource.read.*`), and none
+ * of them reached the warn map or the census. One walk, shared, is what keeps
+ * the two from disagreeing again about how deep a ledger goes.
+ */
+function* ledgerRows(rows: unknown, prefix = ''): Generator<[string, LedgerEntry]> {
+  if (!isRecord(rows)) return;
+  for (const [key, entry] of Object.entries(rows as Record<string, LedgerEntry>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (isRecord(entry)) yield* ledgerRows(entry.children, path);
+    yield [path, entry];
+  }
 }
 
 /**
@@ -126,7 +148,7 @@ interface WarnMapLoad {
   fault?: LedgerFault;
 }
 
-/** Build the warn-only lookup for one type, flattening one level of `children`. */
+/** Build the warn-only lookup for one type, flattening every level of `children` ({@link ledgerRows}). */
 function loadWarnMap(dir: string, type: string): WarnMapLoad {
   const map: WarnMap = new Map();
   const file = join(dir, `${type}.json`);
@@ -144,14 +166,8 @@ function loadWarnMap(dir: string, type: string): WarnMapLoad {
   // carries a `props` record, so this branch describes a corrupt file and
   // never a legitimately empty one (`{"props": {}}` is a reading, not a fault).
   if (!isRecord(ledger) || !isRecord(ledger.props)) return { map, fault: 'unreadable' };
-  const props = ledger.props as Record<string, LedgerEntry>;
-  for (const [key, entry] of Object.entries(props)) {
-    if (entry?.children) {
-      for (const [ck, centry] of Object.entries(entry.children)) {
-        if (shouldWarn(centry)) map.set(`${key}.${ck}`, centry);
-      }
-    }
-    if (shouldWarn(entry)) map.set(key, entry);
+  for (const [path, entry] of ledgerRows(ledger.props)) {
+    if (shouldWarn(entry)) map.set(path, entry);
   }
   return { map };
 }
@@ -301,9 +317,13 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
  *    publishes just `.` and `./runtime`). ────────────────────────────────────
  *
  * Every distinct `status` string the SHIPPED ledgers actually carry, walked the
- * way `loadWarnMap` walks them (top-level props plus one level of `children` —
- * measured as the ledgers' full depth: 423 top-level and 285 child rows carry a
- * status, zero grandchildren do).
+ * way `loadWarnMap` walks them: {@link ledgerRows}, every depth of `children`
+ * (`#26146`). Measured on `origin/main` `6390fe52`, the rows carrying a status
+ * are 528 top-level, 419 child, 41 grandchild and 2 great-grandchild (the app's
+ * `navigation.dataSource.read.url` / `.method`). Until `#26146` both walks
+ * stopped at the child level and a docblock here called that the ledgers' full
+ * depth; it had stopped being one, which is why the depth is no longer a
+ * number this code assumes.
  *
  * WHY THIS EXISTS AND WHY IT DERIVES FROM ROWS. #14057 is #11384 repeating
  * itself through a different door: `describe()` fell behind the vocabulary when
@@ -328,8 +348,19 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
  * carries an anti-vacuity guard.
  */
 export function shippedLedgerStatuses(): ReadonlySet<string> {
+  return ledgerStatusesIn(resolveLivenessDir());
+}
+
+/**
+ * The census of {@link shippedLedgerStatuses}, against a ledger directory the
+ * CALLER supplies — the same seam posture as
+ * {@link lintLivenessPropertiesFromLedgerDir} (module export only). The
+ * shipped ledgers carry no status at depth 2 or deeper that a shallower row
+ * does not also carry, so only a planted copy can show that the census reaches
+ * that depth at all (`#26146`).
+ */
+export function ledgerStatusesIn(dir: string | null): ReadonlySet<string> {
   const statuses = new Set<string>();
-  const dir = resolveLivenessDir();
   if (!dir) return statuses;
   let files: string[];
   try {
@@ -345,11 +376,8 @@ export function shippedLedgerStatuses(): ReadonlySet<string> {
     } catch {
       continue;
     }
-    for (const entry of Object.values(ledger?.props ?? {})) {
+    for (const [, entry] of ledgerRows(ledger?.props)) {
       if (typeof entry?.status === 'string') statuses.add(entry.status);
-      for (const child of Object.values(entry?.children ?? {})) {
-        if (typeof child?.status === 'string') statuses.add(child.status);
-      }
     }
   }
   return statuses;
@@ -371,8 +399,9 @@ export function shippedLedgerStatuses(): ReadonlySet<string> {
  * returns the very map `checkItem` iterates rather than a parallel reading of
  * the same JSON.
  *
- * Keys are the ledger's own property paths, `children` flattened one level as
- * `parent.child` — the shape `checkItem` resolves. Unreadable or absent ledger
+ * Keys are the ledger's own property paths, `children` flattened at every depth
+ * as `parent.child`, `parent.child.grandchild`, … — the shape `checkItem`
+ * resolves. Unreadable or absent ledger
  * ⇒ the empty set, which is also the map `lintLivenessProperties` walks with:
  * the two sides still go quiet TOGETHER rather than one of them going quiet
  * alone, which is the invariant this export exists for.

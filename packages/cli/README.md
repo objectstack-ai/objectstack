@@ -4,6 +4,8 @@ Command Line Interface for building metadata-driven applications with the Object
 
 Built on [oclif](https://oclif.io/) — commands are auto-discovered, and plugins can extend the CLI without modifying the main package.
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Installation
 
 ```bash

@@ -47,20 +47,19 @@ turbo task `@objectstack/console#build:dist`, which depends on
 `@object-ui/console#build` and then runs `packages/console/build-dist.sh`: it copies
 `ui/apps/console/dist` into `packages/console/dist`, adds the tracked repo-root
 `sdui.manifest.json`, and runs the single-zod canary on the bytes it ships.
-`pnpm run release` and `cut-rc.yml` both run it after `pnpm run build`, so a release
-ships the Console from the same commit as the spec it builds against.
+`pnpm run release` runs it after `pnpm run build`, so a release ships the Console
+from the same commit as the spec it builds against.
 
 > objectui's pending changesets from before the merge still sit under
 > `ui/.changeset/`, where the root config does not read them. Moving them into the
 > root `.changeset/` before the first joint Version PR is #25831. New frontend
 > changesets go in the root `.changeset/`.
 
-#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712, #26051)
+#### After a registry change: regenerate the committed manifest (#12924, #17735, #25712, #26137)
 
 The repo-root `sdui.manifest.json` (ADR-0080, the Console's public-tier component
-manifest), its provenance record `scripts/sdui-manifest.record.json` and one record
-per registry package under `scripts/sdui-manifest.sources/` are generated, and one
-command writes them:
+manifest) and its provenance record `scripts/sdui-manifest.record.json` are
+generated, and one command writes them:
 
 ```bash
 node scripts/gen-sdui-manifest-node.mjs   # no arguments
@@ -69,21 +68,26 @@ node scripts/gen-sdui-manifest-node.mjs   # no arguments
 It builds the registry packages under `ui/packages/`, enumerates them from
 `ui/apps/console` under plain Node, and serializes them through
 `@objectstack/sdui-parser` (it needs `packages/sdui-parser/dist`:
-`pnpm --filter @objectstack/sdui-parser build`). Each package record is one line:
-a digest of that package's own `src/` and the `sha256` of the artefact it was
-verified against. A run rewrites only the records whose line changed, so a PR that
-edits one registry package re-records that package alone; the shared record moves
-only when the artefact does, and then every package record names the new `sha256`.
+`pnpm --filter @objectstack/sdui-parser build`). The record moves only when the
+artefact does, so a PR that does not change the manifest touches neither file.
+⛔ There is no npm install route to the manifest; that was deleted by ruling 丙 on
+#17735.
 
-A required lint step reads the tracked files on **every PR**:
-`node scripts/check-sdui-manifest.mjs` checks the shape, the `sha256` against the
-record, and recomputes each package's source digest from the index. A PR that edits
-a registry package's source without regenerating goes red there, naming the package,
-and the failure text prints the regeneration call. Two PRs that edit different
-registry packages touch different record files and do not conflict; two that edit
-the same package, or a PR that changes the artefact, still conflict once, and the
-later one merges `main` and re-runs the command. ⛔ There is no npm install route to the manifest; that was
-deleted by ruling 丙 on #17735.
+CI regenerates the manifest and compares it with the committed bytes (#26137):
+the `Build & E2E UI` step "The committed SDUI manifest is the one this tree
+generates" runs the same command after the registry is built, on every PR that
+touches `ui/`, one of the seven packages objectui consumes (the parser among them)
+or the manifest's own files, and again on the merge queue's combined tree. A
+difference fails the step with the diff and the command to run. Two PRs conflict
+on the manifest only when both change it, and the later one merges `main` and
+re-runs the command; two queued PRs whose effect on the manifest only shows
+together fail in the queue.
+
+A required lint step, `node scripts/check-sdui-manifest.mjs`, reads the tracked
+files on **every PR**: the artefact is present and is a component manifest, and
+its `sha256` and component count are the record's. It builds nothing, so it does
+not judge freshness. (The per-package source records under
+`scripts/sdui-manifest.sources/` that it used to recompute, #26051, are retired.)
 
 **One producer, one artefact.** `packages/console/build-dist.sh` copies the tracked
 `sdui.manifest.json` into `packages/console/dist/`, so the published console carries the
@@ -179,132 +183,45 @@ looks like a real checkout. Its `--self-test` runs in `lint.yml` and pins both
 directions, so the refusal cannot rot into a guard that fires on everything or on
 nothing.
 
-**This is a local-rehearsal trap only.** `cut-rc.yml` and `release.yml` check out
-with `fetch-depth: 0`, so a real cut has full history and never enters that
-branch.
+**This is a local-rehearsal trap only.** `release.yml` checks out with
+`fetch-depth: 0`, so a real cut has full history and never enters that branch.
 
 ## Cutting a release
 
-Two routes, and the choice is not a preference — an rc and a GA release need
-different things, so they get different lanes.
+### Release channels
 
-| | **rc prerelease** | **GA** |
+There are two npm channels, and both are published by `release.yml`:
+
+| dist-tag | Carries | Published by |
 |---|---|---|
-| Workflow | `.github/workflows/cut-rc.yml` | `.github/workflows/release.yml` |
-| Trigger | one `workflow_dispatch` | merge the Version Packages PR, then approve the `release` environment |
-| Console | built from `ui/apps/console` at the snapshot | built from `ui/apps/console` at the version commit |
-| Changelog review | none (the record is generated) | human review on the PR |
-| Board-clearing / #7275-A precondition | not required | required |
+| `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below |
+| `next` | the pre-release (`X.Y.Z-next.N`) | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
 
-Both lanes are gated by `environment: release`, and neither publishes anything until
-a human approves the deployment there. What differs since ADR-0125 (2026-08-20) is
-the *start*: `cut-rc.yml` is still `workflow_dispatch`-only — an event no push, bot,
-merge-queue landing or schedule can synthesise — while `release.yml`'s publish lane
-**is** started by the push that lands the Version Packages PR (D1), and is then held,
-**whole**, at the environment gate until a required reviewer approves it (D2). The
-approval is the release act on that lane, so read ADR-0125 D3 before touching it: an
-environment with no required reviewers passes automatically and silently, which on a
-push-started lane is not a weakened gate but no gate at all. (`release.yml` also
+There is no `rc` channel. The Cut RC lane that cut `X.Y.Z-rc.N` is retired and its
+workflow deleted, and a pre-release cycle enters pre mode with tag `next`, never `rc`.
+npm may still carry the `rc` dist-tag from that lane (`17.0.0-rc.6` when the lane was
+retired). `scripts/release-dist-tags.mjs` lists `rc` as a retired tag: after
+every stable publish it removes that tag (`npm dist-tag rm`) and moves a stale `next`
+up to `latest`. Run with no flags, it prints that plan and writes nothing.
+
+`release.yml`'s publish lane is gated by `environment: release`, and it publishes
+nothing until a human approves the deployment there. Since ADR-0125 (2026-08-20) the
+lane **is** started by the push that lands the Version Packages PR (D1), and is then
+held, **whole**, at the environment gate until a required reviewer approves it (D2).
+The approval is the release act on that lane, so read ADR-0125 D3 before touching it:
+an environment with no required reviewers passes automatically and silently, which on
+a push-started lane is not a weakened gate but no gate at all. (`release.yml` also
 carries a 6-hourly `schedule`, added by #11233; it reaches only the bookkeeping
 `version-pr` job, which has no publish capability by construction.) That is the
 2026-08-07 ruling (「版本发布必须是人工的」) re-implemented, not relaxed, and it is not
 negotiable in either direction — see `release.yml`'s header for the two releases that
 were minted without a human and the lane split that ended it.
 
-### Cutting an rc — the snapshot flow (#7447)
-
-**Actions → Cut RC → Run workflow**, branch `main`, `version` = the version you
-expect to come out (e.g. `17.0.0-rc.6`). Run it once with **`dry_run` checked**
-first; that stops before anything irreversible and uploads the exact commit a real
-run would push, so the first real dispatch is never this workflow's first execution.
-
-What it does, in order:
-
-1. Checks out `main` and records that sha — the snapshot. Nothing downstream
-   re-reads `main`, so **`main` may keep moving for the whole run**.
-2. Builds the workspace, both scopes, then the Console (`pnpm run build`, then
-   `pnpm run console:build`) from that snapshot. The dist carries the tracked
-   `sdui.manifest.json`, whose freshness the required lint job already held on the
-   PR that changed it. A Console that cannot build stops the cut before anything is
-   written.
-3. Runs the gates that read `.changeset/*`, before versioning consumes it.
-4. Runs `pnpm run version` — the repo script, never a bare `changeset version` —
-   and **fails unless the computed version equals the one you typed**.
-5. Pushes one squashed version commit to `main`, then publishes **from that landed
-   commit**. Never the other way round: rc.3 and rc.4 tagged commits that lived only
-   on `changeset-release/main`, which is #6170.
-
-**Why this lane exists.** The standing Version Packages PR *was* force-refreshed on
-every main push, so its CI could not converge while main was busy — and cutting
-through it used to mean chasing a moving objectui pin as well (rc.6 was chased across
-four pin-bump laps, every one overtaken before its CI finished, and finishing would
-have needed ~40 minutes of coordinated freezes across two repos). A snapshot removes
-the race instead of asking people to hold still.
-
-⚠️ **The first half of that premise no longer holds** (#11233, 2026-08-23):
-`release.yml`'s `version-pr` job moved off `push` onto a 6-hourly `schedule` plus an
-on-demand `workflow_dispatch` (`refresh_version_pr`), so between refreshes
-`changeset-release/main` is static and its CI does converge. This section is left
-standing because the *snapshot* lane was never only about that, and `cut-rc` is still
-the rc route. What it does mean is that "the
-version PR can never converge" is no longer a reason to reach for it.
-
-**One-time admin prerequisite.** The lane pushes the version commit straight to
-`main`, so the pushing identity must be on main's ruleset **bypass** list —
-`contents: write` alone does not put it there. Either add the GitHub Actions app to
-the bypass list (ideally scoped to this workflow), or store a fine-grained PAT for an
-account already on that list as the repository secret `RELEASE_PUSH_TOKEN`. The
-workflow uses the secret when present and the Actions identity otherwise, so
-configuring either one is enough and neither needs a workflow edit. Until one is
-configured the push step fails with that message and **nothing is published**.
-
-**What happens to the standing Version Packages PR.** After a cut, the standing
-`chore: version packages (rc)` PR ([#6208](https://github.com/objectstack-ai/objectstack/pull/6208),
-branch `changeset-release/main`) comes to rest **stale**, showing an
-already-consumed version bump, until the next refresh of the version-PR lane. Since
-#11233 that refresh is the 6-hourly `schedule` (or one `workflow_dispatch` with
-`refresh_version_pr`, if you want it now) — **not** the cut's own push, under either
-push credential, because `version-pr` no longer runs on `push` at all.
-
-The push credential still decides whether the cut's push fires `release.yml` at all,
-which matters for the `release-integrity` lane below — so it is written down here
-rather than rediscovered at 2am:
-
-- **Route (a), the Actions identity.** GitHub does not create workflow runs from
-  events triggered by the automatic `GITHUB_TOKEN` — the documented recursion guard,
-  whose only exceptions are `workflow_dispatch` and `repository_dispatch`. So the
-  version-commit push does **not** fire `release.yml`'s `push` lane at all. This repo
-  already depends on that guard elsewhere and says so: see `docker-publish.yml`'s
-  header, which explains that a `push: tags:` trigger "would never fire" because the
-  release workflow pushes its tags with `GITHUB_TOKEN`.
-- **Route (b), a PAT in `RELEASE_PUSH_TOKEN`.** A PAT is not the `GITHUB_TOKEN`, so
-  the push triggers normally and `release-integrity` audits the pushed commit.
-
-**A stale #6208 after an rc cut is EXPECTED AND HARMLESS — do not "fix" it by hand.**
-Its changesets were consumed by the cut and MOVED into `.changeset/pre/` — under
-`@changesets/cli` v3 that move is what "consumed" looks like on disk, and
-`.changeset/pre.json` carries `{"mode","tag"}` and nothing else, so it is not a
-record of what was consumed (it was, under v2). The PR is bookkeeping, it carries no
-publish capability by construction (`release.yml` passes the changesets action no
-`publish:` script), and it regenerates correctly at the next scheduled refresh (at
-most six hours; sooner if you dispatch one) or the next GA cut. Editing or
-force-refreshing it manually only risks putting a version commit somewhere the
-publish lane can reach.
-
-**The runtime image is not built here.** `release.yml`'s `release-integrity` lane runs
-on every push to `main` and requests the image once the version is on npm, so it
-follows within the next merge or two. Note that this is a *later* push under **both**
-routes, not the cut's own: on route (a) the cut's push triggers nothing at all, and on
-route (b) it does trigger, but `release-integrity` runs its audit long before the
-publish step further down the cut has put the version on npm — so it reports "release
-pending a human" and exits green either way. For an image immediately, dispatch
-`docker-publish.yml` with the version.
-
 ### Cutting a GA release — the Version Packages PR flow
 
 Unchanged, and everything that makes a GA release a *judgement* stays here: the
 board-clearing pass, the #7275-A cut precondition, and the human review of the
-generated changelogs on the PR. Like an rc, a GA release ships the Console built from
+generated changelogs on the PR. A GA release ships the Console built from
 `ui/apps/console` at the commit it releases. Merge the `chore: version
 packages` PR (#4935); that push is what starts the publish lane, and the run then
 waits at `environment: release` for a required reviewer to approve a job named
@@ -313,7 +230,6 @@ never one you supply (ADR-0125 D1/D2). ⛔ **Actions → Release → Run workflo
 **not** the GA publish path: since ADR-0125 D4 that dispatch takes no version input at
 all, and left unchecked it starts the repair lane for a publish that died partway —
 checked, it starts the bookkeeping lane described next.
-`release.yml`'s three lanes are untouched by the rc lane.
 
 **First, check #4935 is current** (#11233). It is regenerated on a 6-hourly schedule
 rather than on every push, so at cut time it can be up to one refresh window behind
@@ -366,8 +282,8 @@ later tree and the gate rightly ignores it.
 
 **This is a wait, not a merge freeze.** `main` keeps moving the whole time: the
 approval publishes the version commit's tree and nothing that landed after it, so
-runs on later commits are not what you are waiting for. The snapshot flow above
-chose against coordinated freezes, and a Version Packages PR merged behind `main` is
+runs on later commits are not what you are waiting for. The release lanes chose
+against coordinated freezes, and a Version Packages PR merged behind `main` is
 already handled by `annotate-shipped` (#23818); neither changes.
 
 **After a stable `@objectstack/spec` publish, refresh the retired-after census** (#20390): run `pnpm --filter @objectstack/spec exec tsx scripts/build-retired-after-census.ts` (prefix `NODE_USE_ENV_PROXY=1` behind a proxy) and commit the rewritten `packages/spec/src/conversions/retired-after.census.json` in an ordinary PR — until it lands, the census test holds an unpublished entry's `retiredAfter` only to the range from the last censused release to the label, not to the label exactly.

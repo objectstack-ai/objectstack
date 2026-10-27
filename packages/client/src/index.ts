@@ -6261,6 +6261,21 @@ export class ObjectStackClient {
     },
 
     /**
+     * Whether a record is held by a locking approval — `{ locked }` and
+     * nothing else, answered to every caller who can read the record, whether
+     * or not they take part in the approval (`IApprovalService.getRecordLock`).
+     * A record the caller cannot read answers 404, exactly as a record id that
+     * does not exist; a deployment without the read answers 501.
+     */
+    getRecordLock: async (object: string, recordId: string): Promise<{ locked: boolean }> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(
+        `${this.baseUrl}${route}/records/${encodeURIComponent(object)}/${encodeURIComponent(recordId)}/lock`,
+      );
+      return this.unwrapResponse<{ locked: boolean }>(res);
+    },
+
+    /**
      * Record an approve decision on a request. Finalises the request when the
      * node's behaviour is satisfied and resumes the owning flow run.
      */

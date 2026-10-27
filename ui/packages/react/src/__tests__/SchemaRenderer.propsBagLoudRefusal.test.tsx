@@ -154,7 +154,6 @@ describe('objectui#9108 - the alias still gates NOTHING (the refused arm)', () =
   it.each([
     ['visibleWhen'],
     ['visible'],
-    ['visibleOn'],
   ] as const)('props.%s does not gate, properties.%s does', key => {
     expect(pair('props', key)).toEqual({ truthy: true, falsy: true });
     expect(pair('properties', key)).toEqual({ truthy: true, falsy: false });
@@ -162,7 +161,7 @@ describe('objectui#9108 - the alias still gates NOTHING (the refused arm)', () =
 
   // HIDE polarity - the opposite direction, and the reason a one-polarity
   // suite would have passed on half the defect.
-  it.each([['hidden'], ['hiddenOn']] as const)(
+  it.each([['hidden']] as const)(
     'props.%s does not gate, properties.%s does',
     key => {
       expect(pair('props', key)).toEqual({ truthy: true, falsy: true });
@@ -200,11 +199,8 @@ describe('objectui#9108 - and it is refused BY NAME, loudly', () => {
   it.each([
     ['visibleWhen'],
     ['visible'],
-    ['visibleOn'],
     ['hidden'],
-    ['hiddenOn'],
     ['disabled'],
-    ['disabledOn'],
   ] as const)('props.%s is named on the console', key => {
     mount({ type: TYPE, id: 'n1', props: { [key]: true } });
     const lines = refusals();
@@ -228,11 +224,11 @@ describe('objectui#9108 - and it is refused BY NAME, loudly', () => {
 
   // Two keys in one bag are one authoring mistake and get one line naming both.
   it('names every parked key in one line', () => {
-    mount({ type: TYPE, props: { visible: false, hiddenOn: true } });
+    mount({ type: TYPE, props: { visible: false, hidden: true } });
     const [line] = refusals();
     expect(refusals()).toHaveLength(1);
     expect(line).toContain('`visible`');
-    expect(line).toContain('`hiddenOn`');
+    expect(line).toContain('`hidden`');
   });
 
   // Both halves of the rate limit, together: a test that pins only the first

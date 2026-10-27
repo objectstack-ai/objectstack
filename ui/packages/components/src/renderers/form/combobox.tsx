@@ -63,8 +63,8 @@ import { toFormControlDomProps } from '../../lib/form-control-dom-props';
  * moving to the control never announces.
  */
 const ComboboxRenderer = ({ schema, disabled: hostDisabled, ...props }: { schema: ComboboxSchema; disabled?: boolean; [key: string]: any }) => {
-  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
-  // `disabledOn`, not the raw authored key — which may be a predicate STRING,
+  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled`,
+  // not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).
     const { 
         'data-obj-id': dataObjId, 

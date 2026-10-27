@@ -84,14 +84,17 @@ describe('check-doc-expression-carriage: the evaluated-channel universe is deriv
       return [...literal!.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     };
     const visibility = [...declared('VISIBILITY_SHOW_KEYS'), ...declared('VISIBILITY_HIDE_KEYS')];
-    // Five: the page component's `visibility` leg was retired (objectui#12654).
-    expect(visibility.length).toBe(5);
+    // Three: the page component's `visibility` leg was retired (objectui#12654),
+    // then the `visibleOn` / `hiddenOn` spellings (objectstack#25926, ADR-0089):
+    // `visibleWhen` and `visible` show, `hidden` hides.
+    expect(visibility.length).toBe(3);
     for (const key of visibility) expect(channels.conditions).toContain(key);
-    // The enablement pair is not in either array — it routes through
+    // The enablement key is not in either array — it routes through
     // `evaluateEnablementPredicate`, which is why the gate reads call sites at all.
+    // `disabledOn` was retired with the pair above, so `disabled` stands alone.
     expect(channels.conditions).toContain('disabled');
-    expect(channels.conditions).toContain('disabledOn');
-    expect(channels.conditions.length).toBe(7);
+    expect(channels.conditions).not.toContain('disabledOn');
+    expect(channels.conditions.length).toBe(4);
   });
 
   it('refuses to census against a guessed universe when the renderer is missing', () => {
@@ -105,7 +108,7 @@ describe('check-doc-expression-carriage: the evaluated-channel universe is deriv
     fs.mkdirSync(path.join(fake, path.dirname(RENDERER_SOURCE)), { recursive: true });
     fs.writeFileSync(
       path.join(fake, RENDERER_SOURCE),
-      '// no evaluate call sites at all, only prose naming visibleOn and properties\n',
+      '// no evaluate call sites at all, only prose naming visibleWhen and properties\n',
     );
     expect(() => deriveChannels(fake)).toThrow(/matched nothing/);
     fs.rmSync(fake, { recursive: true, force: true });
@@ -142,7 +145,7 @@ describe('check-doc-expression-carriage: the controls can see, and can fail', ()
   it('fails when a carried channel is dropped and the clean node starts reporting', async () => {
     const carriage = await loadCarriage();
     const real = deriveChannels(ROOT);
-    const crippled = { ...real, all: real.all.filter((key) => key !== 'visibleOn') };
+    const crippled = { ...real, all: real.all.filter((key) => key !== 'visibleWhen') };
     const controls = runControls({ channels: crippled, carriage });
     expect(controls.failures.join('\n')).toMatch(/negative control/);
   });
@@ -559,7 +562,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
         '{',
         '  "type": "card",',
         '  "title": "${item.name}",',
-        '  "visibleOn": "${item.active}"',
+        '  "visibleWhen": "${item.active}"',
         '}',
         '```',
         '',
@@ -774,7 +777,7 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
     const real = deriveChannels(ROOT);
     const honest = analyze(ROOT, { channels: real, carriage });
 
-    for (const key of ['visibleOn', 'content']) {
+    for (const key of ['visibleWhen', 'content']) {
       const crippled = { ...real, all: real.all.filter((k: string) => k !== key) };
       const sabotaged = analyze(ROOT, { channels: crippled, carriage });
       expect(

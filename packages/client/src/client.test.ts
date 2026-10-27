@@ -704,6 +704,15 @@ describe('Approvals namespace (ADR-0019)', () => {
         expect(url).toContain('/api/v1/approvals/requests/req-1');
     });
 
+    it('[#26314] reads a record\'s approval lock off the envelope, path segments encoded', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { locked: true } });
+        const result = await client.approvals.getRecordLock('order', 'rec/1');
+        expect(result).toEqual({ locked: true });
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/records/order/rec%2F1/lock');
+        expect(opts?.method ?? 'GET').toBe('GET');
+    });
+
     it('should record an approve decision', async () => {
         const { client, fetchMock } = createMockClient({
             request: { id: 'req-1', status: 'approved' }, finalized: true, decision: 'approve', resumed: true

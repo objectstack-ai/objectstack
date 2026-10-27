@@ -15,6 +15,7 @@
 ## 范围与 changeset
 
 - 三条判据:无 `content/docs/releases/` 改动、用户可见改动有 changeset、无与卡无关的文件。
+- 种类非 `none` 或带 `(narrowing)`:`Skills-docs:` 行在且属实;`follow-up owed` 立卡改 `#N`;缺 ⇒ REWORK。
 - changeset/CHANGELOG、`content/docs/**`、`apps/docs/**`:逐句核 diff,ACCEPT 点名所核句,⛔ 不起子代理。
 - Tests/docs-only 按仓库分流:本仓库走 `skip-changeset` 标签,⛔ 不走空 changeset。
 - 空 changeset 在本仓库滞留发布;含读者可见生成产物时 dev 改选 changeset 亦对。
@@ -71,7 +72,6 @@
 - 判据是它报的证据面(搜了什么、找到什么)加 PM 自己在 `origin/main` 上的复核。
 - 验收判据本身也可被证伪:dev 用测量推翻字面判据、换上更强的不变量门禁照 ACCEPT。
 - 但推翻过程必须写在 PR 正文并附 main 语料上的实测信噪比,否则按 REWORK 要证据。
-- `+0/-0` 不是空文件的证明:NUL 字节让 git 当二进制渲染,还让文件对 grep 隐身。
-- 先疑 NUL,以 blob 定论 `git show <sha>:<path> | wc -l`,要求源侧写转义序列。
+- `+0/-0` 先疑 NUL,以 blob 定论 `git show <sha>:<path> | wc -l`,要求源侧写转义序列。
 - 以死代码或不可达为由的删除,PM 先在 `origin/main` 用带引号精确名核引用面,再 ACCEPT。
 - 卡的交付物含系统性 sweep 时,ACCEPT 评论把范围外产出成组列出并写明 sweep 判据。

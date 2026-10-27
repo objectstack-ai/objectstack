@@ -33,7 +33,7 @@
     "@object-ui/plugin-view": "workspace:*",
     "@object-ui/providers": "workspace:*",
     "@object-ui/react-runtime": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-router-dom": "^7.18.2",

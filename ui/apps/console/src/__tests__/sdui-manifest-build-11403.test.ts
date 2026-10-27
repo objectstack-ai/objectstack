@@ -20,7 +20,7 @@
  *      the published `dist`, while `buildArtifacts` itself writes three files
  *      (the control that makes "nothing else" a reading).
  *   3. ONE GENERATOR — its bytes are the bytes `buildArtifacts` in
- *      `packages/sdui-parser/scripts/gen-manifest.ts` writes for the same
+ *      `apps/console/scripts/gen-manifest.ts` writes for the same
  *      registry.
  *   4. THE SHAPE THE HOST READS — `isUsableSduiManifest` accepts a value only
  *      when it and its `components` are each a non-array object; the record is
@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 // Module scope, not a hook: the whole registration graph loads at import time.
 import '../../dev/manifest-registry';
-import { buildArtifacts } from '../../../../packages/sdui-parser/scripts/gen-manifest';
+import { buildArtifacts } from '../../scripts/gen-manifest';
 import { SDUI_MANIFEST_FILE, emitSduiManifest } from '../../scripts/emit-sdui-manifest';
 
 const CONSOLE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');

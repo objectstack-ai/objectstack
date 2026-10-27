@@ -3,10 +3,11 @@
 
 /**
  * release-dist-tags -- after a STABLE publish, move every pre-release npm
- * dist-tag that a release has overtaken up to `latest`.
+ * dist-tag that a release has overtaken up to `latest`, and remove every tag of
+ * a retired channel.
  *
- *   node scripts/release-dist-tags.mjs                # plan: print every move, write nothing
- *   node scripts/release-dist-tags.mjs --apply        # move them (`npm dist-tag add`)
+ *   node scripts/release-dist-tags.mjs                # plan: print every move and removal, write nothing
+ *   node scripts/release-dist-tags.mjs --apply        # perform them (`npm dist-tag add` / `rm`)
  *   RELEASE_VERSION=V node scripts/release-dist-tags.mjs --apply
  *                                                     # from release.yml's `publish` job
  *   node scripts/release-dist-tags.mjs --self-test    # verify this logic
@@ -38,12 +39,18 @@
  *     `next` = 19.0.0-next.1 over `latest` = 18.1.0) and is left alone;
  *   - a tag on a STABLE version is not a pre-release tag -- a maintenance line
  *     someone pinned on purpose -- and is left alone, as is anything that is
- *     not semver at all; `latest` itself is never written.
+ *     not semver at all; `latest` itself is never written;
+ *   - a tag in `RETIRED_TAGS` is REMOVED (`npm dist-tag rm`), whatever version
+ *     it points at. The release channels are `latest` (stable) and `next`
+ *     (pre-release, published by release.yml in pre mode); `rc` is retired, so
+ *     moving it would keep a channel alive that nothing publishes to any more.
+ *     The rule for the live tags above is unchanged: `next` still moves.
  *
  * ## What it refuses, and why
  *
- *   - A pre-release REFERENCE moves nothing. A pre-release publish carries its
- *     own tag and leaves `latest` where it was, so there is nothing to catch up.
+ *   - A pre-release REFERENCE moves nothing, and removes nothing. A pre-release
+ *     publish carries its own tag and leaves `latest` where it was, so there is
+ *     nothing to catch up; a retired tag goes at the next stable publish.
  *   - With `RELEASE_VERSION` given, a package whose registry `latest` is not
  *     that version is SKIPPED with a warning, after a short bounded re-read for
  *     the registry's read path to settle. Moving `next` to a version that is
@@ -113,6 +120,14 @@ export const SWEEP_STEP_NAME = 'Move stale pre-release dist-tags up to latest';
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 const USER_AGENT = 'objectstack-release-dist-tags';
 
+/**
+ * Dist-tags of retired release channels. Removed, never moved: a moved `rc`
+ * would still resolve, and a reader of the registry would take it for a live
+ * channel. The live channels are `latest` and `next` (docs/releases-maintenance.md,
+ * "Release channels"); a channel retired later is added here.
+ */
+export const RETIRED_TAGS = Object.freeze(['rc']);
+
 /** Per-request ceiling, so one hung socket cannot hold the step. */
 export const REQUEST_TIMEOUT_MS = 15 * 1000;
 
@@ -137,11 +152,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '4. Failures are named, counted and never stop the rest': 7,
   '5. End to end: a stub registry and a stub npm on PATH': 7,
   '6. The release.yml wiring: after the publish, non-blocking, no token': 9,
+  '7. Retired channels: removed, never moved, and only those': 9,
 });
 
 // Deleting an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const batteryCases = new Map();
@@ -196,26 +212,34 @@ let selfTestReachedVerdict = false;
 export class RegistryUnreadable extends Error {}
 
 /**
- * Which of `tags` are stale against `reference`, and which pre-release tags are
- * kept because a cycle is in progress.
+ * Which of `tags` are stale against `reference`, which belong to a retired
+ * channel, and which pre-release tags are kept because a cycle is in progress.
  *
- * Pure: no registry, no npm. `latest` is never in either list.
+ * Pure: no registry, no npm. `latest` is never in any list.
  *
  * @param {Record<string, string>} tags  the package's dist-tags
  * @param {string} reference             a stable semver version
- * @returns {{ moves: { tag: string, from: string, to: string }[], kept: { tag: string, version: string }[] }}
+ * @param {readonly string[]} [retired]  tags to remove rather than move
+ * @returns {{ moves: { tag: string, from: string, to: string }[], removes: { tag: string, from: unknown }[], kept: { tag: string, version: string }[] }}
  */
-export function planTags(tags, reference) {
+export function planTags(tags, reference, retired = RETIRED_TAGS) {
   const moves = [];
+  const removes = [];
   const kept = [];
   for (const [tag, version] of Object.entries(tags ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
     if (tag === 'latest') continue;
+    // Before any version test: a retired tag goes whatever it points at, a
+    // stable version or a value that is not semver at all.
+    if (retired.includes(tag)) {
+      removes.push({ tag, from: version });
+      continue;
+    }
     if (typeof version !== 'string' || !semver.valid(version)) continue;
     if (semver.prerelease(version) === null) continue;
     if (semver.lt(version, reference)) moves.push({ tag, from: version, to: reference });
     else kept.push({ tag, version });
   }
-  return { moves, kept };
+  return { moves, removes, kept };
 }
 
 /**
@@ -272,6 +296,22 @@ export async function npmDistTagAdd({ name, tag, to }) {
   return null;
 }
 
+/**
+ * Remove one tag with the npm CLI. Resolves `null` on success, or the failure text.
+ *
+ * @param {{ name: string, tag: string }} removal
+ * @returns {Promise<string | null>}
+ */
+export async function npmDistTagRm({ name, tag }) {
+  const result = spawnSync('npm', ['dist-tag', 'rm', name, tag], { encoding: 'utf8' });
+  if (result.error) return `could not run npm: ${result.error.message}`;
+  if (result.status !== 0) {
+    const tail = `${result.stderr ?? ''}${result.stdout ?? ''}`.trim().split('\n').slice(-3).join(' | ');
+    return `npm dist-tag rm exited ${result.status}${tail ? `: ${tail}` : ''}`;
+  }
+  return null;
+}
+
 const realSleep = (ms) => new Promise((resolve_) => { setTimeout(resolve_, ms); });
 
 /**
@@ -287,10 +327,11 @@ const realSleep = (ms) => new Promise((resolve_) => { setTimeout(resolve_, ms); 
  * @param {boolean} [opts.apply]
  * @param {(name: string) => Promise<Record<string, string> | null>} opts.read
  * @param {(move: { name: string, tag: string, to: string }) => Promise<string | null>} opts.write
+ * @param {(removal: { name: string, tag: string }) => Promise<string | null>} [opts.remove]
  * @param {(ms: number) => Promise<void>} [opts.sleep]
  * @param {readonly number[]} [opts.settleDelays]
  * @param {(line: string) => void} [opts.log]
- * @returns {Promise<{ moved: object[], planned: object[], kept: object[], skipped: object[], failures: object[] }>}
+ * @returns {Promise<{ moved: object[], planned: object[], removed: object[], plannedRemovals: object[], kept: object[], skipped: object[], failures: object[] }>}
  */
 export async function sweep({
   names,
@@ -298,11 +339,12 @@ export async function sweep({
   apply = false,
   read,
   write,
+  remove = npmDistTagRm,
   sleep = realSleep,
   settleDelays = LATEST_SETTLE_DELAYS_MS,
   log = (line) => console.log(line),
 }) {
-  const out = { moved: [], planned: [], kept: [], skipped: [], failures: [] };
+  const out = { moved: [], planned: [], removed: [], plannedRemovals: [], kept: [], skipped: [], failures: [] };
   for (const name of names) {
     let tags;
     try {
@@ -336,7 +378,7 @@ export async function sweep({
       });
       continue;
     }
-    const { moves, kept } = planTags(tags, latest);
+    const { moves, removes, kept } = planTags(tags, latest);
     for (const k of kept) {
       out.kept.push({ name, ...k });
       log(`  kept   ${name} ${k.tag}: ${k.version} (ahead of latest ${latest}, a pre-release cycle in progress)`);
@@ -356,6 +398,21 @@ export async function sweep({
       out.moved.push(row);
       log(`  moved  ${name} ${move.tag}: ${move.from} → ${move.to}`);
     }
+    for (const removal of removes) {
+      const row = { name, ...removal };
+      if (!apply) {
+        out.plannedRemovals.push(row);
+        log(`  plan   ${name} ${removal.tag}: ${removal.from} → removed (retired channel)`);
+        continue;
+      }
+      const failure = await remove(row);
+      if (failure) {
+        out.failures.push({ name, reason: `${removal.tag}: ${removal.from} not removed — ${failure}` });
+        continue;
+      }
+      out.removed.push(row);
+      log(`  removed ${name} ${removal.tag}: ${removal.from} (retired channel)`);
+    }
   }
   return out;
 }
@@ -372,6 +429,7 @@ export async function main({
   env = process.env,
   read = (name) => readDistTags(name),
   write = npmDistTagAdd,
+  remove = npmDistTagRm,
   sleep = realSleep,
   log = (line) => console.log(line),
   warn = (line) => console.error(line),
@@ -412,11 +470,13 @@ export async function main({
     `${apply ? 'Sweeping' : 'Planning (read-only; pass --apply to write)'} the dist-tags of ${names.length} package(s)`
       + ` against ${releaseVersion ? `the release ${releaseVersion}` : "each package's own latest"}.`,
   );
-  const result = await sweep({ names, releaseVersion, apply, read, write, sleep, log });
+  const result = await sweep({ names, releaseVersion, apply, read, write, remove, sleep, log });
 
   for (const s of result.skipped) log(`  skip   ${s.name}: ${s.reason}`);
   for (const f of result.failures) warn(`::warning::dist-tags of ${f.name}: ${f.reason}`);
-  const done = apply ? `${result.moved.length} tag(s) moved` : `${result.planned.length} tag(s) would move`;
+  const done = apply
+    ? `${result.moved.length} tag(s) moved, ${result.removed.length} retired tag(s) removed`
+    : `${result.planned.length} tag(s) would move, ${result.plannedRemovals.length} retired tag(s) would be removed`;
   log(
     `${done}, ${result.kept.length} kept ahead of latest, ${result.skipped.length} package(s) skipped, `
       + `${result.failures.length} failure(s).`,
@@ -472,15 +532,15 @@ export async function selfTest() {
   battery('1. The plan: stale pre-release tags move, everything else stays');
   {
     const filed = planTags(FILED, '18.0.0');
-    t('the filed state: next AND rc move to latest', JSON.stringify(filed.moves.map((m) => m.tag)) === '["next","rc"]', JSON.stringify(filed));
+    t('the filed state: next moves to latest', JSON.stringify(filed.moves.map((m) => m.tag)) === '["next"]', JSON.stringify(filed));
     t('each move lands on the reference', filed.moves.every((m) => m.to === '18.0.0'), JSON.stringify(filed.moves));
     t('a move records where the tag was', filed.moves.find((m) => m.tag === 'next')?.from === '18.0.0-next.5');
-    t('latest itself is never planned', !filed.moves.some((m) => m.tag === 'latest') && !filed.kept.some((k) => k.tag === 'latest'));
+    t('latest itself is never planned', ![...filed.moves, ...filed.removes, ...filed.kept].some((r) => r.tag === 'latest'));
     const now = planTags(NOW, '18.1.0');
-    t('the state after 18.1.0: both still move', now.moves.length === 2 && now.moves.every((m) => m.to === '18.1.0'), JSON.stringify(now));
-    const ahead = planTags({ latest: '18.1.0', next: '19.0.0-next.1', rc: '18.0.0-rc.2' }, '18.1.0');
+    t('the state after 18.1.0: next still moves', now.moves.length === 1 && now.moves[0].tag === 'next' && now.moves[0].to === '18.1.0', JSON.stringify(now));
+    const ahead = planTags({ latest: '18.1.0', next: '19.0.0-next.1', beta: '18.0.0-beta.2' }, '18.1.0');
     t('a pre-release AHEAD of latest is a cycle in progress, and is kept', ahead.kept.length === 1 && ahead.kept[0].tag === 'next', JSON.stringify(ahead));
-    t('... while a stale sibling beside it still moves', ahead.moves.length === 1 && ahead.moves[0].tag === 'rc', JSON.stringify(ahead));
+    t('... while a stale sibling beside it still moves', ahead.moves.length === 1 && ahead.moves[0].tag === 'beta', JSON.stringify(ahead));
     t('a pre-release of the SAME version as latest is below it, and moves', planTags({ latest: '18.1.0', next: '18.1.0-next.3' }, '18.1.0').moves.length === 1);
     t('a tag on a STABLE version is a maintenance line, never touched', planTags({ latest: '18.1.0', v17: '17.5.0' }, '18.1.0').moves.length === 0);
     const odd = planTags({ latest: '18.1.0', canary: 'not-a-version', next: 42 }, '18.1.0');
@@ -492,20 +552,21 @@ export async function selfTest() {
   {
     const names = ['@objectstack/cli'];
     const write = async () => null;
-    const pre = await main({ argv: ['--apply'], env: { RELEASE_VERSION: '19.0.0-next.1' }, read: async () => { throw new Error('read'); }, write, log: quiet, warn: quiet });
+    const remove = async () => null;
+    const pre = await main({ argv: ['--apply'], env: { RELEASE_VERSION: '19.0.0-next.1' }, read: async () => { throw new Error('read'); }, write, remove, log: quiet, warn: quiet });
     t('a pre-release RELEASE_VERSION is a no-op, exit 0, nothing read', pre === 0);
-    const bad = await main({ argv: ['--apply'], env: { RELEASE_VERSION: 'v-latest' }, read: async () => NOW, write, log: quiet, warn: quiet });
+    const bad = await main({ argv: ['--apply'], env: { RELEASE_VERSION: 'v-latest' }, read: async () => NOW, write, remove, log: quiet, warn: quiet });
     t('a non-semver RELEASE_VERSION is refused', bad === 1);
 
-    const match = await sweep({ names, releaseVersion: '18.1.0', apply: true, read: async () => NOW, write, sleep: async () => {}, log: quiet });
-    t('latest == RELEASE_VERSION: the stale tags move', match.moved.length === 2 && match.failures.length === 0, JSON.stringify(match));
+    const match = await sweep({ names, releaseVersion: '18.1.0', apply: true, read: async () => NOW, write, remove, sleep: async () => {}, log: quiet });
+    t('latest == RELEASE_VERSION: next moves and rc is removed', match.moved.length === 1 && match.removed.length === 1 && match.failures.length === 0, JSON.stringify(match));
 
     let reads = 0;
     const lagging = await sweep({
-      names, releaseVersion: '18.1.0', apply: true, write, sleep: async () => {}, log: quiet,
+      names, releaseVersion: '18.1.0', apply: true, write, remove, sleep: async () => {}, log: quiet,
       read: async () => { reads += 1; return reads < 3 ? { ...NOW, latest: '18.0.0' } : NOW; },
     });
-    t('a lagging latest is re-read until it agrees, then the tags move', lagging.moved.length === 2 && reads === 3, `reads=${reads} ${JSON.stringify(lagging)}`);
+    t('a lagging latest is re-read until it agrees, then the tags move', lagging.moved.length === 1 && lagging.removed.length === 1 && reads === 3, `reads=${reads} ${JSON.stringify(lagging)}`);
 
     reads = 0;
     const slept = [];
@@ -513,12 +574,13 @@ export async function selfTest() {
       names, releaseVersion: '18.1.0', apply: true, log: quiet,
       read: async () => { reads += 1; return { ...NOW, latest: '18.0.0' }; },
       write: async () => 'must not be called',
+      remove: async () => 'must not be called',
       sleep: async (ms) => { slept.push(ms); },
     });
-    t('a latest that never agrees moves NOTHING and is a named failure', behind.moved.length === 0 && behind.failures.length === 1 && /latest is 18\.0\.0, not 18\.1\.0/.test(behind.failures[0].reason), JSON.stringify(behind));
+    t('a latest that never agrees moves NOTHING, removes nothing, and is a named failure', behind.moved.length === 0 && behind.removed.length === 0 && behind.failures.length === 1 && /latest is 18\.0\.0, not 18\.1\.0/.test(behind.failures[0].reason), JSON.stringify(behind));
     t('... after exactly the bounded settle schedule', JSON.stringify(slept) === JSON.stringify(LATEST_SETTLE_DELAYS_MS) && reads === LATEST_SETTLE_DELAYS_MS.length + 1, `${JSON.stringify(slept)} reads=${reads}`);
 
-    const preLatest = await sweep({ names, apply: true, read: async () => ({ latest: '18.0.0-rc.1', next: '17.0.0-next.1' }), write, log: quiet });
+    const preLatest = await sweep({ names, apply: true, read: async () => ({ latest: '18.0.0-rc.1', next: '17.0.0-next.1' }), write, remove, log: quiet });
     t('by hand, a package whose latest is a pre-release is skipped', preLatest.moved.length === 0 && preLatest.skipped.length === 1, JSON.stringify(preLatest));
   }
 
@@ -528,13 +590,15 @@ export async function selfTest() {
     const names = ['@objectstack/cli', '@objectstack/spec'];
     const writes = [];
     const write = async (m) => { writes.push(`${m.name}@${m.to} ${m.tag}`); return null; };
-    const plan = await sweep({ names, read: async () => NOW, write, log: quiet });
-    t('plan mode calls no writer', writes.length === 0, JSON.stringify(writes));
-    t('plan mode reports every move it would make', plan.planned.length === 4 && plan.moved.length === 0, JSON.stringify(plan));
-    const applied = await sweep({ names, apply: true, read: async () => NOW, write, log: quiet });
-    t('--apply writes each planned move once', writes.length === 4 && applied.moved.length === 4, JSON.stringify(writes));
+    const removals = [];
+    const remove = async (r) => { removals.push(`${r.name} ${r.tag}`); return null; };
+    const plan = await sweep({ names, read: async () => NOW, write, remove, log: quiet });
+    t('plan mode calls no writer and no remover', writes.length === 0 && removals.length === 0, JSON.stringify({ writes, removals }));
+    t('plan mode reports every move and every removal it would make', plan.planned.length === 2 && plan.plannedRemovals.length === 2 && plan.moved.length === 0 && plan.removed.length === 0, JSON.stringify(plan));
+    const applied = await sweep({ names, apply: true, read: async () => NOW, write, remove, log: quiet });
+    t('--apply performs each planned move and removal once', writes.length === 2 && applied.moved.length === 2 && removals.length === 2 && applied.removed.length === 2, JSON.stringify({ writes, removals }));
     t('--apply writes the next tag of each package to latest', writes.includes('@objectstack/cli@18.1.0 next') && writes.includes('@objectstack/spec@18.1.0 next'), JSON.stringify(writes));
-    const ahead = await sweep({ names: ['x'], apply: true, read: async () => ({ latest: '18.1.0', next: '19.0.0-next.1' }), write: async () => 'must not be called', log: quiet });
+    const ahead = await sweep({ names: ['x'], apply: true, read: async () => ({ latest: '18.1.0', next: '19.0.0-next.1' }), write: async () => 'must not be called', remove: async () => 'must not be called', log: quiet });
     t('--apply never writes a tag that is ahead of latest', ahead.moved.length === 0 && ahead.failures.length === 0 && ahead.kept.length === 1, JSON.stringify(ahead));
   }
 
@@ -547,20 +611,20 @@ export async function selfTest() {
       b: async () => null,
       c: async () => NOW,
     };
-    const mixed = await sweep({ names, apply: true, read: (n) => readers[n](), write: async (m) => (m.tag === 'rc' ? 'E403 forbidden' : null), log: quiet });
+    const mixed = await sweep({ names, apply: true, read: (n) => readers[n](), write: async () => null, remove: async () => 'E403 forbidden', log: quiet });
     t('an unreadable registry is a failure naming the package', mixed.failures.some((f) => f.name === 'a' && /503/.test(f.reason)), JSON.stringify(mixed.failures));
     t('a package not on the registry is a skip, not a failure', mixed.skipped.some((s) => s.name === 'b') && !mixed.failures.some((f) => f.name === 'b'));
-    t('a refused write is a failure naming the tag and the reason', mixed.failures.some((f) => f.name === 'c' && /^rc: .*E403/.test(f.reason)), JSON.stringify(mixed.failures));
+    t('a refused write is a failure naming the tag and the reason', mixed.failures.some((f) => f.name === 'c' && /^rc: .*not removed.*E403/.test(f.reason)), JSON.stringify(mixed.failures));
     t('... and the other tag of the same package still moves', mixed.moved.length === 1 && mixed.moved[0].tag === 'next', JSON.stringify(mixed.moved));
 
     const warned = [];
-    const code = await main({ argv: ['--apply'], env: {}, read: (n) => (n === '@objectstack/cli' ? readers.a() : NOW), write: async () => null, log: quiet, warn: (l) => warned.push(l) });
+    const code = await main({ argv: ['--apply'], env: {}, read: (n) => (n === '@objectstack/cli' ? readers.a() : NOW), write: async () => null, remove: async () => null, log: quiet, warn: (l) => warned.push(l) });
     t('main exits non-zero when anything failed', code === 1);
     t('... and prints one ::warning:: per failure', warned.filter((l) => l.startsWith('::warning::dist-tags of @objectstack/cli')).length === 1, JSON.stringify(warned));
     const empty = mkdtempSync(join(tmpdir(), 'dist-tags-empty-'));
     try {
       writeFileSync(join(empty, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-      const vacuous = await main({ argv: ['--root', empty], env: {}, read: async () => NOW, write: async () => null, log: quiet, warn: quiet });
+      const vacuous = await main({ argv: ['--root', empty], env: {}, read: async () => NOW, write: async () => null, remove: async () => null, log: quiet, warn: quiet });
       t('an empty package set is refused, not a green sweep over nothing', vacuous === 1);
     } finally {
       rmSync(empty, { recursive: true, force: true });
@@ -623,12 +687,12 @@ export async function selfTest() {
       try { npmCalls = readFileSync(npmLog, 'utf8').trim().split('\n').sort(); } catch { npmCalls = ['(npm never called)']; }
       const want = [
         'dist-tag add @objectstack/cli@18.1.0 next',
-        'dist-tag add @objectstack/cli@18.1.0 rc',
-        'dist-tag add create-objectstack@18.1.0 rc',
+        'dist-tag rm @objectstack/cli rc',
+        'dist-tag rm create-objectstack rc',
       ];
       t('--apply exits 0', applied.status === 0, `${applied.status} ${applied.stderr}`);
       t('npm is called with exactly the moves, in its own argv form', JSON.stringify(npmCalls) === JSON.stringify(want), JSON.stringify(npmCalls));
-      t('the log names each move', /moved {2}@objectstack\/cli next: 18\.0\.0-next\.5 → 18\.1\.0/.test(applied.stdout), applied.stdout);
+      t('the log names each move and each removal', /moved {2}@objectstack\/cli next: 18\.0\.0-next\.5 → 18\.1\.0/.test(applied.stdout) && /removed @objectstack\/cli rc: 17\.0\.0-rc\.6 \(retired channel\)/.test(applied.stdout), applied.stdout);
       t('the package not yet on npm is a logged skip', /skip {3}@objectstack\/new: not on the registry/.test(applied.stdout), applied.stdout);
     } finally {
       await registry.close();
@@ -660,6 +724,29 @@ export async function selfTest() {
     t('it is bounded: timeout-minutes is set', Number.isInteger(step['timeout-minutes']) && step['timeout-minutes'] > 0, JSON.stringify(step['timeout-minutes']));
   }
 
+  // ── 7. Retired channels ───────────────────────────────────────────────────
+  battery('7. Retired channels: removed, never moved, and only those');
+  {
+    t('the retired list is exactly rc — the live channels are latest and next', JSON.stringify(RETIRED_TAGS) === '["rc"]' && Object.isFrozen(RETIRED_TAGS), JSON.stringify(RETIRED_TAGS));
+    const now = planTags(NOW, '18.1.0');
+    t('the registry today: rc is a removal and next is a move, never the other way', JSON.stringify(now.removes) === '[{"tag":"rc","from":"17.0.0-rc.6"}]' && JSON.stringify(now.moves.map((m) => m.tag)) === '["next"]', JSON.stringify(now));
+    t('a retired tag on a STABLE version is still removed', planTags({ latest: '18.1.0', rc: '18.1.0' }, '18.1.0').removes.length === 1);
+    const aheadRc = planTags({ latest: '18.1.0', rc: '19.0.0-rc.1' }, '18.1.0');
+    t('a retired tag AHEAD of latest is removed, not kept as a cycle in progress', aheadRc.removes.length === 1 && aheadRc.kept.length === 0, JSON.stringify(aheadRc));
+    t('a retired tag on a non-semver value is removed, not skipped', planTags({ latest: '18.1.0', rc: 'garbage' }, '18.1.0').removes.length === 1);
+    const live = planTags({ latest: '18.1.0', next: '18.1.0-next.3' }, '18.1.0');
+    t('next is never retired: a stale next moves and nothing is removed', live.moves.length === 1 && live.removes.length === 0, JSON.stringify(live));
+    const unlisted = planTags(NOW, '18.1.0', []);
+    t('control: the list decides — with no retired tags, rc is a stale pre-release and moves', unlisted.removes.length === 0 && JSON.stringify(unlisted.moves.map((m) => m.tag)) === '["next","rc"]', JSON.stringify(unlisted));
+    const lines = [];
+    await sweep({ names: ['x'], read: async () => NOW, write: async () => 'must not be called', remove: async () => 'must not be called', log: (l) => lines.push(l) });
+    t('the plan output names the removal as a removal', lines.some((l) => /^ {2}plan {3}x rc: 17\.0\.0-rc\.6 → removed \(retired channel\)$/.test(l)) && lines.some((l) => /^ {2}plan {3}x next: 18\.0\.0-next\.5 → 18\.1\.0$/.test(l)), JSON.stringify(lines));
+    const adds = [];
+    const rms = [];
+    await sweep({ names: ['x'], apply: true, read: async () => NOW, write: async (m) => { adds.push(m.tag); return null; }, remove: async (r) => { rms.push(r.tag); return null; }, log: quiet });
+    t('--apply removes rc through the remover and never adds it', JSON.stringify(rms) === '["rc"]' && !adds.includes('rc') && JSON.stringify(adds) === '["next"]', JSON.stringify({ adds, rms }));
+  }
+
   for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
@@ -670,7 +757,7 @@ export async function selfTest() {
   }
   console.log(
     `OK release-dist-tags self-test: ${cases.length} cases pass across ${Object.keys(SELF_TEST_BATTERIES).length} batteries `
-      + '(stale next/rc moved to latest, a cycle in progress kept, nothing moved below a latest the run did not set, '
+      + '(stale next moved to latest, retired rc removed, a cycle in progress kept, nothing moved below a latest the run did not set, '
       + 'failures named without stopping the rest, and the release.yml step wired after the publish, non-blocking).',
   );
   selfTestReachedVerdict = true;

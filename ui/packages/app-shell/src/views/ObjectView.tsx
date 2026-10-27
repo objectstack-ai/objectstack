@@ -11,19 +11,9 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, createElement, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
-import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, isRecordScopedAction, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
-import {
-    parseUserFilterParams,
-    applyUserFilterParams,
-    parseListStateParams,
-    applyListStateParams,
-    userFilterParamsKey,
-    type ListStatePatch,
-    type ListUrlState,
-} from './userFilterUrlState.js';
-import { buildListFilterKey, readListFilterState, writeListFilterState } from './listFilterStorage.js';
+import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
+import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import { useObjectListPreferences, type ListViewPreference } from '../context/ListPreferencesProvider.js';
-import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
@@ -32,9 +22,8 @@ const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
 import { ListView } from '@object-ui/plugin-list';
-import { ObjectView as PluginObjectView, ViewTabBar, ManageViewsDialog, deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
+import { ObjectView as PluginObjectView, ViewTabBar, ManageViewsDialog } from '@object-ui/plugin-view';
 import type { ViewTabItem } from '@object-ui/plugin-view';
-import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
@@ -56,7 +45,7 @@ import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { getIcon } from '../utils/getIcon.js';
-import type { ActionBarSchema, DataSource, UIActionSchema, ListViewSchema, TreeViewConfig, ViewNavigationConfig } from '@object-ui/types';
+import type { ActionBarSchema, DataSource, UIActionSchema, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
@@ -74,14 +63,11 @@ import type { MobileViewSwitcherItem } from '../layout/MobileViewSwitcherContext
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { RecordDetailView } from './RecordDetailView.js';
-import type { RowCrudPredicates } from '../utils/crudAffordances.js';
-import { createIdentityImportDataSource, IDENTITY_IMPORT_OBJECT, IDENTITY_IMPORT_WRITE_MODES, type IdentityPasswordPolicy } from './identityImport.js';
+import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
 import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields } from './IdentityImportPanels.js';
-import { ManagedUsersInviteLine, MANAGED_USERS_OBJECT, UnauthorizedUserMarker, UserGrantLoader, isManagedEnvironment } from './managedEnvironmentUsers.js';
+import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
-import { useExpressionContext } from '../providers/ExpressionProvider.js';
-import { listToolbarDrawsAction, resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
-import { mayReadObject } from '../utils/navObjectReadGate.js';
+import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { defaultListViewId, viewRowId, isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
@@ -89,25 +75,19 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { ActionProvider, useNavigationOverlay, SchemaRenderer, useActionTextLocalizer, useRowPredicate, RelatedRecordActionsProvider, notifyDataChanged, useCapabilityGate, usePredicateScope, useMetadata } from '@object-ui/react';
+import { ActionProvider, SchemaRenderer, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
-import { useOfferedNavRunAction } from '../hooks/useNavRunAction.js';
-import { actionRendersAt } from '@object-ui/types';
-import { useEnvironmentEntitlements } from '../environment/useEnvironmentEntitlements.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import {
     VIEW_TYPE_ICONS,
     FALLBACK_USER,
     substituteFilterTokens,
     declaredPrimaryToolbarAction,
-    selectFilterParams,
     MOBILE_FAB_LIST_CLEARANCE,
 } from './objectViewHelpers.js';
-import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import {
     defaultListColumnsFromObject,
-    bulkWiredActionNamesKey,
     buildAddViewSpec,
     loadViewOverrides,
     buildViewTabs,
@@ -126,6 +106,11 @@ import {
 } from './objectViewOptions.js';
 import { ObjectNotFoundState, useViewTabsFit, keepInlineEditModeForTheSession } from './objectViewChrome.js';
 import { useObjectViewLiveData } from './objectViewLiveData.js';
+import { useObjectViewIdentity } from './objectViewIdentity.js';
+import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
+import { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
+import { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
+import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -501,39 +486,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     });
     const { confirmHandler, toastHandler } = actionRuntime;
 
-    // Environment list (sys_environment) is entitlement- + state-aware: born
-    // with one production env per org, its single `create_environment` action
-    // means different things — "Set up your production environment", "Add
-    // development environment", or a locked plan-tier mark linking to the
-    // upgrade page (objectui#12190) — depending on org state.
-    // Resolved org-side here; the hook is a no-op for every other object.
-    const isEnvironmentList = objectDef.name === 'sys_environment';
-    const environmentEntitlements = useEnvironmentEntitlements({
-        enabled: isEnvironmentList,
-        dataSource,
-        authFetch: actionRuntime.authFetch,
-        apiBase: (import.meta as any).env?.VITE_SERVER_URL || '',
-        refreshKey,
-    });
-    // objectui#12109 — this object's list actions are drawn only for a caller
-    // who may read the object. Every one of them is bound to it (an action's
-    // `objectName` is what merges it into `objectDef.actions`), and a caller
-    // without read gets the list's "You don't have access" under them, so a
-    // drawn action could only end there. The verdict is the one the sidebar
-    // prunes this object's navigation entry on (`mayReadObject`), so the entry
-    // and its list actions go together. A boolean, read each render from the
-    // provider's verdict, so the memo below keys on a primitive (AGENTS.md #10).
-    const listActionsReadable = mayReadObject(perms.can, objectDef.name);
-    const listActions = listActionsReadable ? objectDef.actions : undefined;
-    // Localized `list_toolbar` actions, shared by the generic action bar and the
-    // environment-aware toolbar (the action:bar renderer filters by location).
-    // The header reads them through `headerToolbarActions`, which drops the
-    // selection bar's duplicates once the active view is resolved (objectui#12462).
-    const localizedToolbarActions = useMemo(
-        () => (listActionsReadable ? objectDef.actions || [] : []).map((a: any) => localizeActionTexts(objectDef.name, a)),
-        [objectDef, localizeActionTexts, listActionsReadable],
-    );
-
     // Resolve which generic CRUD affordances belong in the toolbar for
     // this object's lifecycle bucket (`managedBy`).  config tables show
     // New/Edit/Delete but no CSV Import; system / append-only / better-auth
@@ -557,199 +509,49 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
       };
     }, [objectDef, perms]);
 
+    // objectstack#25992 slice 7: environment entitlements, the list actions and the
+    // create and import toolbar verdicts moved to `./objectViewToolbarAffordances.ts`.
+    const {
+        isEnvironmentList,
+        environmentEntitlements,
+        listActions,
+        localizedToolbarActions,
+        objectCanCreate,
+        createVisible,
+        createDisabled,
+        listAddRecordOpensCreate,
+        pageOffersCreate,
+        objectCanImport,
+        importVisible,
+        importDisabled,
+    } = useObjectViewToolbarAffordances({
+        objectDef,
+        dataSource,
+        actionRuntime,
+        refreshKey,
+        perms,
+        localizeActionTexts,
+        newVerdict,
+        importVerdict,
+    });
+
     // Externally-triggered refreshes (e.g. global ModalForm submit, undo, redo)
     // reach every `refreshKey` reader through the sum declared with the counter
     // above (objectui#10572), not through a mirroring effect.
 
-    /**
-     * [#5153] The object-list toolbar's CREATE predicates — the `create` half
-     * of the toolbar-scope pair on THIS surface. #4646 (PR #5145) gave
-     * `createPredicates` a consumer on the **related list**
-     * (`RelatedRecordActionsBridge`); the standalone object-list page kept
-     * gating its "New" on the object-level verdict alone, so one
-     * `userActions.create` object form got two different verdicts depending on
-     * which surface rendered the button — honoured on a record page's related
-     * list, ignored here. `visibleWhen: false` (the objectui#3492 shape) did
-     * not hide this "New".
-     *
-     * BINDING, LAYERING and the fail-CLOSED / fail-SOFT split are the import
-     * half's, immediately below, verbatim — the spec types the two toolbar keys
-     * identically and binds them in one breath. See that docblock for the
-     * reasoning; the only thing that differs here is which affordance is gated.
-     *
-     * TWO RENDER POINTS, ONE VERDICT. The affordance surfaces twice on this
-     * page — the PageHeader button (desktop) and the phone-only floating "+"
-     * that stands in for it once the header is hidden. They are one affordance
-     * rendered twice, so both consume these SAME two values; computing the
-     * predicate once here is what keeps them from disagreeing with each other.
-     */
-    const objectCanCreate = newVerdict.allowed;
-    const createPredicates: RowCrudPredicates | undefined = newVerdict.predicates;
-    /** `visibleWhen` — fails CLOSED, declared-ness by `?? true`. As Import. */
-    const createVisible = useRowPredicate(createPredicates?.visibleWhen ?? true, null, {
-      fallback: false,
-      warnOnError: true,
-      label: 'builtin:create:visibleWhen',
-    });
-    /** `disabledWhen` — fails SOFT, `!= null` declared-ness OUTSIDE the eval. */
-    const createDisabledPred = useRowPredicate(createPredicates?.disabledWhen, null, {
-      fallback: false,
-      warnOnError: true,
-      label: 'builtin:create:disabledWhen',
-    });
-    const createDisabled = createPredicates?.disabledWhen != null && createDisabledPred;
-
-    /**
-     * objectui#11687 — does this page offer a way to add a row? The New button
-     * above, or a `list_toolbar` action the schema-driven toolbar draws (Invite
-     * User, Register OAuth Application, …), each by the verdict its own control
-     * renders on. The managed-by empty state reads it: a `better-auth` list
-     * must not say rows are "not added by hand here" beside such a button.
-     * A boolean, computed each render from the payload (`objectDef.actions`),
-     * so `renderListView` depends on a primitive, not a memoised identity
-     * (AGENTS.md #10).
-     */
-    /**
-     * objectui#13089 — the view's `addRecord` Add button opens this page's own
-     * create (`actions.create`, the header New's), so it is offered exactly
-     * where that New is offered and live: the object-level verdict, the
-     * toolbar-scope `visibleWhen`, and not greyed by `disabledWhen` (`ListView`
-     * draws no greyed Add button). A boolean, so `renderListView` depends on
-     * a primitive (AGENTS.md #10).
-     */
-    const listAddRecordOpensCreate = objectCanCreate && createVisible && !createDisabled;
-    const mayInvokeToolbarAction = useCapabilityGate();
-    const toolbarPredicateScope = usePredicateScope();
-    const pageOffersCreate =
-        (objectCanCreate && createVisible) ||
-        listToolbarDrawsAction(listActions, mayInvokeToolbarAction, toolbarPredicateScope);
-
-    /**
-     * [#5142] The object-list toolbar's IMPORT predicates — the `import` half
-     * of the toolbar-scope pair the spec resolver emits, mirroring what
-     * `RelatedRecordActionsBridge` does for `create` (objectui#4646).
-     *
-     * `@objectstack/spec@17.0.0` types `userActions.create` and
-     * `userActions.import` identically and `resolveCrudAffordances` emits a
-     * predicate envelope for each; the docblock binds them in one breath
-     * ("`importPredicates` — same binding as `createPredicates`"). #4646 gave
-     * `create` a consumer and left `import` declared-and-inert: an author could
-     * write `userActions.import.visibleWhen`, have the spec accept it and the
-     * resolver parse it, and watch this toolbar offer the CSV wizard anyway.
-     *
-     * BINDING (the spec docblock's, not an invention here). Unlike the ROW
-     * predicates, a toolbar predicate evaluates ONCE per toolbar against the
-     * record of the scope the toolbar sits in — the host parent record on a
-     * related list, and **no record at all on a standalone object list**, which
-     * is what this surface is. So `null` is passed deliberately below: a
-     * predicate reading `record.*` has nothing to bind, faults, and — per the
-     * fail-CLOSED rule — hides the button, exactly as the spec spells out.
-     * Predicates over the host scope (`os.user.*` / `features.*`) bind normally
-     * and are the meaningful shape here.
-     *
-     * LAYERING: surfaced only when the object-level verdict already passed —
-     * the same posture the related-list bridge takes, because a predicate may
-     * not RE-OPEN what the bucket, the effective API operations (objectstack#3391) or the
-     * principal's grant have closed. The identity-import bypass below is a
-     * different affordance entirely (it does not read the `listImport` row) and
-     * is deliberately left outside this layer.
-     */
-    const objectCanImport = importVerdict.allowed;
-    const importPredicates: RowCrudPredicates | undefined = importVerdict.predicates;
-    /**
-     * `visibleWhen` — fails CLOSED, and counts as DECLARED by `?? true` rather
-     * than by truthiness, so `visibleWhen: false` hides Import instead of
-     * reading as "ungated" (the objectui#3492 invariant). The `true` default is
-     * a boolean, which the evaluator short-circuits without touching the engine
-     * — an object with no import predicates pays no evaluation at all.
-     */
-    const importVisible = useRowPredicate(importPredicates?.visibleWhen ?? true, null, {
-      fallback: false,
-      warnOnError: true,
-      label: 'builtin:import:visibleWhen',
-    });
-    /**
-     * `disabledWhen` — fails SOFT (an unevaluable predicate must not grey a
-     * button forever), with the `!= null` declared-ness gate OUTSIDE the
-     * evaluation so `disabledWhen: ''` reads as "no condition" rather than as
-     * "disable". Verbatim the posture of the record header (PR #4515), the
-     * row kebab, and the related-list toolbar.
-     */
-    const importDisabledPred = useRowPredicate(importPredicates?.disabledWhen, null, {
-      fallback: false,
-      warnOnError: true,
-      label: 'builtin:import:disabledWhen',
-    });
-    const importDisabled = importPredicates?.disabledWhen != null && importDisabledPred;
-
     // Import wizard open/close state — toolbar entry triggers it.
     const [showImport, setShowImport] = useState(false);
 
-    // ─── Identity import (framework#2782) ────────────────────────────────
-    // sys_user's generic import affordance stays FALSE (a data-layer insert
-    // would bypass better-auth's hashing and never create a credential), but
-    // platform admins get the same wizard wired to the dedicated
-    // /api/v1/auth/admin/import-users pipeline. Gated on the deployment's
-    // admin surface (features.admin from /api/v1/auth/config) plus the
-    // caller being a workspace admin (the server re-checks, ADR-0068).
-    // objectui#13330 — and never on a managed environment
-    // (`features.cloudManaged`): there the server answers `admin/import-users`
-    // with 409 `RESOURCE_CONFLICT`, because people arrive from the hosting
-    // organisation through its identity provider.
-    const { features } = useExpressionContext();
-    const isIdentityImport = objectDef.name === IDENTITY_IMPORT_OBJECT;
-    const identityImportEnabled =
-        isIdentityImport && features?.admin === true && isAdmin && !isManagedEnvironment(features);
-
-    // ─── Setup → Users on a managed environment (objectui#13330) ─────────
-    // The line that says where people are invited, and the marker on a user
-    // who holds no permission set beyond the baseline. The marker reads the
-    // grant rows through one loader per list (`managedEnvironmentUsers.tsx`),
-    // rebuilt when the list refreshes, so a grant made elsewhere shows on the
-    // next load. The metadata store is read through a ref: its context value is
-    // rebuilt whenever any cached type settles (AGENTS.md #10).
-    const managedUsers = objectDef.name === MANAGED_USERS_OBJECT && isManagedEnvironment(features);
-    const metadataStore = useMetadata();
-    const metadataStoreRef = useRef(metadataStore);
-    metadataStoreRef.current = metadataStore;
-    const grantLoaderRef = useRef<{ refreshKey: number; source: unknown; loader: UserGrantLoader } | null>(null);
-    if (
-        managedUsers &&
-        dataSource &&
-        (grantLoaderRef.current?.refreshKey !== refreshKey || grantLoaderRef.current?.source !== dataSource)
-    ) {
-        grantLoaderRef.current = {
-            refreshKey,
-            source: dataSource,
-            loader: new UserGrantLoader(dataSource as any, {
-                ensureType: (type: string) => metadataStoreRef.current.ensureType(type),
-                getTypeStatus: (type: string) => metadataStoreRef.current.getTypeStatus?.(type) ?? 'ready',
-            }),
-        };
-    }
-    const grantLoader = managedUsers ? grantLoaderRef.current?.loader : undefined;
-    const managedUserMarker = useCallback(
-        (row: Record<string, unknown>) => {
-            const id = row?.id ?? row?._id;
-            if (!grantLoader || id === undefined || id === null || id === '') return null;
-            return <UnauthorizedUserMarker loader={grantLoader} userId={String(id)} t={t} />;
-        },
-        [grantLoader, t],
-    );
-    const [identityPasswordPolicy, setIdentityPasswordPolicy] = useState<IdentityPasswordPolicy>('auto');
-    const identityPolicyRef = useRef<IdentityPasswordPolicy>('auto');
-    identityPolicyRef.current = identityPasswordPolicy;
-    const identityDataSource = useMemo(
-      () => (identityImportEnabled
-        ? createIdentityImportDataSource({
-            base: dataSource,
-            authFetch: actionRuntime.authFetch,
-            baseUrl: import.meta.env.VITE_SERVER_URL || '',
-            getPasswordPolicy: () => identityPolicyRef.current,
-          })
-        : undefined),
-      [identityImportEnabled, dataSource, actionRuntime.authFetch],
-    );
+    // objectstack#25992 slice 5: identity import and the managed-environment Users
+    // marker moved to `./objectViewIdentity.tsx`.
+    const {
+        identityImportEnabled,
+        managedUsers,
+        managedUserMarker,
+        identityPasswordPolicy,
+        setIdentityPasswordPolicy,
+        identityDataSource,
+    } = useObjectViewIdentity({ objectDef, isAdmin, dataSource, refreshKey, t, actionRuntime });
 
     // ─── User-defined views (metadata overlay) ──────────────────────────
     // Saved views created via the ViewConfigPanel ("Add View") live in the
@@ -981,83 +783,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? { ...baseView, ...viewDraft }
         : baseView;
 
-    // objectui#12462 (ruling A-narrow) — the header does not draw a duplicate of
-    // the selection bar. The bar is the list toolbar in its selection mode: a
-    // `list_toolbar` action the ACTIVE view wires to it (`bulkActions`, or a
-    // `bulkActionDefs` entry) is still drawn at its declared placement, on the
-    // rows it acts on, so the header's permanent copy is the duplicate. Only a
-    // RECORD-SCOPED action leaves (`isRecordScopedAction`: it also mounts on
-    // rows or records). Launched from the header it runs on exactly one ticked
-    // row, which the bar's per-record run covers. An object-level action keeps
-    // its header entry, because it can run with nothing selected and the bar
-    // cannot. Nothing else moves: the bar reads the same view keys itself.
-    //
-    // The names are the ones `ObjectGrid` folds into its bar from the keys this
-    // page relays to it (see `renderListView`): every non-empty `bulkActions`
-    // name except `delete`, which the grid routes to its built-in bulk delete
-    // rather than to an object action, and the `name` of every `bulkActionDefs`
-    // entry the grid can render. Keyed on a string of the names, not on
-    // `activeView`, which is a fresh object on every render while a draft is
-    // open (AGENTS.md #10).
-    const bulkWiredNamesKey = bulkWiredActionNamesKey(activeView);
-    const headerToolbarActions = useMemo(() => {
-        const wired = new Set<string>(JSON.parse(bulkWiredNamesKey) as string[]);
-        if (wired.size === 0) return localizedToolbarActions;
-        return localizedToolbarActions.filter(
-            (a: any) => !(typeof a?.name === 'string' && wired.has(a.name) && isRecordScopedAction(a)),
-        );
-    }, [localizedToolbarActions, bulkWiredNamesKey]);
-
-    // [#5216] The DECLARED nav `runAction` slot, consumed generically.
-    // An object nav entry declaring `runAction: '<name>'` resolves (via
-    // `resolveHref`) to this list's href carrying `?runAction=`; landing here
-    // runs that action once, through the ordinary execute path.
-    //
-    // Arm only on an action THIS toolbar actually renders — `list_toolbar` is
-    // the slot's surface, so a name that only exists at `record_header` cannot
-    // be triggered from here and must not spend the one-shot intent (#4123).
-    // That is also why it reads `headerToolbarActions`: an action that left the
-    // header for the selection bar (objectui#12462) is not armed either, and the
-    // link stays in the URL, as for any name this header does not draw.
-    // `sys_environment` is excluded because `EnvironmentListToolbar` owns the
-    // arming there: it must additionally wait for entitlements to resolve, and
-    // two consumers of one param would race to strip it.
-    //
-    // [objectui#4191] …and only on an action its author has not HIDDEN here:
-    // the action's own declared `visible` outranks the deep link. A hidden
-    // candidate is neither marked `autoTrigger` nor consumed, and the refusal
-    // is reported — see `useOfferedNavRunAction`, which evaluates the same
-    // predicate `action:button` does.
-    const navRunAction = useOfferedNavRunAction(
-        headerToolbarActions,
-        (a: any) => actionRendersAt(a, 'list_toolbar'),
-        !isEnvironmentList,
-    );
-    // Mark exactly the requested action `autoTrigger`, leaving every other
-    // action's identity untouched so the bar's ordering/overflow is unchanged.
-    const toolbarActionsWithDeepLink = useMemo(
-        () =>
-            navRunAction === null
-                ? headerToolbarActions
-                : headerToolbarActions.map((a: any) =>
-                      a?.name === navRunAction ? { ...a, autoTrigger: true } : a,
-                  ),
-        [headerToolbarActions, navRunAction],
-    );
-    // The schema-driven toolbar, typed as the `action:bar` node it is
-    // (objectui#11355), not as the `BaseSchema` the `schema` prop accepts: a key
-    // `ActionBarSchema` does not declare is refused here. On mobile it collapses
-    // all schema-driven toolbar actions into a single overflow menu, so the
-    // icon-only New / Import buttons stay visible without pushing the page title
-    // off-screen.
-    const toolbarBar: ActionBarSchema = {
-        type: 'action:bar',
-        location: 'list_toolbar',
-        actions: toolbarActionsWithDeepLink,
-        size: 'sm',
-        variant: 'outline',
-        mobileMaxVisible: 0,
-    };
+    // objectstack#25992 slice 8: the header toolbar actions, the nav `runAction` deep link
+    // and the `action:bar` node moved to `./objectViewHeaderToolbar.ts`.
+    const { headerToolbarActions, toolbarActionsWithDeepLink, toolbarBar } = useObjectViewHeaderToolbar({
+        activeView,
+        localizedToolbarActions,
+        isEnvironmentList,
+    });
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -1083,122 +815,25 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // A boolean, so the relay keys on a value (AGENTS.md #10).
     const activeViewIsSaved = !!baseView && isSavedViewId(savedViews, baseView.id);
 
-    /**
-     * objectui#11860 — the list's toolbar state in the URL: the Filter panel's
-     * conditions, the search term, the sort and the grouping, under the `uf_`
-     * family `userFilterUrlState` owns (its header names the params and their
-     * shapes). Panels and dialogs stay out of it.
-     *
-     * The SEED — what the list opens with — is decided once per list identity
-     * (object + view, the same identity `renderListView` keys the list on;
-     * `ListView` reads its initial filters and search once, at mount):
-     *
-     * 1. The URL, when it carries any `uf_*` state this page did not write
-     *    itself — an opened link, a reload, Back. It is then the WHOLE state:
-     *    the per-browser cache is not consulted, so a shared link opens the
-     *    same list for everyone who may read it. A piece the URL lacks is
-     *    absent, not filled from storage.
-     * 2. Otherwise the user's own state (objectui#12418, `listPrefs`): the
-     *    Filter panel's conditions and the sort they left this view with, and
-     *    the search term from the per-user cache (`listFilterStorage`); the
-     *    view's own sort when they stored none, and its own grouping. The
-     *    seed waits until that state has been read (`listPrefs.ready`), so a
-     *    second browser opens on it rather than on an empty cache.
-     *
-     * Then the seed is written back into the URL (replace, never a new history
-     * entry), so the address bar shows the list on screen: a restored filter
-     * is in the link a user copies, and an entry dropped on load (a field the
-     * object does not declare or the user cannot read, a condition the spec
-     * refuses) leaves the address bar too.
-     *
-     * "Did this page write it" is `ownListParamsRef`: the `uf_*` params as the
-     * last write by this page left them. It matters when the identity moves
-     * WITHOUT a navigation — the saved views arrive after the first render and
-     * the active view resolves to another one — where params this page wrote
-     * for the first view would otherwise read as a link to the second. A real
-     * view switch navigates to a path with no query string, so it starts from
-     * the cache, and the ad-hoc params never follow the user into another view.
-     */
-    // objectui#12418 — "Reset view" opens the list again as the view declares
-    // it: the identity moves, so the list remounts and re-seeds. A reset is the
-    // one case that WANTS the list's own state thrown away (AGENTS.md #8 is
-    // about refreshing data, which never does).
-    const [listResetGeneration, setListResetGeneration] = useState(0);
-    const listIdentityKey = activeView?.id
-        ? `${objectName}-${activeView.id}${listResetGeneration ? `~${listResetGeneration}` : ''}`
-        : undefined;
-    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState } | undefined>(undefined);
-    const ownListParamsRef = useRef<string | undefined>(undefined);
-    if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
-        const carried = userFilterParamsKey(searchParams);
-        if (carried && carried !== ownListParamsRef.current) {
-            // A field the object does not declare (a stale link) or one this
-            // user cannot read is dropped. Field-level permissions gate only
-            // once loaded — the same gate `ListView` puts on its columns.
-            const acceptField = (field: string) =>
-                !!objectDef.fields?.[field]
-                && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
-            listSeedRef.current = {
-                key: listIdentityKey,
-                source: 'url',
-                state: parseListStateParams(searchParams, acceptField),
-            };
-        } else {
-            const stored = readListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
-            const viewPref = listPrefs.preference.perView?.[activeView.id];
-            listSeedRef.current = {
-                key: listIdentityKey,
-                source: 'storage',
-                state: {
-                    filters: (viewPref?.filters ?? undefined) as ListUrlState['filters'],
-                    search: stored?.search || undefined,
-                    sort: viewPref?.sort,
-                },
-            };
-        }
-    }
-    useEffect(() => {
-        const seed = listSeedRef.current;
-        if (!seed || seed.key !== listIdentityKey) return;
-        const next = applyListStateParams(searchParams, {
-            filters: seed.state.filters ?? null,
-            search: seed.state.search ?? null,
-            sort: seed.state.sort ?? null,
-            grouping: seed.state.grouping ?? null,
-        });
-        // Only a mirror of the CACHE is this page's own write. A link's params,
-        // even rewritten, stay the link's: the identity can still move to the
-        // view the link names once the saved views arrive.
-        if (seed.source === 'storage') ownListParamsRef.current = userFilterParamsKey(next);
-        if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
-        // Once per list identity, by design: later URL writes are the list's
-        // own changes, already on screen. (`listPrefs.ready` because the seed
-        // is taken only once the user's own state has been read.)
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-    }, [listIdentityKey, listPrefs.ready]);
-    /** Write the list's own change into the URL — replace, never a history entry per keystroke. */
-    const writeListUrlState = useCallback(
-        (patch: ListStatePatch) => {
-            setSearchParams(prev => {
-                const next = applyListStateParams(prev, patch);
-                ownListParamsRef.current = userFilterParamsKey(next);
-                return next;
-            }, { replace: true });
-        },
-        [setSearchParams],
-    );
-
-    /**
-     * objectui#12418 — "Reset view": drop this user's sort, filters and column
-     * layout for the active view, and open the list again as the view declares
-     * it. Offered only while they have stored something for it.
-     */
-    const activeViewHasPreference = !!(activeView?.id && listPrefs.preference.perView?.[activeView.id]);
-    const handleResetView = useCallback(() => {
-        if (!activeView?.id) return;
-        listPrefs.resetView(activeView.id);
-        setListResetGeneration(g => g + 1);
-    }, [activeView?.id, listPrefs.resetView]);
+    // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
+    // "Reset view") moved to `./objectViewListUrlState.ts`.
+    const {
+        listIdentityKey,
+        listSeedRef,
+        ownListParamsRef,
+        writeListUrlState,
+        activeViewHasPreference,
+        handleResetView,
+    } = useObjectViewListUrlState({
+        objectName,
+        objectDef,
+        activeView,
+        listPrefs,
+        perms,
+        user,
+        searchParams,
+        setSearchParams,
+    });
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
@@ -1453,237 +1088,33 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // footer record count moved to `./objectViewLiveData.ts`; the count state stays here.
     useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
 
-    // Navigation overlay for record detail (supports drawer/modal/split/popover via config)
-    // Priority: activeView.navigation > objectDef.navigation > default drawer.
-    //
-    // Default mode = 'drawer'. Mirrors Linear / Notion / Airtable / Jira where
-    // record peek is the primary interaction and full-page is the upgrade.
-    // Direct URL access (`/record/:id`) still opens as a full page because
-    // RecordDetailView owns its own route — only same-page click navigation
-    // is drawer-by-default. Per-view config can still override (e.g. a heavy
-    // detail object can set `navigation.mode = 'page'`).
-    const detailNavigation: ViewNavigationConfig = useMemo(
-        () => {
-            const authored = activeView?.navigation ?? objectDef.navigation;
-            if (authored) {
-                // Authored config wins. For an overlay, resolve the `size`
-                // bucket (or 'auto') to a viewport-clamped width when no explicit
-                // width was given — objectstack-ai/objectstack#2578: a pixel width can't be authored blind.
-                if (authored.mode === 'page') return authored;
-                return {
-                    ...authored,
-                    width: authored.width ?? overlayWidthFor(
-                        (authored as { size?: 'auto' | 'sm' | 'md' | 'lg' | 'xl' | 'full' }).size,
-                        objectDef,
-                    ),
-                };
-            }
-            // objectstack-ai/objectstack#2578: derive surface + width from FIELD COUNT. Field-heavy → full
-            // page (cramped in a drawer); light → a drawer sized to the content
-            // and clamped to the viewport. Mobile always pages (in deriveRecordSurface).
-            return deriveRecordSurface(objectDef) === 'page'
-                ? { mode: 'page' }
-                : { mode: 'drawer', width: overlayWidthFor('auto', objectDef) };
-        },
-        [activeView?.navigation, objectDef]
-    );
-    const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
-
-    /**
-     * URL-derived equality filters in the form `?filter[<field>]=<value>`.
-     * Used by related-list "View All" buttons to scope the destination list
-     * to a single parent record. Emitted as ObjectQL triples (`[field, '=', value]`)
-     * which matches the shape consumed by the list view's data fetcher when
-     * merging base filters.
-     *
-     * Read through `drillUrlFilters` — the ONE module that owns this URL family
-     * — rather than a private regex here (objectui#9196). This route implements
-     * the EQUALITY arm only: an operator suffix it cannot execute
-     * (`?filter[amount][gte]=100`) is DROPPED, never downgraded to equality and
-     * never swallowed into the field name. The greedy capture this replaced did
-     * the last of those, emitting a condition against a field literally named
-     * `amount][gte` that no object declares — a silently wrong query, not an
-     * ignored parameter. Range operators live on the ADR-0055 `/data` surface
-     * (`parseUrlFilterTriples`); giving them to this route would widen an
-     * addressable public surface and is deliberately not done here.
-     */
-    // Dep on the serialized `filter[...]` entries only — `uf_*` user-filter
-    // params also live in the URL and must not invalidate this memo (a new
-    // array identity here rebuilds the whole list schema and refetches).
-    const filterParams = selectFilterParams(searchParams);
-    const filterParamsKey = filterParams.toString();
-    const urlFilters = useMemo(
-        // The params object is read DIRECTLY — nothing is serialized here and
-        // parsed back, so there is no round trip left for a character to be
-        // lost in (objectui#9287). `filterParamsKey` is the memo's identity
-        // only.
-        () => parseUrlEqualityFilterTriples(filterParams),
-        // Keyed on the SERIALIZED params, not on the object's identity:
-        // `filterParams` is rebuilt every render, so listing it would
-        // invalidate this memo on every unrelated `uf_*` write — the churn
-        // this key exists to prevent. Equal keys imply equal contents, so the
-        // captured object is never stale.
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-        [filterParamsKey],
-    );
-
-    /**
-     * End-user filter selections restored from `uf_*` URL params (ADR-0047
-     * persistence), read from the CURRENT location once per list identity —
-     * the identity `listSeedRef` seeds on and `renderListView` keys the list
-     * on (objectui#11992). A view switch keeps this page mounted and remounts
-     * the list, whose `UserFilters` read these once, at that mount. So each
-     * view starts from the selections its own URL carries: none on the bare
-     * path a view tab navigates to, the link's on a link, the entry's own on
-     * Back. A capture once per PAGE mount restored the first view's selections
-     * on every view after it, while their address bar showed none.
-     *
-     * Held per identity rather than re-read every render: the list's own
-     * writes (below) reach the URL after the list already shows them, and a
-     * new object here would rebuild the list's schema on every chip click.
-     * The router's location is read, not `window.location`: it is the one this
-     * page writes to and the one `listSeedRef` reads.
-     */
-    const ufSelectionsRef = useRef<{ key: string; selections: Record<string, string[]> | undefined } | undefined>(undefined);
-    if (listIdentityKey && ufSelectionsRef.current?.key !== listIdentityKey) {
-        ufSelectionsRef.current = { key: listIdentityKey, selections: parseUserFilterParams(searchParams) };
-    }
-    const initialUfSelections = listIdentityKey ? ufSelectionsRef.current?.selections : undefined;
-    const handleUserFilterSelectionsChange = useCallback(
-        (selections: Record<string, Array<string | number | boolean>>) => {
-            setSearchParams(prev => {
-                const next = applyUserFilterParams(prev, selections);
-                // objectui#11860 — this page's own write (see `ownListParamsRef`).
-                ownListParamsRef.current = userFilterParamsKey(next);
-                return next;
-            }, { replace: true });
-        },
-        [setSearchParams],
-    );
-    // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
-    const handleNavOverlayNavigate = useCallback(
-        (recordId: string | number, action?: string) => {
-            if (action === 'new_window') {
-                // Open record detail in a new browser tab with Console-correct URL.
-                // Same builder the list's link column publishes as its href
-                // (objectui#4490) — one record-route shape for this surface.
-                window.open(listRecordDetailUrl(window.location.pathname, recordId), '_blank');
-                return;
-            }
-            // Default: navigate to record detail page.
-            // `action` is a navigation-MODE token — 'view' / 'page' / undefined
-            // — and every non-`new_window` value lands on the record detail
-            // route.
-            //
-            // ⛔ It is NOT a view name, and this comment used to say a custom
-            // one could arrive here "forwarded from `navigation.view` (e.g.
-            // 'detail_form')", resolved "by RecordDetailView from its own
-            // config". No layer ever resolved a view by that name — which is
-            // why `@objectstack/spec` 17.5.0 retired the key under ADR-0049,
-            // and why `useNavigationOverlay` stopped forwarding it
-            // (objectui#9874). Nothing here changes behaviour: this branch
-            // already treated the name and the token identically, which is
-            // exactly what made the substitution inaudible on this surface.
-            const originState = {
-              from: {
-                pathname: location.pathname + (location.search || ''),
-                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
-              },
-            };
-            if (viewId) {
-                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });
-            } else {
-                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
-            }
-        },
-        [navigate, viewId, location.pathname, location.search, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews, language]
-    );
-    /**
-     * The list surface's half of the record-link mechanism (objectui#4490):
-     * publish this page's record-URL builder so the grid's `link: true` column
-     * can render a real anchor instead of a click-only `span role="link"`.
-     * See {@link listRecordActionsValue} for what this does and does NOT claim.
-     *
-     * The record drawer/overlay below mounts `RecordDetailView`, which brings
-     * its own `RelatedRecordActionsBridge` around the whole detail body — that
-     * nearer provider keeps owning the detail surface, exactly as before.
-     */
-    const listRecordActions = useMemo(
-        () =>
-            listRecordActionsValue(objectDef.name, handleNavOverlayNavigate, undefined, {
-                appName,
-                objects,
-                navigate,
-                routerRootHref,
-            }),
-        [objectDef.name, handleNavOverlayNavigate, appName, objects, navigate, routerRootHref],
-    );
-    const navOverlay = useNavigationOverlay({
-        navigation: detailNavigation,
-        objectName: objectDef.name,
-        onNavigate: handleNavOverlayNavigate,
+    // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
+    // URL, row click, expand to page, record links) moved to `./objectViewRecordNavigation.ts`.
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer } = useObjectViewRecordNavigation({
+        activeView,
+        objectDef,
+        objects,
+        appName,
+        viewId,
+        searchParams,
+        setSearchParams,
+        location,
+        navigate,
+        routerRootHref,
+        servedViews,
+        viewLabel,
+        unlabelledViewText,
+        language,
     });
-    const handleDrawerClose = () => {
-        navOverlay.close();
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete(RECORD_DRAWER_PARAM);
-        setSearchParams(newParams);
-    };
-    /**
-     * Row-click handler used by all list/grid/gallery/kanban surfaces inside
-     * this object view. Wraps `navOverlay.handleClick` so that drawer-mode
-     * opens are URL-driven (writes `?recordId=…`) — making the drawer state
-     * shareable, refresh-safe, and respected by browser back/forward. The
-     * URL→state sync effect below handles actually opening the drawer.
-     */
-    const handleRowClick = useCallback(
-        (record: any, event?: React.MouseEvent | { metaKey?: boolean; ctrlKey?: boolean; button?: number }) => {
-            // Cmd/Ctrl/middle-click — let the hook open in a new tab (full page)
-            // regardless of configured mode. Matches browser link convention.
-            const isModifier = !!(
-                event && ((event as any).metaKey || (event as any).ctrlKey || (event as any).button === 1)
-            );
-            if (isModifier) {
-                navOverlay.handleClick(record, event as any);
-                return;
-            }
-            // Drawer mode → URL is the source of truth. Push `?recordId=…`
-            // and let the existing URL-sync effect open the overlay.
-            if (navOverlay.mode === 'drawer') {
-                const id = (record?.id ?? record?._id) as string | number | undefined;
-                if (id != null) {
-                    const next = new URLSearchParams(searchParams);
-                    next.set(RECORD_DRAWER_PARAM, String(id));
-                    setSearchParams(next);
-                    return;
-                }
-            }
-            // All other modes (page / modal / split / popover / new_window / none)
-            // — delegate to the hook.
-            navOverlay.handleClick(record, event as any);
-        },
-        [navOverlay, searchParams, setSearchParams]
-    );
-    /**
-     * "Expand to full page" — invoked from the drawer header chevron. Closes
-     * the drawer (which clears `?recordId=…`) and router-pushes to the
-     * dedicated `/record/:id` route. Mirrors Linear/Notion peek-to-page.
-     */
-    const handleExpandDrawer = useCallback(() => {
-        const rec = navOverlay.selectedRecord as Record<string, unknown> | null;
-        const id = rec && ((rec as any).id ?? (rec as any)._id);
-        if (id == null) return;
-        handleDrawerClose();
-        handleNavOverlayNavigate(id as string | number);
-    }, [navOverlay.selectedRecord, handleNavOverlayNavigate]);
-    // Sync URL-based recordId to overlay state
-    useEffect(() => {
-        if (drawerRecordId && !navOverlay.isOpen) {
-            navOverlay.open({ id: drawerRecordId });
-        } else if (!drawerRecordId && navOverlay.isOpen) {
-            navOverlay.close();
-        }
-    }, [drawerRecordId]);
+
+    // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
+    // user-filter selections moved to `./objectViewListUrlState.ts`.
+    const { urlFilters, initialUfSelections, handleUserFilterSelectionsChange } = useObjectViewUrlFilters({
+        searchParams,
+        setSearchParams,
+        listIdentityKey,
+        ownListParamsRef,
+    });
 
     // objectui#10046 — the last `options` bag handed to `ListView`, so an
     // equal-content rebuild keeps its identity (see `isSameOptionsValue`).

@@ -631,15 +631,14 @@ jobs:
       # and it is the only instrument on this gate's matching rules -- a clean
       # tree cannot tell a working rule from a weakened one.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file.
+      # Invoked through its `pnpm check:*` alias, so root `package.json` is the
+      # one definition of the command (#26086).
       - name: Docs anchors resolve to real headings
         id: docs-anchors-resolve-to-real-headings
         continue-on-error: true
         run: |
           pnpm check:doc-anchors
-          node scripts/check-system-context-census.mjs --self-test
-          node scripts/check-system-context-census.mjs
+          pnpm check:system-context-census
 
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
@@ -908,24 +907,20 @@ jobs:
       # tell a working matcher from a dead one, and the specifier FLOOR is the
       # other half (a dead matcher finds nothing, and nothing is what success
       # looks like — so it refuses with exit 2 rather than passing).
-      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
-      # GATE INVOCATION IDIOM note at the top of this file.
+      # Invoked through its `pnpm check:*` alias, so root `package.json` is the
+      # one definition of the command (#26086).
       # Scans ~2k non-test src files across 78 workspace packages, no spawns; ~1s.
       - name: Published src imports only declared workspace deps
         id: published-src-imports-only-declared
         continue-on-error: true
-        run: |
-          node scripts/check-undeclared-dep-imports.mjs --self-test
-          node scripts/check-undeclared-dep-imports.mjs
+        run: pnpm check:undeclared-dep-imports
 
       # Rationale: `scripts/check-keyed-text-bounds.mjs` header (#12147, #11374, #12058,
       # #12143).
       - name: Keyed text-family columns declare their bound (#12147)
         id: keyed-text-family-columns-declare
         continue-on-error: true
-        run: |
-          node scripts/check-keyed-text-bounds.mjs --self-test
-          node scripts/check-keyed-text-bounds.mjs
+        run: pnpm check:keyed-text-bounds
 
       # Rationale: `scripts/check-bash32-floor.mjs` header (#12221).
       - name: shell scripts hold the bash 3.2 floor
@@ -966,15 +961,11 @@ jobs:
       # repo-root `sdui.manifest.json` is absent or unreadable, so nothing in
       # the production path ever says "the gate lost its whitelist" — this step
       # is the thing that notices. Offline record checks only (existence, shape,
-      # sha256 vs the provenance record, record pin vs `.objectui-sha`): the
-      # regenerate-and-compare half runs where a regeneration can (the Node
-      # generator reads objectui's BUILT tree at the pin, which only
-      # `pnpm objectui:build` materialises — see
-      # scripts/gen-sdui-manifest-node.mjs), and a pin bump goes red HERE until
-      # it has been re-run — the same moment the lockstep step above forces the
-      # parser parity re-verification, with an objectui checkout guaranteed in
-      # hand. Unfiltered for the same reason as its neighbour: filtering to the
-      # artefact would go dormant on exactly the PR that moves the pin.
+      # sha256 vs the provenance record): freshness is decided where the
+      # registry is built, by ci.yml's Build & E2E UI step "The committed SDUI
+      # manifest is the one this tree generates" (#26137), on pull_request and
+      # on the merge queue's combined tree. Unfiltered: it builds nothing and
+      # runs in seconds, and an absent artefact is the failure it exists for.
       # Direct invocation per the GATE INVOCATION IDIOM at the top of this file.
       - name: SDUI manifest is present, intact and fresh at the objectui pin
         id: sdui-manifest-is-present-intact-and-fresh
@@ -1814,7 +1805,7 @@ jobs:
       # from a primary checkout, a detached HEAD and a non-repo cwd with
       # identical results, so neither this checkout's depth nor its branch is an
       # input. This step itself needs only `jq` and `git` (both in the runner
-      # image; `jq` is already relied on bare by cut-rc.yml and release.yml),
+      # image; `jq` is already relied on bare by release.yml),
       # plus whatever each discovered matrix declares in its own header —
       # discovery above is by glob, so a matrix needing more (node, pnpm, a
       # built tree, a generator) must say so there; this comment is not the
@@ -1972,9 +1963,7 @@ jobs:
       - name: Platform-object tenancy census matches the tree
         id: platform-object-tenancy-census-matches
         continue-on-error: true
-        run: |
-          node scripts/check-platform-object-tenancy-census.mjs --self-test
-          node scripts/check-platform-object-tenancy-census.mjs
+        run: pnpm check:platform-object-tenancy-census
 
       # ── THE LANE'S VERDICT (#23191): the last step, and the one that keeps a
       # red gate red. The EVERY GATE RUNS note above `jobs:` argues it. ─────
@@ -3477,6 +3466,38 @@ jobs:
           node scripts/ci/scheduled-full-run.mjs --self-test
           node scripts/ci/scheduled-full-run.mjs --check-concurrency
 
+      # Workflow step bodies that moved out of inline `run:` / `github-script`
+      # blocks into scripts/ci/ (#26086). Each step fires only on an event no
+      # pull request produces (a red scheduled run, a red nightly on main), so
+      # its module's --self-test is the one place it runs before it fires.
+      # Offline doubles; sub-second each. A collector, so one red self-test
+      # does not hide the others (#10814).
+      - name: Moved workflow step bodies self-test
+        id: moved-workflow-step-bodies-self-test
+        continue-on-error: true
+        run: |
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
+          run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
+          run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Moved workflow step bodies self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Moved workflow step bodies self-tests — all three ran and passed"
+
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
       # scripts/ci/select-gate-families.sh, and its `merge_group` branch cannot
@@ -3565,7 +3586,7 @@ jobs:
       - name: Declared registry log level
         id: declared-registry-log-level
         continue-on-error: true
-        run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
+        run: pnpm check:registry-log-declared
 
       # The same defect one package down (#15484). `packages/rest`'s own fault
       # logging hands whole `Error` objects to `console.error`, and Node prints
@@ -3580,7 +3601,7 @@ jobs:
       - name: Declared REST fault-log level
         id: declared-rest-fault-log-level
         continue-on-error: true
-        run: node scripts/check-rest-log-declared.mjs --self-test && node scripts/check-rest-log-declared.mjs
+        run: pnpm check:rest-log-declared
 
       # The pairing half of the one above (#17865, ruling batch #128 item 4).
       # The `packages/rest` harness now runs at `OS_REST_LOG: 'silent'`, which
@@ -3595,7 +3616,7 @@ jobs:
       - name: Declared REST fault-log level — observers
         id: declared-rest-fault-log-level-observers
         continue-on-error: true
-        run: node scripts/check-rest-log-spy-declared.mjs --self-test && node scripts/check-rest-log-spy-declared.mjs
+        run: pnpm check:rest-log-spy-declared
 
       # Rationale: `scripts/check-live-db-isolation.mjs` header (#10382, #9350).
       - name: Live-server database isolation
