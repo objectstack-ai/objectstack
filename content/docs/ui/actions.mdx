@@ -442,8 +442,18 @@ is a spec proposal for a properly named key, not a values map under this one.
 
 An action body and a registered handler both run **elevated**: `ctx.api` and
 `ctx.engine` carry `isSystem`, so they bypass row- and field-level security by
-design (that is what lets an action do work the caller cannot do directly). The
-consequence is that any caller-specific rule has to be re-established **inside**
+design (that is what lets an action do work the caller cannot do directly).
+Elevation stops at identity assignment: an insert, update, delete, transfer,
+restore or purge of `sys_user_position`, `sys_user_permission_set`,
+`sys_invitation` or `sys_member` from either is refused with
+`PERMISSION_DENIED`, and a `type: 'script'` action whose body writes one of them
+by name through `ctx.api.object('…')` is refused when it is saved — make a
+position or permission-set grant from a flow whose `runAs` is `'user'`, which an
+action of `type: 'flow'` runs as the invoking user so the
+delegated-administration gate judges that user, and change invitations and
+memberships through the organization endpoints the refusal names
+([row 1b](/docs/permissions/system-context#1-authorization-and-scoping)). The
+other consequence is that any caller-specific rule has to be re-established **inside**
 your handler — and the predicate most people reach for first does not work:
 
 ```js
