@@ -79,7 +79,7 @@ export const objectWithoutChildren: NavigationItem = {
 
 /**
  * `expanded` is REQUIRED on the output side: `GroupNavItemSchema` declares it
- * `.default(false)`, so a parsed group always carries it. If this suppression
+ * `.default(true)`, so a parsed group always carries it. If this suppression
  * goes unused the default was dropped from the schema — and every consumer
  * reading `item.expanded` off a parsed app silently started getting
  * `undefined`.

@@ -663,8 +663,22 @@ async function selfTest() {
   {
     const lint = sources['lint.yml'];
     const self = 'scripts/check-aggregator-roster.mjs';
-    assert(lint.includes(`node ${self}\n`), `wiring: lint.yml invokes ${self} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
-    assert(lint.includes(`node ${self} --self-test`), 'wiring: lint.yml runs the --self-test half too');
+    // CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so the
+    // alias is where both legs live: pin the step AND the alias value.
+    assert(
+      /^\s*run: pnpm check:aggregator-roster\s*$/m.test(lint),
+      `wiring: lint.yml runs ${self} through its root alias \`pnpm check:aggregator-roster\``,
+    );
+    let alias = null;
+    try {
+      alias = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.['check:aggregator-roster'] ?? null;
+    } catch (err) {
+      failures.push(`cannot read root package.json to verify wiring: ${err?.code ?? err?.message}`);
+    }
+    assert(
+      alias === `node ${self} --self-test && node ${self}`,
+      `wiring: root package.json's check:aggregator-roster runs the --self-test leg, then the gate -- got ${JSON.stringify(alias)}`,
+    );
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───

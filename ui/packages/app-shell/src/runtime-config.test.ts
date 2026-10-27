@@ -280,6 +280,43 @@ describe('runtime-config hideSingleAppSwitcher (objectui#12913)', () => {
     });
 });
 
+describe('runtime-config mapStyleUrl (objectstack#26163)', () => {
+    const STYLE = 'https://tiles.intranet.example/styles/basic/style.json';
+
+    it('is absent before init', () => {
+        resetRuntimeConfigForTesting();
+        expect(getRuntimeConfig().mapStyleUrl).toBeUndefined();
+    });
+
+    it('takes the top-level mapStyleUrl the runtime serves', async () => {
+        mockPayload({ mapStyleUrl: STYLE });
+        await initRuntimeConfig();
+        expect(getRuntimeConfig().mapStyleUrl).toBe(STYLE);
+    });
+
+    it.each([
+        ['absent (the operator set no OS_CONSOLE_MAP_STYLE_URL)', { singleEnvironment: true }],
+        ['empty', { mapStyleUrl: '' }],
+        ['whitespace', { mapStyleUrl: '   ' }],
+        ['not a string', { mapStyleUrl: 42 }],
+        ['nested under branding, where it is not read', { branding: { mapStyleUrl: STYLE } }],
+    ])('is absent when the key is %s', async (_label, payload) => {
+        mockPayload(payload);
+        await initRuntimeConfig();
+        expect(getRuntimeConfig().mapStyleUrl).toBeUndefined();
+    });
+
+    it('withdraws it when a later fetch no longer serves it', async () => {
+        mockPayload({ mapStyleUrl: STYLE });
+        await initRuntimeConfig();
+        expect(getRuntimeConfig().mapStyleUrl).toBe(STYLE);
+
+        mockPayload({ singleEnvironment: false });
+        await initRuntimeConfig();
+        expect(getRuntimeConfig().mapStyleUrl).toBeUndefined();
+    });
+});
+
 describe('runtime-config platform stage', () => {
     it('defaults to preview before init (badge shows out of the box)', () => {
         resetRuntimeConfigForTesting();
