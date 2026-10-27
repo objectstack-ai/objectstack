@@ -41,17 +41,19 @@
 // goes red naming the object, instead of every persona's denial staying green
 // for the wrong reason.
 //
-// ── What this file deliberately does NOT cover ───────────────────────────────
+// ── What the sweep does not judge as plain cells ─────────────────────────────
 //
-//  • The 6 `showcase_field_ops_delegate` × `sys_*` rows. Their verdicts are not
+//  • The 4 `showcase_field_ops_delegate` × `sys_*` rows. Their verdicts are not
 //    plain cells: the platform's OWN baseline sets grant some of that surface
 //    independently of the app's matrix (measured: a member holding no app set
-//    beyond the baseline reads `/data/sys_user` 200 — self-scoped — while the
-//    matrix lists `sys_user` read only for the delegate), and the delegate's
-//    `sys_user_position` writes are decided by the ADR-0090 D12 adminScope
-//    subtree gate, which `showcase-permission-zoo.dogfood.test.ts` already pins
-//    on both sides. A raw cell verdict for those rows would be a false negative
-//    or a false positive depending on the row. They stay manual.
+//    beyond the baseline reads `/data/sys_user` 200 — the organization's
+//    directory — while the matrix lists `sys_user` read only for the delegate),
+//    `sys_user` exposes no create or delete over the API at all (405 for every
+//    caller), and the delegate's `sys_user_position` writes are decided by the
+//    ADR-0090 D12 adminScope subtree gate. So the sweep leaves them out and one
+//    dedicated case drives all 16 cells with those three facts spelled out
+//    (#26571): a delegate holding exactly the set, `sys_user_position` judged on
+//    rows the delegate made inside its subtree.
 //  • The guest-anchor intake asymmetry (`guest_portal`: create without read).
 //    It is NOT observable on a member persona: the everyone baseline grants read
 //    on `showcase_inquiry`, so the union says read — and this file asserts the
@@ -101,7 +103,7 @@ const ROWS = matrix.entries.filter((e) => e.object.startsWith('showcase_'));
 const effective = (row: MatrixRow, verb: Verb): boolean =>
   Boolean(row[verb]) || Boolean(baselineByObject.get(row.object)?.[verb]);
 
-/** The `sys_*` rows this file does not judge — named so the exclusion is visible. */
+/** The `sys_*` rows the sweep leaves out — named so the exclusion is visible; one dedicated case drives them. */
 const UNJUDGED_ROWS = matrix.entries.filter((e) => !e.object.startsWith('showcase_'));
 
 /**
@@ -692,7 +694,6 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
       await send(o, 'edit', await stack.apiAs(delegateTok, 'PATCH', `/data/${o}/${probe}`, editBody), expectOf('edit'));
       await send(o, 'delete', await stack.apiAs(delegateTok, 'DELETE', `/data/${o}/${probe}`), expectOf('delete'));
     }
-    console.log('[crud-matrix delegate cells]', JSON.stringify(cells));
     expect(cells.length, 'four rows × four verbs').toBe(16);
     for (const c of cells) {
       if (c.expected === 'allow') expect(c.status, `${c.cell}: allowed`).toBeLessThan(300);
@@ -787,7 +788,7 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
   });
 
   // ── The exclusion is declared, not silent ────────────────────────────────
-  it('names the matrix rows this file does not judge (the sys_* delegate surface)', () => {
+  it('names the matrix rows the sweep leaves to the delegate case (the sys_* delegate surface)', () => {
     // The two retired catalog row objects (ADR-0131 D3) leave the matrix with
     // C3 stage 8; the rest of the delegate surface stays.
     const RETIRED = new Set(['sys_permission_set', 'sys_position']);
