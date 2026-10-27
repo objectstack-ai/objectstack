@@ -40,6 +40,7 @@ const ORDER = {
     title: { name: 'title', label: 'Title', type: 'text' },
     line_count: { name: 'line_count', label: 'Line count', type: 'summary', summaryOperations: { object: 'pin_rollup_line', field: 'amount', function: 'count' } },
     line_total: { name: 'line_total', label: 'Line total', type: 'summary', summaryOperations: { object: 'pin_rollup_line', field: 'amount', function: 'sum' } },
+    item_count: { name: 'item_count', label: 'Item count', type: 'summary', summaryOperations: { object: 'pin_rollup_item', field: 'title', function: 'count' } },
   },
 };
 /** The child: a `master_detail` to the order. */
@@ -51,6 +52,27 @@ const LINE = {
     grp: { name: 'grp', label: 'Group', type: 'text' },
     amount: { name: 'amount', label: 'Amount', type: 'number' },
     order: { name: 'order', label: 'Order', type: 'master_detail', reference: 'pin_rollup_order' },
+  },
+};
+/**
+ * A second child, which a `set_null` lookup points at: a predicate delete of
+ * it takes the referential walk's arm (#26871), not the single `deleteMany`.
+ */
+const ITEM = {
+  name: 'pin_rollup_item',
+  label: 'Pin roll-up item',
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' },
+    grp: { name: 'grp', label: 'Group', type: 'text' },
+    order: { name: 'order', label: 'Order', type: 'master_detail', reference: 'pin_rollup_order' },
+  },
+};
+const NOTE = {
+  name: 'pin_rollup_note',
+  label: 'Pin roll-up note',
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' },
+    item: { name: 'item', label: 'Item', type: 'lookup', reference: 'pin_rollup_item' },
   },
 };
 
@@ -71,7 +93,7 @@ describe('[#26950] a predicate update or delete recomputes the roll-ups of every
     driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
     await driver.connect();
     ql.registerDriver(driver, true);
-    for (const o of [ORDER, LINE]) ql.registry.registerObject(o as any, 'pin-rollup', 'pin-rollup');
+    for (const o of [ORDER, LINE, ITEM, NOTE]) ql.registry.registerObject(o as any, 'pin-rollup', 'pin-rollup');
     await ql.syncSchemas();
     await installDefaultOrganization(ql);
   }, 60_000);
@@ -99,6 +121,25 @@ describe('[#26950] a predicate update or delete recomputes the roll-ups of every
     expect(await rollup(b)).toEqual({ count: 1, total: 5 });
     return { a, b };
   };
+
+  it('a predicate delete that runs the referential walk recomputes the parent from the rows it walked', async () => {
+    const { a, b } = await seed('walk');
+    const i1 = await insert(ITEM.name, { title: 'i1', grp: 'walk', order: a });
+    await insert(ITEM.name, { title: 'i2', grp: 'walk', order: a });
+    await insert(ITEM.name, { title: 'i3', grp: 'walk-other', order: b });
+    const note = await insert(NOTE.name, { title: 'n1', item: i1 });
+    const items = async (id: string) =>
+      Number(((await driver.find(ORDER.name, { where: { id } as FilterCondition })) as any[])[0].item_count);
+    expect(await items(a)).toBe(2);
+
+    const removed = await ql.delete(ITEM.name, { where: { grp: 'walk' }, multi: true, context: SYS });
+    expect(removed).toBe(2);
+    expect(await items(a)).toBe(0);
+    expect(await items(b)).toBe(1);
+    // The walk ran: the note's lookup to a deleted item is cleared.
+    const [noteRow] = (await driver.find(NOTE.name, { where: { id: note } as FilterCondition })) as any[];
+    expect(noteRow.item ?? null).toBeNull();
+  });
 
   function bulkFlow(name: string, node: Record<string, unknown>) {
     return {
