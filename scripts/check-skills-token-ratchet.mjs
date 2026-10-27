@@ -552,7 +552,16 @@ export const CEILINGS = new Map([
   // 2026-10-24 (project decision list item 9), verbatim and untranslated, the
   // line for item 8 of the same message elided:
   // 「9. 技能文档 security.md 的 token 上限 2543 → 2563 … 同意」.
-  ['skills/objectstack-data/rules/security.md', 2563],
+  // 2563 -> 2957 (#26179): the field permission row condition `when` — the
+  // choice rule (a lock for everyone is a validation; a lock that depends on
+  // who edits is `when` on that set's field entries), one example and the
+  // four boundaries — which the file did not teach, so an author locked the
+  // fields for every user. +396 tokens on a landed 2561, 2 absorbed by
+  // headroom, ceiling +394. The file carries no duplicated passage to cut
+  // first (measured: no sentence repeats in the file). Maintainer ruling
+  // 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/rules/security.md', 2957],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -651,7 +660,15 @@ export const CEILINGS = new Map([
   ['skills/objectstack-ai/evals/skills-tools-knowledge.json', 1074],
   ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1042],
   ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1255],
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 894],
+  // 894 -> 1095 (#26179): one regression case for the field permission `when`
+  // (the contract prompt: lock the legal terms for finance from approval on,
+  // legal keeps the edit) — expected: `when` on the finance set's entries with
+  // `readable: true`, and NO validation rule or `readonlyWhen` locking the
+  // fields for every user. +201 tokens, zero headroom to absorb any of it,
+  // ceiling +201; nothing duplicated in the file to cut first. Same ruling as
+  // the `rules/security.md` row above (2026-10-27, tap A:
+  // 「A:先削重复,余额按实测提高」).
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1095],
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
   ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],

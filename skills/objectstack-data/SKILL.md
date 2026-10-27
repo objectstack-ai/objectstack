@@ -218,7 +218,8 @@ export const Invoice = ObjectSchema.create({
 
 - Use `visibleWhen` to hide irrelevant fields in ObjectUI forms.
 - Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
-  incoming changes when the predicate is `TRUE`.
+  incoming changes when the predicate is `TRUE` (for everyone; per role →
+  field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
   the field **stripped** from any non-system write; the write reports
