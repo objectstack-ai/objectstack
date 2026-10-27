@@ -195,7 +195,8 @@ describe('[ADR-0090 D12 / ADR-0105 D8 × ADR-0068 D2] every branch of the delega
           for (const name of RESERVED_IDENTITY_NAMES) {
             const r = await assign(h, context, name);
             const gatedFirst = branch === 'delegated' && name === BUILTIN_IDENTITY_ORG_EXTERNAL;
-            expect([r.status, r.code], `${name}: ${r.message}`).toEqual(gatedFirst ? [403, 'PERMISSION_DENIED'] : [400, 'VALIDATION_FAILED']);
+            // [#26189] The gate refuses it because its set is off the caller's allowlist: a scope violation, its own code.
+            expect([r.status, r.code], `${name}: ${r.message}`).toEqual(gatedFirst ? [403, 'DELEGATION_SCOPE_VIOLATION'] : [400, 'VALIDATION_FAILED']);
             expect(await storedRows(h, name), `${name} stored nothing`).toHaveLength(0);
           }
 

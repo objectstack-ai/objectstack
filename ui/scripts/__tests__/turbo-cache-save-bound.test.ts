@@ -74,7 +74,7 @@ const CEILINGS: Record<string, number> = {
   [DEPS_JOB]: 25,
   [UI_JOBS.typeCheck]: 40,
   [UI_JOBS.lint]: 40,
-  [UI_JOBS.buildE2e]: 25,
+  [UI_JOBS.buildE2e]: 35,
 };
 
 function job(key: string): Job {

@@ -788,7 +788,7 @@ organization A cannot see organization B's records. See
 
 Schema changes flow through the `os` CLI: validate the config against the protocol
 schema, compile it to a JSON artifact, compare it against the previously deployed
-config to surface breaking changes, then publish the artifact to ObjectStack Cloud.
+config to surface breaking changes, then publish the artifact to ObjectOS Cloud.
 
 ```bash
 # 1. Validate the config against the protocol schema
@@ -800,7 +800,7 @@ os build
 # 3. Compare two configs to detect breaking changes
 os diff ./before.json ./after.json
 
-# 4. Publish the compiled artifact as a versioned package to ObjectStack Cloud
+# 4. Publish the compiled artifact as a versioned package to ObjectOS Cloud
 os package publish
 
 # 5. Roll back / forward by installing a prior package version

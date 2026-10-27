@@ -818,6 +818,40 @@ wizard can collect everything first and write once, after its last screen:
   The target `file` field's own `accept` / `maxSize` still apply at the write
   that claims the file.
 
+#### A read-only record link
+
+`type: 'record_link'` shows a record the run already holds the id of, so a
+screen flow can end on a result screen that links the records it created:
+
+```typescript
+{ id: 'create_account', type: 'create_record', config: { objectName: 'crm_account',
+  fields: { name: { dialect: 'cel', source: 'company' } }, outputVariable: 'account' } },
+{ id: 'create_contact', type: 'create_record', config: { objectName: 'crm_contact',
+  fields: { last_name: { dialect: 'cel', source: 'last_name' } }, outputVariable: 'contact' } },
+{ id: 'done', type: 'screen', config: { title: 'Lead converted', fields: [
+  { name: 'account_link', label: 'Account', type: 'record_link',
+    reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } },
+  { name: 'contact_link', label: 'Contact', type: 'record_link',
+    reference: 'crm_contact', defaultValue: { dialect: 'cel', source: 'contact.id' } },
+] } },
+```
+
+- **The console shows the record's name as a link.** The flow dialog fetches the
+  record and shows its display name (the object's `nameField`), as a link to the
+  record's page. An empty id shows "—". `visibleWhen` works as on any field.
+- **`reference` and `defaultValue` are required.** `reference` names the
+  record's object. `defaultValue` is a value slot that evaluates to the record's
+  id when the screen is served, usually a CEL envelope over a flow variable.
+- **It takes no input.** `required`, `options`, `placeholder`, `min` and `max`
+  are refused on it at publish. The console posts nothing for it, and a resume
+  that carries any value under its name is refused with `invalid_value` inside
+  the run's `INVALID_SCREEN_INPUT`. The value is never bound to a flow variable.
+- **The screen still ends with Submit.** A result screen is an ordinary screen:
+  the run completes when the user submits it. A user who follows a link first
+  leaves the run paused, as closing the dialog does.
+- **Why not `record`?** That name is already an object field type (a name-keyed
+  map of sub-objects), and a screen field's `type` uses the same vocabulary.
+
 **Screen (object form):**
 
 Set `config.objectName`
@@ -1255,11 +1289,14 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
      — declared fields: 'kind', 'escalation_reason'
 ```
 
-Two conditions are refused, both reported at once and both with
-`code: 'INVALID_SCREEN_INPUT'`:
+These conditions are refused, all reported at once and all with
+`code: 'INVALID_SCREEN_INPUT'` (the value shapes of `type: 'number'` and
+`type: 'file'`, and the `min` / `max` bounds, are described with those fields
+above):
 
 - a **`required` field the caller was actually asked for** is missing (an empty
   or blank string counts as missing);
+- a value was sent under a **`type: 'record_link'` field**, which takes none;
 - a key the screen **never declared** was sent.
 
 `visibleWhen` is evaluated against the **submitted values** first, so a hidden

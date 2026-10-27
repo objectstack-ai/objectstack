@@ -79,6 +79,20 @@ describe('resolveDeclaredHomePath', () => {
     ).toBeNull();
   });
 
+  it('names the package id, the address the sidebar builds (objectstack-ai/objectstack#26183)', () => {
+    expect(
+      resolveDeclaredHomePath([{ name: 'clm', _packageId: 'app.objectstack.hotclm', isDefault: true }]),
+    ).toBe('/apps/app.objectstack.hotclm');
+    // A package id the package's FIRST app answers to is not the second app's
+    // address: the name stays its only one.
+    expect(
+      resolveDeclaredHomePath([
+        { name: 'crm', _packageId: 'com.acme.suite' },
+        { name: 'ops', _packageId: 'com.acme.suite', isDefault: true },
+      ]),
+    ).toBe('/apps/ops');
+  });
+
   it('keeps the launcher path spelled once', () => {
     expect(HOME_LAUNCHER_PATH).toBe('/home');
   });

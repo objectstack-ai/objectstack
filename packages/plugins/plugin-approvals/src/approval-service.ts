@@ -120,6 +120,7 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
+import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
@@ -1280,13 +1281,13 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
     // objectui#2902: the node's record-lock policy. The lock is enforced
-    // server-side in `lifecycle-hooks.ts` off THIS SAME snapshot with the
-    // same `!== false` default, so the flag a client renders and the rule the
-    // server applies can never drift. Without it a console can only see
-    // "a pending request exists" and has to assume the record is locked —
-    // which mislabels every `lockRecord: false` node as locked and hides an
-    // edit the server would have accepted.
-    lock_record: cfg?.lockRecord !== false,
+    // server-side in `lifecycle-hooks.ts` off THIS SAME snapshot by the SAME
+    // judgement (`nodeConfigLocksRecord`, #26314), so the flag a client renders
+    // and the rule the server applies can never drift. Without it a console can
+    // only see "a pending request exists" and has to assume the record is
+    // locked — which mislabels every `lockRecord: false` node as locked and
+    // hides an edit the server would have accepted.
+    lock_record: nodeConfigLocksRecord(cfg),
     // #3447 P2: the node's author-declared decision outputs, surfaced so a
     // decision UI can render input fields for them and POST `outputs` on
     // approve/reject. Per-request (each node declares its own), which is why
@@ -8639,6 +8640,46 @@ export class ApprovalService implements IApprovalService {
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
     return this.loadRequest(requestId, context, true);
+  }
+
+  /**
+   * [#26314] `IApprovalService.getRecordLock` — is this record held by a
+   * locking approval, for EVERY caller who can read the record (#25934 ruling
+   * A). A non-participant is told the record is locked before they edit it,
+   * instead of being offered an edit the lock hook then refuses.
+   *
+   * ## Who is answered — the #8652 anchor, read as the caller
+   *
+   * `engine.find(object, { where: { id }, context })` with the CALLER's
+   * context, exactly as {@link addRecordReaderVisibleIds} reads it: object CRUD
+   * read, then RLS. A row the caller may not see comes back empty and answers
+   * `null` — the very answer a record id that does not exist gets, because it
+   * is the same branch. ⛔ No path tells the two apart. A refusal of the read
+   * itself (no read on the object) is thrown, and is the same refusal for any
+   * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
+   * every authenticated user in the tenant.
+   *
+   * ## What is answered — the lock, and nothing about the request
+   *
+   * `{ locked }` only: no request id, node, participants or `pending`. Request
+   * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
+   * untouched). The judgement is the record-lock hook's own
+   * ({@link recordHeldByLockingApproval}), never a second copy of it.
+   */
+  async getRecordLock(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<{ locked: boolean } | null> {
+    const objectName = String(object ?? '').trim();
+    const id = String(recordId ?? '').trim();
+    if (!objectName || !id) return null;
+    // The anchor. As the CALLER — see the doc block.
+    const readable = await this.engine.find(objectName, {
+      where: { id }, fields: ['id'], limit: 1, context,
+    });
+    if (!Array.isArray(readable) || readable.length === 0) return null;
+    return { locked: await recordHeldByLockingApproval(this.engine, objectName, id) };
   }
 
   private async loadRequest(

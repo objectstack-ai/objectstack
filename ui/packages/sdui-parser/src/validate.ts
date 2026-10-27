@@ -30,6 +30,7 @@ import type {
 import { inputTypeArms } from './input-type.js';
 import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
 import { checkRetiredBodyDialect } from './body-dialect.js';
+import { checkRetiredVisibilityDialect } from './retired-visibility-dialects.js';
 
 /**
  * The protocol's ONE child-list key — `BaseSchema.children` — and therefore the
@@ -110,12 +111,18 @@ export interface SduiBaseProp {
  * (objectui#6575) — draws nothing here either, and its render-time console
  * warning is the one signal left.
  *
- * `visibleWhen`, `hiddenOn` and `testId` are `'every-node'` for the same reason
- * (objectui#11044): no registration declares any of them, `SchemaRenderer`'s
- * hide chain reads the first two for every node, and it strips `testId` and
+ * `visibleWhen` and `testId` are `'every-node'` for the same reason
+ * (objectui#11044): no registration declares either, `SchemaRenderer`'s
+ * hide chain reads the first for every node, and it strips `testId` and
  * re-emits it as `data-testid`. `visibleWhen` is the canonical ADR-0089
- * predicate; before it joined, the deprecated `visibleOn` was silent while it
- * drew `unknown-prop`.
+ * predicate.
+ *
+ * ⛔ `visibleOn`, `hiddenOn` and `disabledOn` are NOT here and must not be
+ * added. They were `BaseSchema` dialects of `visibleWhen` / `hidden` /
+ * `disabled`, retired at both faces (a `?: never` tombstone on the
+ * declaration, an alias refusal on the zod mirror, ADR-0089 / ADR-0049).
+ * `./retired-visibility-dialects.ts` answers each by name with its canonical
+ * key, the way `./body-dialect.ts` answers `body`.
  *
  * The `'where-undeclared'` members (objectui#11044, triage ruling) are the
  * `BaseSchema` members some registrations DECLARE as typed inputs — the input
@@ -147,11 +154,8 @@ export const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
   { name: 'style', scope: 'every-node', tsType: 'Record<string, unknown>' },
   { name: 'visible', scope: 'every-node', tsType: 'boolean' },
   { name: 'visibleWhen', scope: 'every-node', tsType: 'string' },
-  { name: 'visibleOn', scope: 'every-node', tsType: 'string' },
   { name: 'hidden', scope: 'every-node', tsType: 'boolean' },
-  { name: 'hiddenOn', scope: 'every-node', tsType: 'string' },
   { name: 'disabled', scope: 'every-node', tsType: 'boolean' },
-  { name: 'disabledOn', scope: 'every-node', tsType: 'string' },
   { name: 'bind', scope: 'every-node', tsType: 'string' },
   { name: 'testId', scope: 'every-node', tsType: 'string' },
   { name: CHILD_LIST_KEY, scope: 'every-node', tsType: 'unknown' },
@@ -268,9 +272,13 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Ma
           // SAME predicate the `children` branch below reads — the declared
           // `children` input, never `isContainer` (objectui#9910) — so the two
           // spellings cannot disagree about which components take a list.
+          // The retired node-level visibility dialects (`visibleOn` /
+          // `hiddenOn` / `disabledOn`) get their canonical key named the same
+          // way — mechanism in `./retired-visibility-dialects.ts`.
           const retiredBody = checkRetiredBodyDialect(node.type, key, value, acceptsChildren(comp));
+          const retiredDialect = retiredBody ?? checkRetiredVisibilityDialect(node.type, key);
           diagnostics.push(
-            retiredBody ?? {
+            retiredDialect ?? {
               severity: 'warning',
               code: 'unknown-prop',
               message: `<${node.type}> has no prop "${key}"`,

@@ -286,7 +286,7 @@ See individual CHANGELOG.md files in each package:
 - [packages/client/CHANGELOG.md](packages/client/CHANGELOG.md)
 - [packages/objectql/CHANGELOG.md](packages/objectql/CHANGELOG.md)
 - [packages/runtime/CHANGELOG.md](packages/runtime/CHANGELOG.md)
-- [packages/plugins/driver-memory/CHANGELOG.md](packages/plugins/driver-memory/CHANGELOG.md)
+- [packages/drivers/driver-memory/CHANGELOG.md](packages/drivers/driver-memory/CHANGELOG.md)
 - [packages/plugins/plugin-hono-server/CHANGELOG.md](packages/plugins/plugin-hono-server/CHANGELOG.md)
 - [packages/types/CHANGELOG.md](packages/types/CHANGELOG.md)
 
@@ -321,9 +321,7 @@ Version tag `v0.2.0` has been created for this release.
 ## 📚 Documentation
 
 Full documentation is available at:
-- Development Roadmap: [DEVELOPMENT_ROADMAP.md](internal/planning/DEVELOPMENT_ROADMAP.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Quick Start: [QUICK_START_IMPLEMENTATION.md](QUICK_START_IMPLEMENTATION.md)
 
 ## 🛠️ Build Status
 

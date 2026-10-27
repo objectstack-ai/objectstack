@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 
 /** What `ActionRunner.setTranslator` takes. */
 type ActionRunnerTranslate = (key: string, options: { defaultValue: string }) => string;
@@ -39,4 +39,31 @@ export function useActionRunnerTranslator(): ActionRunnerTranslate {
     return read;
   });
   return translate;
+}
+
+/**
+ * What `ActionRunner.setDisplayLocale` takes: the viewer's display locale, read
+ * when a copy template is filled.
+ */
+type ActionRunnerDisplayLocale = () => string;
+
+/**
+ * The display locale both React owners of an `ActionRunner` install beside the
+ * translator, so the `template` formatters in an action's `confirmText` and
+ * `successMessage` render in the viewer's locale instead of `en-US`
+ * (objectstack#26232). It is `useDisplayLocale()` — the one resolution every
+ * date, number and currency renderer reads; ⛔ no second copy here.
+ *
+ * Read when CALLED, by the same latest-ref pattern as
+ * {@link useActionRunnerTranslator}, so a locale switch reaches a runner that
+ * was built before it.
+ */
+export function useActionRunnerDisplayLocale(): ActionRunnerDisplayLocale {
+  const displayLocale = useDisplayLocale();
+  const latest = useRef(displayLocale);
+  useEffect(() => {
+    latest.current = displayLocale;
+  });
+  const [read] = useState<ActionRunnerDisplayLocale>(() => () => latest.current);
+  return read;
 }

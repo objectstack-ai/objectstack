@@ -627,6 +627,35 @@ export interface FeedItem {
    */
   sourceObject?: string;
   sourceId?: string | number;
+  /**
+   * The `sys_activity` row's own `type` (`updated`, `created`, …), set by
+   * `activityRowToFeedItem` (`@object-ui/plugin-detail`) on every item it maps
+   * (objectstack#25959). `type` above is the feed PRESENTATION, and it maps
+   * `created`, `updated`, `deleted`, `assigned` and `shared` all to
+   * `field_change`, so only this member tells an update from the rest. Absent
+   * on an item that was not read from `sys_activity`.
+   */
+  activityType?: string;
+  /**
+   * The row's domain kind, `sys_activity.metadata.kind` (ADR-0052 §5): for
+   * example `'milestone'` on a row a declared `activityMilestones` entry
+   * fired. Set by the same mapper when the row carries one (objectstack#25959).
+   */
+  activityKind?: string;
+  /**
+   * Who acted, as an id: `sys_activity.actor_id`, or `null` when the row names
+   * no user (a flow, a rollup or a seed, i.e. the system). Set by the same
+   * mapper on every item it maps (objectstack#25959). `actor` above is the
+   * display name.
+   */
+  actorId?: string | number | null;
+  /**
+   * The machine names of the fields the recorded change touched:
+   * `sys_activity.changed_fields` as the server serves it, already narrowed to
+   * the fields this reader may see. Set by the same mapper when the row
+   * carries the column (objectstack#25959). Names only, never values.
+   */
+  changedFields?: string[];
 }
 
 /**

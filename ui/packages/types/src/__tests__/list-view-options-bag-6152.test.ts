@@ -305,8 +305,14 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B 
 
 describe('objectui#6152 round 12 — the TypeScript face is closed the same way', () => {
   it('the bag type has the eight kinds and no index signature', () => {
+    // `closed` is the no-index-signature half. The eight kinds are members, not
+    // a closed list: the bag's keys are the spec's, so a kind the spec adds is
+    // not a red here.
     const closed: string extends keyof Bag ? 'open' : 'closed' = 'closed';
-    const kinds: Equal<keyof Bag, 'kanban' | 'calendar' | 'gallery' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree'> = true;
+    const kinds: Equal<
+      Exclude<'kanban' | 'calendar' | 'gallery' | 'timeline' | 'gantt' | 'map' | 'chart' | 'tree', keyof Bag>,
+      never
+    > = true;
     expect([closed, kinds]).toEqual(['closed', true]);
   });
 

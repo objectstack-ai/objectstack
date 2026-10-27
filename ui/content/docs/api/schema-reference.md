@@ -70,9 +70,8 @@ All schema types extend `BaseSchema`. These shared properties are available on e
   "description": "A container element",
   "className": "p-4 bg-white rounded-lg",
   "visible": true,
-  "visibleOn": "${data.showWrapper}",
-  "disabled": false,
-  "disabledOn": "${data.isLocked}",
+  "visibleWhen": "${data.showWrapper}",
+  "disabled": "${data.isLocked}",
   "testId": "wrapper-element",
   "ariaLabel": "Content wrapper",
   "children": []
@@ -96,12 +95,12 @@ One row per declared member, in declaration order, so the list can be checked ag
 | `body` | *retired* | ⛔ Refused by name (objectui#6771). `body` was a second child-list spelling `BaseSchema` declared beside `children`; it is now `never` on the TypeScript face and an alias refusal on the Zod mirror, and the refusal names `children`. |
 | `children` | `SchemaNode \| SchemaNode[]` | Child components rendered inside this component — the child-list key, and since objectui#6771 the only one. Whether a given node type renders a child list at all is still per component; see the note below. The keys OTHER than this one through which a renderer hands nodes to `SchemaRenderer` (a dialog's `trigger`, a tab item's `content`, a page's `regions[].components`) are per type and declared once as `NODE_SLOT_DECLARATIONS` / `nodeSlotsFor` (objectui#11170); `objectui check`, the core schema validator and the SDUI parser walk those positions as they walk `children`. |
 | `visible` | `boolean \| string \| { dialect?: string; source: string }` | Visibility control. Accepts a boolean, a predicate expression string, **or** the CEL envelope object (`{ dialect: 'cel', source }` — what `objectstack build` emits for every authored predicate) — the renderer evaluates this key rather than reading it as a boolean. The string-or-envelope half is `ExpressionWire`, the one wire type `visibleWhen` on form fields already carries. |
-| `visibleWhen` | `string \| { dialect, source }` | Canonical conditional-visibility predicate (ADR-0089); the element is shown when it evaluates truthy. Typed as `@objectstack/spec`'s `EvaluatedExpressionInput`: a predicate string, or the envelope the spec's parse writes (`dialect` is `cel`, `cron` or `template`, and `source` is not blank). Evaluated **before** `visible` and `visibleOn`, and outranks both. |
-| `visibleOn` | `string` | Expression for conditional visibility. **Deprecated** (ADR-0089) — use `visibleWhen`. |
-| `hidden` | `boolean \| string \| { dialect?: string; source: string }` | Inverse of `visible` — the node is not rendered. Accepts a boolean, a predicate expression string **or** the CEL envelope object (`ExpressionWire`), which the renderer evaluates rather than reading as a boolean; `hiddenOn` remains the sibling spelling. |
-| `hiddenOn` | `string` | Expression for conditional hiding. |
+| `visibleWhen` | `string \| { dialect, source }` | Canonical conditional-visibility predicate (ADR-0089); the element is shown when it evaluates truthy. Typed as `@objectstack/spec`'s `EvaluatedExpressionInput`: a predicate string, or the envelope the spec's parse writes (`dialect` is `cel`, `cron` or `template`, and `source` is not blank). Evaluated **before** `visible`, and outranks it. |
+| `visibleOn` | *retired* | ⛔ Refused by name. `visibleOn` was objectui's own spelling of `visibleWhen`; it is `never` on the TypeScript face and an alias refusal on the Zod mirror, and the refusal names `visibleWhen` (same predicate, same polarity). |
+| `hidden` | `boolean \| string \| { dialect?: string; source: string }` | Inverse of `visible` — the node is not rendered. Accepts a boolean, a predicate expression string **or** the CEL envelope object (`ExpressionWire`), which the renderer evaluates rather than reading as a boolean. |
+| `hiddenOn` | *retired* | ⛔ Refused by name; the refusal names `hidden` (same predicate, same polarity). |
 | `disabled` | `boolean \| string \| { dialect?: string; source: string }` | Disabled state. Accepts a boolean, a predicate expression string **or** the CEL envelope object (`ExpressionWire`), on the same evaluated path as `visible`. |
-| `disabledOn` | `string` | Expression for conditional disabling. |
+| `disabledOn` | *retired* | ⛔ Refused by name; the refusal names `disabled` (same predicate, same polarity). |
 | `testId` | `string` | Test identifier, rendered as `data-testid`. |
 | `ariaLabel` | `string \| KeyedI18nLabel` | Accessibility label, rendered as `aria-label`. `KeyedI18nLabel` is the **keyed** form (`{ key, defaultValue?, params? }`), resolved by `resolveKeyedI18nLabel` — **not** the `I18nLabel` that `label` and `description` carry. The two are structurally confusable and each returns nothing useful for the other's input. |
 
@@ -1439,6 +1438,6 @@ import type { BaseSchema, SchemaNode } from '@object-ui/types';
 
 - **[Schema Overview](/docs/guide/schema-overview)** — High-level guide to ObjectUI schemas
 - **[Quick Start](/docs/guide/quick-start)** — Build your first ObjectUI application
-- **[Expressions](/docs/guide/expressions)** — Dynamic expressions with `visibleOn`, `disabledOn`
+- **[Expressions](/docs/guide/expressions)** — Dynamic expressions with `visibleWhen`, `hidden`, `disabled`
 - **[Fields Guide](/docs/guide/fields)** — Deep dive into form fields
 - **[Plugin Development](/docs/guide/plugin-development)** — Build custom schema renderers

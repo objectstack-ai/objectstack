@@ -1803,7 +1803,7 @@ export type ChatbotSharedKey =
  * NOT declared, on purpose: `loading`, `showAvatars`, `userAvatar`,
  * `assistantAvatar`, `markdown` and `height` — `ChatbotSchema` members this
  * registration has no read for. `disabled` and `className` are inherited from
- * {@link BaseSchema}: `SchemaRenderer` evaluates `disabled` / `disabledOn`
+ * {@link BaseSchema}: `SchemaRenderer` evaluates `disabled`
  * for every node type and hands the verdict to the registration as a prop, so
  * redeclaring `disabled` here as `boolean` would only narrow away the
  * expression-string half of an inherited field (objectui#6169, `c93b4d5f3`).
