@@ -3161,6 +3161,8 @@ const fr = {
     recordAccessDeniedDescription: "Vous n'avez pas la permission de consulter les enregistrements de ce type. Contactez votre administrateur si vous pensez devoir y accéder.",
     recordLoadFailed: "Impossible de charger cet enregistrement",
     recordLoadFailedDescription: "Une erreur s'est produite lors du chargement. Vérifiez votre connexion et réessayez.",
+    recordAccessEnded: "Décision enregistrée",
+    recordAccessEndedDescription: "Votre étape d'approbation est terminée : votre accès à cet enregistrement a pris fin.",
   },
   actionDialog: {
     title: "Paramètres d'action",

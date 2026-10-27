@@ -78,6 +78,7 @@ describe('[#22445] the dry run of a matched row names the stored row it would up
     await runImport({ ...baseOpts, p, writeMode: 'upsert', dryRun: true, rows: [{ code: 'c8', title: 'fresh' }] });
 
     expect(validateData.mock.calls[0]![0]).toMatchObject({ mode: 'insert' });
-    expect(validateData.mock.calls[0]![0].data).toEqual({ code: 'c8', title: 'fresh' });
+    // [#26684] A create row is previewed with the rows of its batch: an array.
+    expect(validateData.mock.calls[0]![0].data).toEqual([{ code: 'c8', title: 'fresh' }]);
   });
 });

@@ -80,6 +80,11 @@ import path from 'node:path';
 import { BLOCK_CONFIG, type BlockPropField, type PlaceholderSpec } from '../block-config';
 import { t } from '../../i18n';
 import { uiRoot } from '../../../../../../../scripts/ui-root.mjs';
+// `engine.inspector.pageBlock.*` lives in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const PREFIX = 'engine.inspector.pageBlock';
 
@@ -474,7 +479,8 @@ describe('placeholders that must NOT be translated (#3979)', () => {
  * must LEAVE both tables — and until this describe nothing measured it. The two
  * repo-wide i18n gates cannot: `check:i18n-keys` and `check:i18n-dead-keys`
  * both read `packages/i18n/src/locales/`, and `engine.inspector.pageBlock.*`
- * lives only in `metadata-admin/i18n.ts` (which says so in its own header). So
+ * lives only in the designer strings (the `studio` namespace since
+ * objectstack#25922; `metadata-admin/i18n.ts` says so in its own header). So
  * each of the four renames so far (objectui#3829, objectui#5212, objectui#8279,
  * objectui#8278) shipped with a HAND-WRITTEN pin naming the one key it retired
  * — a convention, not an instrument, and the fifth rename is one forgotten pin
@@ -497,6 +503,11 @@ describe('placeholders that must NOT be translated (#3979)', () => {
  *      title. These have no position to derive from, so they are read back OUT
  *      of the source, the same way `PageBlockInspector.i18n.test.tsx` reads its
  *      own chrome key list rather than hand-copying it.
+ *
+ * Since objectstack#25922 slice S2 the prefix lives in the `studio` namespace
+ * of `@object-ui/i18n` (`packages/i18n/src/namespaces/studio/{en,zh}.ts`), so
+ * a locale's key set is read from BOTH homes — the app-shell table and the
+ * namespace catalogue — and a key is retired only when it has left both.
  *
  * Measured on this checkout: every one of the 171 `engine.inspector.pageBlock.*`
  * keys in each table is covered by one of those two, and no key is constructed
@@ -540,6 +551,11 @@ const I18N_SOURCE_PATH = path.join(
   ROOT,
   'packages/app-shell/src/views/metadata-admin/i18n.ts',
 );
+/** The `studio` namespace's catalogues — the prefix's home since objectstack#25922 S2. */
+const STUDIO_HOME_PATH = {
+  en: path.join(ROOT, 'packages/i18n/src/namespaces/studio/en.ts'),
+  zh: path.join(ROOT, 'packages/i18n/src/namespaces/studio/zh.ts'),
+};
 
 interface EngineStringTable {
   /** The `const` name, for assertion messages. */
@@ -565,7 +581,7 @@ interface EngineStringTable {
 function engineStringTable(source: string, name: string): EngineStringTable {
   const lines = source.split('\n');
   const open = lines.findIndex((l) => l.startsWith(`const ${name}: Record<string, string> = {`));
-  if (open === -1) throw new Error(`${name}: declaration not found in i18n.ts — the extractor is stale`);
+  if (open === -1) throw new Error(`${name}: declaration not found — the extractor is stale`);
   const close = lines.findIndex((l, i) => i > open && l === '};');
   if (close === -1) throw new Error(`${name}: no column-0 '};' closes the table — the extractor is stale`);
   const keys: string[] = [];
@@ -602,6 +618,7 @@ function shippedLiteralKeys(): Map<string, string[]> {
       if (!/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) continue;
       if (/\.(test|spec)\.[tj]sx?$/.test(entry.name)) continue;
       if (full === I18N_SOURCE_PATH) continue; // the DEFINITION site, not a reader
+      if (full === STUDIO_HOME_PATH.en || full === STUDIO_HOME_PATH.zh) continue; // likewise
       const content = readFileSync(full, 'utf8');
       if (!content.includes(PREFIX)) continue;
       for (const m of content.matchAll(/['"`](engine\.inspector\.pageBlock\.[A-Za-z0-9_.:$-]+)['"`]/g)) {
@@ -619,6 +636,15 @@ function shippedLiteralKeys(): Map<string, string[]> {
 const I18N_SOURCE = readFileSync(I18N_SOURCE_PATH, 'utf8');
 const EN_TABLE = engineStringTable(I18N_SOURCE, 'ENGINE_STRINGS_EN');
 const ZH_TABLE = engineStringTable(I18N_SOURCE, 'ENGINE_STRINGS_ZH');
+const EN_HOME = engineStringTable(readFileSync(STUDIO_HOME_PATH.en, 'utf8'), 'STUDIO_EN');
+const ZH_HOME = engineStringTable(readFileSync(STUDIO_HOME_PATH.zh, 'utf8'), 'STUDIO_ZH');
+
+/** One locale's keys across both homes: the app-shell table and the namespace. */
+function bothHomes(table: EngineStringTable, home: EngineStringTable): EngineStringTable {
+  return { name: `${table.name} + ${home.name}`, keys: [...table.keys, ...home.keys], from: table.from, to: table.to };
+}
+const EN_KEYS = bothHomes(EN_TABLE, EN_HOME);
+const ZH_KEYS = bothHomes(ZH_TABLE, ZH_HOME);
 
 /** The keys `SITES` implies — the complete BLOCK_CONFIG-derived vocabulary. */
 const DERIVED = new Set(SITES.map((s) => s.derived));
@@ -656,6 +682,12 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     // set arithmetic below would hide it.
     expect(EN_TABLE.keys.length).toBe(new Set(EN_TABLE.keys).size);
     expect(ZH_TABLE.keys.length).toBe(new Set(ZH_TABLE.keys).size);
+    // The namespace homes are read the same way, and a key in both homes of
+    // one locale would be counted twice below.
+    expect(EN_HOME.keys.length).toBeGreaterThan(150);
+    expect(ZH_HOME.keys.length).toBeGreaterThan(150);
+    expect(EN_KEYS.keys.length).toBe(new Set(EN_KEYS.keys).size);
+    expect(ZH_KEYS.keys.length).toBe(new Set(ZH_KEYS.keys).size);
   });
 
   it('the extractor really sees the keys the derivation implies', () => {
@@ -663,8 +695,8 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     // same fact. `SITES` comes from walking BLOCK_CONFIG; these sets come from
     // parsing the source text. A parser that silently stopped matching (a
     // reformat, a changed indent) fails here by name, not by going quiet.
-    const enSet = new Set(EN_TABLE.keys);
-    const zhSet = new Set(ZH_TABLE.keys);
+    const enSet = new Set(EN_KEYS.keys);
+    const zhSet = new Set(ZH_KEYS.keys);
     expect([...DERIVED].filter((k) => !enSet.has(k))).toEqual([]);
     expect([...DERIVED].filter((k) => !zhSet.has(k))).toEqual([]);
     expect(DERIVED.size).toBeGreaterThan(150);
@@ -693,8 +725,8 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     // name and the fix is to teach the reader set about it, not to delete the
     // key. Loud is the correct direction to be wrong in.
     expect(
-      unreachable(EN_TABLE),
-      'ENGINE_STRINGS_EN keys under this prefix that BLOCK_CONFIG no longer implies and no ' +
+      unreachable(EN_KEYS),
+      'en keys under this prefix that BLOCK_CONFIG no longer implies and no ' +
         'shipped source asks for — delete them, or teach the reader set about the new reader',
     ).toEqual([]);
   });
@@ -704,8 +736,8 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
     // sibling `every key resolves in zh-CN` cannot see it — a LEFTOVER key
     // resolves perfectly well.
     expect(
-      unreachable(ZH_TABLE),
-      'ENGINE_STRINGS_ZH keys under this prefix that BLOCK_CONFIG no longer implies and no ' +
+      unreachable(ZH_KEYS),
+      'zh keys under this prefix that BLOCK_CONFIG no longer implies and no ' +
         'shipped source asks for — the half a rename forgets',
     ).toEqual([]);
   });
@@ -713,10 +745,10 @@ describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
   it('both tables hold the same pageBlock key set', () => {
     // "Left BOTH tables", stated directly. Asymmetry here is the signature of a
     // half-applied retirement, and the message names which side kept the key.
-    const en = new Set(pageBlockKeys(EN_TABLE));
-    const zh = new Set(pageBlockKeys(ZH_TABLE));
-    expect([...en].filter((k) => !zh.has(k)), 'in ENGINE_STRINGS_EN but not ZH').toEqual([]);
-    expect([...zh].filter((k) => !en.has(k)), 'in ENGINE_STRINGS_ZH but not EN').toEqual([]);
+    const en = new Set(pageBlockKeys(EN_KEYS));
+    const zh = new Set(pageBlockKeys(ZH_KEYS));
+    expect([...en].filter((k) => !zh.has(k)), 'in the en homes but not zh').toEqual([]);
+    expect([...zh].filter((k) => !en.has(k)), 'in the zh homes but not en').toEqual([]);
     expect(en.size).toBeGreaterThan(150);
   });
 });

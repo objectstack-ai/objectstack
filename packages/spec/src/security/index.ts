@@ -22,6 +22,8 @@ export * from './high-privilege';
 export * from './public-form';
 export * from './explain.zod';
 export * from './sharing.zod';
+// [ADR-0142 D1/D2] The ownership queue: a named set of people records sit in.
+export * from './queue.zod';
 export * from './rls.zod';
 export * from './tenancy-posture';
 export * from './tenant-layer0-verdict';

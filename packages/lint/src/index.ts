@@ -315,6 +315,13 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
 
 export {
+  validateAssignmentRules,
+  ASSIGNMENT_RULE_USER_TARGET,
+  ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
+} from './validate-assignment-rules.js';
+export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
+
+export {
   validateSeedReplaySafety,
   SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
 } from './validate-seed-replay-safety.js';

@@ -112,6 +112,10 @@ const FAMILY: Record<string, string[]> = {
   // reading `sys_audit_log` / `sys_activity` and writing nothing, its rewrite
   // runner logging through a sink `--json` points at stderr.
   'migrate audit-mail-bodies': [],
+  // Its twin: the same shape over the same two tables, a dry run by default
+  // that writes nothing, its rewrite runner logging through a sink `--json`
+  // points at stderr.
+  'migrate audit-key-material': [],
   // A dry run is its DEFAULT and the only form driven here: without `--apply`
   // it boots read-only (plugin-audit's objects registered), reads
   // `sys_comment` below the data door and writes nothing.

@@ -39,6 +39,15 @@ import type { PrintSessionCookie } from './principal-session.js';
  * host's CJK font, every code point mapped; with Chromium's fonts narrowed to a
  * Latin-only fontconfig, none did.
  *
+ * ## Under the console's CSP
+ *
+ * The console serves every page with a Content Security Policy whose
+ * `script-src` carries no `'unsafe-eval'` by default (it is added only for the
+ * `kind:'react'` page tier, `consoleContentSecurityPolicy` in
+ * `packages/cli/src/utils/console.ts`). The fixture serves the same print page
+ * under that directive too, so a ready wait that evaluates a string in the page
+ * fails here with the EvalError a default deployment answers.
+ *
  * ## Which Chromium
  *
  * `OS_TEST_PRINT_CHROMIUM_PATH`, else Playwright's provisioned browser
@@ -82,12 +91,17 @@ const COOKIE: PrintSessionCookie = {
 };
 const CJK_TEXT = '发票客户名称上海示例有限公司合计金额';
 const RECORD_PATH = '/_console/apps/showcase/invoice/record/inv_1';
+/** The same record page, served under the console's default CSP. */
+const CSP_RECORD_PATH = '/_console/apps/showcase/invoice/record/inv_csp';
+const CSP_NONCE = 'print-fixture-nonce';
+/** The console's default `script-src` (no `'unsafe-eval'`), with the rest of its policy's script-relevant directives. */
+const CONSOLE_DEFAULT_CSP = `default-src 'self'; script-src 'self' 'nonce-${CSP_NONCE}' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'`;
 
-function printPageHtml(): string {
+function printPageHtml(nonce?: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <style>@media print { @page { size: A4 portrait; margin: 15mm; } nav { display: none; } }</style>
 </head><body><nav>console chrome</nav><div id="root"></div>
-<script>
+<script${nonce ? ` nonce="${nonce}"` : ''}>
   window.__objectui = { idle: false };
   setTimeout(() => {
     document.getElementById('root').innerHTML =
@@ -113,6 +127,11 @@ async function startFixture(): Promise<Fixture> {
     cookieSeen.push(cookie);
     res.setHeader('content-type', 'text/html; charset=utf-8');
     const signedIn = cookie.split(/;\s*/).includes(`${COOKIE.name}=${COOKIE.value}`);
+    if (req.url === CSP_RECORD_PATH && signedIn) {
+      res.setHeader('content-security-policy', CONSOLE_DEFAULT_CSP);
+      res.end(printPageHtml(CSP_NONCE));
+      return;
+    }
     res.end(req.url === RECORD_PATH && signedIn ? printPageHtml() : SIGNED_OUT_HTML);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -291,6 +310,17 @@ describe.skipIf(!CHROMIUM)('the Chromium engine on both placements', () => {
         const targets = toUnicodeTargets(pdf);
         const missing = [...CJK_TEXT].filter((ch) => !targets.has(ch.codePointAt(0)!));
         expect(missing, 'Chinese characters printed as empty boxes (no embedded glyph maps to them)').toEqual([]);
+      }, 60_000);
+
+      it('renders a page served under the console’s default CSP (no unsafe-eval): the ready wait evaluates no string in the page', async () => {
+        const pdf = await pick().driver.renderPdf({
+          url: `${fixture.origin}${CSP_RECORD_PATH}`,
+          cookie: COOKIE,
+          timeoutMs: 30_000,
+        });
+        expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+        const targets = toUnicodeTargets(pdf);
+        expect([...CJK_TEXT].filter((ch) => !targets.has(ch.codePointAt(0)!))).toEqual([]);
       }, 60_000);
 
       it('a page that never shows a print root is refused TIMEOUT / 504, not printed', async () => {
