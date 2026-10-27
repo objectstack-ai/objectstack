@@ -332,12 +332,14 @@ describe('[#25808] the dataset, valued end to end on the engine path', () => {
     expect(Number(byTitle.get('e')?.past_grace ?? 0)).toBe(0);
   });
 
-  it('the dotted offset spelling validates at the schema door and is refused by SQL push-down by name', async () => {
+  it('[#26601] the dotted offset spelling is refused at the schema door, and past it by the read, by name', async () => {
     const dotted = { completed_on: { $lte: { $now: true, addDays: { $field: 'duty.sla_days' } } } };
-    expect(DatasetSchema.safeParse({
+    const saved = DatasetSchema.safeParse({
       ...TASK_HEALTH,
       measures: [{ name: 'within_grace', aggregate: 'count', filter: dotted }],
-    }).success).toBe(true);
+    });
+    expect(saved.success).toBe(false);
+    expect(saved.error?.issues[0]?.message).toContain('"duty.sla_days" is a dotted path');
     const err = await (async () => {
       try {
         await service.queryDataset(

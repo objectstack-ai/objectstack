@@ -9,9 +9,10 @@ import { definePage } from '@objectstack/spec/ui';
  * the requesting user, and archives the PDF as a file attached to the invoice
  * (`showcase_invoice` declares `enable: { files: true }` for that).
  *
- * It is the invoice's DEFAULT record page (`isDefault: true`) because the
- * console renders a record on its default record page, so that is the page a
- * record prints on. Every block is from the printable subset
+ * It is the invoice's DEFAULT record page (`isDefault: true`), so the invoice
+ * opens on its document. That is this app's choice, not a rule: a record prints
+ * on any print page of its object, and one that is not the default renders on
+ * the console's named record-page route. Every block is from the printable subset
  * (`PRINTABLE_PAGE_COMPONENT_TYPES`): the header and footer regions are the
  * letterhead and the footer, repeated on every sheet, and `record:line_items`
  * prints every line up to its cap.

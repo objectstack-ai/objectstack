@@ -14,16 +14,18 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 
 /**
  * ApprovalStepLine — the vertical step line of an approval request's flow:
- * one row per approval step of the owning flow, done / current / upcoming,
- * drawn from the request's server-served `flow_steps` (objectui#12491).
+ * one row per step it is handed, done / current / upcoming (objectui#12491).
  *
- * Two surfaces draw it, through this one markup: the business record's
- * approvals panel (`RecordApprovalsPanel`), which draws it for the record's
- * pending request, and the approval request page's decision panel
- * (`record:approval_decision`), which draws it for the request the page is
- * bound to, at any status. Each caller owns its own gate on WHICH request; the
- * gate on HOW MANY steps lives here, once: a flow with one approval step has no
- * line to draw, so fewer than two steps draws nothing.
+ * It draws the steps its caller proves, and the caller owns that proof. The
+ * approvals get's `flow_steps` is NOT one: it is the flow graph's trunk, not
+ * the route this request takes, so a request a decision sent down another
+ * branch was drawn on rungs it never visits (objectstack#26563). The business
+ * record's approvals panel (`RecordApprovalsPanel`) hands it the steps the
+ * pending request's run has passed plus the pending one, read off the run's
+ * own request rows (`visitedApprovalSteps`). The approval request page's
+ * decision panel holds only its bound row, which proves no step but its own,
+ * so it draws no line until the approvals read serves the route. The gate on
+ * HOW MANY steps lives here, once: fewer than two steps draws nothing.
  *
  * ## Vertical, at every step count (objectui#5554)
  *
@@ -37,21 +39,17 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
  * a row would reintroduce. Nothing here may pin intrinsic width: no `shrink-0`
  * on the rows, no `whitespace-nowrap` on the labels, no horizontal scroller.
  *
- * The approvals inbox's request sheet draws the same stepper from its own
- * copy (its list adds a `px-1` inset), frozen there by ADR-0060 rule 3. Each
- * side pins the contract for itself, by hand rather than by import.
- *
  * The list's accessible name is the Approval Center's
  * `approvalsInbox.stepProgress` row, asked for by literal key so the call-site
  * i18n gate checks it. Module-internal: no export from the package entry and
  * no SDUI component type.
  */
 
-/** One approval step of the owning flow, as the approvals get serves it. */
+/** One approval step of a request's route: its node id, its label and where it stands. */
 export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_steps']>[number];
 
 export interface ApprovalStepLineProps {
-  /** The request's `flow_steps`, as served. Fewer than two steps draws nothing. */
+  /** The steps the caller proved, in route order. Fewer than two steps draws nothing. */
   steps: ReadonlyArray<ApprovalFlowStep> | null | undefined;
 }
 
