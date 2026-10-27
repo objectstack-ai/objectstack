@@ -11,18 +11,23 @@
     "type": "Bot"
   },
   "labels": [
+    "area:records",
     "bug",
-    "finding"
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:38:09Z",
-  "updated_at": "2026-10-27T13:38:09Z",
+  "updated_at": "2026-10-27T19:07:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26718",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA restrict lookup is supposed to block deleting a referenced parent. When the child also holds a master_detail to the very same parent row, the cascade runs first and the child is deleted; the restrict never fires.\n\n## Reproduction\n\n1. Object `widget_part` (parent). Child object with `f_master_detail → widget_part` (required) and `f_lookup → widget_part` with `deleteBehavior: \"restrict\"`.\n2. Create parent P; create a child with both fields = P.\n3. `DELETE /api/v1/data/widget_part/<P>` → 200 and the child is gone.\n4. Control: the child points its two fields at different parents → deleting the lookup parent → 409 DELETE_RESTRICTED.\n\n## Expected\n\nRestrict wins (409 DELETE_RESTRICTED naming the restricting field), or the spec refuses this combination at save time; never a silent cascade past a declared restrict.\n\n## Suspected landing site (the implementer verifies)\n\nSuspected `packages/objectql/src/engine.ts` referential walk: master_detail cascade evaluated before lookup restrict.\n\n## Filing facts\n\n- reach: `DELETE /api/v1/data/…`, measured by the Data QA card twice with a control.\n- Business reason: Restrict is how authors protect referenced records; here data the author declared undeletable is destroyed.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:server`, `area:data`, p2.\n- Dedupe: semantic search `lookup deleteBehavior restrict overridden by master_detail cascade delete same parent` on objectstack-ai/objectstack → 21 hits, none on restrict-vs-cascade ordering (nearest closed #22957 tree deleteBehavior, #24964).\n- QA id: S4"

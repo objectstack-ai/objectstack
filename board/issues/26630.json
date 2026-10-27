@@ -2,8 +2,8 @@
   "number": 26630,
   "kind": "issue",
   "title": "PostgreSQL: the NULL-safe row identity of sys_setting and sys_notification_preference never lands — DROP INDEX is refused by the declared UNIQUE constraint (2BP01) and CREATE UNIQUE INDEX IF NOT EXISTS then no-ops as success (18.2.0)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T11:01:23Z",
-  "updated_at": "2026-10-27T14:29:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T17:17:57Z",
+  "closed_at": "2026-10-27T17:16:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26630",
   "body": "Filing gate: ① product defect, reproduced at a public door (os dev boot on PostgreSQL), with a named location.\n\n- Business reason: every PostgreSQL deployment of 18.2.0 runs without the sys_setting row identity that #8629 restored. Two tenant-scope or global-scope rows for one (organization, namespace, key) can coexist, and SettingsService then has no defined answer for which value wins. That covers live keys such as lifecycle.retention_overrides and the branding settings. sys_notification_preference loses its identity the same way. Nothing tells the operator except two raw driver errors at boot. SQLite deployments are not affected.\n- Who acts: the seat owning packages/metadata-protocol (src/migrations/partial-index-probe.ts probeThenReplaceIndex, sys-setting-identity-index.ts, notification-preference-identity-index.ts), together with packages/drivers/driver-sql syncDeclaredIndexes, which builds declared unique indexes through knex table.unique(); on PostgreSQL that makes a UNIQUE CONSTRAINT, not a bare index.\n- Dedupe (open and closed): \"PostgreSQL cannot drop index uniq_sys_setting constraint requires it NULL-safe row identity\" gave 7 hits, and \"postgres declared unique index created as constraint, DROP INDEX refused, CREATE INDEX IF NOT EXISTS no-op, sys_notification_preference\" gave 4. Neither found this defect. #8629 (closed) is the original defect, fixed on SQLite. #6418 (closed) is the sibling ensureOverlayIndex drop-then-create order.\n\nreach: os dev on an empty PostgreSQL 16 database, published @objectstack/*@18.2.0, measured on 3 boots.\nQA-source: #26629 · smoke:npm-18.2.0 · D3\ntype: Bug\n\n## Reproduction (published 18.2.0, PostgreSQL 16.15)\n\n1. npm create objectstack@18.2.0 my-app; cd my-app; pnpm add pg.\n2. On an empty database: npx os dev --no-watch -p PORT -d postgres://postgres@127.0.0.1:PGPORT/DB.\n3. The boot log, before \"Server is ready\", shows:\n   - [sql-driver] DATABASE_ERROR — the backend refused a raw statement (2BP01) ... cannot drop index uniq_sys_setting_organization_id_namespace_key_scope_user_id because constraint uniq_sys_setting_organization_id_namespace_key_scope_user_id on table sys_setting requires it\n   - the same for uniq_sys_notification_preference_a22d7d27 on sys_notification_preference.\n   It repeats on every later boot over the same database.\n4. psql: select indexdef from pg_indexes where tablename = 'sys_setting' shows UNIQUE (organization_id, namespace, key, scope, user_id), with plain user_id. On SQLite the same 18.2.0 boot leaves (organization_id, namespace, key, scope, COALESCE(user_id, '')).\n5. Consequence, measured in a transaction and rolled back: inserting a copy of the tenant-scope branding/workspace_name row under a new id gives INSERT 0 1, and the count becomes 2. The same insert on an 18.2.0 SQLite database is refused: \"UNIQUE constraint failed: index 'uniq_sys_setting_organization_id_namespace_key_scope_user_id'\".\n\nExpected: sys_setting and sys_notification_preference carry their NULL-safe identity on PostgreSQL, or, if the platform cannot build it, the ADR-0120 D4 degradation line names what is not enforced. Actual: the tightening silently does not happen, and no [metadata-protocol] line is printed.\n\n## Mechanism (read at 27f38ada)\n\n- SqlDriver.syncDeclaredIndexes creates the declared unique through knex table.unique(fields), which on PostgreSQL is ALTER TABLE ... ADD CONSTRAINT ... UNIQUE. Its backing index cannot be dropped with DROP INDEX.\n- partial-index-probe.ts probeThenReplaceIndex: the probe CREATE under the throwaway name succeeds. Then dropIndexQuietly(indexName) runs DROP INDEX IF EXISTS, which PostgreSQL refuses with 2BP01. The refusal is swallowed by contract, but sql-driver prints it.\n- buildSysSettingIdentityIndexSql emits CREATE UNIQUE INDEX IF NOT EXISTS under the same name. The constraint's index already holds that name, so the statement is a no-op and the outcome reports status 'created'. reportDegradation never runs.\n- The sibling notification-preference-identity-index.ts goes through the same seam with the same result.\n\nFull evidence chain: the run record #26629, cell D3."

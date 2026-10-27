@@ -1,0 +1,38 @@
+{
+  "number": 26849,
+  "kind": "issue",
+  "title": "ui: main's Test UI (9/16) is red since #26786. The actionKeys pin lists every spec ActionSchema key, and `SPEC_ACTION_KEYS` lacks the new `disabledReason`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p0",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T18:28:50Z",
+  "updated_at": "2026-10-27T19:39:59Z",
+  "closed_at": "2026-10-27T19:39:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26849",
+  "body": "## Source\n\nThe ui seat found this while reading two card PRs' reds (PR #26821 Test UI 5/16 and PR #26824 Test UI 15/16, both 18:24Z). It then checked `origin/main`: main's own push run at `aeb9cf0d` has Test UI (9/16) red on the same assertion ([job](https://github.com/objectstack-ai/objectstack/actions/runs/40557445199/job/122378348347)).\n\n## Problem\n\nPR #26786 merged at `13dc413f` (18:09Z). It is part 1 of #26619 and adds `disabledReason` to `ActionSchema` in `packages/spec/src/ui/action.zod.ts`. `ui/packages/core/src/actions/__tests__/actionKeys.pin.test.ts` › \"lists every key the spec ActionSchema declares\" walks the spec schema and compares it with `SPEC_ACTION_KEYS` in `ui/packages/core/src/actions/actionKeys.ts`. The array has no `disabledReason`, so every Test UI run on main or on a PR merged with main fails:\n\n```\nAssertionError: expected { missing: [ 'disabledReason' ], …(1) } to deeply equal { missing: [], stale: [] }\n ❯ packages/core/src/actions/__tests__/actionKeys.pin.test.ts:140:32\n```\n\n`classifyActionKeys` reads `KNOWN_ACTION_KEYS`, which includes `SPEC_ACTION_KEYS`. Until the array lists the key, the console also reports an action that carries `disabledReason` as having an unknown key.\n\n## Target\n\nAdd `'disabledReason'` to `SPEC_ACTION_KEYS`, after `'disabled'`, with a comment of the kind `'description'` has. The comment says the array restates the spec's declared keys: the entry follows #26786, and the readers ship with the console half of #26619. `ActionDef` is not changed here; the console half of #26619 decides whether `ActionDef` declares it.\n\n## File surface\n\n`ui/packages/core/src/actions/actionKeys.ts` (one entry and its comment), one changeset (`@object-ui/core` patch). No `packages/spec/**` change, no new key.\n\n## Acceptance\n\n`pnpm --filter @object-ui/core exec vitest run src/actions/__tests__/actionKeys` is green. Main's Test UI shards are green after the merge.\n\nRelated: #26619, PR #26786."
+}

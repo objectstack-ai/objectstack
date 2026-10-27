@@ -1,0 +1,37 @@
+{
+  "number": 26775,
+  "kind": "issue",
+  "title": "plugin-auth: set-user-manager's depth cap counts only the chain above the new manager, so linking bottom-up builds a manager chain past MAX_MANAGER_CHAIN_DEPTH (each link 200)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T15:19:53Z",
+  "updated_at": "2026-10-27T19:56:06Z",
+  "closed_at": "2026-10-27T19:53:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26775",
+  "body": "Filing gate: class (b), contract violation. Measured by the #26616 card thread during PR #26763 (contract review `6445518048` on that PR, should-fix (b)). The bug predates that PR. Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\nGoverning text: `packages/plugins/plugin-auth/src/admin-set-user-manager.ts:69-72`: \"**Depth** — refused past `MAX_MANAGER_CHAIN_DEPTH`. ADR-0057 D3 requires the hierarchy rollups it feeds to be \"bounded (hard cap + cache, mirroring the `org_user_ids` cap)\"; an unbounded chain written here is an unbounded rollup there.\"\n\n## What was measured\n\nRead at `origin/main` `a485b5a3`:\n- `walkChain` (`admin-set-user-manager.ts:329-357`) starts at the proposed manager and counts `1` (the edge being written) plus each ancestor above that manager. It never counts the subordinates already below the edited user.\n- Writing `B.manager = A`, then `C.manager = B`, and so on from the top is refused at link 21.\n- Writing from the bottom, `U20.manager = U21`, then `U19.manager = U20`, …, then `U1.manager = U2`, is not refused. Each write sees a short chain above the proposed manager, but each one extends a chain that already hangs below the edited user. Every link answers 200, and the finished chain is 21+ links deep.\n- Reach: `POST /api/v1/auth/admin/set-user-manager` (public admin endpoint), and the demoStaff provisioning that reuses `applyUserManagerLink` (#26763).\n\nRe-check: `grep -n \"let links = 1\" packages/plugins/plugin-auth/src/admin-set-user-manager.ts`. While the walk only goes upward, the hole is present.\n\n## Wanted\n\nBound the whole chain the write creates: the depth above the proposed manager, plus 1, plus the longest chain of existing subordinates below the edited user. Refuse with the existing `too_deep` reason when the total passes the cap. Pin both orders (top-down and bottom-up, 21 links) and the boundary at exactly 20.\n\n**Business reason:** the hierarchy rollups ADR-0057 D3 feeds (manager-and-subordinates scopes) promise a bounded walk. A chain past the cap is resolved only in part. A manager then silently loses sight of records owned deep in their chain, and nothing tells the admin who built it.\n\n**Reader who acts:** `domain:server` (`plugin-auth`). No spec change.\n\nDedupe: open issues grepped for \"set-user-manager depth cap\", \"manager chain depth bottom-up\" and \"MAX_MANAGER_CHAIN_DEPTH subordinates\": none.\n\nClause-②: no (narrowing)\nMetadata-protocol: none"
+}

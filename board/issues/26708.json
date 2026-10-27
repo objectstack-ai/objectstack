@@ -14,18 +14,20 @@
     "area:studio",
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:32:26Z",
-  "updated_at": "2026-10-27T14:19:53Z",
+  "updated_at": "2026-10-27T15:54:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26708",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA metadata save naming a package that does not exist is accepted, both as a draft and as an active save, and `publish-drafts` on that phantom id publishes. With no manifest there is no namespace, so the namespace-prefix gate is skipped. The phantom package then shows up in stats. The flow door already refuses this (#20863 / PR #20959); the other types do not. In Studio, `/_console/studio/<nonexistent-package>` renders a full writable builder (New object, Create app) instead of \"package not found\", and an unknown pillar segment falls through to Interfaces.\n\n## Reproduction\n\n1. As admin: `PUT /api/v1/meta/object/ghost_two?mode=draft&package=com.example.nosuch2` body `{\"name\":\"ghost_two\",\"label\":\"Ghost Two\",\"sharingModel\":\"private\",\"fields\":{\"name\":{\"type\":\"text\",\"label\":\"Name\"}}}` → 200 \"Saved object … package=com.example.nosuch2, state=draft\".\n2. `GET /api/v1/packages/com.example.nosuch2` → 404 RESOURCE_NOT_FOUND.\n3. `POST /api/v1/packages/com.example.nosuch2/publish-drafts` → 200 `outcome:\"published\"`; `GET /api/v1/meta/object/ghost_two` → 200 live, unprefixed.\n4. `PUT /api/v1/meta/object/qa_ghost_obj?package=com.example.nosuch3` (no mode) → 200 \"state=active\". Same for dashboard and page bodies.\n5. Browser: `/_console/studio/com.example.nosuch` → writable builder with package chip; `/_console/studio/<pkg>/bogus_pillar` → Interfaces pillar, nothing highlighted.\n\n## Expected\n\nEvery save and publish door refuses an uninstalled package the way the flow door does (422 naming that no package with that id is installed), and Studio shows a \"package not found\" state for an unknown package or pillar.\n\n## Suspected landing site (the implementer verifies)\n\nThe `/meta` save door package resolution and `packages/runtime/src/domains/packages.ts` publish-drafts (the flow-only refusal from PR #20959 generalised to every type); Studio `StudioDesignSurface.tsx` package/pillar resolution.\n\n## Filing facts\n\n- reach: `PUT /api/v1/meta/…` and `POST /api/v1/packages/…/publish-drafts` measured as admin; Studio URL measured in the browser.\n- Business reason: A typo in a package id silently creates live, unnamespaced metadata owned by nothing — it cannot be uninstalled or exported as a package, and it bypasses the namespace rule.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:server`, `area:studio`, p1.\n- Dedupe: semantic search `metadata save accepts package that is not installed, publish-drafts on nonexistent package` on objectstack-ai/objectstack → 41 hits; related closed #20863 (flow door only) and #24547 (namespace prefix on active save); no open duplicate.\n- QA id: F3"

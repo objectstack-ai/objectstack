@@ -1,0 +1,30 @@
+{
+  "number": 26848,
+  "kind": "pull_request",
+  "title": "qa(checklist): studio-authoring accuracy fixes + 23 items from the Studio QA run",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T18:25:03Z",
+  "updated_at": "2026-10-27T18:26:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26848",
+  "body": "## 维护者速读\n- 改了什么：根据 Studio QA 运行（#26715，测于 3fcafcd3）的发现，修正 studio-authoring 区 12 个测试项过时的步骤和条款；新增 23 个 active 测试项，覆盖离开守卫、未完成编辑的发布拒绝、四个板块的各页签、无 Studio 入口的属性矩阵、已移除键的拒绝、未安装包的拒绝；并对账 coverage.json。\n- 为什么改：清单与产品不符会让下一轮误判；运行中实际测过、但清单没有的能力，需要落成可执行的测试项。已坏的能力按正确行为写，并在 knownGaps 记下缺陷卡。\n- 风险与回滚：只改 docs/qa/platform-checklist/ 下三个文件，不发布任何包。回滚即 revert 本 PR。picklist 豁免改为 items 是一项判断，见下文。\n- 先看：\n  - coverage.json 的 picklist 条目；\n  - studio-authoring.removed-key-save-door-refusal（按 HEAD 写：#26599 之后 22 个键改为按未知键拒绝）；\n  - permission-matrix-editor-ux 的 history r6。\n- 两分钟验证：`node scripts/check-platform-checklist.mjs && node scripts/check-platform-checklist.mjs --self-test && node scripts/checklist-select.mjs area:studio-authoring`，预期全部退出 0。\n- 需要你做的：确认是否接受把 picklist 豁免改为 items。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThis is a scoped, single-hunter `checklist-author` pass over the findings of the Studio QA run. The run record is #26715. The run tested `3fcafcd3`; this pass re-read the sources at `43731031`.\n\n**Accuracy fixes (12 items).** Each item gets a revision bump and a `history` row:\n- object-designer-roundtrip\n- view-authoring-live\n- draft-publish-lifecycle\n- authoring-validation-not-persisted\n- org-override-registry-gate\n- expression-editors\n- permission-matrix-editor-ux\n- packaged-automation-studio-lock\n- packaged-display-class-direct-edit\n- doc-on-app-menu\n- picklist-bound-select\n- multi-package-item-rows\n\n**23 new `active` items:**\n- **Cross-pillar:** the leave guard and the held-edit publish refusal.\n- **Automations:** rail and new-flow presets, edge types, the package-less (~org) scope, and Studio status vs `GET /automation/_status`.\n- **Data:** Validations, Hooks, Actions, the API tab, summary fields, and preservation of API-written keys across a Studio save.\n- **Interfaces:** the create dialogs, all 20 widget types and 5 global-filter types, report options, app and nav-entry keys, slotted pages, and page variables.\n- **Access:** the set lifecycle, the facet tabs and their runtime effect, and the OWD and suggestions panels.\n- **Cross-type:** the no-Studio-entry property matrix, removed-key refusal at the save door, and the uninstalled-package refusal.\n\nWhere the run found a capability broken, the clause states the correct behaviour and `knownGaps` cites the defect card (#26705, #26707, #26708, #26711, #26712, #26718, #26719), or \"recorded by QA run #26715\" where no card existed yet.\n\n**coverage.json.** The new items are mapped to their kinds. The `picklist` waiver was re-audited and replaced with items: its premise is stale, because the liveness ledger grades 10 of 11 picklist keys live. The `$comment` states what the mapping does not claim.\n\n**FOLLOW-UPS.md §12.** Records the scope, the liveness-ledger note and the pin-spelling note.\n\n## Deliberately not changed\n\n`studio-authoring.permission-matrix-editor-ux` acceptance[3] and steps[3] stay as written: a QA finding on that question is held under a security card (detail withheld pending maintainer).\n\n## Validation\n\nOn the branch head, and again on the branch merged with `origin/main` `3c2187f4`:\n- `node scripts/check-platform-checklist.mjs` → 0 (16 areas, 352 items).\n- `node scripts/check-doc-authoring.mjs` → 0.\n\nOn the branch:\n- `node scripts/check-platform-checklist.mjs --self-test` → 0.\n- `node scripts/checklist-select.mjs --self-test` → 0.\n- `node scripts/checklist-select.mjs area:studio-authoring` → 0.\n\nVitest pins were not run, since this diff changes no code.\n\n## Notes for review\n- Single hunter, run sequentially: this PR makes no claim that nothing else is missing.\n- No changeset: this is a `docs/qa` change that publishes nothing, so it carries `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAkZns5rNnK2rtszzbQ\n"
+}

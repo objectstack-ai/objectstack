@@ -2,8 +2,8 @@
   "number": 26631,
   "kind": "issue",
   "title": "docs(upgrading): the Per-release specifics table has no v18.2.0 row — 18.2.0 is published and its upgrade checklist (releases/v18/18-2) is not linked from the upgrade guide",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "documentation",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T11:01:48Z",
-  "updated_at": "2026-10-27T12:09:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T18:46:53Z",
+  "closed_at": "2026-10-27T18:45:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26631",
   "body": "Filing gate: ① product docs defect, shipped text (content/docs/upgrading.mdx), named location.\n\n- Business reason: an operator moving a deployment to the published 18.2.0 opens the upgrade guide, which says the per-release specifics live in that release's checklist. The table stops at v18.1.0, so the reader never learns that 18.2.0 has an upgrade checklist. That checklist is content/docs/releases/v18/18-2.mdx, which landed after the release in #26494. #24904 and #24905 closed the same gap for 18.0.0.\n- Who acts: the docs lane owning content/docs/upgrading.mdx. The fix is one table row, \"| v18.2.0 | [Upgrade checklist — 18.2.0](/docs/releases/v18/18-2#upgrade-checklist) |\", above the v18.1.0 row, with the anchor checked against 18-2.mdx.\n- Dedupe (open and closed): \"upgrading.mdx 18.2.0 row per-release specifics release notes 18-2 page\" gave 10 hits, and \"Upgrading per-release specifics table missing v18.2.0 row\" gave 8. #26429 (closed) wrote 18-2.mdx but not the upgrading row. #24904 and #24905 (closed) are the 18.0.0 instances.\n\nQA-source: #26629 · smoke:npm-18.2.0 · C3\ntype: Bug\n\n## Reproduction\n\n1. git show 27f38ada:content/docs/upgrading.mdx and read \"Per-release specifics\". Do the same on main (measured at 7c34e5dc).\n2. Expected: a v18.2.0 row linking the 18.2.0 upgrade checklist. Actual: the newest row is v18.1.0 in both.\n3. At the release commit, content/docs/releases/v18/ holds 18-0.mdx, 18-1.mdx and index.mdx only. 18-2.mdx exists on main from #26494.\n\nFull evidence chain: the run record #26629, cell C3."

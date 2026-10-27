@@ -1,0 +1,35 @@
+{
+  "number": 26800,
+  "kind": "pull_request",
+  "title": "test(app-shell): flowCanvasChip-11665 awaits the lazy studio zh catalogue before reading the tooltip",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T16:37:43Z",
+  "updated_at": "2026-10-27T18:35:39Z",
+  "closed_at": "2026-10-27T18:35:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T18:35:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26800",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ81VujgxVnz75EwAiFbgNpow)_\nFixes #26692\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 自动化画布标题条的测试 `flowCanvasChip-11665`,在模块作用域先 `await loadStudioCatalogue('zh')`,再跑用例;只改测试,不动源码。另修 `metadata-admin/inspectors/inspectorStrings.i18n-10804` 同类竞态(#26780 把 flowNode 文案移入 studio 懒加载包后暴露)。\n- 为什么改:zh 用例只等了标题条出现,就同步读提示文字「API 名称」;这行文案在按需加载的 studio 中文包里,包没到时读到英文,Test UI 随机变红(CI run 40506346595)。\n- 风险与回滚:两个测试文件各加 6 行,不发布任何包;回滚即还原这两个文件。\n- 先看:`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.flowCanvasChip-11665.test.tsx` 第 27–32 行。\n- 两分钟验证:在仓根跑 `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.flowCanvasChip-11665.test.tsx`,应见 4 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe zh case of `StudioDesignSurface.flowCanvasChip-11665.test.tsx` awaited only `findByTestId('auto-canvas-caption')` and then asserted the chip's `title` synchronously. That title is `designer.field.apiName`, a row of the `studio` i18n namespace, whose zh catalogue is a lazy `import()`. If the chunk had not landed, the title was still the en row, so `Test UI` could go red on any PR whose shard ran this file.\n\nThe test now loads the catalogue at module scope (`await loadStudioCatalogue('zh')`), the same shape the other studio-namespace zh tests in app-shell already use (for example `CelTestRunDialog.i18n-10862.test.tsx`, `BuilderLanding.environmentOverlayCopy-12171.test.ts`). The cost moves into the import phase, outside any test or hook timeout, per `ui/AGENTS.md` test discipline. No sleep, no retry wrapper, no quarantine.\n\n`inspectorStrings.i18n-10804.test.tsx` gets the same preload. #26780 (#25922 S2) moved `engine.inspector.flowNode.*` into the lazy `studio` namespace, and that test's `zhRow()` reads `t(key, 'zh-CN')` synchronously, so `Test UI (3/16)` went red twice on `8dd8c259` (`flowNode.kind` read as `Node`).\n\n## Why\n\nTriage ruling 6444153925: the test awaits the catalogue. Of the two spellings the dispatch order offered (top-level preload, or `findBy`/`waitFor` on the title), this PR picks the top-level preload: it is the established pattern in this package, and it waits on the catalogue itself rather than on an RTL budget the loader can still overrun.\n\n## Tests\n\nDeterministic proof at head `d3202677` (merge base `c8583f80`), under the shared verify lock. The studio zh loader (`ui/packages/i18n/src/namespaces/studio/index.ts`) was delayed 4000 ms through `scripts/ablation-replace.mjs`; every mutation was restored (blob equals HEAD, `git diff HEAD` empty).\n\n| Leg | Fixes | zh loader | Result |\n|---|---|---|---|\n| 0 | both kept | normal | Tests 25 passed (25) |\n| A | both kept | delayed 4000 ms | Tests 25 passed (25) |\n| B1 | 10804 preload removed | delayed 4000 ms | 3 failed, 18 passed (the CI failure: `flowNode.kind` zh read as `Node`) |\n| B2 | flowCanvasChip preload removed | delayed 4000 ms | 1 failed, 3 passed (the card's failure: `API name` vs `API 名称`) |\n\n## Acceptance notes\n\n- Sweep, measured not read: with the studio zh loader delayed 4000 ms, all 259 app-shell test files that name zh without the preload ran (2634 tests); only `inspectorStrings.i18n-10804` went red. The seat's 8 other heuristic candidates (three `FlowNodeInspector` tests, `datasetPickers.authorText-11161`, `FlowPreview.removeNode-11772`, `flow-problems.removalRefusal-11838`, `previewStrings.i18n-10848`, `metadataError.heldWidget-11910`) stayed green and are dropped: they compare the DOM with `t()` in the same tick, so a slow chunk leaves both sides en.\n- No changeset: `@object-ui/app-shell` is private and only a test file changed (`skip-changeset`).\n\n## Verification\n\nGate families derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `d3202677` (merge base `c8583f80`; 24 derived, 24 run, all exit 0), each run locally with exits captured before any pipe and reconciled with `--ran`; readings are in the os-dev report on #26692. Repo-wide scans (`pnpm lint`, the full `Test UI` matrix) are CI's.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the maintainer summary is in Chinese by the dispatch contract)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXwuDiqzYUyEfANmtM\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXwuDiqzYUyEfANmtM)_\n\n"
+}

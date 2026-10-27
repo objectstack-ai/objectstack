@@ -12,20 +12,20 @@
   },
   "labels": [
     "area:ai",
-    "domain:server",
+    "domain:cloud",
     "enhancement",
-    "pm:queue",
-    "priority:p1"
+    "priority:p1",
+    "status:parked"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:04:29Z",
-  "updated_at": "2026-10-27T14:19:16Z",
+  "updated_at": "2026-10-27T18:01:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26691",
   "body": "Filing gate **③ a task the maintainer directed.** The maintainer's words, verbatim, in the HotCRM project thread: 「hotcrm 的文档类型元数据还没有好好利用，综合评估一下应该写哪些文档，以及如何挂到菜单上」 (2026-10-27T12:09Z), then, on the evaluation whose step 6 is this card (\"platform cards: book-label localization and a `doc` knowledge source, filed in objectstack\"), 「同意，立卡派发。」 and 「立卡，你不需要派发」 (2026-10-27T12:54Z). Evaluation (Chinese): https://claude.ai/artifact/FSRbbgsT8uFhTxYe5jMBvS. Filed from that thread (`session_01FEkQ5n3dhGrDN5nEgsJyck`). Filed at destination for triage; ⛔ not a claim.\n\n## 维护者速读\n\n- **事由：** ADR-0046 说包文档最大的消费者是应用内 AI（回答「怎么做」），但知识源只有对象、文件、网址三种，没有「包文档」，Ask 助手读不到 HotCRM 写的规则说明。\n- **要做：** 让已安装包的 `doc` 能被助手检索（形状由分诊定：一种新的知识源，或助手的一个读文档工具），并遵守书的访问控制。\n- **完成标准：** 在 HotCRM 里问 Ask「大单审批什么时候触发」，它引用 `crm_sales_opportunities` 作答；销售代表问管理员手册里的内容，得不到受限文档的内容。\n\n**Business reason:** HotCRM is about to grow its in-app docs from 4 to 20 (rules the screens do not show: routing, approval thresholds, SLAs, visibility, metric definitions). The reader most likely to ask those questions asks the assistant first. Without this, every package author writes the same rule twice, once as a doc and once as skill prompt text, and the two drift.\n\n**Reader (who acts):** objectstack triage (`domain:server` for `service-knowledge` and the agent runtime; `domain:spec` if a source kind is added).\n\n**Dedupe:** objectstack issue search (repo-scoped), queries \"knowledge source kind doc package docs agent grounding RAG\" and \"agent answers how-to questions from package docs doc metadata knowledge\", 2026-10-27 → 0 hits on the subject (closest: #10730, the retired `agent.knowledge` key documented as live, closed).\n\n## Readings (objectstack `main` `86ae47e1`)\n\n- `packages/spec/src/ai/knowledge-source.zod.ts`: `KnowledgeSourceKindSchema` is a discriminated union of `object`, `file`, `http` — no `doc`.\n- `packages/services/service-knowledge/src`: no reader of `doc` items.\n- A grep of `packages/` for agent tools named `get_* / list_* / read_* / search_* / describe_*` finds `list_objects`, `describe_object`, `get_record`, `list_records`, `search_knowledge_base` — none reads a `doc`.\n- ADR-0046 §3.6: \"AI assistant grounding: in-app agents load the package's docs as context to answer 'how do I…' — likely the highest-frequency consumer and a direct payoff of docs-in-manifest.\"\n\n## Governing text\n\n- ADR-0046 §3.6 (above) and §6.7: a doc's effective audience is the union over the books that claim it, enforced at the read layer — the retrieval path must apply the same gate, never a broader one (cf. #2981, retrieval falling open to the unfiltered corpus).\n- ADR-0063: `ask` is the platform data-surface agent; package AI capability ships as skills.\n\n## Done when\n\n- The `ask` agent can retrieve the installed packages' `doc` items (locale-resolved) for an answer, through one mechanism decided at triage.\n- Retrieval applies the docs audience gate per caller: a doc the caller cannot read through `/meta/doc` is never retrieved for them; a test proves both directions.\n\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01W2kbUv4yYL1quTZhCMVSej?thread=cmsg_01W2kbUv4yYL1quTZhCMVSejGmdvYsuXanpDEoryDJwW1n)_"

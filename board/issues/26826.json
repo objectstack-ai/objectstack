@@ -1,0 +1,37 @@
+{
+  "number": 26826,
+  "kind": "pull_request",
+  "title": "fix(core): interpolate api action targets before a registered api handler",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T17:45:21Z",
+  "updated_at": "2026-10-27T18:50:05Z",
+  "closed_at": "2026-10-27T18:45:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T18:45:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26826",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb3cr6whx99bskUDH3xXu7A3)_\n\nFixes #26722\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:记录页上 `type: \"api\"` 的动作,目标地址里的 `${ctx.recordId}` 等占位符现在会先被替换成真实值再发请求,和 `url` 动作用的是同一套替换与编码。\n- **为什么改**:控制台注册了自己的 api 处理器,绕过了 ActionRunner 里唯一做替换的 `executeAPI`,请求带着字面占位符发出(`…/$%7Bctx.recordId%7D`),记录级 PATCH/POST 动作在每条记录上都打到不存在的记录。\n- **风险与回滚**:只影响「已注册 api 处理器 + 目标里带 `${` 占位符」的动作;不带占位符的动作原对象原样交给处理器。回滚即 revert 本 PR。\n- **先看**:`ui/packages/core/src/actions/ActionRunner.ts` 中 `dispatchCollected` 的已注册处理器分支;`ActionRunner.apiHandlerTarget-26722.test.ts`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/core/src/actions/__tests__/ActionRunner.apiHandlerTarget-26722.test.ts`,预期 7 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n`ActionRunner.dispatchCollected` now runs `interpolateTarget` on an `api` action's string `target` before handing the action to a registered `api` handler. It is the same call the built-in `executeAPI` and `executeUrl` make, so an api target gets the same scopes (`ctx`, `param`) and the same per-value `encodeURIComponent` as a url target. There is no second interpolator and no change in `app-shell`.\n\n- The landing site differs from the card's first guess. `executeAPI` already interpolated, but the Console registers its own `api` handler (`useConsoleActionRuntime`'s `apiHandler`, wired through `ActionProvider`'s `handlers`), and that handler replaces `executeAPI` entirely. The handler only filled `{field}` row tokens, so `${ctx.recordId}` reached `authFetch` literally.\n- An api target with no token reaches the handler as the same action object. A registered handler for any other type (`flow`, `script`, `modal`) still gets its target exactly as authored.\n- Comments on `interpolateTarget` now name the new caller.\n\n## Why\n\nThe spec documents `${ctx.recordId}` for api targets, and a url action with the same token already resolved. Record-level API actions could not be built without code because they failed on every record.\n\n## Tests\n\nNew `ui/packages/core/src/actions/__tests__/ActionRunner.apiHandlerTarget-26722.test.ts` (7 cases):\n\n- a PATCH and a POST api action on a record page hand the registered handler `/api/v1/data/gapdata_item/gd_001`;\n- an id with a slash and a space is encoded the same way for an api target and a url target (`a%2Fb%20c`);\n- with no handler registered, the built-in executor sends the same resolved path;\n- a url action with the same token is unchanged;\n- a registered `flow` handler still gets its target as authored;\n- an untokenized api action reaches the handler as the same object.\n\n## Acceptance notes\n\n- The url path also runs the expression evaluator after substitution; the api path did not before and does not now. The order asked for the same variables and encoding, which this delivers, and nothing more.\n- `${ctx.recordId}` on a list row action resolves from the runner's context (the page record), not from the clicked row. That is how url targets behave today too, so it is unchanged here. Row actions keep using the `{field}` row tokens the Console's handler already fills.\n\n## Verification\n\n<details><summary>Ablation (one-time, on head 333eef54, mutation restored)</summary>\n\nWith `actionType === 'api'` replaced by `false` in the new branch (via `scripts/ablation-replace.mjs`, anchor 1 → 0, blob restored to HEAD's), the new file reads 3 failed / 4 passed: the PATCH, POST and encoding cases go red, and the built-in, url, flow and same-object controls stay green.\n</details>\n\n<details><summary>Suites and type-check (head 333eef54)</summary>\n\n- `pnpm --dir ui exec vitest run packages/core/ --maxWorkers=1` under the verify lock: Test Files 215 passed (215), Tests 4112 passed, 27 skipped.\n- `pnpm --filter @object-ui/core run type-check`: exit 0.\n- `pnpm --dir ui exec vitest run scripts/ --maxWorkers=2` under the verify lock: Test Files 178 passed, 2 skipped (180); Tests 5065 passed, 2 skipped.\n- `pnpm check:new-line-citations` (from `ui/`): 0 new citations. `eslint` on both changed files: 0 errors; the 15 warnings are existing `no-explicit-any` lines the diff does not touch.\n- Narrowing: `app-shell` and `components` suites were not run locally. A `git grep` over ui tests finds no test outside `packages/core` that registers an api handler and dispatches a target carrying a `${` token, and untokenized actions reach the handler as the same object. CI's Test UI runs those suites.\n</details>\n\n<details><summary>Derived gates (head 333eef54)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 commands. 33 ran locally, each exit 0, and with the scripts suite `--ran` reconciles all of them (`Run reconciliation — 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN`). The 34th, `pnpm --dir ui exec vitest run scripts/`, is in the suites block above.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTDpMW8KaXLg1DFU6f)_\n"
+}

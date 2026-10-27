@@ -2,8 +2,8 @@
   "number": 26581,
   "kind": "issue",
   "title": "record:path ticks a stage the record skipped — a contract type with no legal review shows 「审查中 ✓」 after approval",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T08:49:59Z",
-  "updated_at": "2026-10-27T13:21:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T16:01:57Z",
+  "closed_at": "2026-10-27T16:01:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26581",
   "body": "Ruled: 6442747364 · letter A (with the current_user guardrail) · 2026-10-27T13:14Z\n\nFiling class: ① user-visible defect (misleading status) — reach: public door, measured in a browser on the 18.1.0 Console with objectstack-ai/hotclm `main`. **Reader:** the UI lane (`record:path` renderer) and the spec owner of `RecordPathProps` (`packages/spec/src/ui/component.zod.ts:2187`).\n\n## Business reason\nIn a contract system, 「审查中 ✓」 reads as \"legal reviewed this\". hotclm order contracts (ORD) skip legal review by design and go straight to approval. Yet their page path shows 审查中 as a passed step. An auditor or a requester reading the page is told something that did not happen.\n\n## Measured\nORD-2026-0017 (submitted → in_approval → approved, never `in_review`): the path shows 草稿 ✓ 已提交 ✓ **审查中 ✓** 审批中 ✓ **已批准**. The renderer ticks every stage before the current one by position. A stage takes only `value`, `label` and `terminal`; there is no way to say a stage applies conditionally or was skipped.\n\n## Expected (either is enough)\n- A per-stage predicate (e.g. `visibleWhen` over the record) so an app can drop 审查中 for a type that skips it; or\n- the renderer reads the record's history and shows a skipped stage as skipped (grey, no tick), not passed.\n\nDedupe: objectstack issues (2,000 most recent) and archived objectui issues grepped for `record:path`, `skip`, `stage` + `path` — none.\n\n---\n_Filed from the hotclm UI/UX review (2026-10-27); maintainer: 「平台的问题应该提交issue到平台」._\n"

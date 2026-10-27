@@ -2,8 +2,8 @@
   "number": 26728,
   "kind": "issue",
   "title": "Studio Data › Actions: ticking \"Expose to AI agents\" writes a flat `aiExposed` key the spec refuses — every later save of the object answers 422 until reload, unticking does not recover",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,18 +11,27 @@
     "type": "Bot"
   },
   "labels": [
+    "area:studio",
     "bug",
-    "finding"
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:48:21Z",
-  "updated_at": "2026-10-27T13:48:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T18:57:43Z",
+  "closed_at": "2026-10-27T18:57:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26728",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nOne click bricks the object editor: all subsequent autosaves are refused 422 unrecognized_keys `aiExposed`, and the builder sees edits not saving.\n\n## Reproduction\n\n1. Data › an object › Actions › an action › tick \"Expose to AI agents\" → autosave 422 unrecognized_keys `aiExposed`.\n2. Untick → still 422. Any other edit on the object → 422 until reload.\n\n## Expected\n\nThe control writes the nested `ai` block the spec defines (action.zod.ts ~1607), or is removed.\n\n## Suspected landing site (the implementer verifies)\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/ActionDefaultInspector.tsx` (~lines 26, 381, 676, 1046).\n\n## Filing facts\n\n- reach: Studio UI, measured by the Data QA card.\n- Business reason: A single visible checkbox blocks all further work on the object; it is a protocol-refused shape written by the designer itself (p1 by the \"designer systematically writes refused metadata\" rule).\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p1.\n- Dedupe: semantic search `Expose to AI agents writes aiExposed unrecognized_keys action object save 422` on objectstack-ai/objectstack → 1 hit (closed #3686, unrelated).\n- QA id: U1"

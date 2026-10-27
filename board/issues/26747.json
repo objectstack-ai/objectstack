@@ -11,18 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:records",
     "bug",
-    "finding"
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:12:15Z",
-  "updated_at": "2026-10-27T14:12:15Z",
+  "updated_at": "2026-10-27T17:16:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26747",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe declared new-tab behaviour is ignored from both the record header and the more-menu.\n\n## Reproduction\n\n1. Action `export_tab` on `gapdata_item`: `type: \"api\"`, `opensInNewTab: true`, `newTabUrl: \"https://example.com/export/{recordId}\"` → click from the header and from the more-menu → no tab opens; network shows a POST to the target.\n\n## Expected\n\nThe runner opens `newTabUrl` (interpolated) in a new tab as the spec documents, or the spec refuses the pair on api actions.\n\n## Suspected landing site (the implementer verifies)\n\nConsole action runner for api actions under `ui/`.\n\n## Filing facts\n\n- reach: Console UI, measured twice by the data gap-fill card.\n- Business reason: A declared behaviour the runtime does not honour (\"declared ⇒ enforced\").\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:records`, p2.\n- Dedupe: semantic search `action opensInNewTab newTabUrl ignored on api action no new tab` on objectstack-ai/objectstack → 2 hits, both closed (#23077, #11842 — pair refine, not the runner).\n- QA id: G8"

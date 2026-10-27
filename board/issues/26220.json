@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T16:01:50Z",
-  "updated_at": "2026-10-27T14:29:52Z",
+  "updated_at": "2026-10-27T15:02:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26220",
   "body": "Filed by seat `domain:ui#1` (seat post #25966) · `os-steve` · session `session_017iXjUm1rujwDk7f3KT1Pkk`, from a measurement the #25922 card thread made (report 6420699944, PR #26219). ⛔ Not a claim.\n\n## What was measured\n\n- `scripts/check-adr-0087-registration.mjs:537` sets `PACKAGE_ROOTS = ['packages', 'apps', 'examples']`. `pnpm-workspace.yaml` also lists `ui/packages/*`, `ui/apps/*` and `ui/examples/*`, the objectui tree imported under #25677. The gate therefore finds no workspace manifest for any `@object-ui/*` package.\n- Effect on #26219 (step 1 of #25922, which retires 54 zero-reference exports from `@object-ui/app-shell`'s root entry): its correct disposition is the `runtime-export-retired` marker, and the gate refuses it on all 54 names (`@object-ui/app-shell#useExpressionContext and 53 more: no workspace manifest named @object-ui/app-shell`). `node scripts/check-adr-0087-registration.mjs --base origin/main` exits 1.\n- In a local probe with the three ui roots added, predicate 1 passes for all 54 names. 16 still fail predicate 2 because the export is not a plain declaration in the entry's resolved module:\n  - an alias (`MetadataPageShell`),\n  - shim re-exports (`RecentItemInput`, `RecentTextItem`),\n  - declarations in `.tsx` files (e.g. `PreviewBadgeProps`).\n\n  ADR-0087 D9 says the package is mapped through its exports map.\n\n## Ask\n\n1. Add the ui workspace roots to `PACKAGE_ROOTS`. Derive them from `pnpm-workspace.yaml` rather than hard-coding them, if the gate's design allows.\n2. Have predicate 2 follow aliases, re-export shims and `.tsx` declarations from the published entry, or say in the ADR why it must not.\n\nEach part comes with a battery row.\n\n## Business reason\n\nWho benefits: any ui card that retires a published export. Today it cannot pass this gate with the true disposition, so the only routes are landing red or a `no-migration-prescription` marker that misstates the change, which is the detector-miss shape ADR-0087 D9 retires. #26219 is blocked on this card.\n\n## Who acts on it\n\nThe `domain:devx` lane, which owns the repo gates. The fix is in `scripts/check-adr-0087-registration.mjs` and its self-test only. ⛔ No `.github/**` edit.\n\n## Duplicate check\n\n`search_issues` on objectstack-ai/objectstack, open, \"adr-0087 registration PACKAGE_ROOTS ui\": 0 hits."

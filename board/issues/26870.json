@@ -1,0 +1,35 @@
+{
+  "number": 26870,
+  "kind": "pull_request",
+  "title": "qa(checklist): cli.migrate-plan-apply-json reads its --json sweep from `os migrate --help`, not a typed subcommand list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T19:14:13Z",
+  "updated_at": "2026-10-27T19:43:24Z",
+  "closed_at": "2026-10-27T19:43:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T19:43:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26870",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8WbZXDPXReWQm6PDNoQJQUM)_\nFixes #26795\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`areas/cli.json` 里 `cli.migrate-plan-apply-json` 删掉手打的 19 个子命令 variants 清单,新增一步从 `os migrate --help` 读子命令集合做 `--json` 退出码扫描(revision 7 → 8)。\n- 为什么改:#26772 加了 `audit-key-material`,成了 20 个,清单和 source 里的「19」又漂了;按 #26431 规则,已有权威来源的集合不再手抄。\n- 风险与回滚:只动 QA 台账一个 JSON 文件,不碰产品代码、不加新 gate;回滚即 revert。\n- 先看:该条目新的最后一个 step(duplicates 例外、`audit-key-material`、USAGE 必填参数),acceptance[2] 的 verify/evidence,history revision 8。\n- 两分钟验证:构建 CLI 后跑 `node packages/cli/bin/run.js migrate --help`,COMMANDS 下应列出 20 个,含 `migrate audit-key-material`;`pnpm check:platform-checklist` 输出 OK。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`docs/qa/platform-checklist/areas/cli.json`, item `cli.migrate-plan-apply-json` only (revision 7 → 8):\n\n- `variants` (19 hand-typed subcommand names) is **removed**.\n- A new last step runs the #4873 `--json` sweep over the set the CLI itself reports: capture `os migrate --help`'s COMMANDS list (oclif pattern strategy over `packages/cli/src/commands/migrate/`, `index.ts` being the bare command), then run each subcommand's dry run with `--json` and `echo $?`, adding only what that subcommand's own `--help` USAGE line marks required (`unmapped-columns` takes `--object`). The duplicates exception stays explicit: always JSON on stdout, no `--json` flag, run bare, and an oclif Nonexistent-flag exit 2 from feeding it one is not a #4873 violation. `audit-key-material` (#26772) is named, with the same flags as `audit-mail-bodies` (`--apply`, `--yes`, `--force`, `--json`).\n- `acceptance[2]`: the clause sentence is unchanged; `verify` extends to every subcommand the sweep read from `--help`, and `evidence` asks for the captured COMMANDS list beside the exit code per subcommand.\n- The `source` note drops \"the 19 registered subcommands … enumerated as variants\" and says the sweep reads the set at run time.\n- `history` row 8 cites #26772 and #26795.\n\n## Why\n\nThe item's typed list had to be re-counted at revisions 2, 3, 4 and 6, and #26772 drifted it again (20 registered, 19 listed, source saying 19). Triage (6448491067) ruled the fix: derive the sweep from the CLI's own subcommand list under the #26431 rule, where a set that already has an authority keeps the authority and loses the retyped copy.\n\n**Variants list: dropped, not cross-checked.** The order allowed keeping a list if a gate failed on drift from the registry. I dropped it: the #26431 rule says \"no new gate, no new ledger\", and a gate holding a list equal to the directory is exactly the transcription pin that rule retires. The runner loses nothing, because `os migrate --help` prints the same names plus each one's description, read from the build under test. So `scripts/check-platform-checklist.mjs` and its test are untouched.\n\n**The order's hypothesis, read on main:** `packages/cli/src/commands/migrate/index.ts` does not register subcommands. It is the bare `os migrate` command (it extends `MigratePlan`). The registry is oclif's `pattern` strategy over `dist/commands/**/*.js` (`packages/cli/package.json` `oclif.commands`), so every non-test file in the directory is a command; none sets `hidden`. `audit-key-material.ts` takes the same flags as `audit-mail-bodies.ts`: confirmed.\n\n## Verification\n\n- CLI built at this branch (`OS_SKIP_DTS=1 turbo run build --filter=@objectstack/cli...`, 61 tasks, exit 0). `node packages/cli/bin/run.js migrate --help` lists 20 subcommands under COMMANDS, `migrate audit-key-material` among them, matching the 20 non-test, non-index files in the directory. oclif 5.1.2 `showCommandHelp` prints a command's direct subcommands, which is what the step relies on. The USAGE lines of the 15 subcommands the earlier steps do not run: only `unmapped-columns` has a required flag (`--object`), and only `duplicates` has no `--json`.\n- The item was edited by exact-string surgery (the area file does not round-trip through a JSON re-dump), then parsed before and after: only this item's `revision`, `steps`, `acceptance`, `variants`, `source` and `history` differ; every other item and the area-level keys are identical.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 16 commands at head e0123bfc (rebased on origin/main e9e344a9); all 16 exit 0, and `--ran` reconciles 16 derived, 16 run, 0 NOT-MEASURED. `check:doc-formula-expressions` needed the `@objectstack/formula` + `@objectstack/lint` build first (container state, not the diff).\n- `pnpm check:platform-checklist`: OK, 16 areas, 329 items.\n- No changeset: `docs/qa/**` publishes nothing (`skip-changeset`). No dogfood battery: no test file changed.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no lintable file changed)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWV1vrjPgSUEHcJzs4\n"
+}

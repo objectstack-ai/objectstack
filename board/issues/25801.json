@@ -16,13 +16,11 @@
     "enhancement",
     "priority:p1"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T13:31:03Z",
-  "updated_at": "2026-10-26T17:55:49Z",
+  "updated_at": "2026-10-27T15:26:25Z",
   "closed_at": "2026-10-26T17:55:49Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -30,7 +28,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25801",
   "body": "Blocked-by: #25692\n\nFiling class: ③ capability gap, filed at destination by the hotclm director seat under the maintainer's ruling on objectstack-ai/hotclm#99 item 4 (batch 5, letter B, 2026-10-25). Unlabelled, no assignee; the objectstack seat triages.\n\n## Symptom (hotclm, `@objectstack/*` 18.1.0 and 17.7.0)\n\nhotclm's intake wizard (F1, `contract-intake.flow.ts`) asks three screens of questions and then needs the first version file for a contract type that carries no template. A flat `screen` node cannot collect a file, so the flow creates the `clm_contract` at `create_contract` and then opens an **object-form** screen on `clm_contract_version` (whose required `contract` lookup must point at an existing row) to upload it. A requester who closes the dialog at that point leaves a version-less draft behind (NDA-2026-0021 in the browser pass) that they cannot delete (`DELETE` → 403; the app grants requesters RCU). Reordering the flow cannot fix it: the write has to precede the only widget that can take the file.\n\n## What the platform does today (read on main, 2026-10-25)\n\n- `ScreenFieldConfigSchema.type` is an open string (`packages/spec/src/automation/builtin-node-config.zod.ts:897`), but the console's flat-screen renderer (`objectui packages/app-shell/src/views/ScreenView.tsx:356-421`) handles `lookup` (with `reference`), `boolean`/`checkbox`, `textarea`/`markdown`, and maps `number`/`currency`/`email`/`date` to an `<input>`; everything else falls to a text input. There is no file control, and `resume` has no file-bag contract.\n- Closing the screen dialog sends no request: `FlowRunner.tsx:624` `onOpenChange` calls `onClose` only; `cancelRun` is never called, so the run stays `paused` and whatever the flow wrote before the screen stays written.\n\nSeat analysis with the measurement: https://github.com/objectstack-ai/hotclm/issues/99#issuecomment-6392858419.\n\n## Expected capability\n\n1. A `type: 'file'` screen field on a flat screen: the console renders the platform file widget, the file is stored through the normal file service, and `resume` receives a file reference the next node can write into a `file` field (hotclm would write it into `clm_contract_version.file`).\n2. Closing a paused run's screen dialog cancels the run (or offers to), so a wizard that is authored \"ask everything, write at the end\" leaves nothing behind when abandoned.\n\nWith (1) the app can move every write after the last screen, per its design; (2) closes the remaining abandonment path for flows that must write mid-way.\n\n## Dedupe\n\nSearched objectstack issues for flow screen file upload field / flat screen cannot collect a file / cancel run on dialog close: no card asks for a file-typed screen field or for cancel-on-close."

@@ -1,0 +1,36 @@
+{
+  "number": 26830,
+  "kind": "pull_request",
+  "title": "docs(upgrading): add the v18.2.0 row to the per-release table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T17:47:11Z",
+  "updated_at": "2026-10-27T18:45:34Z",
+  "closed_at": "2026-10-27T18:45:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T18:45:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26830",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ847VupnCQ7pTGRjWNeDr1f4)_\n\nFixes #26631\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 升级指南 `upgrading.mdx` 的「每个版本的升级说明在哪」表格加了一行 v18.2.0,指向 18.2.0 发布页的升级清单。\n- **为什么改:** 18.2.0 已发布且发布页带升级清单,但这张表停在 v18.1.0,从 18.1 往上升的用户在指南里找不到 18.2 的入口。\n- **风险与回滚:** 纯文档一行,无运行时改动,不发包;回滚 = revert 本 PR。\n- **先看:** `content/docs/upgrading.mdx` 「Per-release specifics」表的第一行。\n- **两分钟验证:** 打开 `/docs/upgrading`,点表中 v18.2.0 一行的链接,应落到 18.2.0 发布页的「Upgrade checklist」小节。\n- **需要你做的:** 无,席位落地。\n\n## What changes\n\nOne row added to the per-release table in `content/docs/upgrading.mdx`, above the v18.1.0 row:\n\n```\n| v18.2.0 | [Upgrade checklist — 18.2.0](/docs/releases/v18/18-2#upgrade-checklist) |\n```\n\n## Why\n\nThe table stopped at v18.1.0, while `content/docs/releases/v18/18-2.mdx` (#26494) ships `## Upgrade checklist` (line 910), so the anchor is `#upgrade-checklist`.\n\nNothing else moves with it: no other list in `upgrading.mdx` stops at 18.1, and no test or script pins the table's rows (searched `scripts/`, `packages/`, `.github/`). `content/docs/releases/**` and `references/**` are untouched. `content/docs/**` publishes no package, hence `skip-changeset`.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 44 gate families for this diff; all 44 exit 0, and `--ran` reconciles 44 derived / 44 run / 0 NOT-MEASURED. That includes `check:doc-anchors`, `check:docs-redirects`, `check:corpus-claim-drift` and `check:docs-transcript-drift` (the last after building `@objectstack/lint`). Prerequisite builds before the first exit 0: `@objectstack/lint...`, `@objectstack/formula`, `@objectstack/spec`, `@objectstack/client(-react)...`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (one mdx row, outside ESLint's globs; not run locally)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the 维护者速读 channel)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWQbmPGoJDwc2QWoUJ\n"
+}

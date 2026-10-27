@@ -2,8 +2,8 @@
   "number": 26142,
   "kind": "issue",
   "title": "i18n: a master-detail field's `inlineTitle` has no translation slot — the inline child grids on a zh-CN create form read \"Versions / Deviations / Payment Plan\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T13:39:27Z",
-  "updated_at": "2026-10-27T13:18:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T16:07:16Z",
+  "closed_at": "2026-10-27T15:46:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26142",
   "body": "Filing class: ① product defect (i18n surface) — reach: public door, measured in a browser on 18.1.0 with objectstack-ai/hotclm `main` (`pnpm demo:zh`, Console in zh-CN). **Reader:** the spec/i18n lane (`FieldTranslationSchema`, the i18n gate's field reach) and the objectui consumer (`attachInlineSubforms`).\n\n## Symptom\nOn hotclm, every label of the `clm_contract` create form is Chinese except the six inline child-grid headings, which print the authored `inlineTitle` verbatim: **Versions · Deviations · Obligations · Payment Plan · Reviews · Signatures** (declared e.g. `src/objects/contract-version.object.ts:51` `inlineTitle: 'Versions'`). The app's `lint:i18n-gate` reports 0 missing keys, because there is no key to miss.\n\n## Why\n- `FieldTranslationSchema` (`packages/spec/src/system/translation.zod.ts:119`) carries `label`, `help`, `placeholder`, `options` — no `inlineTitle`.\n- objectui `packages/app-shell/src/providers/MetadataProvider.tsx` `attachInlineSubforms` copies `d.inlineTitle` into the subform's `title` as is.\nSo an app has no place to put the translation, and the coverage gate cannot see the surface.\n\n## Expected\nA translation slot for `inlineTitle` (on the field translation, or the subform title resolved from the child object's translated plural label when `inlineTitle` is absent or untranslated), counted by the i18n coverage gate, and resolved before objectui renders it.\n\nDedupe: objectstack and objectui issues, 2,000 most recently updated each, all states, grepped for `inlineTitle` and `inline (grid) title` — 0 hits.\n\n---\n_Filed from the hotclm browser regression pass (2026-10-26)._"

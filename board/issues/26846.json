@@ -1,0 +1,32 @@
+{
+  "number": 26846,
+  "kind": "issue",
+  "title": "Studio Access polish: jargon duplicate-draft refusal, OWD banner outliving revert, stale set label in the rail, clipped field counter, no re-grant for a dismissed suggestion",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T18:22:40Z",
+  "updated_at": "2026-10-27T19:08:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26846",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nFive small Access-pillar defects measured in one pass.\n\n## Reproduction\n\n1. Create a set whose draft already exists → message \"this save asserted that no draft row exists (the first-write pin, If-None-Match: *…)\".\n2. OWD Memo → Controlled by parent → Save refused → revert → \"No changes\" but the refusal bullet stays.\n3. More › Edit name/label append \" v2\" → autosaved; rail keeps the old label until publish/reload.\n4. 1440×900: \"14 / 14\" field counter clipped; at 900px the field-name column is not sticky.\n5. Dismiss or revoke a suggested binding → no re-grant affordance (`GET /api/v1/security/suggested-bindings?packageId=…` status dismissed).\n\n## Expected\n\nAuthor-facing refusal text; banner cleared on revert; rail label live; counter visible and sticky name column; re-grant control for dismissed suggestions.\n\n## Suspected landing site (the implementer verifies)\n\nAccessPillar / `PermissionMatrixEditor.tsx` / suggestions panel under `ui/packages/app-shell/src/views/`.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Access QA card.\n- Business reason: Each is small; together they make the Access pillar feel unreliable.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p3.\n- Dedupe: semantic search `permission set duplicate draft refusal jargon If-None-Match OWD refusal banner rail label` on objectstack-ai/objectstack → 61 hits, none about these five (nearest open #26170 i18n of hook refusals — different).\n- QA id: A9"
+}

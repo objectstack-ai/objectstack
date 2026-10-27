@@ -11,18 +11,23 @@
     "type": "Bot"
   },
   "labels": [
+    "area:studio",
     "bug",
-    "finding"
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:45:41Z",
-  "updated_at": "2026-10-27T13:45:41Z",
+  "updated_at": "2026-10-27T19:27:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26724",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA typo in `datasource` is accepted at save and publish (\"published\"), but the object never registers, so every data call answers 404 and nothing tells the author why.\n\n## Reproduction\n\n1. `PUT /api/v1/meta/object/gapdata_badds?mode=draft&package=com.example.gapdata` with `\"datasource\": \"gapdata_nosuch\"` (and again with `\"nope_ds_2\"`) → 200; publish-drafts → \"published\".\n2. `POST /api/v1/data/gapdata_badds` → 404 \"Object 'gapdata_badds' is not registered\".\n3. Studio Data rail still lists \"Bad DS\".\n\n## Expected\n\nRefused at save or publish with a located error naming the unknown datasource.\n\n## Suspected landing site (the implementer verifies)\n\nObject save/publish validation of `datasource` against the registered datasources (metadata publish pipeline / object registration).\n\n## Filing facts\n\n- reach: `PUT /api/v1/meta/object/…` + publish + `/api/v1/data`, measured twice by the data gap-fill card.\n- Business reason: Authors and AI agents get \"published\" for an object that cannot be used, with no pointer to the cause.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:server`, `area:data`, p2.\n- Dedupe: semantic search `object with unknown datasource publishes then data calls 404 not registered` on objectstack-ai/objectstack → 7 hits, none about publish accepting an unknown datasource (nearest closed #25486, #21923).\n- QA id: G9"

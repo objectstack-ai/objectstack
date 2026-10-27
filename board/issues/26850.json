@@ -1,0 +1,37 @@
+{
+  "number": 26850,
+  "kind": "issue",
+  "title": "Queue-flake anchor: packages/core/src/actions/__tests__/actionKeys.pin.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "priority:p1",
+    "queue-flake-anchor",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T18:32:35Z",
+  "updated_at": "2026-10-27T20:19:47Z",
+  "closed_at": "2026-10-27T20:19:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26850",
+  "body": "`packages/core/src/actions/__tests__/actionKeys.pin.test.ts` has ejected **6 pull requests** from the merge\nqueue within a rolling 24 hours — **1 independent hit** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #26742 | S1 · inherited | [40561422008](https://github.com/objectstack-ai/objectstack/actions/runs/40561422008) |\n| #26793 | S1 · root | [40555304948](https://github.com/objectstack-ai/objectstack/actions/runs/40555304948) |\n| #26800 | S1 · inherited | [40558907459](https://github.com/objectstack-ai/objectstack/actions/runs/40558907459) |\n| #26815 | S1 · inherited | [40557448260](https://github.com/objectstack-ai/objectstack/actions/runs/40557448260) |\n| #26826 | S1 · inherited | [40560750659](https://github.com/objectstack-ai/objectstack/actions/runs/40560750659) |\n| #26827 | S1 · inherited | [40562512172](https://github.com/objectstack-ai/objectstack/actions/runs/40562512172) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE chain reaches another victim's queue HEAD (directly, or through\ngreen groups queued between them) contains that victim's tree by construction.\nA single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the root above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [40562512172](https://github.com/objectstack-ai/objectstack/actions/runs/40562512172) (PR #26827).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:packages/core/src/actions/__tests__/actionKeys.pin.test.ts -->"
+}

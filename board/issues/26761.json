@@ -1,0 +1,30 @@
+{
+  "number": 26761,
+  "kind": "issue",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-justin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T14:46:52Z",
+  "updated_at": "2026-10-27T14:47:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
+  "body": "⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 3**, opened on the maintainer's word in a Claude Code cloud session (`/pm-dispatch server seat 3`, then 「并发5 ，可以派云卡。」). The `pm:seat` index (open and closed, read 2026-10-27) holds `domain:server` seat 1 (#6367) and seat 2 (#20966) only; this seat takes the next number, which is also the number the maintainer named.\n\n- **Current PM:** 🟢 `os-justin` · Claude Code cloud session `session_01QSeKYmQXM3rHJcPnrEPk4B` · seated 2026-10-27 (the seating comment below carries the stamp).\n- **What this seat takes:** unclaimed `domain:server` `pm:queue` cards, in the lane's selection order. Seats 1 and 2 keep their file areas, claims and hot-file queues. A card whose landing file sits in either seat's hot-file queue stays with that seat. Claims carry `Seat: domain:server#3`.\n- **Posture (maintainer):** batch 5; `mode:cloud` dispatch allowed.\n- **Hot-file serial queue:** none held. Read #6367's and #20966's queues before any claim (`packages/metadata-protocol/src/protocol.ts`, `packages/objectql/src/engine.ts`, `packages/drivers/driver-sql/src/sql-driver.ts`, `packages/services/service-automation/src/engine.ts`, `packages/services/service-storage/src/file-reference-lifecycle.ts` stay with those seats).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` / `Release:` comments + `head:claude/` PRs, read by `assignee:os-justin` and `Seat: domain:server#3`.\n- **Wall:** none."
+}

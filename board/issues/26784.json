@@ -1,0 +1,36 @@
+{
+  "number": 26784,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): record:path leaves out a stage the record's status option rules out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T15:28:07Z",
+  "updated_at": "2026-10-27T16:01:57Z",
+  "closed_at": "2026-10-27T16:01:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T16:01:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26784",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbRJWyNMbDFFa4LtiRqCeDqp)_\nFixes #26581\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: 6442747364 (letter A, with its guardrail); claim amendment 6442931479\n\n## 维护者速读\n\n- **改了什么**:记录页的阶段路径(`record:path`)不再画出本记录按规则不可能经过的阶段。状态字段的某个选项若声明了 `visibleWhen`,且对这条记录求值为假,该阶段在桌面和移动两行都不画。\n- **为什么改**:订单合同(ORD)按类型跳过法务审查,但路径照位置打勾,批准后显示「审查中 ✓」,审计和申请人会读成\"法务审过了\"。\n- **风险与回滚**:只改一个前端渲染组件,无新键、无新请求。引用当前用户的规则不隐藏阶段;规则求值出错时保留阶段;记录当前所在的阶段始终保留。回滚即撤销本 PR。\n- **先看**:`ui/packages/plugin-detail/src/renderers/record-path.tsx` 的 `stagesThisRecordWalks` 与 `readsActingUser`;新测试 `record-path.optionVisibleWhen-26581.test.tsx`。\n- **两分钟验证**:`cd ui && pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-path.optionVisibleWhen-26581.test.tsx`,预期 7 个用例全部通过。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `record:path` filters its stages through a new `stagesThisRecordWalks`, before won/lost classification, so both rows (desktop and mobile) read one list. A stage is omitted when the `statusField` option with the same value declares a `visibleWhen` that evaluates FALSE against the bound record (`evalFieldPredicate` from `@object-ui/core`, the evaluator the option widgets use).\n- The guardrail from the ruling: a predicate that reads the acting user (`current_user`, `user`, `ctx` or `os`, the roots the server's option gate treats as the acting user) never hides a stage. It is detected off the predicate source with string literals blanked. That reading can only over-match, and an over-match keeps a stage.\n- A predicate that cannot be evaluated keeps its stage (render side fail-open, ADR-0137 D3). The stage the record currently stands on is always kept.\n- Authored `stages[]` are matched to the status options by value, the way `declaredStageKinds` already reads `kind`.\n- No new spec key, no new server read: the record and object definition come from the record context the block already reads.\n- One root changeset, `@object-ui/plugin-detail` patch.\n\n## Why\n\nhotclm order contracts (ORD) skip legal review by design, yet their path drew 草稿 ✓ 已提交 ✓ 审查中 ✓ 审批中 ✓ 已批准, because every stage before the current one ticked by position. The record's status history is not reachable from this block without a new read (measured in os-dev-report 6441110297), so the ruling took the status option's own declaration instead: `visibleWhen` means \"offered only when TRUE (else omitted)\", and the server refuses a write of a value whose predicate is false.\n\n## Verification\n\nAll readings below are on head `a5c3c69f` (base `origin/main` `94bab5a2`, which carries #26689), run from `ui/` under `scripts/pm/os-verify-lock.sh`.\n\n<details><summary>Tests</summary>\n\n- New file `record-path.optionVisibleWhen-26581.test.tsx`: 7/7.\n- Every `record:path` test (`record-path*` and `recordPathStagesMembers-8071`): 13 files, 102/102.\n- Full `packages/plugin-detail/`: Test Files 315 passed, 1 skipped (316); Tests 2911 passed, 18 skipped (2929); lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-detail run type-check` (src and `tsconfig.test.json`): exit 0.\n\n</details>\n\n<details><summary>Ablations (via scripts/ablation-replace.mjs, each restored to the HEAD blob with an empty git diff HEAD)</summary>\n\nThe test imports the renderer from source (`../../index`, vitest alias table), so no `dist/` sits in between.\n\n1. Filter off (`gates.size === 0` → `gates.size >= 0`): 3 failed / 4 passed. Red: (a) the ORD path, (e) authored stages, (f) the quoted `'user'`.\n2. Acting-user guard off (`!readsActingUser(…)` → `!(readsActingUser(…) && false)`): 1 failed / 6 passed. Red: (b), so without the guard `false && current_user…` would hide the stage.\n3. Current-stage guard off: 1 failed / 6 passed. Red: (d).\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on head `a5c3c69f` derived 34 commands from 3 changed paths. Every one exited 0, each exit code captured before any pipe. Reconciliation: `--ran` reports \"34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED (a DERIVED zero — all 34 recorded an exit code and none of them is 3)\". The three PR-body gates (`check-adr-0087-registration --base origin/main`, `check-closing-keyword-parity`, `check-changeset-no-major --base origin/main`) were re-run against this exact body: exit 0. Repo-wide lint and the remaining families are CI's.\n\n</details>\n\n## Acceptance notes\n\n- hotclm still has to declare `visibleWhen` on its `in_review` option (for example `record.contract_type != 'ORD'`); that is the hotclm seat's card, per the ruling.\n- A rule that reads a related record (`record.account.tier`) is refused by `objectstack validate` on an object field's option, so only the record's own columns can drive a hidden stage.\n- Edge left as is: if every stage were ruled out and the record's status matched none of them, the block would show its \"no stages configured\" placeholder.\n- Serial: PR #26689 edits the same file and is ahead in the merge queue. Once it merges, this branch merges main and keeps this filter ahead of its new classify/layout.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No `packages/spec` change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` is left to CI.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 section is the Chinese brief the PR contract asks for).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTgHpQBzM5GaoKifNh)_\n"
+}

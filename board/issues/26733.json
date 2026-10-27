@@ -11,18 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:studio",
     "bug",
-    "finding"
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:51:38Z",
-  "updated_at": "2026-10-27T13:51:38Z",
+  "updated_at": "2026-10-27T16:19:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26733",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA builder who mistypes a search sees an empty column and cannot tell whether the list failed to load.\n\n## Reproduction\n\n1. Data › object rail search \"zzzz\" → blank.\n2. Access › permission-set rail search \"zzzz\" → blank.\n\n## Expected\n\nAn empty-search state naming the query, with a clear action.\n\n## Suspected landing site (the implementer verifies)\n\n`StudioRail.tsx` (shared rail search).\n\n## Filing facts\n\n- reach: Studio UI, measured by the Data and Access QA cards.\n- Business reason: Small, but it reads as a broken page.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p3.\n- Dedupe: semantic search `Studio rail search with no matches shows blank list no empty state` on objectstack-ai/objectstack → 3 hits, none about Studio rails (closed #25898, #23004, #6675).\n- QA id: U8"

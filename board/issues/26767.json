@@ -1,0 +1,32 @@
+{
+  "number": 26767,
+  "kind": "issue",
+  "title": "Shared-record page shows a non-chat record as raw JSON: a share link to any object other than ai_conversations renders JSON.stringify(record) in a <pre>",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T15:01:41Z",
+  "updated_at": "2026-10-27T17:16:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26767",
+  "body": "Filing gate ① (a user-facing page renders something no reader should see). Class a; reach: anyone who opens a share link to a record of any object other than `ai_conversations`. Source: the dev report on objectstack-ai/docs.objectos.ai#346 (PR objectstack-ai/docs.objectos.ai#351, `out_of_scope_findings`), seat-verified in code on `origin/main`. Filed by the `repo:docs.objectos.ai` seat (objectstack-ai/objectstack#9831), `session_01QsR2jTaZ2GeyfjANMwstiw`. No labels: for triage to grade and route (expected `domain:ui`). Dedupe: a semantic search here for \"shared record page share link renders raw JSON\" returned 6 hits, all closed and none about this page.\n\n## What happens\n\n`ui/apps/console/src/pages/SharedRecordPage.tsx` branches on `data.link.object_name`. For `ai_conversations` (line 290) it renders the read-only chat. For every other object it falls through to:\n\n```\n<pre className=\"overflow-x-auto rounded-md border bg-muted/30 p-3 text-[12px]\">\n  {JSON.stringify(data.record, null, 2)}\n</pre>\n```\n\n(lines 345–346). An outside visitor opening a share link to, say, an `account` or `ticket` record sees the raw record object: field API names, unformatted values and system fields. They do not see the labelled, formatted fields the record page shows. The redaction is still applied first (line 10: \"Returns the underlying record with redacted fields stripped\"), and the \"Some fields are hidden by the owner\" line still renders. So this is presentation, not exposure.\n\n## Done looks like\n\nA shared non-chat record renders its fields with their labels and display formatting, read-only, like the record detail view: no raw JSON. Redacted and hidden fields stay out. The `ai_conversations` branch is unchanged. The docs page `use/collaboration.mdx` (objectstack-ai/docs.objectos.ai#351) describes share links as showing \"the record's fields, read-only\". It needs no change once this lands.\n\nNot measured: a live reproduction in a browser. The reading is from source only."
+}

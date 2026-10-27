@@ -2,8 +2,8 @@
   "number": 26614,
   "kind": "issue",
   "title": "Console home: the 「构建应用」 button on a deployment without the AI builder leads somewhere that exists (Studio new package) or hides; /_console/ai redirects to the home",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T10:21:49Z",
-  "updated_at": "2026-10-27T13:39:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T14:43:23Z",
+  "closed_at": "2026-10-27T14:43:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

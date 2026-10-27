@@ -1,0 +1,38 @@
+{
+  "number": 26769,
+  "kind": "pull_request",
+  "title": "fix(spec): a translation item is named in snake_case, the locale tag goes in `locale`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T15:10:32Z",
+  "updated_at": "2026-10-27T19:09:42Z",
+  "closed_at": "2026-10-27T19:09:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T19:09:39Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26769",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBGfQhhK2rkH91cc4DbNzUXk)_\n\nFixes #26128\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:翻译条目 `name` 的说明改为 snake_case(如 `zh_cn`),语言标签写在 `locale`;不再建议用 `zh-CN` 作条目名。保存门与读侧回退行为不变。\n- 为什么改:旧说明叫作者用 `zh-CN` 命名,而保存门的条目名语法拒收它(400 INVALID_REQUEST),照规范写的作者第一次保存必失败。\n- 风险与回滚:仅文案与一条门禁测试,无接受集变化;回滚即 revert 本 PR。\n- 先看:`packages/spec/src/system/translation.zod.ts`(name 的 describe 与上方注释)、`packages/metadata-protocol/src/protocol.item-name-grammar.test.ts`(新增 #26128 段)、`packages/core/src/fallbacks/authored-translation-sync.ts`(跳过警告文案)。\n- 两分钟验证:`pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.item-name-grammar.test.ts`,预期 27/27 通过,其中 `zh-CN` 被拒、`zh_cn` + `locale: 'zh-CN'` 保存成功。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `TranslationItemSchema.name` describe: `Item name — snake_case like every metadata item (e.g. \\`zh_cn\\`); the BCP-47 tag goes in \\`locale\\``. The comment above it now says the same and that the tag-shaped `row.name` fallback covers only rows stored before `locale` became required.\n- `content/docs/references/system/translation.mdx`: the generated `name` row, regenerated with `gen:schema` + `gen:docs`.\n- `authored-translation-sync.ts`: the no-locale skip warning now says `set the top-level 'locale' to its BCP-47 tag, e.g. 'zh-CN'` instead of suggesting the item be named after the tag. Behaviour unchanged (the existing test matches `no resolvable locale`).\n- Door pin (`protocol.item-name-grammar.test.ts`): `saveMetaItem` of type `translation` named `zh-CN` is refused with `code: INVALID_REQUEST`, `status: 400` and the grammar message, persisting nothing; `zh_cn` with `locale: 'zh-CN'` saves and keeps the tag in `locale`.\n- `refuseUngrammaticalMetaItemName` and the read-side fallback are untouched.\n- Docs, skills and examples grep (`conventionally the locale`, `name the item after`, a `name: 'zh-CN'` translation item): no hits outside the files above.\n- Changeset: `'@objectstack/spec': patch`, `'@objectstack/core': patch` (the sync warn text).\n- `packages/objectql/src/protocol-publish-canonical-fold.test.ts` (about line 269): the test-helper comment now says the name is snake_case (`zh_cn`) with the tag in `locale`; its fixture already used `zh_cn`. Added in patch round r1 (claim surface amended 15:13Z).\n\n## Tests\n\nTests ran on `33a1af012`; head `f308adfc4` is that commit plus a merge of `origin/main` (`a485b5a3e`) that touches none of these files.\n\n- `metadata-protocol` `protocol.item-name-grammar.test.ts`: 27/27 (25 existing + 2 new).\n- `spec` `src/system/translation.test.ts`: 182/182. `core` `src/fallbacks`: 67/67. `service-i18n` `authored-translations.test.ts`: 16/16.\n- `metadata-protocol` full suite: 269 files passed, 3 skipped; 21582 tests passed, 19 skipped.\n- r1, on `ad3a211fe`: `objectql` `protocol-publish-canonical-fold.test.ts` 10/10.\n\n## Acceptance notes\n\n- `packages/spec/src/system/translation.test.ts` (about line 757) parses a schema-level item named `zh-CN`; the schema does not constrain `name`, so this stays valid at the schema and is not a door fixture. Left as is.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 106 derived families, run serially on `33a1af012`. 102 exited 0 on the first pass; 4 exited 3 (prerequisite: built output) and exited 0 after a full `pnpm turbo run build` (`check:skill-examples`, `check:dual-build-cjs-loads`, `check:i18n-walk-parity`, `check:lean-entry-closure`).\n- `--ran` reconciliation: `106 derived famil(ies) accounted for — 106 run, 0 NOT-MEASURED`. The derived list on head `f308adfc4` is byte-identical to the one on `33a1af012`.\n- After the `os-regen-merge.sh` merge, on `f308adfc4`: spec build + `gen:schema` + `gen:docs` left the tree clean; `check:generated`, `check:docs`, `check:authorable-surface` exit 0.\n- r1, head `ad3a211fe` (comment + changeset only): the derived list grew to 107 (`check-engine-split-ratio.mjs --self-test` added). The 23 families reading the changeset, objectql tests or repo-wide text were re-run on `ad3a211fe`, all exit 0; `--ran` over the merged record: `107 derived famil(ies) accounted for — 107 run, 0 NOT-MEASURED`.\n- Full dogfood: not owed (no `!` in the title, no narrowing arm).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzhKYT8L13Bgj8icT3i)_\n"
+}

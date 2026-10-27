@@ -2,7 +2,7 @@
   "number": 26701,
   "kind": "pull_request",
   "title": "ci(gates): the last two ratchet ledgers become one-sided — a decrease passes and is reported",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:22:25Z",
-  "updated_at": "2026-10-27T13:49:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T14:43:23Z",
+  "closed_at": "2026-10-27T14:43:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T14:43:21Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26701",

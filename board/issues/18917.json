@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 4 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-10-26T12:44:41Z",
+  "updated_at": "2026-10-27T15:30:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 69,
+  "comments": 70,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18917",
-  "body": "os-pm-seat-post — `domain:spec` seat 4.\n\n**This post is the seat.** Only the sitting PM edits the body, and the body is authoritative. The title and the assignee are views derived from it. Current values live here, never in `references/lanes/spec.md`. This is a project seat's stub (`seat-lifecycle.md`): posture, ledger and round reports live in the project.\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Seated:** `zhuangjianguo` · `session_01HbmCEPMBmMLU3VZCEzfec7` · 2026-10-26T09:19Z. The seat is held by the `zhuangjianguo` account's project, which also holds seat 2 (#18549), under the maintainer's exception recorded in the round-open marker `6412472115`.\n- **Posture:** held, with no dispatch, because the maintainer's token budget is tight. Cards move over from seat 2 only as the two seats agree a split. The two seats together keep no more cards in flight than seat 2 had at 2026-10-26T09:18Z.\n- **The term before:** `marchtian` · `session_01K2Tat8JEt4AhLASV4V4QWE`, whose clock-out brief is `6411277129`. The body revision last edited 2026-10-26 08:11 UTC holds that term's ledger.\n- **Stay-behind:** none.\n\n## Handover ledger\n\n- **In hand:** none.\n- **Split with seat 2:** not agreed yet. Until a card's claim carries `Seat: domain:spec#4`, it is seat 2's or the queue's.\n\n## Hot-file serial queue\n\nRe-derived at each dispatch from open-PR file lists and live claim comments. ⛔ It is never carried forward.\n\n| file / region | holder | next |\n|:--|:--|:--|\n| — | none | — |\n\n## 说明\n\n- **Other live `domain:spec` seats:** #6017 (seat 1), #18549 (seat 2, same account), #18883 (seat 3), #19357 (seat 5). ⛔ No liveness judgement on them.\n- 由 zhuangjianguo 账户的项目负责 · 姿态台账住项目 (posture and round ledger live in the project thread).\n"
+  "body": "os-pm-seat-post — `domain:spec` seat 4.\n\n**This post is the seat.** Only the sitting PM edits the body, and the body is authoritative. The title and the assignee are views derived from it. Current values live here, never in `references/lanes/spec.md`.\n\n## Current PM — ⏳ vacant\n\n- **Vacated:** 2026-10-27T15:28Z, by `zhuangjianguo`, session `session_01HbmCEPMBmMLU3VZCEzfec7`, seated 2026-10-26T09:19Z under the maintainer's exception (marker `6412472115`).\n- **Why:** on 2026-10-27 at 00:20Z the user stopped new dispatch on both spec seats of the `zhuangjianguo` project, because no Fable is available. Each seat carried only its in-hand cards through landing, and the user opens a new spec seat elsewhere. Also in force: 「后续不再派 fable 卡」 (00:18Z). No card thread or reviewer runs on Fable, and a `CONTRACT_REVIEW_TIER` review goes to the director seat.\n- **Handover check:** `check-handover.mjs --session=session_01HbmCEPMBmMLU3VZCEzfec7 --account=zhuangjianguo` exited 0.\n- **Stay-behind:** none.\n- **Successor's guide:** `/pm-dispatch 接手`, then read this post.\n\n## Handover ledger\n\n| Card | PR | Outcome |\n|:--|:--|:--|\n| #25598 | #26154 (`9993165b`) | merged; card closed |\n| #25801 | #26134 (`6d9d3ef8`) | merged; card closed. The second half was ruled B, staged, on #26149 (closed `not_planned` as the record) |\n| #25779 | #26244 (`2163e806`) | merged (Tier H, os-zhuang APPROVED); card closed |\n| #25785 | #26159 (`b49b752d`) | merged; card closed |\n| #25769 | #26337 (`a9f654eb`) | merged (Tier H). Card released (6445967026) to `needs-user-decision` on the `queues` RLS membership key, where the seat recommends A. HotCRM stopgap, console picker and authoring guide resume after the ruling |\n\n- **Filed by this seat:** #26149 (decision; ruled), #26288 (CI typecheck OOM; fixed by #26356), #26475 (skills docs for ownership queues; open, for the skills lane).\n- **Queue snapshot:** this seat's untouched candidates were #25794, #26000, #25458, #25556 and #25579. They stay in `pm:queue`, and no seat holds them.\n- **Hot-file serial queue:** none carried.\n- **Cross-lane notes:**\n  - The relay's `run_rerun_failed` is fenced to `ci.yml`. Neither `pr_draft` nor `automerge_disable` takes a PR out of the merge queue; a human \"Remove from queue\" is needed.\n  - Check Changeset reads a moved `authorable-surface/*.json` shard as a metadata-protocol change.\n\n## 说明\n\n- **Other live `domain:spec` seats:** #6017 (seat 1), #18549 (seat 2, same account, also standing down), #18883 (seat 3), #19357 (seat 5). ⛔ No liveness judgement on them.\n"
 }

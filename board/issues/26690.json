@@ -14,18 +14,20 @@
     "area:i18n",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:03:41Z",
-  "updated_at": "2026-10-27T14:19:13Z",
+  "updated_at": "2026-10-27T17:49:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26690",
   "body": "Filing gate **③ a task the maintainer directed.** The maintainer's words, verbatim, in the HotCRM project thread: 「hotcrm 的文档类型元数据还没有好好利用，综合评估一下应该写哪些文档，以及如何挂到菜单上」 (2026-10-27T12:09Z), then, on the evaluation whose step 6 is this card (\"platform cards: book-label localization and a `doc` knowledge source, filed in objectstack\"), 「同意，立卡派发。」 and 「立卡，你不需要派发」 (2026-10-27T12:54Z). Evaluation (Chinese): https://claude.ai/artifact/FSRbbgsT8uFhTxYe5jMBvS. Filed from that thread (`session_01FEkQ5n3dhGrDN5nEgsJyck`). Filed at destination for triage; ⛔ not a claim.\n\n## 维护者速读\n\n- **事由：** 文档正文可以按语言出（`<name>.zh.md`），但书名和书里的分组名只能写一种语言。HotCRM 准备给中文用户上「使用手册」，侧栏的分组标题会是英文。\n- **要做：** 让书和分组的标题能走翻译（形状由分诊和 spec 车道定，例如进翻译包，和导航项、页面一样）。\n- **完成标准：** 一个带中文翻译的书，中文用户在 `/apps/<pkg>/docs` 侧栏和 `GET /meta/book/:name/tree` 里看到中文书名和分组名；英文用户不变。\n\n**Business reason:** a package that ships docs in two languages today shows a half-translated manual: the body follows the reader's locale, the frame does not. HotCRM's in-app docs plan (batch 1 adds `crm_manual`, `crm_admin_manual`, `crm_revenue_manual`) is the first exhibit with zh variants, and every other package with localized docs hits the same frame.\n\n**Reader (who acts):** objectstack triage (`domain:spec` for the shape, then the resolver and console consumers). HotCRM is not blocked: its batch-1 card objectstack-ai/hotcrm#2327 ships with group labels in one language until this lands.\n\n**Dedupe:** objectstack issue search (repo-scoped), queries \"localize book label and group labels translations i18n docs portal\" and \"book label untranslated docs sidebar group label locale\", 2026-10-27 → 0 hits about books (closest: #25652 positions and permission sets had no translation key, closed; #24968 `page:tabs` labels, closed).\n\n## Readings (objectstack `main` `86ae47e1`)\n\n- `packages/spec/src/system/book.zod.ts`: book-level and group-level `translations` were retired in 17.0.0 (#4667, ADR-0049) because \"no resolver ever read it\"; the tombstone says the tree endpoint and the portal render `label` / `description` verbatim, and the generic bundle translator covers view / action / object / app / dashboard / page only. The tombstone itself points authors at `doc.translations` — which localizes the body, not the book.\n- `ui/apps/console/src/pages/BookSidebar.tsx` renders `book.label` and `group.label` as served.\n- `doc.translations` (`system/doc.zod.ts`, `resolveDocLocale`) is live: so the gap is exactly the spine's two strings.\n\n## Governing text\n\n- ADR-0049 enforce-or-remove: the retirement was right for an unread key; this card asks for a read path, not for the old key back.\n- `BookGroupSchema.label` describe: \"Section title — first-class, i18n-homed\" — the declaration says the label is i18n-homed; no translation path reaches it today.\n\n## Done when\n\n- A book's `label` and each group's `label` resolve to the reader's locale on `GET /meta/book/:name/tree`, the book list, and the console sidebar, through the platform's one translation mechanism (shape decided at triage); a missing translation falls back to the authored string.\n- `os i18n extract` (or its successor) emits the keys, so a package's locale packs can carry them.\n\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01W2kbUv4yYL1quTZhCMVSej?thread=cmsg_01W2kbUv4yYL1quTZhCMVSejGmdvYsuXanpDEoryDJwW1n)_"

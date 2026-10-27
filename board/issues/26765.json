@@ -1,0 +1,36 @@
+{
+  "number": 26765,
+  "kind": "pull_request",
+  "title": "docs(agents): drop the director's five-row batch from Prime Directive 14; pin two skill line ceilings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T14:59:46Z",
+  "updated_at": "2026-10-27T15:28:56Z",
+  "closed_at": "2026-10-27T15:28:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-27T15:28:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26765",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9DkVJWXCxZNN1NkiZC7biv8)_\nFixes #26697\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:AGENTS.md 第 14 条删掉「总监席把批准请求打成一批、每批最多五行」这一分句;两条技能行数上限按实测下调(49、87)。\n- 为什么改:你说过「所以总监席你呈给我完全没必要啊」,技能文件已按此改完,但 AGENTS.md 优先级更高、还写着相反规则。\n- 风险与回滚:只删一个分句,批准与落地规则本身不变;回滚即 revert 本 PR。\n- 先看:`AGENTS.md` 第 279–280 行;`scripts/pm/check-skill-line-ratchet.mjs` 两行数字。\n- 两分钟验证:`git grep -n \"batch of at most five\" AGENTS.md .claude` 应无输出;`pnpm check:pm-skill-ratchet` 应全绿。\n- 需要你做的:批准本 PR\n\n## What changes\n\n- `AGENTS.md`, Prime Directive 14 (Tier H): the clause \"the director seat requests the word as ONE batch of at most five rows,\" is deleted, so the sentence reads \"…the OWNING seat then lands it, later pushes included; the click stays the maintainer's.\" Nothing else in PD14 changes. The two touched lines are the paragraph's minimum: `**Tier S** (席内达档复核落地: all of` moves to the start of the next line because the joined line would be 122 columns; no untouched line is re-wrapped.\n- `scripts/pm/check-skill-line-ratchet.mjs`: ceilings pinned at the measurement, `references/decision-analysis.md` 50 → 49 and `references/lanes/director.md` 88 → 87 (both files measured at 49 / 87 lines on base `74db43ef`). Byte-identical to the patch measured by the #26671 thread.\n\nThe pm-dispatch skill already dropped the batch rule (#26693, `1685a06dd`); AGENTS.md outranks the skill, so it still said the opposite. Maintainer, verbatim (from #26671): 「pr 你交给我批的价值是什么，我说同意你能合并吗」「所以总监席你呈给我完全没必要啊」.\n\nNo forced test edits. No changeset: the diff touches `AGENTS.md` and `scripts/pm/**` only, which publish nothing (`skip-changeset`).\n\n## Tests\n\nNo behaviour under test changed; the ratchet's own self-test and run are the check (below).\n\n## Acceptance notes\n\n- `git grep -n \"batch of at most five\" AGENTS.md .claude` → 0 hits (exit 1).\n- Open PR #26598 edits other rows of the ratchet file and the two reference files; rows differ. If it lands first, this PR re-measures both files and pins at the new counts.\n\n## Verification\n\nHead `2271cb17`. `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 36 commands; every one ran and exited 0, and `--ran` reconciles.\n\n<details><summary>Derived gates (36, all exit 0)</summary>\n\n- `node scripts/check-closing-keyword-parity.mjs :: exit 0`\n- `node scripts/check-closing-keyword-parity.mjs --self-test :: exit 0`\n- `node scripts/check-comment-mask-corpus.mjs :: exit 0`\n- `node scripts/check-declaration-mirrors.mjs :: exit 0`\n- `node scripts/check-declaration-mirrors.mjs --self-test :: exit 0`\n- `node scripts/check-self-test-wired.mjs :: exit 0`\n- `node scripts/check-self-test-wired.mjs --self-test :: exit 0`\n- `node scripts/check-self-test-workflow-commands.mjs :: exit 0`\n- `node scripts/check-self-test-workflow-commands.mjs --self-test :: exit 0`\n- `node scripts/check-whole-set-label-write.mjs :: exit 0`\n- `node scripts/check-whole-set-label-write.mjs --self-test :: exit 0`\n- `node scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0`\n- `node scripts/pm/bare-root-worklist.mjs --self-test :: exit 0`\n- `pnpm check:agent-test-spelling :: exit 0`\n- `pnpm check:bash32-floor :: exit 0`\n- `pnpm check:ci-filter-parity :: exit 0`\n- `pnpm check:cli-command-ids :: exit 0`\n- `pnpm check:cross-package-test-inputs :: exit 0`\n- `pnpm check:docs-audit-scope :: exit 0`\n- `pnpm check:driver-memory-census :: exit 0`\n- `pnpm check:entry-guard :: exit 0`\n- `pnpm check:gitlink-declared :: exit 0`\n- `pnpm check:nul-bytes :: exit 0`\n- `pnpm check:parse-guard :: exit 0`\n- `pnpm check:pm-governed-merges :: exit 0`\n- `pnpm check:pm-governed-prose :: exit 0`\n- `pnpm check:pm-skill-id-lint :: exit 0`\n- `pnpm check:pm-skill-ratchet :: exit 0`\n- `pnpm check:pnpm-filter-targets :: exit 0`\n- `pnpm check:pnpm-flag-spellings :: exit 0`\n- `pnpm check:ratchet-remedy-authority :: exit 0`\n- `pnpm check:refd-timer-probe :: exit 0`\n- `pnpm check:required-contexts :: exit 0`\n- `pnpm check:scripts-symbol-anchors :: exit 0`\n- `pnpm check:watch-hint-literal :: exit 0`\n- `pnpm check:pm-dispatch-gates :: exit 0`\n\n`--ran`: `Run reconciliation — 36 derived, 36 run, 0 NOT-MEASURED, 0 UNRUN.` (a derived zero: all 36 recorded an exit code)\n\n</details>\n\n<details><summary>check:pm-skill-ratchet</summary>\n\n- self-test: `✓ check-skill-line-ratchet self-test: 164 cases pass.`\n- run: every row green; `decision-analysis.md` 49 (ceiling 49; headroom 0), `lanes/director.md` 87 (ceiling 87; headroom 0).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQSSjxyjrgFc2uWEBL)_\n"
+}

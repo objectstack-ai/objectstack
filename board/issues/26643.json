@@ -2,8 +2,8 @@
   "number": 26643,
   "kind": "issue",
   "title": "chatbot build panel: the zh heading 「已构建{{app}}」 runs the verb into the app name (「已构建Library Lending Management」) — add a separator",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T11:21:17Z",
-  "updated_at": "2026-10-27T13:41:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T14:43:23Z",
+  "closed_at": "2026-10-27T14:43:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

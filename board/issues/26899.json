@@ -1,0 +1,32 @@
+{
+  "number": 26899,
+  "kind": "pull_request",
+  "title": "docs(scripts): two comments stop describing the pre-#22927 system-context census (#26611)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T20:04:54Z",
+  "updated_at": "2026-10-27T20:05:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26899",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ83E4C5pqznRerdLyMs7ArET)_\n\nFixes #26611\n\n## What changes\n\nTwo code comments, no code.\n\n1. `scripts/doc-line-anchors.mjs`, header section \"Today, since #15921\": it said the `line-anchors` comparator is \"selected by that page's `mixed` field\" and that the census `--fix` \"regenerates only the page's declared counts\". It now says the comparator is the one a `REGEN_ARTIFACTS` row *would* select with `mixed: 'line-anchors'`, that no row carries `mixed` since the page left the driver at #22927, and that `check-system-context-census.mjs --fix` is retired (exit 2, names `--write`, which rebuilds the #26442 site register and touches no anchor).\n2. `scripts/regen-artifacts.mjs`, `NOT_DRIVER_MANAGED` entry `docs/audits/**`: it called the strictness counts \"The ONE exception\". It now names both generated-whole files under `docs/audits/`: the strictness ledger's `.counts/` shards (routed, the row above; the old text's `.counts.md` spelling predates their sharding) and `2026-08-tenant-audit-write-call-sites.counts.md` (not routed), with the reason.\n\n## Why\n\nItem 2 asked for a decision: route the tenant-audit `.counts.md` like the strictness one, or record why not. **Not routed, recorded.** A `REGEN_ARTIFACTS` row needs a `gen:`/`check:` pair in the manifest it names as owner, and no manifest declares one for this census (it runs straight from `lint.yml`, step `tenant-audit-census-matches-the-tree`); the driver runs only in a local merge, never in GitHub's server-side merge or the queue's; and `check-tenant-audit-census.mjs` already holds the file to its `--write` output on every PR, so a clean-and-wrong text merge is red, never silent. That is the reasoning the file's own generated header (`renderCountsFile` in `scripts/tenant-audit-census.mjs`) already prints; the ledger entry now agrees with it instead of contradicting it. Routing would be a manifest + `.gitattributes` + row change with the regen gate in the PR, which is a separate, larger card if anyone wants it.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands scripts/doc-line-anchors.mjs scripts/regen-artifacts.mjs` derived 35 commands. 31 exit 0, plus `node scripts/git-merge-regen.mjs --self-test` (exit 0) and `node --check` on both files (exit 0).\n- 4 derived gates exit 3 (PREREQUISITE NOT MET, no `dist/` in this container): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. They read built package output, which comment edits in two root `scripts/` files cannot change; CI runs them after its build.\n- `skip-changeset`: both files are root tooling and publish from no released package.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` not run locally, CI's lint job is the verdict)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXz4CLkqrp9ANVLuPH\n"
+}

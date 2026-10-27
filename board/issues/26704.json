@@ -2,7 +2,7 @@
   "number": 26704,
   "kind": "pull_request",
   "title": "refactor(metadata-protocol): move saveConflict and listLiveMetadataTypes out of protocol.ts, each into its own module (#25467 cut 24)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:28:06Z",
-  "updated_at": "2026-10-27T13:52:10Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T14:40:11Z",
+  "closed_at": "2026-10-27T14:40:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T14:40:09Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26704",

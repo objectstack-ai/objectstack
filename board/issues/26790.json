@@ -1,0 +1,32 @@
+{
+  "number": 26790,
+  "kind": "issue",
+  "title": "skills(objectstack-ui, objectstack-i18n): the actions rule and the i18n skill do not teach an action's disabledReason (follow-up owed by #26619)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T15:45:34Z",
+  "updated_at": "2026-10-27T17:17:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26790",
+  "body": "Filing gate ①: a follow-up owed by work in flight. PR #26786 (`Part of #26619`, the spec half of ruling `6442737825` letter A) adds `disabledReason` to `ActionSchema` and records `Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, its views-apps-actions-pages eval, skills/objectstack-i18n/SKILL.md`, keeping `skills/**` (Tier H) out of the PR. Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\nBlocked-by: #26786\n\n**Business reason:** once #26619 lands, a record action that is greyed out by `disabled` can say why, through a translatable `disabledReason` (for example \"An approved legal review is required before approval\"). The console's hover title and accessible description read it, and \"Not available for this record\" stays the default when it is absent. It is display-only: the refusal is still the hook's or the permission's. An agent authoring an action from the skill is not told the key exists. It will leave the generic sentence in place, or put the reason into `description` or a page field, which is the workaround #24034 B′ and the ruling both name.\n\n**Reader who acts:** the skills lane (`skills/**` is Tier H).\n\n## Wanted\n\n- `skills/objectstack-ui/rules/actions.md`: one line beside `disabled`. `disabledReason` is an I18nLabel, display-only, and never a predicate.\n- The views-apps-actions-pages eval: one case that expects `disabledReason` beside a `disabled` predicate and forbids putting the reason in `description`. Only if it fits, or under the standing 「A:先削重复,余额按实测提高」 ruling (#26302).\n- `skills/objectstack-i18n/SKILL.md`: the slot `objects.<object>._actions.<action>.disabledReason` (and `globalActions.<action>`) beside `confirmText` / `successMessage`.\n\nDedupe: open issues grepped for `disabledReason`: none besides #26619 itself.\n\nClause-②: no\nMetadata-protocol: none"
+}
