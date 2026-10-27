@@ -571,6 +571,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Its own self-test, where it runs (check:self-test-wired). Milliseconds.
+      # A red here fails this job before it publishes a plan, so the matrix
+      # falls back to all eight shards: a broken planner costs runners, never
+      # coverage.
+      - name: Test Core shard planner self-test
+        run: node scripts/ci/plan-test-core-shards.mjs --self-test
+
       # The event fields are the `test` job's "Compute this shard's package
       # set", verbatim: the plan is that step's answer, computed once.
       - name: Plan this run's Test Core shards
