@@ -267,11 +267,16 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     // an expanded ViewItem always carries both — so a console PUT on a REAL
     // view arrives bound, exactly as spelled here. The precondition-inertness
     // claim is asserted separately below on the bare, baseline-less shapes.
+    //
+    // [#26711] The filter-only overlay is a LIST overlay: `filter` is a list
+    // key. Spelled `viewKind: 'form'` it was accepted only because the form
+    // member `.strip()`ped the filter unread, so the save stored a form overlay
+    // without it; the form member now refuses `filter` by name.
     it.each([
       ['a pin PUT with no stored item to merge', { isPinned: true, object: 'crm_lead', viewKind: 'list' }],
       ['a switcher-reorder PUT', { sortOrder: 3, object: 'crm_lead', viewKind: 'list' }],
       ['a column-only overlay', { columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
-      ['a filter-only overlay', { filter: [{ field: 'name', operator: 'contains', value: 'x' }], object: 'crm_lead', viewKind: 'form' }],
+      ['a filter-only overlay', { filter: [{ field: 'name', operator: 'contains', value: 'x' }], object: 'crm_lead', viewKind: 'list' }],
       ['an order-only overlay', { order: 2, object: 'crm_lead', viewKind: 'form' }],
       ['a renamed view that still carries its config', { label: 'New name', columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
     ])('leaves %s alone', (_label, body) => {
@@ -384,14 +389,20 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(ViewMetadataSchema.safeParse({ groupByField: 'stage' }).success).toBe(false);
     });
 
-    it('does NOT close the arms — `.strip()` round-tripping is untouched', () => {
-      // The ruling on #5599 kept every arm's `.strip()`: a body that speaks the
-      // vocabulary still carries undeclared aux keys through without a 422.
-      // This is the deliberate residue of the minimal fix, pinned so a later
-      // batch cannot mistake it for an oversight. ([#7741] bound form — the
-      // openness under test is about UNKNOWN keys, not the binding pair.)
+    it('the arms judge an unknown key themselves — the precondition admits the body, the arm refuses the key', () => {
+      // The ruling on #5599 kept every arm's `.strip()` while the save stored
+      // the ORIGINAL body, so undeclared aux keys round-tripped. [#26711] Since
+      // #20051 the save stores the parsed body and #20456 declared every
+      // round-trip key, so the strip only dropped a misspelt key in silence;
+      // the arms are closed. The precondition is unchanged: this body speaks
+      // the vocabulary (`isPinned`), and the refusal is the arm's, naming the
+      // key. ([#7741] bound form — the case is about UNKNOWN keys, not the
+      // binding pair.)
       const r = ViewMetadataSchema.safeParse({ isPinned: true, someFutureStudioKey: 'x', object: 'crm_lead', viewKind: 'list' });
-      expect(r.success).toBe(true);
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.success ? [] : r.error.issues)).toContain('Unrecognized key(s) on this inline list view: `someFutureStudioKey`');
+      // …and without the unknown key the same body is accepted.
+      expect(ViewMetadataSchema.safeParse({ isPinned: true, object: 'crm_lead', viewKind: 'list' }).success).toBe(true);
     });
   });
 

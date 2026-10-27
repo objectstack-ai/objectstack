@@ -424,16 +424,18 @@ describe('批 18 — the shapes left open, and what became of them', () => {
     ).toBe(true);
   });
 
-  it('…and the mechanism, which is why a posture flip could NOT have fixed it: `.strip()` does not recurse', () => {
+  it('…and the mechanism, which is why a posture flip could NOT have fixed it: a top-level posture does not recurse', () => {
     // The load-bearing fact for every nested block in this file. A member's
-    // `.strip()` re-opens the TOP level only, so a nested block closed inside
-    // `ListViewSchema` is still reached at full strictness through that member.
-    // #5074's answer is not a deeper strip — it is removing the named
-    // decoration ahead of the parse. These two assertions are the CONTROLS for
-    // that claim and must hold whichever way the decorated blocks are written.
+    // top-level posture reaches the TOP level only, so a nested block closed
+    // inside `ListViewSchema` is reached at its own strictness through that
+    // member, whatever the member does. #5074's answer is not a deeper strip —
+    // it is removing the named decoration ahead of the parse. These two
+    // assertions are the CONTROLS for that claim and must hold whichever way
+    // the decorated blocks are written.
     const overlay = { type: 'grid', columns: ['name'], name: 'o.default', viewKind: 'list', object: 'o' };
-    // top level: an unknown aux key rides along, because the member strips.
-    expect(ViewMetadataSchema.safeParse({ ...overlay, someStudioAuxKey: 1 }).success).toBe(true);
+    // top level: [#26711] the member is closed, so an unknown aux key is
+    // refused (it used to `.strip()` and the save dropped the key).
+    expect(ViewMetadataSchema.safeParse({ ...overlay, someStudioAuxKey: 1 }).success).toBe(false);
     // nested: a CLOSED sub-block that is NOT a declared decoration still rejects.
     expect(ViewMetadataSchema.safeParse({ ...overlay, emptyState: { title: 'x', notAnEmptyStateKey: 1 } }).success).toBe(false);
   });

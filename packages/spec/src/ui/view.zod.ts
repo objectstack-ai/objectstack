@@ -6083,11 +6083,14 @@ function speaksViewVocabulary(body: unknown): boolean {
  * **Why a precondition and not a required floor on member 4.** Giving the form
  * arm a required key (the other candidate fix) would 422 the flattened overlays
  * Studio writes, whose required-ness nobody has measured; the ruling on #5599
- * took this route and deferred that one explicitly. This route also leaves every
+ * took this route and deferred that one explicitly. This route also left every
  * arm's `.strip()` untouched — the round-trip capability #5074 traced and
- * documented is load-bearing and is not what was broken. What was broken is that
- * an arm which strips AND requires nothing is a wildcard for the whole union, so
- * the fix belongs one level up, at the union's door.
+ * documented was load-bearing then, while the save stored the ORIGINAL body.
+ * What was broken is that an arm which strips AND requires nothing is a
+ * wildcard for the whole union, so the fix belonged one level up, at the
+ * union's door. [#26711] The arms are closed now: #20051 made the save store
+ * the parsed body and #20456 declared every round-trip key, so the strip no
+ * longer carried anything — it only dropped a misspelt key in silence.
  *
  * **Why it lives in the existing `z.preprocess` stage.** `/api/v1/meta/types/view`
  * serves `z.toJSONSchema()` of this schema to Studio's SchemaForm, and both pins
