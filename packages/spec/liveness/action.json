@@ -151,6 +151,14 @@
       "evidence": "objectui: components action-button/-group/-icon/-menu + app-shell DeclaredActionsBar + plugin-detail record-quick-actions — all six rendering surfaces gate the Button on the predicate",
       "note": "EVIDENCE CORRECTED 2026-07 (#1878 §3 recheck): previously cited the metadata-admin PREVIEW renderer, which only echoes the authored value. At that time the predicate was actually enforced on ONE of six surfaces (#1885 wired action:button alone) — the 'live' verdict was right for the wrong reason and hid a real silent no-op on the other five. objectui#2863 wired the rest; showcase specimen `showcase_archive_task` (#3643) dogfoods it."
     },
+    "disabledReason": {
+      "status": "planned",
+      "verifiedAt": "2026-10-27",
+      "authorWarn": true,
+      "authorHint": "Keep it, but nothing reads it yet: no console shows a greyed action's `disabledReason`, so the button still says \"Not available for this record\" until the console's greyed-action readers ship.",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateAction overlays the translated `objects.{o}._actions.{a}.disabledReason` (or `globalActions.{a}.disabledReason`) onto the served action; packages/cli/src/utils/i18n-extract.ts#collectExpectedEntries emits the key and packages/spec/src/system/translation.zod.ts declares the translation slot.",
+      "note": "PLANNED until the console half of #26619 lands (ruling 6442737825, letter A: spec PR first, console PR second). The framework half is live today — parse, blank refusal, translation slot, extract, translateAction overlay — but no renderer reads the key yet: the four greyed-action readers (ui/packages/components/src/renderers/layout/containers.tsx#disabledReasonFor, ui/packages/components/src/renderers/action/disabled-reason.tsx#useDisabledReason, ui/packages/plugin-detail/src/renderers/record-quick-actions.tsx, ui/packages/app-shell/src/views/DeclaredActionsBar.tsx) still show only `actions.notAvailableForRecord`. `authorWarn` is set because an author who writes the key today sees the default sentence, not theirs. The console PR flips this row to `live` with those read points, and drops `authorWarn` / `authorHint` in that same edit (a warned `live` row reds this gate, #21127). Display only by contract: never a server admission input, never read as a predicate."
+    },
     "ai": {
       "status": "live",
       "verifiedAt": "2026-09-15",

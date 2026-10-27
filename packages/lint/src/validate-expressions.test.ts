@@ -926,6 +926,21 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(ok).toHaveLength(0);
     });
 
+    it('never reads `disabledReason` as a predicate — it is display copy (#26619)', () => {
+      // The same bare-field source that is an error on `disabled` above is a
+      // plain sentence on `disabledReason`: nothing is checked, nothing flagged.
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_lead', fields: { status: { type: 'select' } } }],
+        actions: [{
+          name: 'park',
+          objectName: 'crm_lead',
+          disabled: 'record.status == "converted"',
+          disabledReason: 'status == "converted"',
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
     it('validates an action attached to an object (record scope = parent object)', () => {
       const issues = validateStackExpressions({
         objects: [{
@@ -3372,6 +3387,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'action',
     // `object` is absent — the action schema's canonical key is `objectName`.
+    // `disabledReason` is absent by contract (#26619): display copy beside
+    // `disabled`, never read as a condition.
     expected: ['disabled', 'name', 'objectName', 'visible'],
     declaredBy: 'ObjectStackSchema.actions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
