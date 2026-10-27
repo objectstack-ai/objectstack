@@ -914,7 +914,8 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *
  * ## Why the ui-scripts-suite entry stands in for a CI JOB (#26318)
  *
- * The 178 test files under `ui/scripts/__tests__/` belong to no package and run
+ * The 180 test files under `ui/scripts/__tests__/` (178 that run, 2 skipped)
+ * belong to no package and run
  * only inside the 16 `Test UI` shards, as the "always-on" files the affected-test
  * selector adds to every run because no package owns them. They pin facts a
  * change under ui package source, the Console app, the objectui skill bundle or
@@ -933,7 +934,13 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  * census guard in the self-test reds on the PR that does it.
  *
  * It names the WHOLE suite, never an affected subset: a subset map is a second
- * list that rots, and the whole run is about a minute. What it does not see is
+ * list that rots. Measured at 6390fe52 on a 4-vCPU container, after the seven
+ * @objectstack packages the job builds: 178 files passing in 284 s and 286 s
+ * (two runs; the card's "about a minute" was read elsewhere), nearly all of it
+ * module import — so a subset would save minutes, not a CI round trip, and the
+ * reach it would have to model is the tree itself: by a static scan of each
+ * file and the helpers it imports, 165 of the 180 read ui package source, 141
+ * the ui apps, 16 the objectui skill bundle and 170 ui/scripts. What it does not see is
  * stated rather than hidden: a ui path outside the four roots (a ui package's
  * tests outside `src`, its `package.json`, a root config) is not named here,
  * though CI's `Test UI` job still schedules the suite for it — the full battery
@@ -1057,7 +1064,7 @@ export const CHANGE_KIND_ROWS = [
         name: 'pnpm --dir ui exec vitest run scripts/',
         ciJob: 'Test UI',
         ciRunner: 'pnpm --dir ui exec vitest run',
-        why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change under ui package source, the ui apps, skills/objectui or ui/scripts moves. The whole suite, never a subset: about a minute locally. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
+        why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change under ui package source, the ui apps, skills/objectui or ui/scripts moves. The whole suite, never a subset: measured at about five minutes on a 4-vCPU container (284 s and 286 s, 178 files passing, import-bound), against the CI round trip of about 25 minutes it saves. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
       },
     ],
   },
