@@ -1,5 +1,120 @@
 # @objectstack/formula
 
+## 18.2.0
+
+### Patch Changes
+
+- be531f6: feat(spec,core,objectql,driver-sql,formula,driver-mongodb,service-analytics): a filter compares a datetime column against now shifted by whole days held on the record (`{ $now: true, addDays }`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6415710193
+  
+  An analytics dataset could not say "opened longer ago than this ticket's own SLA": the comparand grammar had a `{ $field, addDays }` pair for two columns of the record and `{N_days_ago}` placeholders for a fixed number of days, but nothing that anchored at the current instant and read the number of days off the row. Authors fell back to a literal day count, which drifts from every record whose SLA differs.
+  
+  `FilterCondition` gains a now-anchored comparand, legal exactly where a `{ $field }` reference is — as the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`, on a `date` or `datetime` column:
+  
+  ```ts
+  // opened more than review_sla_days_offset days ago — the column holds NEGATIVE days
+  { opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } } }
+  // on or after thirty days ago
+  { closed_on: { $gte: { $now: true, addDays: -30 } } }
+  ```
+  
+  - **`@objectstack/spec`.** `NowAnchorSchema` (`data/filter.zod.ts`): `$now` is the literal `true`, `addDays` is REQUIRED — an integer of any sign or a `{ $field }` reference to a numeric column of the same record, the `addDays` grammar `FieldReferenceSchema` already carries; there is no `subDays`, and the unshifted instant stays the `{now}` placeholder. The `FilterCondition` door refuses a malformed anchor in the anchor's own words, and an anchor as an `$in` / `$nin` member or a `$between` endpoint by name, as it refuses a reference there. `filter.mdx` and the authorable surface document the shape.
+  - **`@objectstack/core`.** `resolveFilterTokens` pins `$now` to the tree's one instant (the `now` every `{N_days_ago}` in the tree resolves from), as an ISO string, so every executor sees `{ $now: '<ISO>', addDays }`; an anchor without `addDays` is `INVALID_FILTER` / 400 there.
+  - **`@objectstack/driver-sql`.** SQL push-down compiles the anchor on SQLite, PostgreSQL and MySQL through the `addDays` arithmetic (`crossFieldOffsetExpr`), with the instant bound in the target column's storage form: a `datetime` column keeps the time of day, a `date` column meets the instant's UTC calendar day. A NULL offset column is zero days (`coalesce`). The predicate is total: an ordering and `$eq` need the target to have a value, `$ne` holds when it has none or differs, so `$not` takes exactly the complement. The offset column is held to the same-table rules the `addDays` pair's is (declared, numeric, same table, never the tenant-isolation column); a non-temporal target, a malformed anchor and every other position are refused with the operands withheld from the message and the diagnostic in the server log.
+  - **`@objectstack/formula`.** `matchesFilterCondition` resolves the anchor in the form of the stored value it meets (a calendar day stays a calendar day), so the memory path answers the SQL path's rows; `$now: true` reads the evaluator's clock for a caller with no resolver seam.
+  - **`@objectstack/objectql`.** `aggregations[i].filter` and `having` judge the anchor by `where`'s rules (temporal target, declared numeric offset) before any row is read, and evaluate it per row through the formula evaluator.
+  - **`@objectstack/service-analytics`.** `NativeSQLStrategy` declines a query carrying an anchor, as it declines a `{ $field }` comparand, so a dataset filter or measure filter routes to the engine path where the driver compiles it; a dataset's authored `$now: true` is pinned by the service's own token seam.
+  - **`@objectstack/driver-mongodb`.** Refuses the anchor in every position (`INVALID_FILTER` / 400) rather than translating it as a literal sub-document.
+  
+  Pinned on the drivers' cross-field conformance corpus (`CROSS_FIELD_NOW_CASES` / `CROSS_FIELD_NOW_REFUSALS`, exported from `@objectstack/driver-sql`) on both execution paths, and on the analytics dataset shape the ruling was made for.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 14b5597: fix(formula,core,react): a template's formatter locale comes from a reserved context channel, so a root named `locale` is just a value, and the console passes the viewer's display locale
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. What changes is which input sets the template dialect's formatter locale: the evaluate context's own `locale` field instead of a root named `locale`. A template that names a root `locale` keeps compiling and rendering; its hole still prints that value, only the number and date formatting no longer follows it. There is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no runtime interface, type or export is removed or narrowed: `EvalContext` gains an optional member and `fillTemplateHoles` an optional trailing argument (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  The `template` dialect's formatters (`number`, `currency`, `percent`, `date`, `datetime`) used to take their locale from `extra.locale`, the same bag a caller passes the template's roots in. A template's roots are author-visible values, so a bulk action param or a flow variable named `locale` silently set the locale of every formatted value in the sentence, and no caller ever passed the viewer's locale.
+  
+  - **`@objectstack/formula`**: `EvalContext` gains `locale?: string`, a reserved channel like `timezone`. It is not bound as a variable, and the template engine reads its formatter locale from it alone, defaulting to `en-US` when unset or empty. `extra.locale` is no longer read.
+  - **`@objectstack/service-automation`**: a flow text slot's formatters render in `en-US`, and a flow variable named `locale` is a value like any other. The renderer's doc said the variable was also the formatters' locale; that line is gone.
+  - **`@object-ui/core`**: `fillTemplateHoles(source, roots, locale?)` passes `locale` on the engine's reserved channel, apart from the roots. `ActionRunner.setDisplayLocale(read)` installs where the runner reads the viewer's display locale; `confirmText` and `successMessage` templates format in it, and a `callContext` dispatch keeps it.
+  - **`@object-ui/react`**: `<ActionProvider>` and `useActionRunner` install `useDisplayLocale()` on the runner they build, read when a template is filled, so a locale switch reaches a runner built before it.
+  
+  **BREAKING** (a narrowing) for a caller that set the formatter locale through a root: a template evaluated with `extra: { locale }` (or a flow variable named `locale`) now formats in `en-US` and prints the value only where a hole names it. None was found in this repository: the one test that did so now passes `locale` on the context. What to do: pass the locale as the evaluate context's `locale` (`templateEngine.evaluate(expr, { extra: roots, locale })`), or as `fillTemplateHoles`'s third argument.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

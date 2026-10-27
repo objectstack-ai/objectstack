@@ -1,5 +1,279 @@
 # @objectstack/core
 
+## 18.2.0
+
+### Minor Changes
+
+- b77bb37: feat(spec,core,rest): an import column can be written only when its row is created (`applyOn`), and `matchFields` takes ordered key sets
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Two additions to the import contract (`POST /data/:object/import` and the async import job), both honoured by the import runner:
+  
+  - **`FieldMappingEntry.applyOn: 'create' | 'always'`** (default `always`, today's behaviour). An inline mapping entry marked `create` is written when the import creates the row and left out when an `upsert` updates an existing one; an `update` import never writes it. One upsert can then be re-run safely: master-data columns refresh, while a column the app has changed since the first run (a status, a flag) keeps its current value. A create-only column is still read for matching, and the key a row was found by stays in that row's update. An `applyOn` value outside `create` / `always` refuses the request with `400 INVALID_REQUEST`.
+  - **`matchFields` accepts ordered key sets** (`string[][]`) beside one key set (`string[]`, unchanged). Each row is matched by the first set whose fields are all non-blank on it, and only by that set, so one sheet can identify domestic suppliers by `credit_code` and overseas ones by `country` + `registration_no`. A row blank on every set fails with `BLANK_MATCH_KEY` (`ok: false`, `action: 'failed'`) instead of being created or skipped; `skipBlankMatchKey: true` with key sets is refused with `400 INVALID_REQUEST`, as are malformed key sets (an empty set or name, or names mixed with sets). A set that matches more than one record fails the row with `AMBIGUOUS_MATCH`, as before.
+  
+  ```json
+  {
+    "writeMode": "upsert",
+    "matchFields": [["credit_code"], ["country", "registration_no"]],
+    "mapping": [
+      { "sourceField": "Code", "targetField": "credit_code" },
+      { "sourceField": "Country", "targetField": "country" },
+      { "sourceField": "Reg. no.", "targetField": "registration_no" },
+      { "sourceField": "Name", "targetField": "name" },
+      { "sourceField": "Status", "targetField": "status", "applyOn": "create" }
+    ]
+  }
+  ```
+  
+  `@objectstack/spec` also exports `isMatchKeySets(matchFields)`, which tells the two `matchFields` spellings apart. `RunImportOptions` in `@objectstack/core` gains `createOnlyFields` and accepts both `matchFields` spellings.
+- c8cb510: feat(spec,security): a field permission entry can carry a row condition (`when`) on its edit vote
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6408558941
+  
+  - **Before.** A `fields["<object>.<field>"]` entry voted `readable` / `editable` on every row of the object. A lock that should apply on some rows only (the amount of an approved opportunity, say) had no spelling: a validation rule or a hook carried it, outside the permission model and outside `os explain`.
+  - **Now.** `FieldPermissionSchema.when` is an optional row condition, authored in the same canonical CEL as `rowLevelSecurity[].using` (`status == 'approved'`, `owner_id == current_user.id`, …). An entry with a `when` votes as declared on the rows the condition names and is **absent** on the others, as if the set had not declared the field; an entry without one votes on every row, as before. The vote reaches the **edit** bit only — reads are row-blind — so `readable: false` beside a `when` is refused at parse, and the message says why. `condition`, `where` and `filter` are refused with a pointer to `when`.
+  - **Judged on the row the write changes.** The write gate (the engine middleware's field-level step and `canWriteObject`) judges the **stored** row before an update, read as the caller reads it, and each **incoming** row of an insert — in process, by `RLSCompiler.compileRowPredicate` (the compile, `current_user` context, field guard and comparand faces an RLS `check` clause takes) and the write gate's own stored-form judge. Never a query rewrite. A row that cannot be judged — a predicate update, a stored row the caller cannot read, a condition that does not resolve for the request — applies the entry as its **lock** (no edit grant), and a WARN line says why.
+  - **Row-blind readers apply the lock.** `/auth/me/permissions` (`buildEffectiveFieldPermissions`, new in `@objectstack/core`, the one vote `PermissionEvaluator.getFieldPermissions` takes per object), the writable-field projections, the query guard and the result masker hold no row, so a conditioned entry is reported as its lock: no client is told of an edit the gate refuses. `os explain`'s `fls` layer names each row-conditioned entry as such — judged per row by the write gate, applied as the lock elsewhere.
+  - **Validated like an RLS predicate.** `@objectstack/lint`'s `validateRlsPredicateEnforceability` walks `permissions[].fields[].when` by the passes `using` / `check` take, against the key's object: `rls-predicate-unenforceable`, `-unparseable`, `-over-budget`, `-unknown-field`, `-unknown-user-variable`, with the cost named (the entry cannot be judged and is applied as its lock on every row).
+  - **Unchanged.** Field grants union without deny: a matched conditioned lock is out-voted by a sibling's unconditioned `editable: true` exactly as before, and only declaring entries vote. The `/auth/me/permissions` `fields` merge keeps its most-permissive rule. Recorded under ADR-0066 ⑧ (note of 2026-10-26).
+
+### Patch Changes
+
+- 733b3c8: fix(plugin-security)!: a permission set that shares a held position's name is no longer granted; declare it in the position's `permissionSets` (#24757)
+  
+  Clause-②: yes (narrowing: a holder of position `P` is no longer granted the permission set named `P` unless `P`'s definition names it in `permissionSets`; widened: `@objectstack/core`'s `UserAuthzGrants` and `ResolvedAuthzContext` gain the additive field `directPermissions`)
+  Metadata-protocol: none
+  Ruling-ref: #13419 ruling B (`5472608110`); 「甲」 as amended (`6303865025`); order and unlock on #24757 (`6290781571`, `6392096931`); #25799 seat ruling A (claims `6414302166`, `6414315157`)
+  
+  ADR-0131 D3/D4: a position grants only the permission sets its definition's `permissionSets` names — the binding is written, not inferred. The security plugin's set resolution still requested every held position's NAME as a permission-set name too (the position-name fold), so a set that happened to share a position's name was granted to its holders without anyone writing the binding. #13419 ruling B retires that channel; HotCRM declared its bindings first (objectstack-ai/hotcrm#2200, released in hotcrm `v6.0.0`).
+  
+  What changes:
+  
+  - `resolvePermissionSetsForContext` requests only the context's `permissions` and the baseline. A held position's name reaches no set. `dropDeactivatedFoldedSets`, the second activation read that only the fold needed, is gone.
+  - The `position_name_fold_grant` warning keeps its event name and fields and now says the opposite: the same-named set is **not** granted, and how to grant it (`permissionSets: ['P']`) or to rename one of the two. Its payload carries `granted: false`. It is still logged once per position name per process.
+  - `describePositionGrants` lists only the sets a position's definition names, so it no longer serves `via: 'name'`. The `'name'` member of `PositionGrantVia` (`@objectstack/spec`) and its UI badge are retired separately in #26022; until then the value is published but never served.
+  - The delegated-administration gate judges an assignment of position `P` on the sets `P`'s definition names only. A set that only shares `P`'s name is no longer walked for the allowlist, the containment check or the organization boundary, because no assignment grants it.
+  - `explainAccess` attributes a set to `position:P` when `P`'s definition names it, and says `direct grant` otherwise. When the position definitions cannot be read it says so, rather than guessing either. A set held both through the user's own grant row and through a held position's definition reads `direct grant + position:P`, so revoking the position is not mistaken for removing the access (#25799).
+  - `@objectstack/core`: `UserAuthzGrants` and `ResolvedAuthzContext` gain `directPermissions: string[]`, the names conferred by the user's own `sys_user_permission_set` rows that apply in the active organization (a set a position definition also names included, a set only a definition names excluded). It is additive and grants nothing; the explainer reads it. Code that builds either object by hand must now set it (`directPermissions: []` when there are no grant rows).
+  - The lint gate `check-position-name-fold-loaders` and the census script `measure-position-name-fold-census` are deleted. They guarded the fold's only route, which no longer exists.
+  
+  **BREAKING** for an environment that relied on a shared name to grant a set.
+  
+  - **Before.** A user holding position `sales_manager` was granted the permission set `sales_manager` whether or not the position's definition named it.
+  - **Now.** That user is granted only the sets the `sales_manager` definition lists in `permissionSets`. The first resolution that would have folded the set logs `position_name_fold_grant` with `granted: false`, naming the position and the fix.
+  - **Fix.** Name the set in the position: `permissionSets: ['sales_manager']`. If the shared name is a coincidence, nothing needs to change.
+  - **Cloud ordering.** An environment running HotCRM must be on the HotCRM release that declares its bindings (`v6.0.0` or later) before it takes this release.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time narrowing in the security plugin's permission-set resolution: a held position's name is no longer requested as a permission-set name. No authorable key, spelling or stored shape moves, the position and permission-set schemas parse exactly as before, and no stored row is read, rewritten or converted. The repair is the author's choice between naming the set in the position's `permissionSets` and leaving it ungranted, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); nothing exported from `@objectstack/spec` moves in this change; and the one type change, the additive `directPermissions` on `@objectstack/core`'s resolver output, is a per-request value no stored artifact or authored metadata carries, so no conversion has a source to rewrite. -->
+- 65145d3: refactor(core)!: `resolveLocalizationContext` takes the organization as `organizationId`; the `tenantId` key is retired
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/core#ResolveLocalizationInput.tenantId) the retired member is a key of a published runtime TypeScript input with no Zod schema, no spec declaration and no stored shape; the compiler reports it at every object-literal call that still spells it, and nothing exists for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `resolveLocalizationContext` from `@objectstack/core`. The key that names the organization to localize for is renamed. There is no alias and no deprecation window.
+  
+  `ResolveLocalizationInput.tenantId` always meant the **organization** id: the settings service stores and reads `localization` under the organization (ADR-0131 D8), and the direct `sys_setting` fallback reads that organization's rows. The name did not say so, and an environment id passed there type-checked. It matched no organization's settings, so every non-UTC organization silently resolved its timezone as `UTC`, and the date boundaries cut from it moved with it. The key is now `organizationId`, and the resolver reads no other spelling at run time.
+  
+  - FROM `ResolveLocalizationInput.tenantId` TO `ResolveLocalizationInput.organizationId`: pass the caller's organization id under the new key, `resolveLocalizationContext({ ql, settings, organizationId, userId })`. Never pass an environment id.
+  
+  **Who moves.** A caller that builds the input as an object literal with `tenantId` gets a compile error (excess property) and makes the one-key fix above. A caller that builds it some other way, such as spreading an object that holds `tenantId` or passing a variable typed wider than the input, does not get that error: its `tenantId` is ignored and the resolver localizes as for a caller with no organization, so grep for `tenantId` beside `resolveLocalizationContext`. In this repository the four callers (`@objectstack/core`'s request execution context, `@objectstack/mcp`, `@objectstack/plugin-audit` and `@objectstack/plugin-hono-server`) are migrated here and behave as before.
+  
+  **Not moved.** The settings service's own scope argument, `{ tenantId, userId }` on `get` / `getMany`, keeps its spelling. It is a separate surface with its own callers. The resolver passes the organization id there as before.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- 073f08b: fix(security): a hook that runs as system and an action body are refused writes to position holdings, permission-set grants, invitations and memberships, as a system flow already is
+  
+  Clause-②: no (narrowing: app-authored hook and action-script writes to the four identity objects are refused at run time, as #25251 did for flows; the seat runs the contract review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What changes is the run-time answer to a hook or action body's elevated write to four platform objects; the save-time refusal and its semantic entry are the spec half of the same card. -->
+  
+  **BREAKING** (a served-set narrowing) for app-authored automation that writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` under system elevation. A census of the hooks and action bodies in this repository and in HotCRM found none that does.
+  
+  A `runAs: 'system'` flow has been refused these writes since 18.1. Two other kinds of app-authored automation run with the same elevation and were not: a hook that declares `runAs: 'system'`, and an action body (`type: 'script'`), which always runs elevated. Their writes skipped the delegated-administration gate (so a grant carried no `granted_by`) and the invitation door's placement and role-cap checks. Both are now refused the same way:
+  
+  - An insert, update, delete, transfer, restore or purge of one of the four objects, from a `runAs: 'system'` hook (a sandboxed body or an in-process handler) or from an action body (through `ctx.api` or `ctx.engine`), answers `403 PERMISSION_DENIED`. Nothing is written. A hook's refusal aborts the triggering write under the default `onError: 'abort'`.
+  - The message names the source and the fix. For position holdings and permission-set grants: set the hook's `runAs` to `'user'`, so the delegated-administration gate judges the user the hook acts for and records them as `granted_by`. An action body has no `runAs`, so its grant moves to a `runAs: 'user'` flow, which an action of type `flow` runs as the invoking user. For invitations and memberships: use the organization endpoints.
+  
+  Unchanged: reads of the four objects, and writes to every other object, from the same hook or body. A hook under `runAs: 'user'`, which the ordinary gates judge as its user. The platform's own writers (better-auth and its reconciliation, invitation placement, the seeders, any `sudo()`), which carry no app-automation mark. A system flow's refusal, word for word.
+  
+  **What changes for you.** A hook or action body that grants a position or a permission set under elevation now fails. Declare `runAs: 'user'` on the hook, or move an action body's grant into a `runAs: 'user'` flow. Invitations and memberships change through `POST /api/v1/auth/organization/invite-member`, `cancel-invitation`, `update-member-role` and `remove-member`.
+  
+  `@objectstack/core` exports the mark: `APP_AUTOMATION_ELEVATION`, `markAppAutomationElevation`, `appAutomationElevationOf` and `carryAppAutomationElevation`.
+- be78977: feat(install): a package that declares an installed app in `manifest.dependencies` may share that app's namespace, and a boot hydrates installed packages in dependency order (ADR-0141 D5)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped: `manifest.dependencies` keeps its record shape and meaning. The one narrowing is an install-local acceptance detail of the not-yet-released ADR-0141 D2 check (an artifact wrapper's own id no longer counts as a delivered package), plus the matching removal of the unreleased `DeclaredDependencyCheck.deliveredIds` option; there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **Namespace co-ownership by declaration.** The install gate (`SchemaRegistry.installPackage`) used to admit packages into one namespace only when one release artifact delivered them together. A module shipped as its own artifact that uses its app's namespace was refused `422 NAMESPACE_CONFLICT` beside the installed app, whatever it declared. Now an installed package P co-owns namespace N with:
+  
+  - an installed X that P declares in `manifest.dependencies`, when both use N;
+  - a sitting owner of N that declares P, which is the same relation read from the other end, so an upgrade or reinstall of the app beside its modules is admitted;
+  - a sibling S, when S and P each declare one installed package that holds N (two modules of one app, neither declaring the other).
+  
+  Only direct declarations count. The shared parent must be installed and must hold N itself.
+  
+  The object-name check reads the same co-owner set. A co-owner by declaration that defines an object name another co-owner already owns is refused `422 DUPLICATE_ARTIFACT_OBJECT_NAME` before any DDL. Examples: a module redefining its app's object, a sibling redefining the other sibling's object, or an app upgrade newly defining a name one of its modules owns. The message is worded per source (same artifact, declared dependency, sibling). `NAMESPACE_CONFLICT` now names the declaration as the fix for a package that extends the app holding the namespace.
+  
+  **Hydrate order.** The `sys_packages` hydrate and the install-local `kernel:ready` rehydrate used to register in source-listing order. Now they sort their batch by `manifest.dependencies`, with declared ids as optional edges, through `resolvePluginOrder`. Before this, a module that hydrated before the app whose namespace it shares could be refused and stay absent for the process lifetime. In the install-local rehydrate, each ledger entry is one node, so a declared id resolves to the entry that carries that package. A dependency cycle never stops a hydrate: its members keep source order and an error names them.
+  
+  **BREAKING** (an install-acceptance narrowing of the unreleased ADR-0141 D2 check) at `POST /api/v1/marketplace/install-local`. A multi-package artifact's own wrapper id no longer counts as delivered unless one of its packages carries it. A module declaring the wrapper id is judged like any other entry, because it would be `absent` on its first standalone install. `DeclaredDependencyCheck.deliveredIds` is removed with it. Also, an undecided range union whose installed version is readable is now reported `found: 'unreadable-range'` instead of `'unreadable-version'`; for example, `<5 || latest` against `7.0.0`.
+  
+  **What changes for you.**
+  
+  - A module that extends an app and uses its namespace declares the app in `manifest.dependencies`, and then installs beside it as its own artifact. Two modules of one app need not declare each other.
+  - Every package of the app's own artifact that uses the namespace should declare the app too.
+  - New exports: `@objectstack/core` exports `orderHydrationBatch` and `declaredDependencyIds`.
+- be531f6: feat(spec,core,objectql,driver-sql,formula,driver-mongodb,service-analytics): a filter compares a datetime column against now shifted by whole days held on the record (`{ $now: true, addDays }`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6415710193
+  
+  An analytics dataset could not say "opened longer ago than this ticket's own SLA": the comparand grammar had a `{ $field, addDays }` pair for two columns of the record and `{N_days_ago}` placeholders for a fixed number of days, but nothing that anchored at the current instant and read the number of days off the row. Authors fell back to a literal day count, which drifts from every record whose SLA differs.
+  
+  `FilterCondition` gains a now-anchored comparand, legal exactly where a `{ $field }` reference is — as the whole comparand of `$eq` / `$ne` / `$gt` / `$gte` / `$lt` / `$lte`, on a `date` or `datetime` column:
+  
+  ```ts
+  // opened more than review_sla_days_offset days ago — the column holds NEGATIVE days
+  { opened_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days_offset' } } } }
+  // on or after thirty days ago
+  { closed_on: { $gte: { $now: true, addDays: -30 } } }
+  ```
+  
+  - **`@objectstack/spec`.** `NowAnchorSchema` (`data/filter.zod.ts`): `$now` is the literal `true`, `addDays` is REQUIRED — an integer of any sign or a `{ $field }` reference to a numeric column of the same record, the `addDays` grammar `FieldReferenceSchema` already carries; there is no `subDays`, and the unshifted instant stays the `{now}` placeholder. The `FilterCondition` door refuses a malformed anchor in the anchor's own words, and an anchor as an `$in` / `$nin` member or a `$between` endpoint by name, as it refuses a reference there. `filter.mdx` and the authorable surface document the shape.
+  - **`@objectstack/core`.** `resolveFilterTokens` pins `$now` to the tree's one instant (the `now` every `{N_days_ago}` in the tree resolves from), as an ISO string, so every executor sees `{ $now: '<ISO>', addDays }`; an anchor without `addDays` is `INVALID_FILTER` / 400 there.
+  - **`@objectstack/driver-sql`.** SQL push-down compiles the anchor on SQLite, PostgreSQL and MySQL through the `addDays` arithmetic (`crossFieldOffsetExpr`), with the instant bound in the target column's storage form: a `datetime` column keeps the time of day, a `date` column meets the instant's UTC calendar day. A NULL offset column is zero days (`coalesce`). The predicate is total: an ordering and `$eq` need the target to have a value, `$ne` holds when it has none or differs, so `$not` takes exactly the complement. The offset column is held to the same-table rules the `addDays` pair's is (declared, numeric, same table, never the tenant-isolation column); a non-temporal target, a malformed anchor and every other position are refused with the operands withheld from the message and the diagnostic in the server log.
+  - **`@objectstack/formula`.** `matchesFilterCondition` resolves the anchor in the form of the stored value it meets (a calendar day stays a calendar day), so the memory path answers the SQL path's rows; `$now: true` reads the evaluator's clock for a caller with no resolver seam.
+  - **`@objectstack/objectql`.** `aggregations[i].filter` and `having` judge the anchor by `where`'s rules (temporal target, declared numeric offset) before any row is read, and evaluate it per row through the formula evaluator.
+  - **`@objectstack/service-analytics`.** `NativeSQLStrategy` declines a query carrying an anchor, as it declines a `{ $field }` comparand, so a dataset filter or measure filter routes to the engine path where the driver compiles it; a dataset's authored `$now: true` is pinned by the service's own token seam.
+  - **`@objectstack/driver-mongodb`.** Refuses the anchor in every position (`INVALID_FILTER` / 400) rather than translating it as a literal sub-document.
+  
+  Pinned on the drivers' cross-field conformance corpus (`CROSS_FIELD_NOW_CASES` / `CROSS_FIELD_NOW_REFUSALS`, exported from `@objectstack/driver-sql`) on both execution paths, and on the analytics dataset shape the ruling was made for.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 617f27e: fix(core)!: an `update` / `upsert` import refuses its own rows that share a match key, before any write
+  
+  Clause-②: no (narrowing: rows of one `update` / `upsert` import that carry the same coerced `matchFields` key, which used to be written one by one, now all fail with `DUPLICATE_MATCH_KEY` and none of them is written)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What narrows is the per-row answer of the import runner for a file that repeats a match key; the caller's migration is the one the row error names: keep one row per key and import again. -->
+  
+  **BREAKING** for an import that carries the same match key on two or more of its own rows. Before, an `upsert` wrote every one of them: under a key no stored record carried yet each row was created, so the object held two records for one business key and every later import of that key failed with `AMBIGUOUS_MATCH` until someone deleted the extra record by hand; under a key a stored record carried, each row updated that record in turn and the last row silently won. An `update` import did the same silent double update.
+  
+  - **The refusal.** Before any row is written, the import runner (`runImport`, behind `POST /data/:object/import`, the async import job, the connector pull and the user import) groups the rows by their match key. Every row of a key carried more than once fails with `ok: false`, `action: 'failed'`, `code: 'DUPLICATE_MATCH_KEY'`, and its `error` names every row that carries the key and the key set (`Rows 1, 2 of this import have the same match key (supplier + cert_type + cert_no), so none of them was written: keep one row per key and import again`). None of them is written. The other rows of the file import as before.
+  - **What counts as one key.** The key set the row is matched by (the first set of `matchFields` whose fields are all non-blank on it) with its cell values as coerced, the values the matcher queries with. So `ISO 14001` (an option label) and `ISO14001` (its value) are one key, and so are two spellings of one lookup target. A row blank on every key set, or whose key cells fail coercion, has no key and answers as before.
+  - **The dry run answers the same.** A `dryRun` preview reports the same `DUPLICATE_MATCH_KEY` rows the import would.
+  - **Every object.** An object with a unique index over the key answers the same refusal: before, its import created the first row and failed the second with `UNIQUE_VIOLATION`, while its dry run reported both as created.
+  - **Unchanged.** A file without repeated keys answers exactly as before, and an `insert` import, which matches nothing, still writes every row.
+  
+  **Who moves.** A caller that imports a file repeating a match key now gets those rows back as failures: keep one row per key (the one that is right) and import again. `@objectstack/spec` adds `DUPLICATE_MATCH_KEY` to the error-code ledger and to the `matchFields` contract text.
+- 876aa27: fix(core): one declaration serves both module formats, so the export map hands each condition its own `types`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/core` used to emit two separate declarations of every class, `dist/index.d.ts` and `dist/index.d.cts`, and its export map served the ESM-kind `index.d.ts` to both conditions, so a TypeScript consumer resolving `require` was told the package is ESM (attw `FalseESM` on `.` and `./logger`). Serving the `.d.cts` to `require` was not possible while the two files declared `ObjectKernel` twice: its `private plugins` member makes the two copies incompatible types for any program that reaches core through both resolution modes.
+  
+  Core's declaration build now runs once, for the ESM format. `dist/index.d.ts` and `dist/logger.d.ts` carry the declarations, as before, and `dist/index.d.cts` and `dist/logger.d.cts` are one-line re-exports of them, so both conditions hand out the same classes. `exports` now gives types per condition, `{ import: { types, default }, require: { types, default } }`, on both subpaths. No subpath is added or removed, no JavaScript file changes, and the `dist` file names are unchanged.
+  
+  A CommonJS consumer compiling with `module: node16` (or, measured on TypeScript 5.6, under `nodenext` too) used to get TS1479 at its own `import ... from '@objectstack/core'`. That diagnostic now sits inside core's `.d.cts`, where `skipLibCheck` silences it. Nothing else for a consumer to do.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

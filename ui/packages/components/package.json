@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/components",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Standard UI component library for Object UI, built with Shadcn UI + Tailwind CSS",

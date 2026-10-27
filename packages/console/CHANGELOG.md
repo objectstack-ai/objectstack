@@ -1,5 +1,86 @@
 # @objectstack/console
 
+## 18.2.0
+
+### Patch Changes
+
+- 2a61f08: build(console): `@objectstack/console` is built in this workspace from `ui/apps/console`, and the Console no longer arrives through a pinned objectui commit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The package.** `@objectstack/console` ships the same `dist/` it shipped at 18.1.0: the built Console (`index.html`, `assets/`, the manifests it served). Two files leave the tarball: `dist/.objectui-sha`, which named the objectui commit the Console was built from, and `dist/.objectstack-injection.json`, which recorded the spec and client dists injected into that build. Both described a pin that no longer exists: the Console is built from the `ui/` tree of the same commit as the framework, so its version is the framework's version.
+  - **The CLI.** When a framework checkout has no built Console, `objectstack serve` / `objectstack dev` and the 503 at `/_console/` now name `pnpm console:build`, which builds `ui/apps/console` and copies its dist into `packages/console`. The remedy used to be `pnpm objectui:build`, which cloned objectui at the pinned commit.
+  - **One version.** The `@object-ui/*` packages and the private VS Code extension join the `@objectstack/*` fixed group, so every public package of both scopes publishes at one version and the extension ships at it.
+  
+  What to do: nothing as a consumer; install `@objectstack/console` as before. In a framework checkout, run `pnpm console:build` where you ran `pnpm objectui:build`.
+- db5fca7: fix(platform-objects): the System Overview's tile captions and column headers are translated in every shipped locale
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The captions.** Under zh-CN, ja-JP and es-ES the System Overview drew a translated title on each KPI tile and the English measure label under it: `Users`, `Organizations`, `Sessions`, `Installations`, `Events`. The event-volume table and the audit charts were headed `Action` and `User` the same way. Those strings come from the board's datasets, not from the dashboard, and the Setup bundle had no `datasets` block. It now carries `datasets.<name>.measures.<m>.label` and `datasets.<name>.dimensions.<d>.label` for every member the board draws, in `en`, `zh-CN`, `ja-JP` and `es-ES`. The analytics query already localizes a saved dataset before it runs, so nothing else changes on the serving path.
+  - **Staleness.** `HAND_AUTHORED_SECTIONS` (exported from `@objectstack/platform-objects/apps`) now lists `datasets`, and the new translations carry recorded source hashes. When a dataset label is edited, the translated locales serve the new English until they are re-translated, as `apps`, `dashboards` and `pages` already do.
+  - **Console.** The Audit Log's `IP` column header reads `console.system.auditLog.ipAddress` ("IP 地址" under zh). A Beta settings page's title carries a space between the name and the badge in its text ("Feature Flags Beta").
+  
+  What to do: nothing.
+- 56a2346: fix(plugin-editor): the Console's code editor loads Monaco from its own build, never from cdn.jsdelivr.net
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio's code editors (the JSON source tab, the html / react page source editor, the metadata form's code fields) and the `code-editor` page component fetched Monaco's core from `cdn.jsdelivr.net` at run time, through `@monaco-editor/loader`'s default config. An install with no route to that CDN, and every Console served under its content-security-policy (which lists no CDN in `script-src`), got a plain textarea instead, and the `code-editor` component stayed on "Loading..." for good.
+  
+  - **`@object-ui/plugin-editor`:** `monaco-editor` is now a dependency, bundled by the host. The new `configureBundledMonaco(loader)` imports its ESM core as a lazy chunk and hands it to the loader with `loader.config({ monaco })` before the first `loader.init()`, so the loader injects no CDN script. Each language worker is imported through Vite's `?worker` when Monaco first asks for it, and starts from a same-origin file under the build's assets. The `code-editor` component mounts the editor only once that config has landed, and when the editor chunk cannot be fetched it edits the same text in a plain textarea instead of loading forever.
+  - **`@object-ui/app-shell`:** the code editors' one loader probe per page awaits `configureBundledMonaco` before `loader.init()`. The plain-textarea fallback stays for a chunk that cannot be fetched.
+  - **`@objectstack/console`:** the built Console carries Monaco as lazy chunks and worker files under `assets/` (about 13.5 MB of uncompressed JavaScript, loaded only on a screen that opens an editor); the first-paint closure is unchanged.
+  
+  What to do: nothing. A host that bundles `@object-ui/plugin-editor` with a bundler other than Vite must handle the `?worker` imports itself.
+- 2409c9c: chore(packages): ship a LICENSE in the 14 published packages that had none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  npm packs a package's own `LICENSE` whatever its `files` says, and nothing in the release tooling copies the repository's root `LICENSE` into a package, so these 14 published tarballs carried no licence text at all while declaring `"license": "Apache-2.0"`. Each now carries a byte-for-byte copy of the root `LICENSE`, the same file the other 59 published packages already ship. With this, every one of the 73 published packages outside `ui/` ships a LICENSE and a README.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- f871670: Console (objectui) refreshed to `b41ed7f68956`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 9 releasing of 10 changesets added across 15 non-merge commits; omitted: 1 release-nothing changeset, 6 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — The Console's first page load no longer downloads the chat UI (objectui#13410). The `plugin-chatbot` chunk (169.6 KB gzipped, the third-largest eager chunk) and most of `vendor-ma… (objectui `47138b718`)
+  - **patch** — Clause-②: yes Metadata-protocol: none (objectui `b41ed7f68`)
+  - **patch** — Clause-②: no Metadata-protocol: none (objectui `cd70b7818`)
+  - **patch** — Clause-②: no Metadata-protocol: none (objectui `cd70b7818`)
+  - **patch** — The `@objectstack/*` pin moves from `915e940499` to objectstack `e649c2d91e`, the 18.1.0 release commit (objectstack#25606), past objectstack#25483 and objectstack#25564, which sh… (objectui `0984c77e1`)
+  - **patch** — A `type: 'form'` action fired inside an app opens its form inside that app, headed by a label, with a Cancel (objectui#13433). (objectui `576fd257d`)
+  - **patch** — A create form no longer locks fields through `readonlyWhen`. The server does not apply `readonlyWhen` on insert, but the form evaluated it against the seeded defaults, so a predic… (objectui `a78608f38`)
+  - **patch** — `html` and `richtext` values are now sanitized with `rehype-sanitize`, the sanitizer the `markdown` pipeline already used, instead of a hand-written pattern filter. (objectui `f3044f708`)
+  - **patch** — Settings: a setting's `visible` predicate is evaluated with the renderer's expression interpreter, and a predicate that does not evaluate hides the setting. (objectui `06ce712fc`)
+  
+  **In this console build, declared nowhere** — objectui merged 6 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ chore(test): refresh the per-file test timings (objectui#12208) (#13028) (objectui `723776b5b`)
+  - _(no changeset)_ chore: release packages (#13289) (objectui `a3c0da922`)
+  - _(no changeset)_ ci: pin credential-holding third-party actions by sha and default ci.yml and check-links.yml to a read-only token (#13430) (objectui `798138418`)
+  - _(no changeset)_ fix(ci): the affected-tests fast path runs: the shard step compares the output value, not the selector's key=value line (objectui#13350) (#13358) (objectui `861fdff76`)
+  - _(no changeset)_ ci(test-shard-timings-refresh): push and open the refresh pull request as the fleet App so it runs CI (#13362) (objectui `cf2419005`)
+  - _(no changeset)_ ci(repo-gates): restore the build's turbo cache, save and prune on push only (#13360) (objectui `3688e5cd4`)
+  
+  Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)
+  
+  objectui range: `2958f17e9c6a...b41ed7f68956`
+
 ## 18.1.0
 
 ### Minor Changes

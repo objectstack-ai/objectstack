@@ -667,5 +667,19 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'sections would re-create exactly the reading the ruling removed, and every declared value '
         + 'keeps its meaning.',
     },
+    {
+      key: 'ui/GroupNavItem:expanded',
+      from: 'false',
+      to: 'true',
+      reason:
+        'A RULED default change (maintainer ruling record 6431302164, letter A): a navigation group '
+        + 'that says nothing opens. The console already opened a group that arrived without the key; '
+        + 'what moves is the PARSED value. An app parsed through `defineStack` / `defineApp` used to '
+        + 'carry a written `expanded: false` on every silent group, which the console honoured as an '
+        + 'explicit close, and now carries `true`, so those groups open on first view. To keep a group '
+        + 'closed until the user opens it, write `expanded: false`. The `semantic` entry '
+        + '`ui-nav-group-expanded-default-open` carries the change to `os migrate meta` and the '
+        + 'upgrade guide.',
+    },
   ],
 };

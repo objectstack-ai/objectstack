@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -88,7 +88,7 @@ Flows are built from **20 built-in node types** (plugins register more via
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally |
 
 #### Human Decision
 
@@ -206,8 +206,8 @@ variables: [
   evaluated before the query (`filter: { id: { dialect: 'cel', source:
   'record.id' } }`). A whole-string **query placeholder** (`{current_user_id}`,
   `{today}`, `{current_year_start}`) passes through verbatim for the query
-  engine to expand; every other `{…}` token is refused (`expression-invalid`)
-  with its envelope, and a flow variable never shadows a placeholder. Only
+  engine to expand; every other `{…}` token is refused, and a flow variable
+  never shadows a placeholder. Only
   `filter` gets this hand-off — in a text slot `{{ current_year_start }}` is a
   nonsense reference.
 - **An operand that evaluates to `null` refuses the node** (not

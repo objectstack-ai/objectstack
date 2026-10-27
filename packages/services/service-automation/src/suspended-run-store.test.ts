@@ -1433,6 +1433,29 @@ describe('ObjectStoreSuspendedRunStore — the refused terminal and its message 
     });
 });
 
+describe('ObjectStoreSuspendedRunStore — the missed terminal (#25235)', () => {
+    it('a `missed` row is history: stored as missed with its due and detected instants, and it reaches listHistory', async () => {
+        // Same widened-writer / narrower-reader trap as `refused` above: the
+        // row gate is `isTerminalRunStatus`, so the vocabulary has to carry it.
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(5, {
+            status: 'missed',
+            startedAt: '2026-10-22T08:00:00.000Z',
+            finishedAt: '2026-10-22T09:30:00.000Z',
+            durationMs: undefined,
+            steps: [],
+        }));
+
+        const row = engine.rows.get('run_r5');
+        expect(row.status).toBe('missed');
+        expect(row.started_at).toBe('2026-10-22T08:00:00.000Z');
+        expect(row.finished_at).toBe('2026-10-22T09:30:00.000Z');
+        const history = await store.listHistory('busy_flow', 10);
+        expect(history.find((r) => r.runId === 'r5')?.status).toBe('missed');
+    });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // [#20725] The read behind the ADR-0126 §7.3 disable guard is COMPLETE
 // ─────────────────────────────────────────────────────────────────────────────
