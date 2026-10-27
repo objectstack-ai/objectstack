@@ -5,6 +5,8 @@ import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { ChartConfigSchema } from './chart.zod';
+import { DATE_RANGE_DEFAULT_RANGES } from './dashboard.zod';
+import { ReportExportOptionsSchema } from './list-view-export-options';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 
@@ -182,6 +184,46 @@ const JOINED_CONTAINER_CHART_REFUSED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
+ * The refusals a `joined` report's `dateRange` and `exportOptions` carry, on
+ * the container (ruling 6408567749 on #25873, letter B; #26548). Both are
+ * keys of ONE table over ONE dataset, and a joined report is neither: its
+ * blocks may bind different datasets, so a single `dateRange.dimension`
+ * cannot name a date column in every one of them, and it draws one table per
+ * block where a report exports the table it draws. A block declares neither
+ * key — its `guidance` entries below say so — so, like the container `chart`,
+ * the refusal carries no pointer onto `blocks[]`. A per-block or
+ * conformed-dimension date range (ADR-0021 Q3) and a multi-table export are
+ * later widenings, not this shape.
+ */
+const JOINED_CONTAINER_DATE_RANGE_REFUSED =
+  'a `joined` report takes no `dateRange`: its blocks may bind different datasets, so one '
+  + '`dimension` cannot name a date column in every block, and a block has no `dateRange` of its '
+  + 'own. Delete `dateRange`; to window one of these slices by period, give it a non-joined report '
+  + 'of its own with that `dateRange`.';
+
+const JOINED_CONTAINER_EXPORT_OPTIONS_REFUSED =
+  'a `joined` report offers no export: it draws one table per block, and a report exports the one '
+  + 'table it draws. Delete `exportOptions`; to export one of these slices, give it a non-joined '
+  + 'report of its own.';
+
+/**
+ * The answer to `subscription` / `schedule` on a report (#26548). A scheduled
+ * delivery of a report was weighed beside its date range and export and not
+ * adopted (ruling 6408567749 on #25873: letter C waits for a customer who asks
+ * for it), so nothing in the platform delivers a report on a timetable — and a
+ * key that parsed would promise exactly that.
+ */
+const REPORT_SUBSCRIPTION_NOT_OFFERED =
+  'a report declares no subscription or scheduled delivery: the platform does not send reports on a '
+  + 'schedule, so there is no key for it. Delete the key. The period a report covers is its '
+  + '`dateRange`, and the download of its table is `exportOptions`.';
+
+/** A block's answer to `dateRange` / `exportOptions`: the container's keys, refused there too. */
+const BLOCK_NON_JOINED_REPORT_KEY = (key: 'dateRange' | 'exportOptions'): string =>
+  `\`${key}\` is a key of a non-joined report, not of a block, and a \`joined\` container refuses it `
+  + 'as well. Give the slice a non-joined report of its own and declare it there.';
+
+/**
  * The refusal a `joined` report's block with no `dataset` earns, at
  * `blocks[i].dataset` (#21702; ADR-0021 single-form, ADR-0049 enforce-or-remove,
  * the enforce arm). A block is an independent dataset query, and nothing else
@@ -286,6 +328,12 @@ export const JoinedReportBlockSchema = lazySchema(() => strictObject({
     // closed shape, so the prescription is what an author who keeps writing it
     // is answered with (build-schemas check (c) proof 4 reads it from here).
     chart: JOINED_BLOCK_CHART_RETIRED,
+    // #26548 — two keys of a NON-joined report: one dataset's date window and
+    // the export of the one table it draws. A joined container refuses both
+    // (see `JOINED_CONTAINER_DATE_RANGE_REFUSED`), so there is no layer above
+    // to point at either.
+    dateRange: BLOCK_NON_JOINED_REPORT_KEY('dateRange'),
+    exportOptions: BLOCK_NON_JOINED_REPORT_KEY('exportOptions'),
   },
 }, {
   /** Stable id for the block (used as react key, telemetry, deeplinks). */
@@ -401,8 +449,23 @@ export const ReportSchema = lazySchema(() => strictObject({
     sort: 'order',
     orderBy: 'order',
     sortBy: 'order',
+    // #26548 — the dashboard's own top-level spellings for its date range
+    // (`DashboardSchema`), aimed at the same key here. A block declares no
+    // `dateRange`, so these have no block twin to keep in parity with.
+    dateFilter: 'dateRange',
+    timeRange: 'dateRange',
   },
   guidance: {
+    // #26548 — the export PERMISSION is not report metadata. Writing it here
+    // reads as "allow exporting this report", which is the question the
+    // permission-set axis answers for the dataset's base object; edit distance
+    // would offer nothing, and silence would leave the author guessing.
+    allowExport:
+      '`allowExport` is a permission, not a report key: it is `ObjectPermission.allowExport` on a permission set, granted per object. A report offers its export control to a viewer whose permissions allow export of the report\'s dataset base object, and declares only what is exported, in `exportOptions` (`formats`, `includeHeaders`, `fileNamePrefix`). To turn the control off for everyone, write `exportOptions: { formats: [] }`.',
+    // #26548 — a subscription / scheduled delivery was not adopted with the
+    // date range and export (ruling 6408567749 on #25873 deferred letter C).
+    subscription: REPORT_SUBSCRIPTION_NOT_OFFERED,
+    schedule: REPORT_SUBSCRIPTION_NOT_OFFERED,
     // #5022 — the reverse half of a two-way disambiguation. The forward half
     // lives on `ChartDrillDownSchema` in `ui/chart.zod.ts`, which tells an
     // author who writes `drilldown` on a CHART that they want the report's
@@ -500,6 +563,92 @@ export const ReportSchema = lazySchema(() => strictObject({
   chart: ReportChartSchema.optional().describe('Embedded chart configuration (refused on a joined report, which draws tables only)'),
 
   /**
+   * The report's period: a date window over ONE dataset date dimension, with
+   * a default preset and an optional custom pick (ruling 6408567749 on
+   * #25873, letter B; #26548). Absent = no window, every period — exactly as
+   * a report has always rendered.
+   *
+   * `defaultRange` and `allowCustomRange` are the dashboard's
+   * (`DashboardSchema.dateRange`) verbatim: the same preset table
+   * (`DATE_RANGE_DEFAULT_RANGES` — every `DATE_RANGE_PRESETS` member plus the
+   * `custom` "open the picker, no window" sentinel), the same defaults and the
+   * same rename hints. `report-date-range-export.test.ts` holds the two declarations
+   * equal, so the vocabulary cannot drift into a second preset table.
+   *
+   * `dimension` is where the two differ, on purpose. The dashboard's `field`
+   * names a raw object FIELD; a report names a dataset DIMENSION (ADR-0021 —
+   * a report selects by name, and a dimension carries its own relationship
+   * path, so `account.created_at` needs no new grammar). The dimension must
+   * declare `type: 'date'`: the analytics compiler types any other dimension
+   * as a string axis, not a time one. Omitted, the dataset's ONE `type: 'date'`
+   * dimension is used; zero or several is an authoring error naming what it
+   * found — the rule the dashboard executor applies to an omitted
+   * `compareTo.dimension`. `ReportSchema` parses without the dataset, so this
+   * shape checks only itself; the dataset-aware half is the `@objectstack/lint`
+   * rule `validate-report-date-range.ts` (`os validate`, `os build`, and the
+   * report publish door).
+   *
+   * Lowering (the renderer's contract): the active window rides the dataset
+   * query as `selection.timeDimensions: [{ dimension, dateRange }]` with NO
+   * `granularity` — a filter window, not a bucket, ANDed with `runtimeFilter`
+   * and the dataset's own filter. A preset goes on the wire by name; a custom
+   * pick as `[start, end]`. Bucketing stays on the dimension's
+   * `dateGranularity` and the report's `rows` / `columns`.
+   *
+   * Refused on a `joined` report — see {@link JOINED_CONTAINER_DATE_RANGE_REFUSED}.
+   */
+  dateRange: strictObject({
+    surface: 'this report date range',
+    history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+    aliases: {
+      // The dashboard's own rename hints for these two members, verbatim.
+      preset: 'defaultRange',
+      range: 'defaultRange',
+      default: 'defaultRange',
+      allowCustom: 'allowCustomRange',
+      custom: 'allowCustomRange',
+      // "Which date column": the dashboard's `field` and its two spellings,
+      // and the wire's `timeDimensions[].dimension` — the same words the
+      // dashboard's `compareTo` routes onto its own `dimension`.
+      field: 'dimension',
+      dateField: 'dimension',
+      fieldName: 'dimension',
+      timeDimension: 'dimension',
+    },
+  }, {
+    dimension: z.string().optional()
+      .describe('Dataset dimension (declared `type: \'date\'`) the window applies to; omitted = the dataset\'s one date dimension'),
+    defaultRange: z.enum(DATE_RANGE_DEFAULT_RANGES).default('this_month').describe('Default date range preset'),
+    allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),
+  }).optional().describe('Report date range: a window over one dataset date dimension (refused on a joined report)'),
+
+  /**
+   * What the report's export control offers (ruling 6408567749 on #25873,
+   * letter B; #26548). The members are the list export block's
+   * (`view.exportOptions`), narrowed to what a report table needs — see
+   * {@link ReportExportOptionsSchema} for what is and is not carried over.
+   *
+   * Default ON: absent, a report offers `['csv', 'xlsx']`, as a list offers
+   * its default formats unasked; `formats: []` turns the control off.
+   *
+   * Who may export is NOT declared here — there is no report permission key.
+   * The control is offered to a viewer whose effective API operations on the
+   * dataset's base object include `export`: the `ObjectPermission.allowExport`
+   * axis, through the same predicate the list toolbar uses.
+   *
+   * What is exported (the renderer's contract): the report table as drawn,
+   * within the active `dateRange` and `runtimeFilter` — the selected rows ×
+   * values, the matrix pivot and the server totals — with headers from the
+   * dimension and measure labels. The file is named for the report label and
+   * the period; `fileNamePrefix` replaces the label.
+   *
+   * Refused on a `joined` report — see {@link JOINED_CONTAINER_EXPORT_OPTIONS_REFUSED}.
+   */
+  exportOptions: ReportExportOptionsSchema.optional().describe(
+    'Report export control: `{ formats?, includeHeaders?, fileNamePrefix? }`, csv / xlsx, on by default; who may export is the base object\'s export permission (refused on a joined report)',
+  ),
+
+  /**
    * Joined report blocks — only meaningful when `type: 'joined'`.
    *
    * A joined report renders multiple independent sub-reports stacked
@@ -584,6 +733,15 @@ export const ReportSchema = lazySchema(() => strictObject({
     // "empty" reading the selection threshold above could apply to).
     if (r.chart !== undefined) {
       ctx.addIssue({ code: 'custom', message: JOINED_CONTAINER_CHART_REFUSED, path: ['chart'] });
+    }
+    // #26548 — the same arm, the same no-pointer style: one dataset's date
+    // window and the export of one drawn table, neither of which a joined
+    // container has. Any present value is refused, `{}` included.
+    if (r.dateRange !== undefined) {
+      ctx.addIssue({ code: 'custom', message: JOINED_CONTAINER_DATE_RANGE_REFUSED, path: ['dateRange'] });
+    }
+    if (r.exportOptions !== undefined) {
+      ctx.addIssue({ code: 'custom', message: JOINED_CONTAINER_EXPORT_OPTIONS_REFUSED, path: ['exportOptions'] });
     }
   } else {
     checkReportOrder(r, ctx);
