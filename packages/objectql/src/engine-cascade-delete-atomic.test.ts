@@ -537,6 +537,29 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     expect(driver.rowsOf('node').map((r: any) => [r.id, r.boss ?? null])).toEqual([[report.id, null]]);
   });
 
+  it('a detail that also restricts its own master refuses the predicate delete, as it does by id (#26718)', async () => {
+    // The predicate arm runs the by-id walk itself, so every rule the walk
+    // judges holds here too: the detail is in its master's cascade set by its
+    // own master_detail, and its restrict to that master still refuses.
+    const pledge = {
+      name: 'pledge',
+      label: 'Pledge',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        parent: { name: 'parent', type: 'master_detail' as const, reference: 'parent' },
+        guard: { name: 'guard', type: 'lookup' as const, reference: 'parent', deleteBehavior: 'restrict' },
+      },
+    };
+    const { engine, driver } = await makeEngine([parent, pledge]);
+    const p = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('pledge', { parent: p.id, guard: p.id });
+
+    await expect(engine.delete('parent', { where: { name: 'doomed' }, multi: true }))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'pledge' });
+    expect(driver.rowsOf('parent')).toHaveLength(1);
+    expect(driver.rowsOf('pledge')).toHaveLength(1);
+  });
+
   it('a matched set of zero rows walks nothing and deletes nothing', async () => {
     const { engine, driver } = await makeEngine([parent, detail]);
     const p = await engine.insert('parent', { name: 'kept' });
