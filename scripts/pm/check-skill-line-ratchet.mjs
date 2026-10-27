@@ -1231,7 +1231,8 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 91],
+  // 91 → 88 (#25753): the console-pin release precondition retired with the pin; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 88],
   // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
   // grep cannot see, and the local preflight, one fact per line per repo. Added
   // by the protocol-text family PR, which could not carry its own ceiling: that
