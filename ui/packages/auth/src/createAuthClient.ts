@@ -227,19 +227,23 @@ function getWindowOrigin(): string | undefined {
 }
 
 /**
- * Resolve the redirect URL appended to password-reset emails as
- * `?callbackURL=<value>`. better-auth sends users to `<value>?token=…`
- * after verifying the token, so the value must point at the SPA's
- * `/reset-password` route — including the SPA basename when mounted
- * under a subpath (e.g. `/_console/reset-password`).
+ * Resolve one of the SPA's own routes as a path the server can send the
+ * browser back to — including the SPA basename when mounted under a subpath
+ * (e.g. `/_console/reset-password`, `/_console/login`). Two callers:
+ *
+ *   - password-reset emails carry it as `?callbackURL=<value>`; better-auth
+ *     sends users to `<value>?token=…` after verifying the token.
+ *   - sign-out sends it as `callbackURL`; better-auth turns it into the
+ *     provider's `post_logout_redirect_uri`, where the identity provider
+ *     sends the browser once it has ended its own session.
  *
  * Resolution order:
  *   1. `<base href="…">` in the document head (matches how Console &
  *      Account derive React Router's basename) — preferred since it
  *      tracks whatever path the host SPA is served from.
- *   2. `'/reset-password'` — sensible default for a SPA at the origin root.
+ *   2. `route` as given — sensible default for a SPA at the origin root.
  */
-function resolveResetPasswordRedirect(): string {
+function resolveSpaRoute(route: '/reset-password' | '/login'): string {
   try {
     if (typeof document !== 'undefined') {
       const baseEl = document.querySelector('base');
@@ -247,13 +251,36 @@ function resolveResetPasswordRedirect(): string {
       if (href) {
         const url = new URL(href, getWindowOrigin() ?? 'http://localhost');
         const path = url.pathname.replace(/\/$/, '');
-        return `${path}/reset-password`;
+        return `${path}${route}`;
       }
     }
   } catch {
     // ignore — fall through to default
   }
-  return '/reset-password';
+  return route;
+}
+
+/**
+ * The provider-logout URL a sign-out answer asks the browser to follow, or
+ * `null` when there is none to follow.
+ *
+ * better-auth's `POST /sign-out` answers `{ success: true }` alone when the
+ * user has no account linked through a provider that can end its own session.
+ * For one that can (an OIDC provider with an `end_session_endpoint`, e.g. a
+ * hosted environment signed in through ObjectOS Cloud), it answers
+ * `{ success: true, url, redirect: true }`, where `url` is that endpoint with
+ * the `id_token_hint`. Only an absolute `http:` / `https:` URL is followed:
+ * the answer decides where the whole window goes, so a `javascript:` or
+ * `data:` URL, or anything that does not parse, is dropped.
+ */
+function providerLogoutURL(data: { url?: unknown; redirect?: unknown } | null | undefined): string | null {
+  if (data?.redirect !== true || typeof data.url !== 'string') return null;
+  try {
+    const { protocol } = new URL(data.url);
+    return protocol === 'http:' || protocol === 'https:' ? data.url : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -529,10 +556,30 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     },
 
     async signOut() {
-      const { error } = await betterAuth.signOut();
+      // `callbackURL` is where the identity provider sends the browser after
+      // ending its own session: this SPA's sign-in page. better-auth uses it
+      // only when it answers with a provider-logout URL (see
+      // `providerLogoutURL`); without a provider the answer is
+      // `{ success: true }` and the caller's in-app route to the sign-in page
+      // stays as it was.
+      const { data, error } = await betterAuth.signOut({ callbackURL: resolveSpaRoute('/login') });
       TokenStorage.clear();
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
+      }
+      // `disableDefaultFetchPlugins: true` drops better-auth's `redirectPlugin`,
+      // so the provider-logout redirect is followed here, the same way
+      // `signInWithProvider` follows its `{ url, redirect }`. Without it the
+      // provider session survives, and the next "continue with" on this
+      // browser signs straight back in as the user who just signed out.
+      //
+      // `AuthProvider.signOut` still resets its state and purges the tab's
+      // caches after this resolves, before the page unloads: `assign` only
+      // starts the navigation, and the document is unloaded in a later task,
+      // after the microtasks that run that purge.
+      const url = providerLogoutURL(data);
+      if (url && typeof window !== 'undefined') {
+        window.location.assign(url);
       }
     },
 
@@ -617,7 +664,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
       const { error } = await requestReset({
         email,
-        redirectTo: resolveResetPasswordRedirect(),
+        redirectTo: resolveSpaRoute('/reset-password'),
       });
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
