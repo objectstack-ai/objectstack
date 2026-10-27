@@ -143,6 +143,11 @@ export class SeedDatasetFiles {
     private readonly service: IFieldFileService | null,
   ) {}
 
+  /** Whether the dataset carries seed-file bytes: some record names `seedFile(path)`. */
+  get carriesFiles(): boolean {
+    return Object.keys(this.files).length > 0;
+  }
+
   /**
    * The dataset's file handling, or `null` when the seeded object declares no
    * file-class field — nothing below runs for such an object.
