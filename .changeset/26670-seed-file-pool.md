@@ -2,6 +2,8 @@
 '@objectstack/metadata-protocol': patch
 ---
 
+fix(metadata-protocol): a seed that stores many `seedFile` values no longer starves sign-ins and other requests while it runs
+
 Clause-②: no
 Metadata-protocol: none
 
