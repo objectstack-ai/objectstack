@@ -1778,7 +1778,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
