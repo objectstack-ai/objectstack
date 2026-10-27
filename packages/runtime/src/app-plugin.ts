@@ -572,7 +572,8 @@ export class AppPlugin implements Plugin {
         // BEFORE the manifest is decomposed into the registry. A bundle whose
         // declared `engines.protocol` excludes this runtime's major fails boot
         // fast with the structured OS_PROTOCOL_INCOMPATIBLE diagnostic (naming
-        // the `migrate meta` command) instead of crashing later in a schema
+        // the `migrate meta` command, or for a bundle built for a newer
+        // protocol, the runtime upgrade) instead of crashing later in a schema
         // `.parse()` or renderer contract. Absent/unparsable ranges are admitted
         // with a warning (grandfathering; never a false rejection).
         assertProtocolCompat(sys, undefined, (m) => ctx.logger.warn(`[AppPlugin] ${m}`));
