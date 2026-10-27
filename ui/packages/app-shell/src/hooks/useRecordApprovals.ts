@@ -28,9 +28,18 @@
  * approvals service still mounts the list route and answers it
  * `200 { data: [] }`: that is an answered read with no request, not an absent
  * route, and the result's `answered` says which one happened (objectui#12220).
+ *
+ * That list serves a request only to its participants (slate, submitter,
+ * override actor), so for anyone else an answered empty read cannot tell "no
+ * approval is running" from "one is running that you may not see". When the
+ * list finds no pending request, the hook also asks the server whether the
+ * record is held by a locking approval (`client.approvals.getRecordLock`,
+ * answered to every caller who can read the record — objectstack#25934 ruling
+ * A) and hands the answer back as `recordLock`.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useAdapter } from '../providers/AdapterProvider.js';
 import { bearerAuthHeaders } from '../utils/authToken.js';
 import type { DecisionOutputDef } from '../utils/decisionOutputParams.js';
 
@@ -278,6 +287,18 @@ interface UseRecordApprovalsResult {
    */
   pendingRequest: ApprovalRequestLite | null;
   latestRequest: ApprovalRequestLite | null;
+  /**
+   * The server's record lock (`GET /approvals/records/:object/:recordId/lock`,
+   * objectstack#25934), read only when the list found no pending request:
+   * `{ locked: true }` means a pending approval whose node locks the record is
+   * running, though this viewer cannot see its request. `null` when there is
+   * no answer to give: a pending request was found (it decides, with its own
+   * `lock_record`), no adapter is mounted, or the read has never answered — a
+   * composition without the approvals service answers it 501, so there the
+   * record is not locked by this signal. A later failed read keeps the last
+   * answer, as the list read does.
+   */
+  recordLock: { locked: boolean } | null;
   refresh: () => Promise<void>;
 }
 
@@ -415,6 +436,8 @@ interface ApprovalsSnapshot {
   answered: boolean;
   /** Rows as the server sent them, the pending one enriched. Unsorted. */
   rows: ApprovalRequestLite[];
+  /** The server's record lock, when the rows hold no pending request. */
+  recordLock: { locked: boolean } | null;
 }
 
 const EMPTY_ROWS: ApprovalRequestLite[] = [];
@@ -423,6 +446,7 @@ const INITIAL_SNAPSHOT: ApprovalsSnapshot = Object.freeze({
   available: true,
   answered: false,
   rows: EMPTY_ROWS,
+  recordLock: null,
 }) as ApprovalsSnapshot;
 
 interface ApprovalsEntry {
@@ -467,8 +491,16 @@ function holdEntry(key: string): () => void {
   };
 }
 
+/** Reads the server's record lock for the record a read is for. */
+type RecordLockReader = () => Promise<{ locked: boolean }>;
+
 /** Send the record's read and publish its answer to every consumer of the key. */
-function startRead(key: string, objectName: string, recordId: string): Promise<void> {
+function startRead(
+  key: string,
+  objectName: string,
+  recordId: string,
+  readLock: RecordLockReader | null,
+): Promise<void> {
   const seq = ++readSeq;
   latestSeq.set(key, seq);
   const entry = entries.get(key);
@@ -484,11 +516,26 @@ function startRead(key: string, objectName: string, recordId: string): Promise<v
       // header — so exactly one follow-up read, never one per row.
       const pending = rows.find((r) => r.status === 'pending');
       const full = pending ? await fetchProgressEnrichment(pending) : null;
+      // A pending row the viewer can see decides the lock with its own node's
+      // `lock_record`. Without one, ask the record itself (objectstack#25934):
+      // the list hides a request from a non-participant, the lock does not.
+      let recordLock: { locked: boolean } | null = null;
+      if (!pending && readLock) {
+        recordLock = entries.get(key)?.snapshot.recordLock ?? null;
+        try {
+          const lock = await readLock();
+          recordLock = { locked: lock?.locked === true };
+        } catch {
+          // A read that never answered (501 without the approvals service)
+          // leaves none; a failure after an answer keeps it, as the rows are.
+        }
+      }
       if (latestSeq.get(key) !== seq) return;
       publish(key, {
         rows: full ? rows.map((r) => (r === pending ? full : r)) : rows,
         available: true,
         answered: true,
+        recordLock,
       });
     } catch (err: any) {
       if (latestSeq.get(key) !== seq) return;
@@ -543,6 +590,18 @@ export function useRecordApprovals(
   // for the render, mirrored into a ref the mount effect and `refresh` read.
   const [unavailable, setUnavailable] = useState(false);
   const unavailableRef = useRef(false);
+  // The record-lock read goes through the SDK (`client.approvals.getRecordLock`),
+  // so it needs the adapter's client; with no adapter mounted it is skipped.
+  const adapter = useAdapter();
+  const adapterRef = useRef(adapter);
+  adapterRef.current = adapter;
+  const lockReader = useCallback(
+    (object: string, id: string): RecordLockReader | null =>
+      adapterRef.current
+        ? () => adapterRef.current!.getClient().approvals.getRecordLock(object, id)
+        : null,
+    [],
+  );
 
   const subscribe = useCallback((l: () => void) => subscribeKey(readKey, l), [readKey]);
   const getSnapshot = useCallback(
@@ -565,19 +624,19 @@ export function useRecordApprovals(
     // read only when neither exists. The entry may be new while a read is in
     // flight (StrictMode's replayed mount): that read publishes into it.
     if (entry && !entry.read && !inFlight.has(readKey) && !unavailableRef.current) {
-      void startRead(readKey, objectName, recordId);
+      void startRead(readKey, objectName, recordId, lockReader(objectName, recordId));
     } else if (entry && inFlight.has(readKey)) {
       entry.read = true;
       if (!entry.snapshot.loading) publish(readKey, { loading: true });
     }
     return release;
-  }, [readKey, objectName, recordId]);
+  }, [readKey, objectName, recordId, lockReader]);
 
   const refresh = useCallback(async () => {
     if (!objectName || !recordId || !readKey) return;
     if (unavailableRef.current) return;
-    await startRead(readKey, objectName, recordId);
-  }, [objectName, recordId, readKey]);
+    await startRead(readKey, objectName, recordId, lockReader(objectName, recordId));
+  }, [objectName, recordId, readKey, lockReader]);
 
   const requests = readKey === null ? EMPTY_ROWS : snapshot.rows;
   const loading = snapshot.loading;
@@ -613,6 +672,7 @@ export function useRecordApprovals(
     requests: sortedRequests,
     pendingRequest,
     latestRequest,
+    recordLock: readKey === null ? null : snapshot.recordLock,
     refresh,
   };
 }
