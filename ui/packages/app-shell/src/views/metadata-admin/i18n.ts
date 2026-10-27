@@ -2685,6 +2685,10 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.studio.landingHome': 'Studio home',
   // objectui#11795 — the one line a phone shows under the Studio header.
   'engine.studio.desktopHint': 'Studio is built for a desktop screen.',
+  // objectstack#26708 — the builder's not-found states: a package id the
+  // package list does not hold, and a pillar segment Studio has no pillar for.
+  'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
+  'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces or Access above.',
   // Pillar tab labels
   'engine.fieldType.text': 'Text',
   'engine.fieldType.textarea': 'Text Area',
@@ -5847,6 +5851,8 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.studio.toggleRail': '切换侧栏',
   'engine.studio.landingHome': 'Studio 首页',
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
+  'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
+  'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面或权限。',
   // Pillar tab labels
   'engine.fieldType.text': '单行文本',
   'engine.fieldType.textarea': '多行文本',

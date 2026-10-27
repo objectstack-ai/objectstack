@@ -16,9 +16,16 @@ import { HttpDispatcher } from '../http-dispatcher.js';
  * their read sibling answers from (`packageIsUnknown`), and the parity cases
  * read both doors side by side so a future divergence fails here.
  *
- * Asked only when the protocol's answer is empty: drafts the protocol holds for
- * an id the registry lacks are still published (the control below), so the
- * change touches exactly the answer that lied.
+ * `discard-drafts` and the trail ask only when the protocol's answer is
+ * empty: drafts or commits the protocol holds for an id the registry lacks are
+ * still discarded or listed (the controls below), so the change touches
+ * exactly the answer that lied.
+ *
+ * [#26708] `publish-drafts` asks FIRST and refuses the unknown id before the
+ * protocol is called, whatever drafts are stored under it: publishing them
+ * served items live under a package that does not exist (no manifest, so no
+ * namespace, no uninstall and no export). The save door now refuses a save
+ * naming such an id; drafts stored under one before it did stay discardable.
  */
 
 const PKG_ADMIN = () => ({
@@ -138,18 +145,30 @@ describe('the package draft doors answer an unknown package 404, like GET /packa
         expect(discarded.response?.body?.data?.discardedCount).toBe(0);
     });
 
-    it('control: drafts the protocol holds for an id the registry lacks are still published', async () => {
-        const door = makeDoor({ publishResult: PUBLISHED_ONE });
+    it('[#26708] drafts the protocol holds for an id the registry lacks are NOT published — 404 before the protocol is asked', async () => {
+        const door = makeDoor({ publishResult: PUBLISHED_ONE, apps: [{ name: 'crm', _unpublished: true }] });
         const result = await door.send(`/${UNKNOWN}/publish-drafts`, 'POST');
+
+        expect(answer(result)).toEqual(answer(await door.send(`/${UNKNOWN}`, 'GET', undefined)));
+        expect(result.response?.status).toBe(404);
+        expect(door.publishPackageDrafts).not.toHaveBeenCalled();
+        // …and no ADR-0045 visibility flip runs for it either.
+        expect(door.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('control: a package that exists still publishes its drafts, 200', async () => {
+        const door = makeDoor({ publishResult: PUBLISHED_ONE });
+        const result = await door.send(`/${KNOWN}/publish-drafts`, 'POST');
 
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.outcome).toBe('published');
+        expect(door.publishPackageDrafts).toHaveBeenCalledWith(expect.objectContaining({ packageId: KNOWN }));
     });
 
-    it('control: a visibility flip that FAILED for that id is answered 200 with its unhideError, never hidden behind a 404', async () => {
+    it('control: a visibility flip that FAILED for a package that exists is answered 200 with its unhideError', async () => {
         const door = makeDoor({ failAppRead: true });
         vi.spyOn(console, 'error').mockImplementation(() => {});
-        const result = await door.send(`/${UNKNOWN}/publish-drafts`, 'POST');
+        const result = await door.send(`/${KNOWN}/publish-drafts`, 'POST');
 
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.outcome).toBe('nothing_to_publish');
@@ -167,9 +186,9 @@ describe('the package draft doors answer an unknown package 404, like GET /packa
         expect(result.response?.body?.data?.discardedCount).toBe(1);
     });
 
-    it('control: an unpublished app the door un-hid for that id is reported, not answered 404', async () => {
+    it('control: an unpublished app the door un-hid for a package that exists is reported', async () => {
         const door = makeDoor({ apps: [{ name: 'crm', _unpublished: true }] });
-        const result = await door.send(`/${UNKNOWN}/publish-drafts`, 'POST');
+        const result = await door.send(`/${KNOWN}/publish-drafts`, 'POST');
 
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.unhiddenApps).toEqual(['crm']);
