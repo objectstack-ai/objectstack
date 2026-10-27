@@ -71,7 +71,8 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
             // The two host exits must agree before either is believed.
             expect(envelope?.status, 'catch-all status').toBe(resolved.status);
             expect(envelope?.body.error.code, 'catch-all code').toBe(resolved.code);
-            return { status: resolved.status, code: resolved.code, message: envelope?.body.error.message };
+            const message = envelope?.body.error.message;
+            return { status: resolved.status, code: resolved.code, message: typeof message === 'string' ? message : undefined };
         }
         const res = returned.response;
         return { status: res.status, code: res.body?.error?.code, message: res.body?.error?.message, body: res.body };
