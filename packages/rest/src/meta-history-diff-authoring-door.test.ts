@@ -331,11 +331,14 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
         const { door, draftVersion } = await boot();
         const v = await draftVersion('app', 'atlas');
         for (const who of BUILDERS) {
-            const res = await door(who, '/diff', 'app', 'atlas', { from: '0', to: String(v) });
+            // [#26462] From the published version, not `from=0`: a version
+            // with no history row is refused 404 `VERSION_NOT_FOUND`, so the
+            // draft's navigation is read as the `to` side of its change.
+            const res = await door(who, '/diff', 'app', 'atlas', { from: String(v - 1), to: String(v) });
             expect(res.statusCode, who).toBe(200);
             expect(res.body?.toVersion, who).toBe(v);
             expect(text(res), who).toContain('Atlas (draft)');
-            const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
+            const navigation = res.body?.changed?.find((e: any) => e.path === 'navigation')?.to;
             expect(navIds({ navigation }), who).toContain('nav_atlas_launch_plan');
             // Ruling 5856774816: whole for whoever may save the app, pruned
             // for any other caller — unchanged by this card.
@@ -351,7 +354,9 @@ describe('[#20378 · #20441] builders read /diff, /history and /audit as before 
             const res = await door(who, '/diff', 'view', 'opportunity.pipeline', { from: String(v - 1), to: String(v) });
             expect(res.statusCode, who).toBe(200);
             expect(text(res), who).toContain('Pipeline (draft)');
-            const draftOnly = await door(who, '/diff', 'view', 'opportunity.forecast', { from: '0', to: '1' });
+            // [#26462] The default from side: a draft-only view has no
+            // earlier version, so it is absent and the whole body is added.
+            const draftOnly = await door(who, '/diff', 'view', 'opportunity.forecast', { to: '1' });
             expect(draftOnly.statusCode, who).toBe(200);
             expect(text(draftOnly), who).toContain('Forecast');
         }
@@ -471,5 +476,28 @@ describe('[#23546] the trail admits a strict subset of the callers /meta/_drafts
         }
         expect(admitted).toEqual({ system: true, member: false, studioBuilder: true, setupAdmin: false, author: true });
         expect((await drafts('setupAdmin')).statusCode).toBe(200);
+    }, 60_000);
+});
+
+describe('[#26462] /diff refuses a named version with no history row, as /rollback does', () => {
+    it('steps 4–6: both versions missing, one missing, and an item that never existed answer 404 VERSION_NOT_FOUND; the step 3 control answers its change', async () => {
+        const { door, draftVersion } = await boot();
+        const v = await draftVersion('view', 'opportunity.pipeline');
+        const control = await door('studioBuilder', '/diff', 'view', 'opportunity.pipeline', { from: String(v - 1), to: String(v) });
+        expect(control.statusCode).toBe(200);
+        expect(control.body?.changed?.map((e: any) => e.path)).toContain('label');
+
+        const cases: Array<[string, Record<string, string>, number]> = [
+            ['opportunity.pipeline', { from: '998', to: '999' }, 999],
+            ['opportunity.pipeline', { from: String(v - 1), to: '999' }, 999],
+            ['opportunity.pipeline', { from: '999', to: String(v) }, 999],
+            ['opportunity.no_such_view', { from: '1', to: '2' }, 2],
+        ];
+        for (const [name, query, missing] of cases) {
+            const res = await door('studioBuilder', '/diff', 'view', name, query);
+            const label = `${name} ${JSON.stringify(query)}`;
+            expect(envelope(res), label).toEqual({ status: 404, code: 'VERSION_NOT_FOUND' });
+            expect(text(res), label).toContain(`version ${missing} `);
+        }
     }, 60_000);
 });

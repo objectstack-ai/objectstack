@@ -11,9 +11,10 @@ import type { SonnerSchema } from '@object-ui/types';
 import { toast } from 'sonner';
 import { Button } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('sonner', 
-  ({ schema, ...props }: { schema: SonnerSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: SonnerSchema; [key: string]: unknown } & RendererHostProps) => {
     // `style` forwarded by name; the rest through the form-control
     // declaration (objectui#5632).
     const { style, ...buttonProps } = props;

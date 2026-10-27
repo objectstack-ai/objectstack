@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 60 — spawns the real producer once per single-cause fixture: three `os serve --dev` boots, one per fixture (multi-package, single-package, no owner); slowest CI reading 47.95 s (run 40392443783) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * #22405 — a CONFIG boot of a multi-package stack serves the stack's flat

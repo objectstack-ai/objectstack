@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: two `os verify` spawns, one per face (`--json` and text), already in one beforeAll; slowest CI reading 32.30 s (run 40424746941) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * PIN — `os verify --json` on a stack that REACHES THE RUNTIME STAGE writes

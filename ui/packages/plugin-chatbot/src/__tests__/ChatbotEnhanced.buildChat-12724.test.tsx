@@ -207,7 +207,7 @@ describe('objectui#12724 — the finished build card', () => {
     // The published envelope lifts no draft review; the package is its own.
     expect(onDesignBuiltApp).toHaveBeenCalledWith('library_app', 'app.hcpl');
     expect(screen.getByTestId('build-result-posture')).toHaveTextContent(
-      '之后的修改先存草稿，由你在 Studio 发布。',
+      '之后的修改先存草稿，在对话里点「发布」即可上线。',
     );
   });
 

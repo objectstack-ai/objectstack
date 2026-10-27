@@ -21,7 +21,7 @@ import { renderChildren, renderTriggerSlot } from '../../lib/utils';
 // Wrapping here is safer for isolated usage.
 
 ComponentRegistry.register('tooltip', 
-  ({ schema, className, ...props }: { schema: TooltipSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: TooltipSchema; className?: string; [key: string]: unknown }) => (
     <TooltipProvider delayDuration={schema.delayDurationMs}>
       <Tooltip {...props}>
         {renderTriggerSlot(TooltipTrigger, schema.trigger)}

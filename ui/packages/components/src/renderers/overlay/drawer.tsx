@@ -19,7 +19,7 @@ import {
 import { renderChildren, renderTriggerSlot } from '../../lib/utils';
 
 ComponentRegistry.register('drawer', 
-  ({ schema, className, ...props }: { schema: DrawerSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: DrawerSchema; className?: string; [key: string]: unknown }) => (
     // ⛔ Three reads retired here (objectui#11347): `shouldScaleBackground`,
     // `footer` and `showClose`. `DrawerSchema` declares none of them, the
     // installed `@objectstack/spec` has no row for `drawer`, and no catalog

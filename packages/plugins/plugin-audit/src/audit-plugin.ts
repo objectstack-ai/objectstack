@@ -423,8 +423,8 @@ export class AuditPlugin implements Plugin {
         return typeof tenancy?.defaultOrgId === 'function' ? tenancy.defaultOrgId() : undefined;
       };
       // A mention notification previews its comment and links its record, so
-      // it reaches only a mentioned user who can READ that record — judged in
-      // that user's own envelope, their organization claim vetted under the
+      // it reaches only a mentioned user who can READ both — judged in that
+      // user's own envelope, their organization claim vetted under the
       // posture the request path reads (`mention-recipient-gate.ts`).
       const getTenancyPosture = () => {
         try {

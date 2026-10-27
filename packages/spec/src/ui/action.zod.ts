@@ -32,6 +32,12 @@ import {
 } from './action-copy-template';
 import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
+// [#25653] Import-free leaf, shared with `HookSchema`: the identity-assignment
+// set, the body-source reading and the refusal text.
+import {
+  identityAssignmentBodyWriteRefusal,
+  identityAssignmentWritesNamedIn,
+} from '../identity/identity-assignment-body-writes';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
 import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
@@ -1073,8 +1079,12 @@ const actionObject = () => strictObject({
    * followed by a backslash, a tab / line feed / carriage return anywhere, and
    * a bare relative target are refused at parse — the same set the console's
    * action runner opens (`navigation-target.ts`).
+   *
+   * An in-app path is a **console route**, the same one `onSuccess.navigate`
+   * takes — a record is `/apps/APP/OBJECT/record/ID`; what `APP` is, and why
+   * the path carries it, is written once on `onSuccess` below.
    */
-  target: z.string().optional().describe("URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused."),
+  target: z.string().optional().describe("URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (a console route; a record is /apps/APP/OBJECT/record/ID, APP being the app's route segment — see onSuccess.navigate) — every other scheme and a protocol-relative //host are refused."),
 
   /**
    * For `type:'url'` — where to open `target`. A simple, declarative new-tab
@@ -1134,6 +1144,15 @@ const actionObject = () => strictObject({
    * The sandbox reports the discarded `ctx.record` writes at INVOCATION time as
    * well, covering the computed keys, aliases and Studio/API-authored bodies a
    * parse cannot reach.
+   *
+   * An action body runs as system, and elevation does not reach identity
+   * assignment (#25653, ruling record 6384657105 letter A): its writes to
+   * `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and
+   * `sys_member` are refused at run time with `PERMISSION_DENIED`, and the
+   * refinement on {@link ActionSchema} refuses a sandboxed JS body whose
+   * `source` names such a write. A grant goes through a flow whose `runAs` is
+   * `'user'` (an action of `type: 'flow'` runs it as the invoking user);
+   * invitations and memberships through the organization endpoints.
    */
   body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
 
@@ -1714,7 +1733,7 @@ const actionObject = () => strictObject({
    *   `type:'flow'` action, the completed run's answer (`AutomationResult`),
    *   whose `output` carries the flow's `isOutput` variables. This is what
    *   makes "server clones a record → jump to the new record" declarable:
-   *   `navigate: '/apps/crm/tasks/${result.id}'`, or, from a flow whose
+   *   `navigate: '/apps/crm/tasks/record/${result.id}'`, or, from a flow whose
    *   `create_record` node writes an `isOutput` variable `renewal`,
    *   `navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}'`.
    *   A variable the flow does not declare `isOutput` is not in `output`.
@@ -1734,6 +1753,22 @@ const actionObject = () => strictObject({
    * (`tasks/${result.id}`) are refused at parse: the runner
    * (`navigateOnSuccess`) classifies the interpolated URL with the same set
    * and performs no navigation for any of them.
+   *
+   * **An in-app path is a console route**, and the console's object and
+   * record routes are app-qualified. Write it without the console's mount
+   * prefix (`/_console` under the framework CLI — the router adds it). The
+   * record page is `/apps/APP/OBJECT/record/ID` (the console redirects a
+   * shorthand `/apps/APP/OBJECT/ID` there only when `ID` looks like a record
+   * id, so write `record/`); the object's list is `/apps/APP/OBJECT`. `APP` is
+   * the app's route segment (ADR-0048): its package id, e.g.
+   * `app.objectstack.hotcrm`; the app's `name` resolves too, and is the only
+   * segment that reaches an app other than the first in a package that ships
+   * several. A `./` path resolves against the current route. This contract
+   * declares no app-relative form — no `${ctx.*}` member names the current
+   * app, and it gives a path such as `/OBJECT/record/ID` no meaning — so write
+   * the app segment. (The objectui console hosts such a path under the app the
+   * user is in, `hostInConsolePath`; that is the console's accommodation, not a
+   * form this schema promises.)
    *
    * **`openIn`** is a CLOSED two-member enum — `'self'` (default: navigate in
    * place) or `'newTab'` — deliberately not a general navigation DSL.
@@ -1793,7 +1828,7 @@ const actionObject = () => strictObject({
         "the tab choice is the closed enum `openIn: 'self' | 'newTab'` — write `openIn: 'newTab'`.",
     },
   }, {
-    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}; on a type:'flow' action the completed run's answer, whose `output` carries the flow's isOutput variables, e.g. ${result.output.renewal.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions."),
+    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}; on a type:'flow' action the completed run's answer, whose `output` carries the flow's isOutput variables, e.g. ${result.output.renewal.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. An in-app path is a console route, written without the console's mount prefix; a record is /apps/APP/OBJECT/record/ID, where APP is the app's route segment (its package id; its name also resolves). No app-relative form is declared and no ${ctx.*} member names the current app, so write the app segment. Renderers MUST encodeURIComponent values in query positions."),
     openIn: z.enum(['self', 'newTab'], {
       error: (issue) => (issue.input === 'new-tab'
         ? "`onSuccess.openIn` spells the new-tab member `'newTab'` (matching the handler-return "
@@ -1954,6 +1989,28 @@ function refuseUnopenableOnSuccessNavigate(
 ): void {
   const refusal = navigationTargetRefusal(data.navigate, "An action's `onSuccess.navigate`");
   if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['navigate'], message: refusal });
+}
+
+/**
+ * [#25653, ruling record 6384657105 letter A] App-authored automation does not
+ * use elevation to write the four identity-assignment objects, and an action
+ * body always runs as system (`buildActionExecutionContext`, runtime). The data
+ * middleware refuses the write at run time (`flow-system-identity-write-refusal.ts`,
+ * plugin-security); this refuses the `script` action whose sandboxed JS (L2)
+ * `body` names one — a write method on `ctx.api.object('<object>')`, called on
+ * the handle or on a name the body bound it to — at every door that parses an
+ * action, one issue per object at `body.source`. An expression (L1) body
+ * performs no IO, and reads of the four objects stay legal, as at run time.
+ * `HookSchema` carries the same check for a `runAs: 'system'` hook.
+ */
+function refuseIdentityAssignmentBodyWrite(
+  data: { type?: string; body?: { language?: string; source?: unknown } },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.type !== 'script' || data.body?.language !== 'js' || typeof data.body.source !== 'string') return;
+  for (const object of identityAssignmentWritesNamedIn(data.body.source)) {
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: identityAssignmentBodyWriteRefusal(object, 'action') });
+  }
 }
 
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
@@ -2202,6 +2259,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   path: ['undoable'],
 }).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
+  .superRefine(refuseIdentityAssignmentBodyWrite)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final
   // term — the convention the platform-objects feature-gate guard reads. One

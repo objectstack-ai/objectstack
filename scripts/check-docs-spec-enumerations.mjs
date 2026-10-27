@@ -70,7 +70,7 @@
  *   3. `content/docs/getting-started/glossary.mdx`, three times over: the
  *      `protocol namespaces:` sentence, the union of the layers table's
  *      `Namespaces it includes` column, and the `### <X> Protocol` sections
- *      under the `## The N Protocol Namespaces` heading. Sets, plus the table's
+ *      under the `## The Protocol Namespaces` heading. Sets, plus the table's
  *      own no-duplicate rule -- a namespace listed in two layers is a finding
  *      in its own right, because that table is a partition.
  *   4. Every numeric namespace-count CLAIM in PROSE. `content/docs/**` is swept
@@ -79,6 +79,10 @@
  *      for the loose phrasing (`the N namespaces`), which is too weak to run
  *      over the whole corpus without meeting sentences about some other kind of
  *      namespace. Fenced code blocks are NOT prose and are skipped -- see below.
+ *      The pages state no count today: #26441 took the numbers out of the
+ *      glossary, because the lists above already carry the set and a sentence
+ *      with no number in it cannot drift. The sweep stays so that a count
+ *      written back in anywhere is held to the exports map, not taken on trust.
  *
  * Every one of those is INDEPENDENTLY load-bearing, and battery 4 mutates them
  * one at a time to prove it: a gate that reads five enumerations and reports
@@ -119,8 +123,8 @@
  *    An unterminated fence would hide the rest of a page from the sweep, so on
  *    the three governed pages it is a structural REFUSAL rather than a page read
  *    short. Elsewhere in the corpus it is not policed -- this gate is not a
- *    markdown linter for 387 pages, and every live count claim is on a governed
- *    page.
+ *    markdown linter for 387 pages, and the governed pages are where a count
+ *    claim has lived.
  *  - **Display spelling outside these enumerations.** `Data` in a heading this
  *    gate does not read is compared with nothing.
  *  - **Whether a subpath RESOLVES.** That is the alias-coverage pin's job. This
@@ -171,8 +175,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '4. Each enumeration is load-bearing ON ITS OWN.': 10,
   '5. The CONFLATION pin: the two sets are not interchangeable.': 4,
   '6. Order belongs to the subpath sentence, and only to that one.': 3,
-  '7. Count claims: digits, words, drift, fenced code, and the drain refusal.': 15,
-  [BATTERY_REFUSALS]: 20,
+  '7. Count claims: digits, words, drift, fenced code, and a count-free page.': 17,
+  [BATTERY_REFUSALS]: 18,
   '9. The layers table carries its own no-duplicate rule.': 2,
   '10. A finding NAMES the real shape, not a nonsense entry.': 2,
 });
@@ -222,7 +226,7 @@ const NAMESPACE_COLON_PREFIX = 'protocol namespaces:';
 /** The layers table's column of namespaces. A rename or a reorder is a finding. */
 const COL_NAMESPACES = 'Namespaces it includes';
 /** The h2 that owns the per-namespace sections. Its number is a count claim too. */
-const SECTIONS_HEADING = /^##\s+The\s+(\S+)\s+Protocol\s+Namespaces\s*$/i;
+const SECTIONS_HEADING = /^##\s+The\s+(?:\S+\s+)?Protocol\s+Namespaces\s*$/i;
 /** A per-namespace section heading inside that h2. */
 const SECTION_HEADING = /^###\s+(.+?)\s*$/;
 /** Any h2 -- what ends the sections block. */
@@ -249,15 +253,6 @@ const FENCE_RUN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const COUNT_CLAIM_STRICT = /\b([A-Za-z0-9-]+)\s+protocol\s+namespaces\b/gi;
 /** `The 15 namespaces` -- only run over the governed pages; too weak elsewhere. */
 const COUNT_CLAIM_LOOSE = /\bthe\s+([A-Za-z0-9-]+)\s+namespaces\b/gi;
-
-/**
- * How many numeric count claims the glossary must still carry.
- *
- * The page states its total in several places. A claim set that drains to
- * nothing is a check that passes by having nothing left to read, which is the
- * phantom-check failure this gate exists to prevent, one level up.
- */
-const GLOSSARY_COUNT_CLAIM_FLOOR = 3;
 
 // -------------------------------------------------------------------------
 // Number words, so an evasion by spelling is still a claim
@@ -691,7 +686,7 @@ export function readLayersTable(text, fileLabel = PAGE_GLOSSARY) {
 }
 
 /**
- * The `### <X> Protocol` sections under the `## The N Protocol Namespaces` h2.
+ * The `### <X> Protocol` sections under the `## The Protocol Namespaces` h2.
  *
  * Scoped to that h2 deliberately: the page carries an unrelated
  * `### Protocol Namespace` definition further up, and a document-wide sweep of
@@ -704,7 +699,7 @@ export function readProtocolSections(text, fileLabel = PAGE_GLOSSARY) {
   const { hit, findings } = soleLine(
     lines,
     (l) => SECTIONS_HEADING.test(l),
-    'a `## The N Protocol Namespaces` heading',
+    'a `## The Protocol Namespaces` heading',
     fileLabel,
   );
   if (hit === null) return { line: 1, items: [], findings };
@@ -932,17 +927,6 @@ export function run(tree) {
   }
 
   const glossaryClaims = readCountClaims(tree.glossary, true);
-  // Reported only when the claims are genuinely absent. With a fence left open
-  // above them the shortfall is a SYMPTOM, and the refusal above already names
-  // the cause; two findings for one defect send the reader to the wrong line.
-  if (openFences.get(PAGE_GLOSSARY) === null && glossaryClaims.length < GLOSSARY_COUNT_CLAIM_FLOOR) {
-    structural.push({
-      kind: 'structure',
-      file: PAGE_GLOSSARY,
-      line: 1,
-      message: `only ${glossaryClaims.length} numeric namespace-count claim(s) found, below the floor of ${GLOSSARY_COUNT_CLAIM_FLOOR} -- the page states its total in several places, and a claim set that drains to nothing is a check that passes by having nothing left to read.`,
-    });
-  }
 
   if (structural.length > 0) {
     return { structural, findings: [], subpaths, namespaces: derived.namespaces, claims: [], read };
@@ -1256,7 +1240,7 @@ export function selfTest() {
     run(tree({ packages: shuffledParen })).findings.length === 0);
 
   // ---- 7. Count claims.
-  battery('7. Count claims: digits, words, drift, fenced code, and the drain refusal.');
+  battery('7. Count claims: digits, words, drift, fenced code, and a count-free page.');
   const drifted = FIXTURE_GLOSSARY.replace('**4 protocol namespaces**', '**5 protocol namespaces**');
   const driftRun = run(tree({ glossary: drifted }));
   check('count/a stale digit reds', driftRun.findings.some((f) => f.kind === 'count-drift'),
@@ -1271,6 +1255,19 @@ export function selfTest() {
   check('count/compounds parse', parseCountToken('twenty-one') === 21, String(parseCountToken('twenty-one')));
   check('count/the heading number is a claim', readCountClaims(FIXTURE_GLOSSARY, true).some((c) => c.line === 18),
     JSON.stringify(readCountClaims(FIXTURE_GLOSSARY, true)));
+  // A page that states no count at all is green, and its sections are still
+  // read: the counts are optional prose, the lists are what this gate holds.
+  const countless = FIXTURE_GLOSSARY
+    .replace('**4 protocol namespaces**', '**protocol namespaces**')
+    .replace('has 4 protocol namespaces:', 'has these protocol namespaces:')
+    .replace('The 4 namespaces collapse', 'The namespaces collapse')
+    .replace('## The 4 Protocol Namespaces', '## The Protocol Namespaces');
+  const countlessRun = run(tree({ glossary: countless }));
+  check('count/a glossary that states NO count is green',
+    countlessRun.structural.length === 0 && countlessRun.findings.length === 0 && countlessRun.claims.length === 0,
+    JSON.stringify({ structural: countlessRun.structural, findings: countlessRun.findings, claims: countlessRun.claims }));
+  check('count/and its uncounted sections heading is still read',
+    countlessRun.read?.sections.items.length === 4, JSON.stringify(countlessRun.read?.sections));
   check('count/the loose phrasing is read on a governed page',
     readCountClaims(FIXTURE_GLOSSARY, true).length > readCountClaims(FIXTURE_GLOSSARY, false).length,
     `${readCountClaims(FIXTURE_GLOSSARY, true).length} vs ${readCountClaims(FIXTURE_GLOSSARY, false).length}`);
@@ -1343,12 +1340,6 @@ export function selfTest() {
   refused('the sections heading is gone', {
     glossary: FIXTURE_GLOSSARY.replace('## The 4 Protocol Namespaces', '## The Namespaces'),
   });
-  refused('the count claims drained away', {
-    glossary: FIXTURE_GLOSSARY
-      .replace('**4 protocol namespaces**', '**several protocol namespaces**')
-      .replace('has 4 protocol namespaces:', 'has these protocol namespaces:')
-      .replace('The 4 namespaces collapse', 'The namespaces collapse'),
-  }, `floor of ${GLOSSARY_COUNT_CLAIM_FLOOR}`);
   // Skipping fenced code buys a way to hide claims: open a fence and never
   // close it. On a governed page that is refused, on BOTH the page that holds
   // the claims and one that does not -- otherwise the guard reads as

@@ -286,7 +286,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `true`) | Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed until the user opens it. A group holding the current route opens whatever it declares. |
 | **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +8 more)[]` | ✅ | Child navigation items |
 
 ### Nested Shape: `App.areas[number]`
@@ -475,7 +475,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `true`) | Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed until the user opens it. A group holding the current route opens whatever it declares. |
 
 ### Nested Shape: `GroupNavItem.dataSource`
 
@@ -680,7 +680,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `true`) | Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed until the user opens it. A group holding the current route opens whatever it declares. |
 | **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +8 more)[]` | ✅ | Child navigation items |
 
 
@@ -879,7 +879,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `true`) | Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed until the user opens it. A group holding the current route opens whatever it declares. |
 | **children** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +8 more)[]` | ✅ | Child navigation items |
 
 
@@ -1200,7 +1200,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
-| **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+| **expanded** | `boolean` | optional (default: `true`) | Whether the group starts open in the sidebar. Omitted, it opens; write `false` to keep it closed until the user opens it. A group holding the current route opens whatever it declares. |
 | **children** | `[NavigationItem](#navigationitem)[]` | ✅ | Child navigation items |
 
 ### Nested Shape: `NavigationItem[type='group'].dataSource`

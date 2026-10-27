@@ -223,6 +223,12 @@ export interface DraftReview {
    */
   materialized?: boolean;
   /**
+   * The build envelope's `appHidden`, beside `materialized`: `false` says
+   * the materialized app is already listed, i.e. published (ADR-0045
+   * publish = live AND visible). Absent when the envelope does not say.
+   */
+  appHidden?: boolean;
+  /**
    * ADR-0038 L1 graph-lint verdict for the staged build. Rendered as a
    * verified/issues chip so "drafted" and "verified" read as the two
    * separate statements they are. Absent on older tool output.
@@ -1095,6 +1101,7 @@ function draftReviewOf(obj: Record<string, unknown>): DraftReview | undefined {
     // ADR-0045: the build was materialized in-turn (real tables + data, app
     // hidden). The canvas then previews the REAL app URL, not the draft overlay.
     ...(obj.materialized === true ? { materialized: true } : {}),
+    ...(typeof obj.appHidden === 'boolean' ? { appHidden: obj.appHidden } : {}),
     ...(verification ? { verification } : {}),
     ...(issues.length ? { issues } : {}),
     // objectui#10109 — the producer's incremental-edit marker rides the draft
@@ -1340,7 +1347,13 @@ function extractBuildProgress(parts: AnyPart[]): ChatBuildProgress | undefined {
   const items = Array.isArray(d.items)
     ? (d.items as Array<Record<string, unknown>>)
         .filter((i) => typeof i?.type === 'string' && typeof i?.name === 'string')
-        .map((i) => ({ type: i.type as string, name: i.name as string }))
+        .map((i) => ({
+          type: i.type as string,
+          name: i.name as string,
+          // The item's display label, when the frame carries one; the panel
+          // falls back to the machine name without it.
+          ...(typeof i.label === 'string' && i.label ? { label: i.label } : {}),
+        }))
     : [];
   const phase = readBuildPhase(d.phase);
   return {

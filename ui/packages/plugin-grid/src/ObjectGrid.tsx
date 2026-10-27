@@ -22,10 +22,10 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
+import type { ObjectGridSchema, DataSource, ListColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, normalizeTableColumnType } from '@object-ui/types';
 import { parseFilterAST, resolveFieldScale, type FilterCondition } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata } from '@object-ui/react';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -58,7 +58,7 @@ import {
   toast,
 } from '@object-ui/components';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { resolveConditionalFormatting, resolveDependsOnFields, isDeadlineSettled, leadWithNameField, declaredNameField, buildExpandFields, buildExportFileName, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, resolveAffordance, resolveFieldAffordance, type SchemaLike, isProjectableField, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, toFilterNodeSafely, filterRefusalSubject, FilterOperatorError, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
+import { resolveConditionalFormatting, isDeadlineSettled, leadWithNameField, declaredNameField, buildExportFileName, columnIdentity, resolveAffordance, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -79,56 +79,27 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { applyRelationalMeta } from './relationalMetaKeys';
-import { resolveBulkActions, describeUnusableBulkActionDefs, resolvePromotedBulkParams } from './resolveBulkActions';
+import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { partitionBulkRows } from './bulkEligibility';
-import { resolvesToDataColumn, describeUnresolvedColumns } from './columnSpellingDiagnostics';
+import { resolvesToDataColumn } from './columnSpellingDiagnostics';
 import { RowActionMenu, formatActionLabel, planRowActionMenu } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
-import { findParamsSignature, useResolvedGridFilters } from './objectGridQuery';
 import { type ObjectGridColumn, type ObjectGridColumnDraft, isChipFieldType, normalizeColumns, resolveColumnLabel } from './objectGridColumns';
 import { LinkCell, recordPointerFace, rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
-import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_FETCH_BATCH_SIZE, DEFAULT_SELECTION_TYPE, NO_GROUPING_REFUSAL, type RowHeightMode, describeNonPositivePageSize, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
-import { type BatchSaveOutcome, OCC_TOKEN_FIELD, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
+import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
+import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type ObjectGridColumnState, type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
+import { useObjectGridDiagnostics } from './objectGridDiagnostics';
+import { useObjectGridQueryInputs } from './objectGridQueryInputs';
+import { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
+import { useObjectGridRowLoad } from './objectGridRowLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps } from './objectGridProps';
-
-/**
- * A declared `sort` → the `"field order"` join string THIS block sends as
- * `$orderby` (objectui#8973).
- *
- * ⚠️ Read the split before editing either half. WHICH entries survive and what
- * a missing `order` means is `normalizeSortEntries`' decision — the governed
- * one in `@object-ui/core`, shared with `convertSortToQueryParams` and every
- * sibling block. Only the JOIN is this block's, because only this block sends
- * a join string: the sink's `{field: direction}` map is route B on
- * objectui#8767, declined by the maintainer 2026-09-10 pending a card that
- * measures the server contract and both readers. So the operation with two
- * copies (the normalization) has one implementation, and the shape the
- * declination protects does not move.
- *
- * What this closes: the arms below used to interpolate every key
- * unconditionally, so an entry missing `field` or `order` reached the wire as
- * the literal text `undefined`. `$orderby: 'name undefined'` is not a
- * degraded ordering — `normalizeSortNodes` (`@objectstack/metadata-protocol`,
- * the one normalizer every server ingress funnels through) reads `undefined`
- * as a direction that is "neither 'asc' nor 'desc'" and answers
- * `400 INVALID_QUERY`.
- *
- * @returns `undefined` when nothing orderable survives, so the caller omits
- * `$orderby` entirely instead of sending `""` — the same correction
- * `toFilterNode` already made for `$filter: {}` on the filter leg above.
- */
-function toOrderByClause(sort: QuerySortEntry[] | undefined | null): string | undefined {
-  const ordered = normalizeSortEntries(sort);
-  if (!ordered) return undefined;
-  return ordered.map((s) => `${s.field} ${s.order}`).join(', ');
-}
 
 /**
  * A view's declared `sort` → the shape the table's header indicators read.
@@ -1171,159 +1142,33 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     delete: canDelete,
   });
 
-  const schemaFields = schema.fields;
-  const schemaColumns = schema.columns;
-  // [objectui#12292] Whether this grid's rows must carry their concurrency
-  // token: the AUTHORED key, not `inlineEditable`, so the principal's write
-  // verdict landing does not cost a second fetch. A read-only principal is
-  // sent one column it does not use.
-  const carriesConcurrencyToken = schema.editable === true;
-  // [objectui#12393] The row colour's field, which the projection asks for
-  // (see `rowColorFields` in the load effect). A string, so the fetch effect
-  // can name it: a host can replace the rule on a mounted grid (`ListView`
-  // hands the grid its toolbar pick as `rowColor`), and a new field no
-  // request carried would otherwise never be fetched. The `colors` map is a
-  // render-time concern the projection cannot see, so changing it costs no
-  // round trip.
-  const rowColorField = schema.rowColor?.field || undefined;
-  // [objectui#7179] The fetch effect's dep on the grouping block, as a CONTENT
-  // key over the field NAMES alone.
-  //
-  // Not `schema.grouping` itself: hosts rebuild that object literal every
-  // render (`plugin-list` spreads a fresh `{ grouping: groupingConfig }` into
-  // the node it hands down), so naming it here would re-issue the query on
-  // every render — the identity-churn refetch storm objectui#6697 recorded for
-  // `expandFields`.
-  //
-  // Names ONLY, not the whole block: `order` and `collapsed` are render-time
-  // concerns the projection cannot see, so a user collapsing a group must not
-  // cost a round trip. What the query depends on is exactly this list.
-  const groupingProjectionKey = useMemo(
-    () => JSON.stringify(collectGroupingFieldRefs(schema.grouping)),
-    [schema.grouping],
-  );
-  // [objectui#10689] The fetch effect's dep on the three view-level PREDICATE
-  // carriers its projection harvests (objectui#3501), as a CONTENT key over the
-  // operand NAMES alone, the shape `groupingProjectionKey` takes above.
-  //
-  // The load effect reads `conditionalFormatting`, `rowActionDefs` and
-  // `bulkActionDefs` through `listViewPredicates` and puts each operand into
-  // `$select`, but none of the three was a dependency. So a rule added to a
-  // mounted grid never had its operand fetched: the rows kept arriving without
-  // the field, and the rule, which reads it, never matched.
-  //
-  // Names ONLY: a rule's style, or an action's label, is a render-time concern
-  // the projection cannot see, so changing it costs no round trip. The same
-  // harvest over the same three inputs as the effect's; the object-level
-  // `actions` / `userActions` it adds come from the definition the effect reads
-  // for itself. The `rowActionDefs` cast is the objectui#5091 NON-AUTHOR
-  // SURFACE exemption stated at the effect's own read of that key.
-  // `__tests__/ObjectGrid.harvestInputsFetchKey-10689.test.tsx` pins each input.
-  const conditionalFormattingRaw = schema.conditionalFormatting as readonly unknown[] | undefined;
-  const rowActionDefsRaw = (schema as { rowActionDefs?: readonly unknown[] }).rowActionDefs;
-  const bulkActionDefsRaw = (schema as { bulkActionDefs?: readonly unknown[] }).bulkActionDefs;
-  const predicateProjectionKey = useMemo(
-    () => JSON.stringify(collectPredicateFieldRefs(listViewPredicates({
-      conditionalFormatting: conditionalFormattingRaw,
-      rowActionDefs: rowActionDefsRaw,
-      bulkActionDefs: bulkActionDefsRaw,
-    }))),
-    [conditionalFormattingRaw, rowActionDefsRaw, bulkActionDefsRaw],
-  );
-  // The view's declared filter, lowered ONCE through the repo's single filter
-  // sink for both consumers below (the fetch and the server-side export).
-  //
-  // The lowering is what makes the authoring surface honest rather than merely
-  // reachable (objectui#4041). Until this block published `filter`, the only
-  // thing that could arrive here was an ObjectQL AST synthesized by
-  // `ElementDataSourceGate`, and passing that through verbatim was right. An
-  // AUTHOR writes the spec's view vocabulary instead — `ViewFilterRule[]`,
-  // `[{ field, operator, value }]` — and that shape byte-copied onto `$filter`
-  // is refused on the wire: `isFilterAST` is false for an array of objects and
-  // the data API answers `400 INVALID_FILTER` (measured against a real backend
-  // in objectui#3431). Declaring the key without this hop would have traded a
-  // silent wrong answer for a guaranteed failure, which is not a fix.
-  //
-  // `toFilterNode` is that hop by design — the last stop before the wire, where
-  // a value legitimately leaves the spec's view vocabulary and becomes an AST
-  // (see its doc for why the fold cannot live at the producer). It passes AST
-  // nodes through untouched, so the `ElementDataSourceGate` path is unchanged;
-  // it also collects the MongoDB-style object shape, and returns `undefined`
-  // for an absent or empty source so we skip `$filter` rather than sending an
-  // empty array. `plugin-list`'s `buildEffectiveFilter` and `plugin-view`'s
-  // `ObjectView` already reach the wire through this same sink; this read point
-  // was the last consumer on the chain that did not.
-  //
-  // ⚠️ `toFilterNodeSafely`, not `toFilterNode` — objectui#9050. This read is a
-  // RENDER-time `useMemo`: a `FilterOperatorError` from the lowering is a
-  // render error, and there is no load `try` and no `classifyLoadError` above
-  // it. The refusal is kept as a VALUE and rendered by the malformed-filter
-  // branch below; collapsing it to `undefined` would mean "no filter" and run
-  // the grid unconstrained, the silent widening objectui#9001 closed.
-  //
-  // objectui#10607: both authored entries are read RESOLVED and held (see
-  // `useResolvedGridFilters`), so `{current_user_id}` goes out as the real id
-  // and an equal filter keeps its reference across renders.
-  const filterScope = useFilterScope();
-  const authoredFilters = useResolvedGridFilters({ filter: schema.filter }, filterScope);
-  const schemaFilterSource = authoredFilters.filter;
-  const schemaFilterResult = useMemo(() => toFilterNodeSafely(schemaFilterSource), [schemaFilterSource]);
-  const schemaFilterRefusal = schemaFilterResult.ok ? undefined : schemaFilterResult.refusal;
-  const schemaFilter = schemaFilterResult.ok ? schemaFilterResult.node : undefined;
-  const schemaSort = schema.sort;
-  const schemaPagination = schema.pagination;
-  const schemaPageSize = schema.pageSize;
-
-  // Server-side ("manual") pagination for the flat list view. The fetch window
-  // ($top/$skip) and the DataTable's display page size are the SAME number here
-  // — the records we hold ARE one page, so paging means refetching the next
-  // slice from the server instead of slicing an in-memory batch. This is what
-  // makes records beyond the first batch reachable at all
-  // (objectstack-ai/objectstack#2212).
-  //
-  // That makes this a DISPLAY page size, so undeclared it is the spec's display
-  // default, ⛔ not the fetch batch (objectui#9853). A server-grouped leaf pages
-  // its rows by this same size (`useServerGroupRows` below).
-  const [serverPage, setServerPage] = useState(1);
-  const [serverPageSize, setServerPageSize] = useState<number>(
-    resolvePageSize(schema, DEFAULT_DISPLAY_PAGE_SIZE),
-  );
-
-  // Column-header sort, when this grid fetches its own rows (objectui#3106).
-  // `null` means "nobody has clicked a header" and the view's declared
-  // `schema.sort` is in force; once set it REPLACES that sort for the whole
-  // collection, not for the window on screen.
-  const [headerSort, setHeaderSort] = useState<TableSortItem[] | null>(null);
-  // A view whose declared sort changes underneath us (view switch, saved-view
-  // edit) invalidates a header sort taken against the previous one.
-  useEffect(() => { setHeaderSort(null); }, [JSON.stringify(schema.sort ?? null)]);
-
-  // Toolbar search term, when this grid fetches its own rows (objectui#3118).
-  // It goes out as `$search` on the refetch — the server decides which fields
-  // it matches from the object's metadata (ADR-0061), the same channel the
-  // ListView toolbar uses. Filtering the rows we hold instead would search the
-  // page on screen and call the answer "the results in this list".
-  const [searchTerm, setSearchTerm] = useState('');
-  // A term is asked of one collection. Pointing the grid at another object
-  // makes it a question about rows it was never typed for.
-  useEffect(() => { setSearchTerm(''); }, [objectName]);
-  // [objectui#11021] Whose term is it? A host that passes `search` owns it —
-  // under host-driven paging, and also when this grid fetches for itself:
-  // `ListView` fetches for a flat grid, but hands a grid that groups on the
-  // server no rows, only its toolbar term, which this grid's own queries then
-  // carry (both group queries, or its own window). Absent that prop, the term
-  // is the one typed into this grid's box.
-  const hostOwnsSearch = externalManualPagination || hostSearch !== undefined;
-  const querySearchTerm = hostOwnsSearch ? (hostSearch ?? '') : searchTerm;
-  // [objectui#10689] The `$searchFields` the load effect sends, as a CONTENT
-  // key for its dependency list: the view's `searchableFields`, and only while
-  // a term goes out, since without one the query does not send them. A view
-  // that narrows its search to other fields re-reads once; an equal array in a
-  // new object does not.
-  const searchFieldsKey =
-    querySearchTerm.trim() && schema.searchableFields && schema.searchableFields.length > 0
-      ? JSON.stringify(schema.searchableFields)
-      : '';
+  // The projection keys and the filter, sort, search and server-paging state,
+  // read here in hook order (`./objectGridQueryInputs`).
+  const {
+    schemaFields,
+    schemaColumns,
+    carriesConcurrencyToken,
+    rowColorField,
+    groupingProjectionKey,
+    predicateProjectionKey,
+    filterScope,
+    schemaFilterSource,
+    schemaFilterRefusal,
+    schemaFilter,
+    schemaSort,
+    schemaPagination,
+    schemaPageSize,
+    serverPage,
+    setServerPage,
+    serverPageSize,
+    setServerPageSize,
+    headerSort,
+    setHeaderSort,
+    setSearchTerm,
+    hostOwnsSearch,
+    querySearchTerm,
+    searchFieldsKey,
+  } = useObjectGridQueryInputs({ schema, objectName, externalManualPagination, hostSearch });
 
   // --- Inline data effect (synchronous, no fetch needed) ---
   useEffect(() => {
@@ -1372,818 +1217,42 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return () => { cancelled = true; };
   }, [hasInlineData, objectName, dataSource]);
 
-  // objectui#10583 — a MASKED field is REFUSED as a grouping key.
-  // Grouping by it printed the raw value as each group's label. Masking the
-  // label would not be enough: the buckets would still show which records
-  // share a credential, ordered by its raw value. So the entry is dropped (the
-  // other entries still group, as `usableGroupingFields` does for an unusable
-  // one) and the drop is reported through the grid's warning channel. The rule
-  // is the column flag's: `isMaskedGridColumn` over the view column's type and
-  // the object-declared type.
-  //
-  // objectui#10657 (which folded objectui#10706) — the same rule's third
-  // argument: while the object's field types are unknown (`objectTypesPending`,
-  // the host-fetched window, or a failed read), an entry on a field whose view
-  // column authors no type is WITHHELD and so refused too, since its group
-  // label would print whatever the field holds. The group label follows the
-  // cell: a withheld cell draws the mask, and a withheld key labels no group.
-  // Once the types are known the entry groups again, unless its field is
-  // masked. The refusal of a withheld entry is not warned: it is not a finding
-  // about the authored grouping, and a failed read reports itself.
-  const groupingFieldsRaw = schema.grouping?.fields;
-  const maskedGroupingSignature = React.useMemo(() => {
-    const cols: ReadonlyArray<string | ListColumn> = normalizeColumns(schema.columns) ?? [];
-    const columnTypeOf = (field: string) =>
-      cols.find((c): c is ListColumn => typeof c === 'object' && c !== null && c.field === field)?.type;
-    const refused = usableGroupingFields(groupingFieldsRaw)
-      .map((gf) => gf.field)
-      .filter((field) => isMaskedGridColumn(columnTypeOf(field), objectFields?.[field]?.type, objectTypesPending));
-    return JSON.stringify({
-      refused,
-      // The ones refused on a KNOWN masked type, which is what the warning names.
-      warned: refused.filter((field) => isMaskedGridColumn(columnTypeOf(field), objectFields?.[field]?.type, false)),
-    });
-  }, [groupingFieldsRaw, schema.columns, objectFields, objectTypesPending]);
-  // Keyed on the authored array and the signature STRING, never on a memo's
-  // identity (AGENTS.md #10). Read only when something was refused: the
-  // unmasked path below hands `useGroupedData` the authored config itself.
-  const unmaskedGroupingFields = React.useMemo(() => {
-    const { refused }: { refused: string[] } = JSON.parse(maskedGroupingSignature);
-    return usableGroupingFields(groupingFieldsRaw).filter((gf) => !refused.includes(gf.field));
-  }, [groupingFieldsRaw, maskedGroupingSignature]);
-  const groupingRefusesNothing = maskedGroupingSignature === NO_GROUPING_REFUSAL;
-  useEffect(() => {
-    const { warned: masked }: { warned: string[] } = JSON.parse(maskedGroupingSignature);
-    if (masked.length === 0) return;
-    console.warn(
-      `[ObjectUI] ObjectGrid grouping: ${schema.objectName ?? 'object-grid'} groups by the masked `
-      + `field(s) ${masked.join(', ')}. A masked field cannot be a grouping key: its group labels would `
-      + 'show the raw value, and its groups would show which records share it. The entry was ignored.',
-    );
-  }, [maskedGroupingSignature, schema.objectName]);
+  // The grouping decisions: masked-key refusal, server grouping, the two
+  // grouping refusals and the fetch window (`./objectGridGroupingDecisions`).
+  const {
+    unmaskedGroupingFields,
+    groupingRefusesNothing,
+    groupingKeyReadable,
+    serverGroupedFetch,
+    groupingNeedsHeaderQuery,
+    groupingNeedsWholeRows,
+    fetchWindow,
+    groupRowQuery,
+    setGroupRowQuery,
+  } = useObjectGridGroupingDecisions({
+    schema,
+    objectName,
+    objectFields,
+    objectTypesPending,
+    perms,
+    dataSource,
+    hasInlineData,
+    dataConfig,
+    externalManualPagination,
+    hostRowCount,
+    serverPageSize,
+  });
 
-  // ── Server-side grouping (objectui#7189, maintainer ruling A) ─────────────
-  //
-  // Grouping on a list view is server-side: the set of groups and every number
-  // in a group header are properties of the QUERY, not of a fetched page, and
-  // the rows inside a group are paged. So a grouped grid that OWNS its fetch
-  // asks the server for its group headers (`dataSource.queryGroupHeaders`,
-  // the compiled `compileListViewGroupQuery`) and pages each open group's rows
-  // (`compileListViewGroupRowsQuery`) instead of fetching one window and
-  // bucketing it — which answered two headers (86, 14) or five page slices
-  // (31/31/30/7/1) for the same five units of 86/61/31/7/1, depending on
-  // nothing but row order, and left every row past the window unreachable.
-  //
-  // Presence of `queryGroupHeaders` is the capability. Rows handed in whole
-  // (`hasInlineData`) are grouped where they are, which is exact because
-  // nothing was withheld. A data source that cannot answer the header query
-  // cannot group (objectui#10881, maintainer ruling F): the grid refuses,
-  // naming the missing member, and asks for no rows — see
-  // `groupingNeedsHeaderQuery`. It used to group the page it fetched, whose
-  // every count was a page slice.
-  //
-  // Decided on the grouping AS CONFIGURED less the entries refused on a KNOWN
-  // masked type — NOT less the entries merely withheld while the object's
-  // types are still loading, or the first render would fetch one flat window
-  // it is about to throw away.
-  const groupingRefusedKnownMasked = React.useMemo(
-    () => (JSON.parse(maskedGroupingSignature) as { warned: string[] }).warned,
-    [maskedGroupingSignature],
-  );
-  // A grouping field this principal may not READ is not a key the server may
-  // group by: a header row carries every key's raw value, so grouping by it
-  // would print what the column itself withholds. Same gate, same deferral
-  // (an unanswered policy filters nothing), as the projection's.
-  const groupingKeyReadable = (field: string): boolean =>
-    !perms?.isLoaded || !objectName || perms.checkField(objectName, field, 'read');
-  const serverGroupedFetch =
-    !hasInlineData
-    && !!objectName
-    && typeof dataSource?.queryGroupHeaders === 'function'
-    && usableGroupingFields(groupingFieldsRaw).some(
-      (gf) => !groupingRefusedKnownMasked.includes(gf.field) && groupingKeyReadable(gf.field),
-    );
-  // [objectui#10881] The refusal: this grid would fetch its own rows and group
-  // them, and its data source cannot answer the group header query. There is
-  // no honest grouping to draw — a fetched window grouped in the browser shows
-  // page slices as group counts and drops every group whose rows fall past the
-  // window — so the grid names the missing member instead, and the load effect
-  // below asks for no rows (the object definition is still read: it is what
-  // tells a KNOWN masked grouping key, which groups nothing, from one that
-  // does). Rows handed in whole never reach it (`hasInlineData`). The same
-  // grouping entries count as for `serverGroupedFetch`, less the readability
-  // gate: over such a source a grouping by a key this principal may not read
-  // is refused too, rather than falling through to a fetched page.
-  const groupingNeedsHeaderQuery =
-    !hasInlineData
-    && !!objectName
-    && !!dataSource
-    && typeof dataSource.queryGroupHeaders !== 'function'
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
-  // [objectui#10881] The second refusal: rows a host handed in that the SAME
-  // host declares to be one page of more — the external-pagination props
-  // (`externalManualPagination`) with a `rowCount` above the rows it handed.
-  // Only rows handed in WHOLE group where they are; a declared window grouped
-  // here shows page-slice counts and drops every group whose rows fall past
-  // it (on 100 of 186 rows over five units, two groups: 86 and 14). The
-  // header-query sentence is the wrong one here: the host owns this fetch,
-  // and its data source may even declare `queryGroupHeaders`. So this names
-  // its own remedy — hand the rows in whole, or let the grid fetch them.
-  // Counted against the rows as HANDED (`dataConfig.items`), not the `data`
-  // state that mirrors them one render later, so whole rows never flash it.
-  // Same grouping entries as `groupingNeedsHeaderQuery`. A `rowCount` absent
-  // or not above the handed rows is whole rows, and groups as before.
-  const handedRows = hasInlineData ? (dataConfig as { items?: unknown } | undefined)?.items : undefined;
-  const groupingNeedsWholeRows =
-    externalManualPagination
-    && Array.isArray(handedRows)
-    && (hostRowCount as number) > handedRows.length
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
-  // What the load effect's ONE flat fetch asks for (objectui#9853, ruling
-  // 5824040487, structure B). Where the rows it holds ARE the page on screen,
-  // that is the display page size. Where this grid buckets the rows it holds
-  // into groups in the browser, nothing pages them, so it asks for the fetch
-  // BATCH instead, which no display path reads. Since objectui#7189 a grouped
-  // grid that fetches its own rows buckets a window only when the server
-  // cannot group for it and the grid has not refused: not server-grouped
-  // (`serverGroupedFetch` strips `$top` and pages each group), not refused
-  // (`groupingNeedsHeaderQuery` asks for no rows), and at least one grouping
-  // entry left once a KNOWN masked key is refused. The case that reaches it
-  // today is a grouping key this principal may not read, over a data source
-  // that answers the header query (see `groupingKeyReadable`).
-  //
-  // Counted the way the two predicates above count, less the keys refused on a
-  // KNOWN masked type and NOT less the ones merely withheld while the object's
-  // types load: otherwise the first fetch would go out at the page size and be
-  // re-issued at the batch the moment the types land.
-  const bucketsFetchedWindow =
-    !serverGroupedFetch
-    && !groupingNeedsHeaderQuery
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
-  const fetchWindow = bucketsFetchedWindow
-    ? resolvePageSize(schema, DEFAULT_FETCH_BATCH_SIZE)
-    : serverPageSize;
-  // The grid's own row query — projection, expansion, order and the view's
-  // filter — resolved by the load effect below exactly as the flat fetch
-  // resolves it, and handed to each group's row page. `null` until resolved.
-  const [groupRowQuery, setGroupRowQuery] = useState<Record<string, unknown> | null>(null);
-  // [objectui#11021] Leaving server grouping drops the held query. Only the
-  // load effect below writes it, and only while grouping on the server, so a
-  // grid that went flat and came back asked its first header query with the
-  // query it held when it last grouped — a cleared search term, or an old
-  // filter, sort or projection — and painted that answer before the fresh
-  // one. `null` holds both group queries until the query as it stands now is
-  // resolved.
-  useEffect(() => {
-    if (!serverGroupedFetch) setGroupRowQuery(null);
-  }, [serverGroupedFetch]);
-
-  // objectui#10035 — the refresh input this grid had none of, so a host could
-  // show it a write only by remounting it (AGENTS.md #8's corollary: refresh
-  // data, don't rebuild UI). The nonce moves when the data-invalidation bus
-  // reports a change to the object this grid FETCHES, and the load effect below
-  // names it, so the rows are re-read in place — the table stays mounted
-  // (`RefreshIndicator`, not the skeleton), and with it selection, scroll,
-  // column state and any open inline edit. Subscribed only when the grid
-  // fetches for itself: rows a host handed down (`data`, `bind`, an inline
-  // `value` set) are the host's to refresh, and a nonce there would only
-  // re-render for nothing.
-  const invalidationNonce = useDataInvalidation(hasInlineData ? undefined : objectName);
-
-  // --- Unified async data loading effect ---
-  // Combines schema fetch + data fetch into a single async flow with AbortController.
-  // This avoids the fragile "chained effects" pattern where Effect 1 sets objectSchema,
-  // triggering Effect 2 to call fetchData — a pattern prone to infinite loops when
-  // fetchData's reference is unstable.
-  useEffect(() => {
-    if (hasInlineData) return;
-    // A refused `schema.filter` never reaches the wire (objectui#9050). The
-    // malformed-filter branch in the render shows it instead; this guard is
-    // what keeps "no filter node" from being read as "no filter" by the query
-    // built below.
-    if (schemaFilterRefusal) return;
-
-    let cancelled = false;
-
-    const loadSchemaAndData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // --- Step 1: Resolve object schema ---
-        let resolvedSchema: any = null;
-        const cols = normalizeColumns(schemaColumns) || schemaFields;
-
-        if (objectName && dataSource) {
-          // Always fetch full schema for field type metadata (enables rich type-aware rendering)
-          if (typeof dataSource.getObjectSchema === 'function') {
-            const schemaData = await dataSource.getObjectSchema(objectName);
-            if (cancelled) return;
-            resolvedSchema = schemaData;
-          } else {
-            resolvedSchema = { name: objectName, fields: {} };
-          }
-        } else if (cols && objectName) {
-          // Fallback: minimal schema stub when no dataSource available
-          resolvedSchema = { name: objectName, fields: {} };
-        } else if (!objectName) {
-          throw new Error('Object name required for data fetching');
-        } else {
-          throw new Error('DataSource required');
-        }
-
-        if (!cancelled) {
-          setObjectSchema(resolvedSchema);
-        }
-
-        // --- Step 2: Fetch data ---
-        // [objectui#10881] A grouping this data source cannot count is refused
-        // before any row is asked for; the render names the missing member.
-        if (groupingNeedsHeaderQuery) return;
-        if (dataSource && objectName) {
-          // [objectui#7179] The fields the view GROUPS BY. `grouping` is a
-          // sibling of `columns` in the spec, not a subset of it, so a grid may
-          // legitimately group by a field it never shows — and until this
-          // harvest existed, `$select` (built from `columns` alone) never asked
-          // for it, so every row carried `undefined` and `useGroupedData`
-          // labelled ONE group `(empty)` holding every record.
-          //
-          // Raw here, GATED at each of its two use sites below, because the two
-          // sites need different gates: the projection has to intersect with
-          // the declared fields (an unknown `$select` key ZEROES the list on
-          // backends that reject rather than ignore it), while `$expand` is
-          // gated structurally by `buildExpandFields` itself.
-          const groupingFieldRefs = collectGroupingFieldRefs(schema.grouping);
-          const getSelectFields = () => {
-            // Always include 'id' so row click / navigation handlers can resolve
-            // the record key — without it `record.id` is undefined and the
-            // primary-field link silently no-ops.
-            // Both halves used to resolve identity differently — the probe was
-            // name-first while the projection below read `c.field` alone — so a
-            // legacy `{name}` column was projected as `undefined` while the
-            // probe happily saw its name (#3104). One reader now, both halves.
-            const ensureId = (list: any[]): any[] => {
-              const names = list.map((f: any) => columnIdentity(f));
-              return names.includes('id') ? list : ['id', ...list];
-            };
-            // [objectui#6898] FIELD-LEVEL SECURITY ON THE PROJECTION — the FETCH
-            // half of the gap objectui#6799 closed on the RENDER half.
-            //
-            // objectui#6799 made `generateColumns()` drop a column naming a
-            // declared field the principal cannot read. That is what reaches the
-            // SCREEN. This is what goes on the WIRE: without this gate the same
-            // field name is still handed to the server in `$select`, so a
-            // backend that does not enforce FLS on the projection would return
-            // the value into `data` with no column on screen to reveal it.
-            //
-            // ⭐ MEASURED, not assumed (the escalation gate this card was graded
-            // on). ObjectStack's own server DOES enforce it — but on the RECORD,
-            // not on the projection. `plugin-security`'s read middleware runs
-            // `FieldMasker.maskResults`, whose `maskRecord` DELETES an unreadable
-            // key from every returned row, and `predicate-guard.ts` says in terms
-            // that the projection is deliberately NOT guarded because "selecting
-            // a hidden field is harmless because FieldMasker strips it from the
-            // result". Pinned end-to-end over real HTTP by objectstack's
-            // `showcase-fls-read-mask-strip.dogfood.test.ts`: an explicit
-            // `?select=name,<denied>` answers 200 with the denied key ABSENT.
-            // So against ObjectStack this gate is defence-in-depth (p2), exactly
-            // as triage graded it — it is NOT load-bearing for that backend, and
-            // this comment is what stops a future reader from concluding it is.
-            // It becomes load-bearing for any other backend, which is the same
-            // argument the objectui#6723 / objectui#6799 rulings accepted: the
-            // invariant must not rest on every future backend having enforced it.
-            //
-            // ⭐ THE DECLARED-KEY LIMIT IS THE SAME ONE, AND THE CARD IS RIGHT
-            // THAT THE REASONING DOES NOT TRANSFER AUTOMATICALLY — it has to be
-            // re-derived here, and it lands in the same place. On the render path
-            // an undeclared key is a legitimate derived / host-joined column. In
-            // a `$select` an undeclared key is what the host asked the SERVER
-            // for, so the question is genuinely different. It resolves the same
-            // way for a reason that is about `checkField`, not about drawing:
-            // `checkField` answers FALSE for a field the policy has never heard
-            // of, so judging an undeclared key is not a stricter reading of this
-            // rule — it is a different, wrong one, and it would strip a host's
-            // derived or joined column out of its own query. Undeclared ⇒ not
-            // this gate's business, on both halves.
-            //
-            // ⛔ NAVIGATION IS PRESERVED STRUCTURALLY, NOT BY A SPECIAL CASE:
-            // every call below composes `ensureId(...)` AFTER this gate, so `id`
-            // is re-added even in the pathological case where a policy marks it
-            // unreadable. A gate that filtered `id` out last would break row
-            // click / navigation for everyone — the naive-filter failure the
-            // card names by name. Keeping the restoration in the composition
-            // rather than in a branch here means it cannot drift out of one arm.
-            //
-            // Keyed on `objectName` (the object actually being FETCHED —
-            // `dataConfig.object` when a data block names one) rather than the
-            // render half's `schema.objectName`: the projection is judged against
-            // whatever object the server is about to read.
-            const passesProjectionGate = (entry: unknown): boolean => {
-              // Not loaded ⇒ nothing to ask yet; never filter on an unanswered
-              // policy. Same deferral as the render half — and the fetch effect
-              // re-runs on `perms.isLoaded` so the projection is rebuilt the
-              // moment the answer arrives (without that dep this gate would be
-              // dead on the first, and usually only, fetch).
-              if (!perms?.isLoaded || !objectName) return true;
-              const fieldName = columnIdentity(entry);
-              // No readable identity ⇒ nothing to ask the policy about.
-              if (!fieldName) return true;
-              // Undeclared ⇒ host-joined / derived / platform column ⇒ see above.
-              // `hasOwnProperty` rather than a truthiness read so an inherited
-              // name (`constructor`, `toString`) cannot be mistaken for a
-              // declared field and dropped out of the query.
-              if (!Object.prototype.hasOwnProperty.call(resolvedSchema?.fields ?? {}, fieldName)) return true;
-              return perms.checkField(objectName, fieldName, 'read');
-            };
-            // Fields the view's PREDICATES read but no column shows
-            // (objectui#3501). Without them the projection asks the
-            // server for everything except the field a row action is gated on,
-            // and CEL faults on the absent key (`No such key`) rather than
-            // reading it as null — which fail-closed hides the button for
-            // everyone, with nothing pointing at the projection. Kept to fields
-            // the object actually declares: an unknown key in `$select` is not
-            // ignored by every backend, and a typo'd predicate must not be able
-            // to zero the list.
-            const declared = resolvedSchema?.fields;
-            const predicateFields = declared
-              ? collectPredicateFieldRefs(listViewPredicates({
-                  conditionalFormatting: schema.conditionalFormatting as unknown[] | undefined,
-                  // NON-AUTHOR SURFACE, same ruling as the seed above
-                  // (objectui#5091, maintainer 2026-08-19): this cast read is
-                  // deliberate, not a missed manifest entry. It is the SECOND
-                  // of the key's two read sites and the one with teeth — a def
-                  // gated on `record.<field>` puts that field in `$select`, so
-                  // deleting this read would leave the predicate's operand out
-                  // of the payload and CEL would fault on the absent key
-                  // (objectui#3501, the whole reason this harvest exists).
-                  // Pinned by `__tests__/gridNonAuthorKeys.test.tsx`.
-                  rowActionDefs: (schema as any).rowActionDefs,
-                  bulkActionDefs: (schema as any).bulkActionDefs,
-                  objectActions: (resolvedSchema as any)?.actions,
-                  // KEY COLLISION — `userActions` names TWO different blocks,
-                  // and only the OBJECT's is interpretable here. This read is
-                  // therefore `resolvedSchema`-only; it must never regain a
-                  // `(schema as any).userActions ??` left operand. Maintainer
-                  // ruling of 2026-08-20 on objectui#5240 (Q1=A), on these
-                  // measurements against `@objectstack/spec@17.0.0`:
-                  //
-                  //   - VIEW-level `userActions` is TOOLBAR POLICY —
-                  //     `UserActionsConfigSchema` (`sort`, `search`, `filter`,
-                  //     `refresh`, `rowHeight`, `addRecordForm`, `editInline`,
-                  //     `buttons`), which REJECTS `edit` BY NAME
-                  //     (`unrecognized_keys`). `ListViewSchema` accepts it, so
-                  //     it is spec-legal and really authored: `react/src/
-                  //     spec-bridge/bridges/list-view.ts` copies it onto the
-                  //     `object-grid` node this component receives as `schema`,
-                  //     and `app-shell/src/views/ObjectView.tsx` builds one
-                  //     unconditionally. It is NOT an unwritten key.
-                  //   - OBJECT-level `userActions` is the CRUD-PREDICATE block
-                  //     (`edit` / `delete` / `create` carrying `visibleWhen` /
-                  //     `disabledWhen`, objectui#2614) — what
-                  //     `resolveRowCrudAffordances` consumes above, and the only
-                  //     shape `listViewPredicates` can read: its loop skips
-                  //     every non-object value, so a toolbar block yields ZERO
-                  //     predicates.
-                  //
-                  // Read view-first, a legitimately authored toolbar block
-                  // therefore SHADOWED the object's CRUD predicates and dropped
-                  // their operands from `$select`; CEL then faults `No such
-                  // key`, fails CLOSED, and the row Edit/Delete button vanishes
-                  // for everyone with nothing pointing at the projection
-                  // (objectui#3501 — the whole reason this harvest exists).
-                  // Both halves of the collision, and this read itself, are
-                  // pinned by `__tests__/gridNonAuthorKeys.test.tsx`.
-                  userActions: (resolvedSchema as any)?.userActions,
-                })).filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  // [objectui#6898] A predicate operand the principal cannot read
-                  // is dropped from the projection too. This costs nothing that
-                  // was working: against ObjectStack the server already DELETES
-                  // that key from every row (measured above), so the operand was
-                  // never arriving and the CEL predicate was already faulting
-                  // `No such key` and failing CLOSED. Dropping it from `$select`
-                  // changes what we ASK for, not what we got. Against a
-                  // non-enforcing backend it converts "the button works, and the
-                  // denied value sits in memory" into "the button hides" — which
-                  // is the correct direction for a predicate gated on a field
-                  // this principal may not read.
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#7179] The GROUPING fields, through the SAME two gates
-            // the predicate operands take, for the same two measured reasons.
-            //
-            // `isProjectableField` first: a `grouping.fields[]` entry is
-            // SPECULATIVE in exactly the sense that gate exists for. Its
-            // `field` is a bare `z.ZodString` and this card's whole premise is
-            // that it is NOT among the columns, so nothing has validated it.
-            // Some backends answer an unknown `$select` key with an EMPTY
-            // RESULT SET rather than ignoring it (the cloud multi-tenant
-            // runtime does exactly that), so an unguarded union would trade
-            // this card's bug — one `(empty)` group holding all the rows — for
-            // a strictly worse one: NO rows, equally silently. The current bug
-            // at least shows the data.
-            //
-            // `passesProjectionGate` second (objectui#6898): a grouping field
-            // names a field just as capable of being denied as a column is, and
-            // this is the half that goes on the WIRE. Gating here rather than
-            // after the union is what keeps that card closed.
-            const groupingFields = declared
-              ? groupingFieldRefs
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#12292] The row's concurrency token. An inline-editable
-            // grid's default save sends it as `If-Match` (`rowVersionOf`), so
-            // every row has to carry it. A projection built from the columns
-            // left it off each row no column showed it on, and the save went
-            // out with no token at all. The same two gates as the harvests
-            // above: a platform column, and one this principal may read.
-            const concurrencyFields = carriesConcurrencyToken && declared
-              ? [OCC_TOKEN_FIELD]
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#12393] The ROW COLOUR's field. `useRowColor` paints a
-            // row from `row[rowColor.field]`, and the spec sets no column
-            // requirement on that field, so a grid tinted by a field no column
-            // shows fetched rows without it and painted nothing, with no error.
-            // `ListView`'s harvest gained this arm in objectui#12376, but a
-            // grouped grid owns its fetch (`gridOwnsGroupedFetch`) and so does
-            // a standalone `object-grid`: this projection is the one their rows
-            // arrive through. The same two gates as the harvests above: a field
-            // the object declares (or a platform column), and one this
-            // principal may read.
-            const rowColorFields = rowColorField && declared
-              ? [rowColorField]
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#11815] A shown DECLARED deadline's `settledWhen`
-            // operands. The predicate reads the row exactly as a row action's
-            // gate does, so a grid showing only Title and Due fetched rows
-            // without `status`, CEL faulted `No such key`, and a done row's
-            // deadline still read overdue. The same two gates as the harvests
-            // above.
-            const shownColumns = (schemaFields ?? (Array.isArray(schemaColumns) ? schemaColumns : [])) as unknown[];
-            const deadlineFields = declared
-              ? collectPredicateFieldRefs(
-                  shownColumns
-                    .map((entry) => (declared as Record<string, { dueLike?: unknown; settledWhen?: unknown } | undefined>)[columnIdentity(entry) ?? ''])
-                    .filter((def) => def?.dueLike === true && def.settledWhen != null)
-                    .map((def) => def!.settledWhen),
-                )
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#13036] A shown `referenceVia` pointer column's TYPE
-            // half. `recordPointerFace` resolves the record through
-            // `resolveRecordPointer` (objectui#12608), which reads the sibling
-            // off the ROW and answers null when it is absent, so a grid whose
-            // columns show the id half but not its sibling fetched rows
-            // without it and drew the raw record id. `ListView`'s harvest
-            // carries the same arm; this is the projection a grouped grid that
-            // owns its fetch (`gridOwnsGroupedFetch`) and a standalone
-            // `object-grid` send. Asked of the columns this projection keeps (a
-            // pointer the principal may not read is not drawn), then the same
-            // two gates as the harvests above: a sibling the principal may not
-            // read is not asked, and that row keeps the stored text.
-            const referenceViaFields = declared
-              ? shownColumns
-                  .filter(passesProjectionGate)
-                  .map((entry) => (declared as Record<string, { referenceVia?: unknown } | undefined>)[columnIdentity(entry) ?? '']?.referenceVia)
-                  .filter((f): f is string => typeof f === 'string' && f !== '')
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#13214] A shown column's DECLARED `dependsOn` siblings.
-            // A faced column reads them off the ROW (`dependentValues={row}`):
-            // the `recipient-picker` face names a stored id by the row's
-            // `recipient_type`, and draws the stored text when it is absent.
-            // So a grid showing `recipient_id` but not `recipient_type` fetched
-            // rows without the kind and drew the raw user id. Driven by the
-            // declaration alone: every sibling the field names, nothing mapped
-            // by name here. Asked of the columns this projection keeps and the
-            // grid draws: a column the principal may not read, or one authored
-            // `hidden: true`, pulls nothing. Then the same two gates as the
-            // harvests above: a sibling the object does not declare is never
-            // sent, and one the principal may not read is never asked.
-            const dependsOnFields = declared
-              ? shownColumns
-                  .filter((entry) => !(entry && typeof entry === 'object' && (entry as { hidden?: unknown }).hidden === true))
-                  .filter(passesProjectionGate)
-                  .flatMap((entry) => resolveDependsOnFields(
-                    (declared as Record<string, { dependsOn?: DependsOnInput } | undefined>)[columnIdentity(entry) ?? '']?.dependsOn,
-                  ))
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // [objectui#13107] The object's DECLARED name field. The bulk
-            // confirm step names each affected record from the row this
-            // projection fetched (`getRecordDisplayName`, ADR-0079), so a
-            // `nameField` no column shows arrived absent and the step listed
-            // another text field in its place (a contact's job title). Asked
-            // by name whatever its type: the server serves a formula field
-            // like any other. Fetched, never drawn: it joins the projection,
-            // not the columns. The same two gates as the harvests above.
-            const declaredName = declaredNameField(resolvedSchema);
-            const nameFields = declared && typeof declaredName === 'string' && declaredName !== ''
-              ? [declaredName]
-                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
-                  .filter((f) => passesProjectionGate(f))
-              : [];
-            // A UNION, never an append: a grouping field that IS also a column
-            // must not produce a duplicate `$select` entry.
-            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...referenceViaFields, ...dependsOnFields, ...nameFields];
-            const withHarvestedFields = (list: any[]): any[] => {
-              if (extraFields.length === 0) return list;
-              const names = new Set(list.map((f: any) => columnIdentity(f)));
-              const seen = new Set<string>();
-              const extra = extraFields.filter(
-                (f) => !names.has(f) && !seen.has(f) && (seen.add(f), true),
-              );
-              return extra.length > 0 ? [...list, ...extra] : list;
-            };
-            // [objectui#11105] ONE projection for BOTH branches: gate, then read
-            // each entry's field NAME through `columnIdentity`, then drop the
-            // entries that have none. Only names go on the wire.
-            //
-            // The `schemaFields` branch used to return its entries UNMAPPED,
-            // and `ListView` hands its effective column entries to the grid as
-            // `fields` AND `columns` alike. So a view whose columns are objects
-            // (`{ field, width }`) put the objects themselves into `$select`,
-            // which the adapter's `join(',')` serialized as `[object Object]`.
-            // Harmless while grouped grids got inline rows; since the grid
-            // groups on the server (objectui#7189) every group's row page
-            // carries this `$select`, and a server that refuses unknown select
-            // keys answered INVALID_FIELD in every group. For a `fields` entry
-            // that is already a name, `columnIdentity` hands it back unchanged.
-            const projectFieldNames = (entries: unknown[]): string[] =>
-              entries
-                .filter(passesProjectionGate)
-                .map((entry) => columnIdentity(entry))
-                .filter((v): v is string => !!v);
-            if (schemaFields) {
-              return withHarvestedFields(ensureId(projectFieldNames(schemaFields as unknown[])));
-            }
-            if (schemaColumns && Array.isArray(schemaColumns)) {
-              return withHarvestedFields(ensureId(projectFieldNames(schemaColumns)));
-            }
-            return undefined;
-          };
-
-          const params: any = {
-            $select: getSelectFields(),
-            $top: fetchWindow,
-            $skip: (serverPage - 1) * fetchWindow,
-          };
-
-          // The block's declared `filter` input, already lowered to an AST at
-          // the read point above. `undefined` means "no filter declared" —
-          // including a declared-but-empty array, which `toFilterNode` folds
-          // away so an empty `$filter` never goes out. The `Array.isArray` guard
-          // this replaces predates the lowering and was itself a silent drop:
-          // it read false for the MongoDB-style object shape, so such a filter
-          // went missing and the grid answered with every record.
-          if (schemaFilter !== undefined) {
-            params.$filter = schemaFilter;
-          }
-
-          // Sort. A column-header click (objectui#3106) replaces the view's
-          // declared sort for the whole collection — which is what makes the
-          // arrow in the header true of the list rather than of this page.
-          // The `SortNode[]` form goes out rather than the `"field order"`
-          // string: it is the shape the server names in its own error messages,
-          // and it survives a field name containing a space.
-          if (headerSort && headerSort.length > 0) {
-            params.$orderby = headerSort.map((s) => ({ field: s.field, order: s.order }));
-          } else if (schemaSort) {
-            if (typeof schemaSort === 'string') {
-              // objectui#8767 — the legacy string `sort` clause is RETIRED
-              // (objectui#8221, decision batch #77) and is REFUSED here rather
-              // than lowered. This block owns a PRIVATE lowering, so #8758's
-              // narrowing of the shared sink never reached it: a bare
-              // `object-grid` went on honouring a spelling `object-view`
-              // already refuses — one key meaning two things depending on which
-              // block you are on, which is the per-block divergence the #8221
-              // ruling declined by name.
-              //
-              // The refusal is #8758's OWN, not a second one: calling the
-              // shared sink on this arm reports the retired spelling once per
-              // spelling and answers `undefined`, so the query carries no
-              // `$orderby`. Its return value is deliberately unused — the wire
-              // shape stays this block's, and the array arm below is untouched
-              // (with it the export path). The header-arrow reader
-              // `parseSchemaSort` was left parsing the string HERE, and read
-              // this same key more widely than this refusal until objectui#8961
-              // narrowed it to the declared array; the two now agree. Routing
-              // the whole key through the sink is still a different card: it
-              // would send the sink's `{field: direction}` map where every grid
-              // today sends a `"field order"` string.
-              //
-              // Read through `unknown`, exactly as the sink does: types are
-              // erased, so the array-only `ObjectGridSchema.sort` declaration
-              // cannot stop a string arriving from authored JSON, a stored
-              // `sys_metadata` row or an `as any` bag.
-              convertSortToQueryParams(schemaSort as unknown as QuerySortEntry[]);
-            } else if (Array.isArray(schemaSort)) {
-              // objectui#8973 — normalize before joining. Every key used to be
-              // interpolated unconditionally, so `[{ field: 'name' }]` went out
-              // as `'name undefined'` and `[]` as `''`. The join, and only the
-              // join, stays this block's (see {@link toOrderByClause}).
-              const orderBy = toOrderByClause(schemaSort as unknown as QuerySortEntry[]);
-              if (orderBy !== undefined) {
-                params.$orderby = orderBy;
-              }
-            }
-          }
-          // objectui#5861 — there is no third arm. The legacy single-entry
-          // `defaultSort` was retired under ADR-0049: `@objectstack/spec`
-          // refuses it by name on `object-grid` (since 17.3.0), so this chain
-          // reads `sort` alone, and the header reader below reads the same key
-          // the same way.
-
-          // Search (objectui#3118). The term the toolbar box holds is a question
-          // about the collection, so it goes to the server rather than to a
-          // `.filter()` over the window we happen to be holding. Per ADR-0061 the
-          // client sends only the term; the server resolves which fields it
-          // matches from the object's metadata. `$searchFields` goes along only
-          // when the view declared `searchableFields` — it can narrow that
-          // server-resolved set, never widen it — which is exactly what the
-          // ListView toolbar sends.
-          const trimmedSearch = querySearchTerm.trim();
-          if (trimmedSearch) {
-            params.$search = trimmedSearch;
-            if (schema.searchableFields && schema.searchableFields.length > 0) {
-              params.$searchFields = schema.searchableFields;
-            }
-          }
-
-          // Auto-inject $expand for lookup/master_detail fields
-          //
-          // [objectui#7179] The grouping fields ride along. `$select` alone
-          // fetches a lookup as its BARE FOREIGN KEY, so a grid grouped by a
-          // lookup would bucket by raw id ("8UY9zHWBfjYjYor4") instead of by
-          // name — better than one `(empty)` bucket, still not right, and the
-          // identical failure `expandFields` in `plugin-list` already records
-          // for kanban. No `isProjectableField` gate is needed on THIS half:
-          // `buildExpandFields` returns a subset of the object's declared
-          // reference-bearing fields, so an unknown or non-relational grouping
-          // field is dropped structurally and cannot reach the query.
-          //
-          // Only augment when a column list actually narrows the expansion —
-          // with no columns, `buildExpandFields` already expands every relation
-          // and the grouping fields are covered by that superset. Passing an
-          // array here unconditionally would NARROW that case to the grouping
-          // fields alone.
-          //
-          // [objectui#7215] FIELD-LEVEL SECURITY ON `$expand` — the half
-          // objectui#6898 left open. That card gated `$select`, which asks for
-          // a denied lookup's BARE FOREIGN KEY; `$expand` asks the server to
-          // RESOLVE the same field and hand back the related record, so the
-          // larger of the two disclosures was the ungated one.
-          //
-          // Graded the same way #6898 was, and by measurement rather than
-          // assumption: against ObjectStack this is defence-in-depth, because
-          // `plugin-security`'s `FieldMasker.maskRecord` does `delete
-          // result[field]` on every unreadable key and objectql's expand path
-          // writes the resolved record back under THAT SAME KEY
-          // (`record[fieldName] = recordMap.get(...)`), so one statement
-          // deletes the expanded object and the bare id alike. It is
-          // load-bearing for a backend that does not strip.
-          //
-          // ⭐ THE GATE GOES ON THE OUTPUT, NOT ON THE COLUMN LIST, and both
-          // reasons are measured (`__tests__/expandFls-7215.test.tsx` pins
-          // each):
-          //
-          //  - `buildExpandFields` reads an EMPTY column list as "no column
-          //    restriction" and falls back to every declared relation, so
-          //    filtering its INPUT would WIDEN a view whose only relational
-          //    column is denied from that one field to all of them;
-          //  - the no-columns case passes `undefined`, so it has no input to
-          //    gate at all — and it is the case that expands the most.
-          //
-          // Gating the output also satisfies, structurally, the ordering the
-          // `$select` gate above spells out by hand (intersect with the
-          // DECLARED fields first, ask `checkField` only about survivors):
-          // `buildExpandFields` returns a subset of the object's declared
-          // reference-bearing fields, so every name judged here is declared by
-          // construction and the "`checkField` answers false for an undeclared
-          // key" trap is unreachable. That is why this gate is SHORTER than
-          // `passesProjectionGate` rather than a copy of it — no undeclared-key
-          // arm, and no identity read, because these are resolved root names
-          // rather than column entries.
-          //
-          // Deferral is the same as every other gate on this path: an
-          // unanswered policy filters nothing, and the effect re-runs on
-          // `perms.isLoaded`, so the expansion is rebuilt the moment the answer
-          // arrives.
-          const expandReadable = (fieldName: string): boolean => {
-            if (!perms?.isLoaded || !objectName) return true;
-            return perms.checkField(objectName, fieldName, 'read');
-          };
-          const expandColumns = schemaColumns ?? schemaFields;
-          const expand = buildExpandFields(
-            resolvedSchema?.fields,
-            expandColumns ? [...(expandColumns as any[]), ...groupingFieldRefs] : undefined,
-          ).filter(expandReadable);
-          if (expand.length > 0) {
-            params.$expand = expand;
-          }
-
-          // [objectui#7189] Server-grouped: no flat window is fetched. The
-          // query is resolved here all the same — every gate above applies to
-          // each group's rows exactly as it would to the flat page — and each
-          // group's row page supplies its own filter and window.
-          if (serverGroupedFetch) {
-            const { $top: _top, $skip: _skip, ...groupQuery } = params;
-            setGroupRowQuery(groupQuery);
-            lastFindParamsRef.current = { ...groupQuery };
-            setSelectAllMatching(false);
-            return;
-          }
-
-          const result = await dataSource.find(objectName, params);
-          if (cancelled) return;
-          setData(result.data || []);
-          // Capture total matching count + the params we used, so the bulk
-          // selection banner can offer "Select all N matching" and the
-          // dispatcher can re-issue the query to expand selection.
-          const totalFromResult = (result as { total?: number }).total;
-          setTotalMatching(typeof totalFromResult === 'number' ? totalFromResult : undefined);
-          lastFindParamsRef.current = { ...params };
-          // Reset cross-page flag whenever the underlying query changes.
-          setSelectAllMatching(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err as Error);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadSchemaAndData();
-
-    return () => {
-      cancelled = true;
-    };
-  // `perms.isLoaded` (objectui#6898): the projection is FLS-gated above, and
-  // `/me/permissions` resolves asynchronously — on the first render it is still
-  // `false`, so the gate defers and the first request goes out ungated. Without
-  // this dep nothing would ever rebuild it and the gate would be dead on the
-  // only fetch most grids make. The boolean, not `perms` itself: it flips
-  // false -> true exactly once, so this costs at most one refetch, where the
-  // context object's identity would re-fetch the grid on every render.
-  // `PermissionProvider` reports `true` synchronously and the no-provider
-  // default stays `false` forever, so neither of those pays anything.
-  // `groupingProjectionKey` (objectui#7179): the grouping fields are part of
-  // the projection now, and grouping is RUNTIME-MUTABLE (the toolbar popover
-  // rewrites it), so without this dep switching the grouping field would leave
-  // the query asking for the OLD one and the new grouping would read
-  // `undefined` on every row — the very `(empty)` bucket this card fixes,
-  // reachable a second way.
-  // `invalidationNonce` (objectui#10035): a write to this object, reported on
-  // the data-invalidation bus — see its declaration above.
-  // `groupingNeedsHeaderQuery` (objectui#10881): it flips when the object's
-  // types land and show the only grouping key masked, and the flat fetch it
-  // withheld must then go out.
-  // `predicateProjectionKey` and `searchFieldsKey` (objectui#10689): the
-  // harvested predicate operands and the `$searchFields` this query sends, each
-  // a string compared by value — see their declarations above.
-  // `carriesConcurrencyToken` (objectui#12292): a boolean, so turning inline
-  // edit on re-reads the rows WITH their token — see its declaration above.
-  // `rowColorField` (objectui#12393): a string, so a rule naming a new field
-  // re-reads the rows with it — see its declaration above.
-  }, [objectName, schemaFields, schemaColumns, schemaFilter, schemaFilterRefusal, schemaSort, headerSort, querySearchTerm, schemaPagination, schemaPageSize, serverPage, fetchWindow, dataSource, hasInlineData, dataConfig, refreshKey, perms.isLoaded, groupingProjectionKey, predicateProjectionKey, searchFieldsKey, invalidationNonce, serverGroupedFetch, groupingNeedsHeaderQuery, carriesConcurrencyToken, rowColorField]);
-
-  // The same reset, for the path the loader above never runs on (objectui#4501
-  // clause 2). "All N matching are selected" is a claim about ONE query, so it
-  // must not survive that query changing — the loader drops it in place (three
-  // lines up, next to its `lastFindParamsRef` write), and under a host-driven
-  // fetch the host's params changing is the identical signal. Without this a
-  // user could escalate, change the filter in the host's toolbar, and keep an
-  // escalation that now reads against a match set they never saw.
-  //
-  // Keyed on the CONTENT signature, not the prop's identity: a host re-render
-  // that rebuilds an equal object is not a query change, and dropping the
-  // escalation on one would make the affordance unusable.
-  const hostFindParamsKey = React.useMemo(
-    () => findParamsSignature(hostFindParams),
-    [hostFindParams],
-  );
-  React.useEffect(() => {
-    setSelectAllMatching(false);
-  }, [hostFindParamsKey]);
-
-  // Reset to page 1 whenever the query itself changes (object / filter / sort /
-  // search), so we never request a page index that no longer exists for the new
-  // result set (e.g. applying a filter while sitting on page 5 of the old
-  // query). A new search term is the sharpest case of this: 3075 rows can
-  // become 2, and "page 5" of that is nothing at all.
-  React.useEffect(() => {
-    setServerPage(1);
-  }, [objectName, schemaFilter, schemaSort, headerSort, querySearchTerm]);
+  // The row load: the invalidation nonce, the load effect, and the
+  // `findParams` and page-1 resets, in hook order (`./objectGridRowLoad`).
+  const { invalidationNonce } = useObjectGridRowLoad({
+    schema, dataSource, objectName, dataConfig, hasInlineData, perms, refreshKey, hostFindParams,
+    lastFindParamsRef, setData, setLoading, setError, setObjectSchema, setTotalMatching,
+    setSelectAllMatching, schemaFields, schemaColumns, carriesConcurrencyToken, rowColorField,
+    groupingProjectionKey, predicateProjectionKey, schemaFilter, schemaFilterRefusal, schemaSort,
+    schemaPagination, schemaPageSize, serverPage, setServerPage, headerSort, querySearchTerm,
+    searchFieldsKey, serverGroupedFetch, groupingNeedsHeaderQuery, fetchWindow, setGroupRowQuery,
+  });
 
   // --- NavigationConfig support ---
   // Must be called before any early returns to satisfy React hooks rules
@@ -2624,84 +1693,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wholeSetSummary.row,
   );
 
-  // An authored column the renderer cannot read now says so, instead of just
-  // not being there (objectui#5349 — the Q2 objectui#5068 deferred).
-  //
-  // #5068 made `ListColumnSchema`'s `field` / `label` the only spelling read
-  // here, which is right; what it left behind was the receipt. A column
-  // authored `{ accessorKey, header }` (or with no `field` at all) is dropped
-  // by `resolvesToDataColumn` above, and until this effect landed the author
-  // saw no error, no warning and no empty header — just a grid with its
-  // row-number column and no data columns. Same defect shape #5068 exists to
-  // fix, one level down: renderer and author disagree, author gets a success
-  // receipt.
-  //
-  // Scope, deliberately narrow: this reads the `columns` INPUT and nothing
-  // else. It never asks whether the grid found ROWS, because a grid legitimately
-  // draws them from five different places (inline `data` array, `data.provider:
-  // 'value'`, legacy `staticData`, `bind`, or a host that owns the fetch and
-  // passes the window down as a `data` React prop). A predicate that consulted
-  // those would eventually paint a configuration error over a working grid.
-  // `hidden: true` is authored intent and is never reported.
-  //
-  // Channel: the same one `ObjectGrid` already uses for "you declared it, the
-  // renderer dropped it" — a `useEffect` keyed on the schema slice and one
-  // `console.warn` prefixed `[ObjectUI] ObjectGrid <topic>:` (see the export
-  // format warning below) — rather than a second, differently-shaped one.
-  const columnDiagnosticBlockType = (schema as { type?: unknown }).type;
-  const columnDiagnosticLabel = schema.label ?? (schema as { title?: unknown }).title;
-  useEffect(() => {
-    const message = describeUnresolvedColumns(schema.columns, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [schema.columns, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#8730] The same channel, for the sibling failure on
-  // `bulkActionDefs`. A member that is not a usable def (a bare action name —
-  // the OTHER key's vocabulary — or `null`, a number, `{}`, `{ name: '' }`) is
-  // skipped by `resolveBulkActions`; before that guard it reached the bar and
-  // `formatActionLabel(undefined)` threw during render, so the author's first
-  // multi-row selection lost the whole selection bar.
-  //
-  // The skip alone would only relocate the failure into silence — which is what
-  // the mirror direction already does (`bulkActions: [{ name: 'approve' }]`,
-  // stepped over by the `typeof name !== 'string'` guard). Saying which member
-  // was dropped, and that a bare name belongs in `bulkActions`, is what makes
-  // this a diagnosis rather than a quieter version of the same defect. One
-  // `console.warn` per authored array, keyed on it — NOT a second guard: the
-  // predicate lives once, in `resolveBulkActions`, and this reads it.
-  const bulkDefsDiagnosticSlice = (schema as { bulkActionDefs?: unknown }).bulkActionDefs;
-  useEffect(() => {
-    const message = describeUnusableBulkActionDefs(bulkDefsDiagnosticSlice, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [bulkDefsDiagnosticSlice, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#9853] The same channel again, for a `pagination.pageSize` (or the
-  // deprecated flat shorthand) that is not a positive integer. `resolvePageSize`
-  // drops such a value at all three read points and uses the site's default; on
-  // its own that is a quieter version of the defect, because substituting a
-  // number the author never wrote is exactly what the flat site already did in
-  // silence. This is the half that makes it a diagnosis.
-  //
-  // Keyed on the authored slice, so it is one warning per declaration and not
-  // one per render. NOT a second guard — the predicate lives once, in
-  // `isUsablePageSize`, and this reads it.
-  const pageSizeDiagnosticObject = schema.pagination;
-  const pageSizeDiagnosticFlat = schema.pageSize;
-  useEffect(() => {
-    const message = describeNonPositivePageSize(
-      { pagination: pageSizeDiagnosticObject, pageSize: pageSizeDiagnosticFlat },
-      { blockType: columnDiagnosticBlockType, objectName: schema.objectName },
-    );
-    if (message) console.warn(message);
-  }, [pageSizeDiagnosticObject, pageSizeDiagnosticFlat, columnDiagnosticBlockType, schema.objectName]);
+  // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
+  // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).
+  useObjectGridDiagnostics(schema);
 
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's

@@ -991,10 +991,31 @@ export interface IAutomationService {
      * the automation service refuses it with `RESOURCE_CONFLICT` / 409 and
      * changes nothing. That flow's switch is its own `status` (`'obsolete'` /
      * `'active'`), published through {@link registerFlow}.
+     *
+     * `caller` names who made the request, so the activation-ledger row the
+     * switch writes, and the audit row that write produces, attribute it to
+     * that user. It carries {@link AutomationContext.userId} and nothing else:
+     * the key {@link execute} reads for its acting user, narrowed to what the
+     * write records.
+     *  - No positions, permissions or posture. This method is no authority
+     *    gate: ADR-0126 §5 gates the switch at the door that receives the
+     *    request, and the ledger write itself runs elevated. A channel that
+     *    carried grants would invite a second, divergent gate here.
+     *  - No tenant. The ledger is deployment state with no organization column
+     *    (ADR-0126 as amended by ADR-0131 D6).
+     *
+     * A door that serves a person passes that person's id. An absent `caller`,
+     * or one without a `userId`, means an unattributed write: the ledger row
+     * and its audit row carry no actor. That is the honest answer for an
+     * in-process caller with no person behind it, never the answer for a door
+     * that has one. Attribution only: the channel grants nothing, and an
+     * implementation neither refuses nor widens the switch on it.
+     *
      * @param name - Flow name (snake_case)
      * @param enabled - Whether to enable (true) or disable (false)
+     * @param caller - Who made the request; absent means an unattributed write
      */
-    toggleFlow?(name: string, enabled: boolean): Promise<void>;
+    toggleFlow?(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void>;
 
     /**
      * List execution runs for a flow

@@ -85,6 +85,10 @@ export type {
     // [#22507] What `AutomationEngine.renderFlowTextSlot` takes — the slot a
     // builtin executor hands the engine's one translated-template pick.
     FlowTextSlotTranslation,
+    // [#25235] What `AutomationEngine.recordMissedRun` takes and answers —
+    // barrel-reachable through that method.
+    MissedScheduledRun,
+    MissedRunOutcome,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

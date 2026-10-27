@@ -1,6 +1,6 @@
 # ADR-0117: 记录级业务单元归属（owning business unit）
 
-- **状态**: **Accepted (D1/D3 scoped)**（2026-08-05）—— 仅 **D1**（`ownership` 新增
+**Status**: **Accepted (D1/D3 scoped)**（2026-08-05）—— 仅 **D1**（`ownership` 新增
   `business_unit` 一档与 `owning_business_unit_id` 记录戳的命名与语义）与 **D3**
   （`record.organization_id == sys_business_unit(owning_business_unit_id).organization_id`
   不变量）进入协议。**D5、D2 的默认盖章策略、D8 的启用门粒度、D4 的权限位选择仍为

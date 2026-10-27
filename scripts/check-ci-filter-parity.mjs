@@ -202,14 +202,11 @@
  *
  * ## Wiring
  *
- * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
- * legs, rather than through a `pnpm check:*` alias: see the GATE INVOCATION
- * IDIOM note at the top of that file, which states the reasons once. It is NOT
- * because root `package.json` is off limits -- that reading of the #9465 fence
- * is false, and the note carries the fence's verbatim scope so this docblock
- * does not have to: restating it is how the wrong reading spread (#10894).
- * The self-test asserts that wiring against the workflow text -- a gate that
- * exists and is not scheduled is the same dormant shape from the other side.
+ * Invoked from `.github/workflows/lint.yml` through its root alias, which runs
+ * both legs: see the GATE INVOCATION IDIOM note at the top of that file, which
+ * states the rule once. The self-test asserts that wiring against the workflow
+ * text and the alias value -- a gate that exists and is not scheduled is the
+ * same dormant shape from the other side.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1226,8 +1223,22 @@ export async function selfTest() {
     failures.push(`cannot read .github/workflows/lint.yml to verify wiring: ${err?.code ?? err?.message}`);
   }
   if (lint !== null) {
-    assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
-    assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
+    // CI runs the root alias (lint.yml's GATE INVOCATION IDIOM note), so the
+    // alias is where both legs live: pin the step AND the alias value.
+    assert(
+      /^\s*run: pnpm check:ci-filter-parity\s*$/m.test(lint),
+      `wiring: lint.yml runs ${SELF} through its root alias \`pnpm check:ci-filter-parity\``,
+    );
+    let alias = null;
+    try {
+      alias = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).scripts?.['check:ci-filter-parity'] ?? null;
+    } catch (err) {
+      failures.push(`cannot read root package.json to verify wiring: ${err?.code ?? err?.message}`);
+    }
+    assert(
+      alias === `node ${SELF} --self-test && node ${SELF}`,
+      `wiring: root package.json's check:ci-filter-parity runs the --self-test leg, then the gate -- got ${JSON.stringify(alias)}`,
+    );
   }
 
   // The checked-in ci.yml, which the real-tree cases of (9) and (10) read.

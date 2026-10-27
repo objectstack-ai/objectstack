@@ -278,8 +278,12 @@ describe('#8868 — diffMetaItem folds its type at the request boundary', () => 
     it('does NOT refuse a spelling that reaches for no declared type — the refusal stays narrow', async () => {
         // A plugin-registered runtime kind must never be refused by a static
         // rule. `fieldz` is not a plural of anything declared, so the boundary
-        // is silent and the request is served (with no rows, truthfully).
-        const { engine } = makeStubEngine();
+        // is silent and the request is served.
+        // [#26462] Served from rows of its own: with none, the two named
+        // versions are a 404 `VERSION_NOT_FOUND` miss, which a weakened
+        // assertion here could not tell from a boundary refusal.
+        const { engine, tables } = makeStubEngine();
+        seedTwoVersions(tables, PLUGIN_SHAPED_SPELLING, 'x');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         const res: any = await protocol.diffMetaItem({
@@ -290,7 +294,7 @@ describe('#8868 — diffMetaItem folds its type at the request boundary', () => 
         });
 
         expect(res.type).toBe(PLUGIN_SHAPED_SPELLING);
-        expect(res.changed).toEqual([]);
+        expect(res).toMatchObject(REAL_DIFF_BODY);
     });
 });
 
@@ -320,20 +324,28 @@ describe('#8833 — a history-store outage stops masquerading as an empty diff',
         // SELECTIVE rather than a blanket "any failure 503s" — which would
         // break first boot on a minimal deployment that never provisioned
         // `sys_metadata_history`.
+        //
+        // [#26462] What "benign" answers moved, not the discrimination: with no
+        // history rows, a NAMED version is a miss — 404 `VERSION_NOT_FOUND`,
+        // the rollback door's refusal, as for any item with no history — and
+        // the default range is the empty diff. Neither is the 503.
         const { engine } = makeStubEngine({ historyError: MISSING_TABLE_ERROR });
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        const res: any = await protocol.diffMetaItem({
-            type: PRESENT_TYPE,
-            name: 'grid',
-            fromVersion: 1,
-            toVersion: 2,
-        });
+        const res: any = await protocol.diffMetaItem({ type: PRESENT_TYPE, name: 'grid' });
 
         expect(res.added).toEqual([]);
         expect(res.removed).toEqual([]);
         expect(res.changed).toEqual([]);
         expect(res.type).toBe(PRESENT_TYPE);
+
+        const err: any = await protocol
+            .diffMetaItem({ type: PRESENT_TYPE, name: 'grid', fromVersion: 1, toVersion: 2 })
+            .then(() => null, (e: unknown) => e);
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('VERSION_NOT_FOUND');
+        expect(err.status).toBe(404);
     });
 
     it('the 503 does not depend on the type — gated-shut types propagate identically', async () => {

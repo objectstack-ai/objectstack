@@ -1,5 +1,141 @@
 # @object-ui/console
 
+## 18.2.0
+
+### Minor Changes
+
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+
+### Patch Changes
+
+- 80f267d: refactor(ui)!: the renderer runs `@objectstack/sdui-parser`, and `@object-ui/sdui-parser` is deleted (#25712)
+  
+  Clause-②: yes (narrowing: a `type-mismatch` or `member-type-mismatch` the html-tier compile used to grade `warning` is now an `error`, so a page that carried one now refuses to compile instead of rendering with the value dropped)
+  Metadata-protocol: none
+  
+  The renderer and the save gate each ran their own copy of the SDUI parser. The previous change under this card made `@objectstack/sdui-parser` the one body. This change moves every `@object-ui/*` package, the console and the examples onto it, and deletes `ui/packages/sdui-parser`. There is no forwarding release of `@object-ui/sdui-parser`: it leaves the fixed version group, and the 18.1 line on npm is its last.
+  
+  - **Dependencies.** Each package above now depends on `@objectstack/sdui-parser` where it depended on `@object-ui/sdui-parser`. The console's `gen-manifest.ts` moved from the deleted package to `ui/apps/console/scripts/`.
+  - **Severity, the one narrowing.** The renderer's copy graded a `type-mismatch` as an `error` only beside an `enum` arm, and as a `warning` otherwise. The kept rule grades every `type-mismatch` and `member-type-mismatch` an `error`, which is what the save gate already did. So an html-tier page whose attribute does not fit the declared type now shows the compile-error block naming the prop, where it rendered the block with that value dropped. Example: `<list-view columns='["name","amount"]' />` (a string where `columns` is declared `array`). A page the save gate accepted is not affected, because the save gate already refused it.
+  - **Body-dialect messages.** The retired `body` child-list key's `unknown-prop` message now ends `("body" is its retired spelling)`, and its `not-a-container` message drops the `(objectui#6771)` parenthetical.
+  
+  Migration: none for a page the save gate accepted. A page that relied on the warning has a value the declared type does not take: write it in the declared type, for example `columns={['name','amount']}`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the renderer's grading of a value that does not fit its declared type, which the save gate already refused, so no page saved through the gate changes verdict. The repair of a page written around the gate is the author's per diagnostic, which no ledger entry can derive. The other categories are closed on facts: no ADR-0087 id is named or touched (not registered or already-registered); the deleted `@object-ui/sdui-parser` stays published on npm at 18.1 and is deprecated there by the maintainer after 18.2, and no package in this change is unpublished (not unpublished); nothing exported by a package above is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- 9753d16: fix(console): the audit log's From and To filters use the platform date picker the record forms use
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → Audit Log drew the browser's native date input for its From and To filters, with the operating system's `mm/dd/yyyy` face and picker whatever the console's language. Both filters now draw the same date picker as a record form's `date` field: a text box in the display locale's format, a calendar popover, a clear button and today / tomorrow shortcuts. A typed day commits on blur or Enter. The filters send the same `created_at` bounds as before (`YYYY-MM-DD`, the To day through 23:59:59), and each filter label still names its text box.
+- ff91895: fix(auth,console): the sign-up form shows a password mismatch under the confirm field, and the register page links privacy and terms
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Mismatch on the field.** `RegisterForm` showed "Passwords do not match" as the error banner at the top of the form, above the name field. The message now sits under the confirm-password input, which carries `aria-invalid` and names the message through `aria-describedby`. Editing either password clears it. The banner still carries what the server refuses (an existing account, a closed registration). The text is the same `labels.passwordMismatchError`, so no locale key changes. Every page that renders `RegisterForm` gets this.
+  - **Legal links on sign-up.** The console's `/register` now draws the same footer as `/login`: the locale switch, plus the privacy and terms links that `GET /api/v1/auth/config` serves as `features.privacyUrl` / `features.termsUrl`. A link appears only when its URL is served and is an http(s) URL or a same-origin path. Both pages now read the links through one shared reader.
+- 326a559: fix(app-shell,console): an invitee who opens the invitation link signed out is greeted for the invitation, offered "Create an account and join" first, and the accept page names the inviter
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Login page.** A signed-out visitor arriving at `/login?redirect=/accept-invitation/ID` used to see the returning-user card ("Welcome back · Sign in to continue your work") with a small "Sign up" link under the form. Both login pages (the console's own and `DefaultLoginPage`) now title the card "Accept your invitation · Use the email address the invitation was sent to." Where the server offers sign-up to this visitor, a full-width "Create an account and join" link (the new `InvitationSignUpPrompt` export) sits above the sign-in form in place of the small link. With sign-up switched off, the visitor gets the invitation header and the sign-in form only.
+  - **Register page.** From an invitation redirect, both register pages title the form "Create an account to join" and ask for the address the invitation was sent to, because only that account can accept it.
+  - **Accept page.** `DefaultAcceptInvitationPage` shows an "Invited by" row with the inviting member's email, which `GET /organization/get-invitation` already returns as `inviterEmail`. That route returns no inviter name.
+  - **Not in this change.** The signed-out pages name no organization, inviter or invited address, and do not prefill the email. The only invitation read the server serves answers a signed-out caller `401`, so a preview for signed-out visitors needs a new server read first.
+  - New locale keys in all ten packs: `auth.login.invitationTitle`, `auth.login.invitationDescription`, `auth.login.invitationSignUpButton`, `auth.login.invitationSignInDivider`, `auth.register.invitationTitle`, `auth.register.invitationDescription`, `organization.accept.invitedBy`.
+- c86c823: fix(i18n): the last English literals on the data table, the chart view, react pages, the References sheet and Flow Runs read the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Data table.** The hover "open record" affordance and the inline-edit row's cancel and save buttons are titled from `table.openRecord`, `table.cancelChanges` and `table.saveRow`.
+  - **Chart view.** A chart view's loading fallback reads the existing `chart.loading` row.
+  - **`kind:'react'` pages.** The capability notice, the empty-source refusal, the loading line and the two error titles read `reactPage.*`. Sentences with an inline code chip are one translated string, so each language decides where the chip sits.
+  - **References sheet (Studio).** The table's column headers read `engine.edit.refsColFromType`, `refsColFromName` and `refsColPath` from the Studio's own table, in English and Chinese.
+  - **Flow Runs.** When the client lacks the method a panel calls (`meta.getItems`, `automation.execute`, `automation.listRuns`), the panel keeps the method's name and words the diagnostic at render from `console.developer.flowRuns.clientMethodUnavailable`. A message the call threw is still shown as it came.
+  
+  All ten locale packs carry the new rows. With no i18n provider every surface still renders its English.
+- f143cd8: fix(console): the console's build-identity define no longer leaks into the other ui test projects
+  
+  Clause-②: no (build/test configuration only; no exported type or runtime contract change; the console production build keeps its version stamp)
+  Metadata-protocol: none
+  
+  The console's Vite config bakes `import.meta.env.VITE_APP_VERSION` (the build's version, else the git short sha) as a `define`. The console's vitest project merges that config, and vitest moves every `import.meta.env.*` / `process.env.*` define into the main process's `process.env` while it resolves a project's config, so every other ui test project's workers inherited the console's git sha. App-shell's `getConsoleBuild()` then read that sha instead of `null`, and `buildIdentity-12970`'s "reads null" case went red in full ui runs. The console's vitest config now drops those keys from the merged Vite config. `vite build` still bakes the version exactly as before.
+- 823d0f6: fix(console): the build's chunk-membership report attributes only objectui's own packages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console build writes `dist/chunk-membership.json`, which the eager-closure gate reads to check that each budgeted chunk holds the packages it declares. Inside the objectstack monorepo the framework's own packages resolve to a second `packages/` directory, and four of their names are objectui package names too (`cli`, `core`, `sdui-parser`, `types`). The report matched any `packages/<name>/` segment, so `@objectstack/core`'s bundle file, which belongs in `vendor-objectstack`, was counted as a module of objectui's `packages/core`, and the gate reported `framework` as having lost one module to a vendor chunk. The report now counts only modules under objectui's own `packages/` directory. No chunk's contents change.
+- f00cbe3: fix(cli,i18n,console): the hosted product reads "ObjectOS Cloud" everywhere a user reads it; the Community Console carries a "Powered by ObjectStack" mark
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ObjectOS is one product in three editions — Community (this repository's runtime and Console, open source), Cloud (cloud.objectos.ai) and Enterprise — and ObjectStack is the name of the protocol, SDK, CLI and framework. The hosted product is "ObjectOS Cloud" wherever a user reads it; it was still "ObjectStack Cloud" in the CLI and in the Console's cloud-install strings.
+  
+  - **`@objectstack/cli`.** `os cloud login`, `os cloud logout`, `os cloud whoami`, `os package publish` and `os plugin publish` say "ObjectOS Cloud" in their `--help` descriptions, their `--url` / `--server` / `--token` / `--visibility` flag descriptions, their headers and their "Not logged in" prescriptions; so do the `os serve` welcome page's link to the cloud console and the shared "Authentication required" message. The CLI README and the deployment CLI reference follow. Internal identifiers are unchanged: `~/.objectstack/cloud.json`, `OS_CLOUD_API_KEY`, `OS_CLOUD_URL`, the `os cloud …` command names.
+  - **`@object-ui/i18n`.** The cloud-connection "Connected to …" title and the three cloud-install dialog sentences ("You need to be signed into …", "… sign into … first") name "ObjectOS Cloud" in all ten locales, the product name kept untranslated inside each locale's sentence. New key `auth.shell.poweredBy` ("Powered by ObjectStack") in all ten locales.
+  - **`@object-ui/app-shell`.** New `isDefaultProductName()`: true while the deployment carries the default `branding.productName` ("ObjectOS"), false once a runtime has pushed its own.
+  - **`@object-ui/console`.** The sign-in layout (login, register, forgot/reset password, verify email, setup, consent, device, invitation) shows a small "Powered by ObjectStack" link to objectstack.ai under the form when `isDefaultProductName()` is true. A deployment that pushes its own product name — ObjectOS Cloud, Enterprise, a cloud-connected workspace — shows its own name and no second brand line. The default product name, `logo.svg`, `manifest.json` and `admin@objectos.ai` are unchanged.
+  
+  What to do: nothing. An operator who rebrands the Console through `branding.productName` keeps a single brand line, as before.
+- 61ba04f: fix(app-shell,console): one app opens under one address — a name-alias route moves onto the package id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app with a package id answered under two address families in one session. ADR-0048 keys `/apps/<segment>` on the package id, and every sidebar entry builds on it, but the app's `name` still resolves as an alias, and a page opened on the alias built every link of its own (list rows, record pages, related lists) on the alias. Landing on `/apps/clm/…` therefore opened contracts under the name and obligations and the approvals inbox under `/apps/app.objectstack.hotclm/…`.
+  
+  - **`@object-ui/app-shell`:** a route under `/apps/<name>/…` whose app carries a package id is rewritten, with `replace`, to the same path under `/apps/<package id>/…`, keeping the query string, hash and history state. Old name-based bookmarks and shared links keep opening, now on the one address. The top-bar logo and every Home affordance (`resolveDeclaredHomePath`) name the declared app by its package id. An app without a package id, an app whose name is its package id, and every app after the first of a package that ships several (the package id opens the first) keep their name as their address.
+  - **`@object-ui/console`:** the `/` landing (`resolveLandingPath`) names the landing app by the same address, so post-login and the logo agree and no redirect hop follows.
+  
+  What to do: nothing. Links that name an app by its name keep working; they now arrive on its package-id address.
+- Updated dependencies [8faba89]
+- Updated dependencies [e843b5b]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+  - @objectstack/sdui-parser@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

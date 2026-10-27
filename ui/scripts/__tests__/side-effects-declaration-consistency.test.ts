@@ -1172,10 +1172,7 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
     // the entry form that made the console's bundle 0 bytes while every
     // published path was declared.
     const layoutAliases = aliasEntries.filter((a) => a.specifier === '@object-ui/layout');
-    expect(layoutAliases.map((a) => a.config).sort()).toEqual([
-      'apps/console/vite.config.ts',
-      'examples/console-starter/vite.config.ts',
-    ]);
+    expect(layoutAliases.map((a) => a.config).sort()).toEqual(['apps/console/vite.config.ts']);
     for (const alias of layoutAliases) {
       expect(alias.target).toBe(path.join(repoRoot, 'packages/layout/src'));
     }

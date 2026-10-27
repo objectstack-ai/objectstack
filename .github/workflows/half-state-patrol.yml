@@ -178,7 +178,7 @@ on:
   # action, and never by reading a cadence out of this file.
   workflow_dispatch: {}
   # Changes to the patrol itself get exercised before they merge — the same
-  # posture as engine-split-metric.yml. On a pull_request run the sweep still
+  # posture as test-nightly-tiers.yml. On a pull_request run the sweep still
   # executes (that is the point: the transport, the flags and the rendering are
   # proven on a real runner), but the anchor write is skipped and the rendered
   # body goes to the run's step summary instead. A PR must never rewrite the
@@ -356,8 +356,8 @@ jobs:
           # The judge's own cases first, and the sweep only if they hold: this
           # step WRITES to other people's cards, and a broken predicate that
           # still runs is the one failure mode that cannot be undone by the next
-          # run. `check:pm-closed-card-sweep` is the same command under a dev
-          # -facing name; this is the invocation CI holds.
+          # run. It has no root alias: this job sets up no pnpm, so this line is
+          # the one definition (the GATE INVOCATION IDIOM note in lint.yml).
           set +e
           node scripts/pm/sweep-closed-cards.mjs --self-test > "$RUNNER_TEMP/closed-cards-selftest.log" 2>&1
           selftest=$?

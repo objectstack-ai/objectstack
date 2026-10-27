@@ -50,7 +50,7 @@ ComponentRegistry.register('collapsible',
   // so, and `zod-mirror-parity.test.ts` ledgers it), so it keeps riding this
   // spread onto the Radix root, where it fires for the UNCONTROLLED toggling
   // this exclusion restores.
-  ({ schema, className, disabled: hostDisabled, open: _open, ...props }: { schema: CollapsibleSchema; className?: string; disabled?: boolean; [key: string]: any }) => {
+  ({ schema, className, disabled: hostDisabled, open: _open, ...props }: { schema: CollapsibleSchema; className?: string; disabled?: boolean; [key: string]: unknown }) => {
     // `asChild` is CONDITIONAL, and the condition is Radix's own structural
     // precondition, not a preference (objectui#9701).
     //

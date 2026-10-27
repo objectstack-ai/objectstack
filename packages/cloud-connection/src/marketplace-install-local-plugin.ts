@@ -4147,7 +4147,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * The GET listing still serves the entry, marked not loaded (#21822), to
      * whoever reads it; this line is what the boot itself says. The line owes
      * the consequence and the fix, and carries the handshake's own message,
-     * which names the replay command (`objectstack migrate meta`).
+     * which names the remedy: the replay command (`objectstack migrate meta`),
+     * or for a package ahead of this runtime, the runtime upgrade (#26480).
      */
     private reportProtocolIncompatibleEntry = (
         ctx: PluginContext,

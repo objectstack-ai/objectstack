@@ -1,6 +1,7 @@
 # ADR-0006: Environment & Project — v4 (drop dev-workspace Project, unify on Package)
 
 **Status**: Accepted (v4 — supersedes v3) — API-surface vocabulary boundary recorded 2026-08-27 (#12473): the v5.0 `project` → `environment` rename stops at the CLI's user-facing vocabulary; three API surfaces keep `project` deliberately (see the addendum). **D1 retired by execution (2026-08-28, #12867 — see the second addendum):** D2 fired on the maintainer's 2026-08-28 ruling; all three of those surfaces are renamed to `environment` / `environments` with no aliases, authored and parked for one coordinated release. Read the first addendum's D1 as history — the boundary it draws no longer exists.
+**Versions of this number**: [v2](./0006-project-environment-split.v2.md) · [v3](./0006-project-environment-split.md) · [v4, current](./0006-project-environment-split.v4.md) — one decision revised twice; the number is shared only by its own revisions (AGENTS.md Prime Directive 13). A version is cited as `ADR-0006 v4` in prose or, stem-qualified, as `ADR-0006-project-environment-split.v4`.
 **Date**: 2026-05-20 (v4)
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: v1 (strict tree), v2 (siblings + sys_deployment join), v3 (siblings + deferred dev-workspace `sys_project`)

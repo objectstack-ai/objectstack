@@ -2341,6 +2341,7 @@ const en = {
       assistant: 'Assistant',
       liveCanvas: 'Live preview — {{app}} (draft)',
       liveCanvasUnlisted: 'Live app — {{app}} (unlisted until published)',
+      liveCanvasLive: 'Live app — {{app}}',
       loadingAgents: 'Loading agents…',
       askAnything: 'Ask anything…',
       askOrChangeApp: 'Ask about your data, or ask me to change this app…',
@@ -4471,7 +4472,7 @@ const en = {
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
-      draftPosture: 'Later changes are saved as drafts, and you publish them in Studio.',
+      draftPosture: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
       checksPassed: 'Checks passed {{passed}}/{{total}}',
     },
     changes: {
@@ -5437,13 +5438,15 @@ const en = {
     },
     map: {
       sourceUnresolved: 'This map’s data source could not be resolved',
-      // objectstack#25889 — the map view's own notices. Both style failures
-      // fill `{{reason}}` with MapLibre's message, or `styleFailedUnknownReason`
-      // when it gave none; the excluded count reads "Label: N" so no key needs
+      // objectstack#25889 — the map view's own notices. The three style
+      // failures (the view's own style, the deployment's default style —
+      // objectstack#26163 — and the public default) fill `{{reason}}` with
+      // MapLibre's message, or `styleFailedUnknownReason` when it gave none; the excluded count reads "Label: N" so no key needs
       // a plural family.
       invalidCoordinatesExcluded: 'Records excluded from the map for missing or invalid coordinates: {{excluded}}',
       styleFailedConfigured: 'Map failed to load ({{reason}}). The records are listed below; check the map style URL set on this view.',
       styleFailedDefault: 'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
+      styleFailedDeployment: 'Map failed to load ({{reason}}). The records are listed below; the default map style set for this deployment could not be loaded here, so ask your administrator to check it.',
       styleFailedUnknownReason: 'the map style or tiles could not be loaded',
       webgl2Unavailable: 'Map failed to load (this browser does not provide WebGL2, which the map needs). The records are listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.',
       retry: 'Try the map again',

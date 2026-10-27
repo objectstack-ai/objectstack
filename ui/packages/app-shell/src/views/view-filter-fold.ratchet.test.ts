@@ -43,7 +43,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const objectViewPath = path.join(here, 'ObjectView.tsx');
 const widgetsPath = path.join(here, 'metadata-admin/widgets.tsx');
 
-const objectViewSrc = readFileSync(objectViewPath, 'utf8');
+const objectViewSrc = [objectViewPath, path.join(here, 'objectViewListRenderer.tsx'), path.join(here, 'objectViewViewCrud.tsx')].map((file) => readFileSync(file, 'utf8')).join('\n');
 const widgetsSrc = readFileSync(widgetsPath, 'utf8');
 
 /**

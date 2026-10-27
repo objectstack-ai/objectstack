@@ -8,8 +8,9 @@
  * ledgers — the generic `sys_audit_log` row (`SettingsAuditSink.valueDigest`)
  * and the per-key `sys_setting_audit` row (`SettingsAuditWriter.newHash`) —
  * with the provider's KEYED digest, never an unkeyed one; with no keyed digest
- * available it records no fingerprint at all. Non-secret settings keep the
- * adapter's unkeyed `digest` of the canonical JSON, unchanged.
+ * available it records no fingerprint at all. Non-secret settings record the
+ * declared `sha256:` digest of the canonical JSON (#26465), whatever adapter
+ * is injected; the adapter's own `digest` is no longer read.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -178,15 +179,16 @@ describe('settings audit trail — secret-valued settings', () => {
 });
 
 describe('settings audit trail — non-secret settings', () => {
-  it('keep the unkeyed adapter digest of the canonical JSON, unchanged', async () => {
+  it('record the declared SHA-256 of the canonical JSON on both ledgers, not the adapter digest (#26465)', async () => {
     const provider = new LocalCryptoProvider({ key: randomBytes(32) });
     const { svc, forKey } = boot({ cryptoProvider: provider, secretStore: memorySecretStore() });
 
     await writeSecret(svc, 'pw-1');
 
-    const expected = new NoopCryptoAdapter().digest(JSON.stringify('ops@example.com'));
+    const expected = sha256(JSON.stringify('ops@example.com'));
     const { ledger, settingAudit } = forKey('from_email');
     expect(settingAudit[0]).toMatchObject({ encrypted: false, newHash: expected });
     expect(ledger[0]).toMatchObject({ encrypted: false, valueDigest: expected });
+    expect(settingAudit[0].newHash).not.toBe(new NoopCryptoAdapter().digest(JSON.stringify('ops@example.com')));
   });
 });

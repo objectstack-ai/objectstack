@@ -234,7 +234,7 @@ describe('QUICK_REFERENCE.md — every documented `pnpm` command exists', () => 
   });
 });
 
-describe('QUICK_REFERENCE.md — the "Run Examples" section covers the examples that run', () => {
+describe('QUICK_REFERENCE.md — the "Examples" section covers the examples that run', () => {
   /**
    * The reverse direction, and the one that would have caught this card before it was
    * filed. The forward test above only says the documented examples exist; it stays
@@ -245,16 +245,25 @@ describe('QUICK_REFERENCE.md — the "Run Examples" section covers the examples 
    * when its manifest declares a `dev` script. `hello-world` (a snippet) and
    * `schema-catalog` (a data package) declare none, so they are correctly absent from
    * the command block — and the day either grows one, this goes red.
+   *
+   * Since the two host-console examples were deleted (#25922) no `examples/*` package
+   * is a dev server, and the section says so in words instead of listing commands. That
+   * sentence is pinned for as long as it is true, so neither half can go stale alone:
+   * an example that grows a `dev` script reds the sentence, and the command check
+   * below takes over.
    */
   it('documents a dev command for every `examples/*` package that declares one', () => {
     const runnable = workspacePackages.filter((p) => p.dir.startsWith('examples/') && p.scripts.has('dev'));
-    expect(
-      runnable.length,
-      'no `examples/*` package declares a `dev` script any more — the "Run Examples" section ' +
-        'is now describing something that does not exist and needs rewriting, not re-pinning',
-    ).toBeGreaterThan(0);
-
-    const block = section('### Run Examples');
+    const block = section('### Examples');
+    const noneRuns = 'No directory under `examples/` is a dev server';
+    if (runnable.length === 0) {
+      expect(block, `${docRel}'s "Examples" section must say that no example is a dev server`).toContain(noneRuns);
+      expect(block, `${docRel}'s "Examples" section documents a dev command for an example that has none`).not.toMatch(
+        /--filter @object-ui\/example-[\w-]+ dev/,
+      );
+      return;
+    }
+    expect(block, `${docRel} says no example is a dev server, but ${JSON.stringify(runnable.map((p) => p.dir))} declare one`).not.toContain(noneRuns);
     const missing = runnable.filter((p) => !block.includes(`--filter ${p.name} dev`));
 
     expect(

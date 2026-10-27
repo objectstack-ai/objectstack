@@ -1088,7 +1088,7 @@ export const A = (name: string, label: string, n: number) => {
         "t('marketplace.detail.reseedLocalSuccess', { inserted, updated })",
       ],
       [
-        'packages/app-shell/src/views/ObjectView.tsx',
+        'packages/app-shell/src/views/objectViewViewCrud.tsx',
         // Tight on purpose: the file still holds a legitimate *computed*
         // `defaultValue` ending in the same sentence (line ~1657), and a marker
         // loose enough to catch that one would fail for the wrong reason.

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: three spawns in one beforeAll: an `os serve` config boot, the `os build` of its artifact, and the artifact boot; slowest CI reading 36.70 s (run 40424746941) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * #22614 — the by-name read of a `defineView` container answers the same on an

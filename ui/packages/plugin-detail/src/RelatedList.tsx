@@ -275,6 +275,14 @@ export interface RelatedListProps {
   parentId?: string | number;
   /** Lucide icon name (kebab-case) to render next to the section title. */
   icon?: string;
+  /**
+   * Told whether this list is EMPTY once its read has answered: `true` for no
+   * records, `false` for records (or a refused filter, which draws its own
+   * state), `null` while a read is in flight. `record:related_list` reads it
+   * to fold the empty lists of a stack into one line (#25895); the list
+   * itself draws exactly the same either way.
+   */
+  onEmptyChange?: (empty: boolean | null) => void;
 }
 
 /**
@@ -535,6 +543,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   referenceField,
   parentId,
   icon,
+  onEmptyChange,
 }) => {
   // Distinguish "caller did not provide data" (auto-fetch) from
   // "caller passed an empty array" (no related records — do not fetch).
@@ -1657,6 +1666,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // The CHILD row's own `settledWhen` verdict (objectui#11815), judged
           // against the row the table hands this cell — never the parent record.
           deadlineSettled: isDeadlineSettled(def, row, { scope: predicateScope, fields: objectSchema?.fields }),
+          // Every cell this builder makes is one of a table COLUMN's cells
+          // (objectstack#26344, the grid's objectstack#25884): an undeclared
+          // `date` reads in one absolute face down the column, its relative
+          // phrase the tooltip. A declared `format` still wins.
+          inGridColumn: true,
         });
       };
     };
@@ -2274,6 +2288,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   const isEmpty = !loading && relatedData.length === 0 && (!windowed || currentPage === 0);
+  // The same answer, for a caller that arranges several lists (#25895). Before
+  // the early return below, so the hook order never changes.
+  const emptyAnswer: boolean | null = filterRefusal ? false : loading ? null : isEmpty;
+  React.useEffect(() => {
+    onEmptyChange?.(emptyAnswer);
+  }, [emptyAnswer, onEmptyChange]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)
