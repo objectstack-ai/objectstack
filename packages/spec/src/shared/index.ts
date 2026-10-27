@@ -16,6 +16,7 @@ export * from './metadata-types.zod';
 // live at the surfaces themselves: inline regexes on object/field/flow names,
 // bare `SnakeCaseIdentifierSchema` on app and position names.
 export * from './suggestions.zod';
+export * from './protocol-upgrade-guide';
 // `suggestFieldType` lives apart from `suggestions.zod` so that module imports no
 // schema: strict-object → suggestions → data/field.zod was the eager import
 // cycle that crashed the `/api` and `/data` entries under OS_EAGER_SCHEMAS=1.

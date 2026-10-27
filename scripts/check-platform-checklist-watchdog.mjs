@@ -20,7 +20,7 @@
  * an unrelated pull request is never blocked by checklist drift. The watchdog
  * changes the REPORTING CHANNEL and nothing else.
  *
- * So this gate pins six things, and the third and fourth are the ones worth
+ * So this gate pins seven things, and the third and fourth are the ones worth
  * having:
  *
  *   1. the workflow FILE EXISTS and parses as YAML;
@@ -30,7 +30,9 @@
  *      WORKFLOW FILE AND THE SIBLING PATROL JOBS' OWN INPUTS -- a list frozen
  *      here as a SET -- and nothing else;
  *   5. it invokes the gate's PACKAGE SCRIPT, `pnpm check:platform-checklist`;
- *   6. and it does NOT inline a copy of that alias's command.
+ *   6. it does NOT inline a copy of that alias's command;
+ *   7. and every `on.schedule` cron has its twin in some job's `if:`, and
+ *      every cron a job's `if:` names has its twin under `on.schedule`.
  *
  * Clauses 3 and 4 are why this file exists rather than a comment asking nicely.
  * A pin that asserted only the positive ones would be GREEN on a workflow that
@@ -91,6 +93,24 @@
  * would drift from the invocation the cadence documentation tells a human to
  * type. Clause 5 is clause 4's other half: asserting the alias is present says
  * nothing about a copy sitting beside it.
+ *
+ * ## Clause 7: one cron, spelled twice
+ *
+ * The workflow is four patrols on four clocks. A `schedule` event carries the
+ * cron that fired it (`github.event.schedule`), and each job's `if:` compares
+ * against its own, so one cron string lives in two places: under
+ * `on.schedule`, and in exactly one job's `if:`. Edit one side alone and
+ * nothing reds: a cron no `if:` names fires a run in which every job skips,
+ * and a job whose `if:` names a cron the schedule does not declare never runs
+ * on a schedule again. So clause 7 reads both sides and refuses an orphan on
+ * either one.
+ *
+ * It reads ONE spelling, the one every job uses today:
+ * `github.event.schedule == 'CRON'`. A job-level `if:` that reads
+ * `github.event.schedule` any other way is refused as unreadable, never
+ * skipped, because a comparison this clause cannot read is one it cannot
+ * check. Only job-level `if:`s count: they are what decides whether a job
+ * runs at all.
  *
  * ## Why the workflow itself cannot hold this
  *
@@ -172,11 +192,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'clause 4b — no board write reachable from a pull_request run': 6,
   'clauses 5 and 6 — the package script, and no inlined copy of it': 5,
   'the manifest clause — the package script exists to be invoked': 3,
+  'clause 7 — every schedule cron and every job if: cron has its twin': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned beside the floors.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -328,6 +349,46 @@ export function judgeBoardWrites(doc) {
   return out;
 }
 
+/** The one comparison clause 7 reads in a job's `if:`; group 1 is the cron. */
+const SCHEDULE_COMPARISON = /github\.event\.schedule\s*==\s*'([^']*)'/g;
+const SCHEDULE_MENTION = /github\.event\.schedule\b/g;
+
+/**
+ * Clause 7. Every `on.schedule` cron must be named by some job's `if:`, and
+ * every cron a job's `if:` names must be an `on.schedule` entry. Compared
+ * byte-for-byte, because `github.event.schedule` carries the string exactly as
+ * the schedule spells it.
+ */
+export function judgeScheduleTwins(doc) {
+  const out = [];
+  const schedule = triggerBlock(doc)?.schedule;
+  const declared = Array.isArray(schedule)
+    ? schedule.filter((e) => e && typeof e.cron === 'string' && e.cron.trim() !== '').map((e) => e.cron)
+    : [];
+  const named = new Set();
+  const jobs = doc?.jobs && typeof doc.jobs === 'object' ? doc.jobs : {};
+  for (const [jobId, job] of Object.entries(jobs)) {
+    const cond = typeof job?.if === 'string' ? job.if : '';
+    const mentions = cond.match(SCHEDULE_MENTION)?.length ?? 0;
+    const crons = [...cond.matchAll(SCHEDULE_COMPARISON)].map((m) => m[1]);
+    if (crons.length !== mentions) {
+      out.push(`${WORKFLOW_REL}: job \`${jobId}\`'s \`if:\` reads \`github.event.schedule\` in a spelling this pin does not read, so its cron cannot be checked against \`on.schedule\`. Spell the comparison \`github.event.schedule == 'CRON'\`, the one every patrol job uses.`);
+    }
+    for (const cron of crons) {
+      named.add(cron);
+      if (!declared.includes(cron)) {
+        out.push(`${WORKFLOW_REL}: job \`${jobId}\`'s \`if:\` compares \`github.event.schedule\` to \`${cron}\`, which no \`on.schedule\` entry declares, so the job never runs on a schedule and nothing reds. A cron under \`on.schedule\` and the same string in its job's \`if:\` are one fact: change both in the same edit.`);
+      }
+    }
+  }
+  for (const cron of declared) {
+    if (!named.has(cron)) {
+      out.push(`${WORKFLOW_REL}: \`on.schedule\` declares the cron \`${cron}\` but no job's \`if:\` compares \`github.event.schedule\` to it, so that cron fires a run in which every job skips and nothing reds. A cron under \`on.schedule\` and the same string in its job's \`if:\` are one fact: change both in the same edit.`);
+    }
+  }
+  return out;
+}
+
 /**
  * Judge one workflow's TEXT. Pure over its inputs so `--self-test` can drive
  * every clause with a fixture instead of asserting it into the void.
@@ -378,6 +439,7 @@ export function judgeWorkflow(text, parse) {
   }
 
   failures.push(...judgeBoardWrites(doc));
+  failures.push(...judgeScheduleTwins(doc));
 
   const commands = runBlocks(doc).flatMap((run) => shellCommands(run));
   if (!commands.some((c) => invokes(c, 'pnpm', PACKAGE_SCRIPT))) {
@@ -426,6 +488,9 @@ permissions:
   issues: write
 jobs:
   watchdog:
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '51 2 * * *')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -587,6 +652,37 @@ export function selfTest(parse) {
   t('a manifest with the script ⇒ silent', judgeManifest(`{"scripts":{"${PACKAGE_SCRIPT}":"node x.mjs"}}`).length === 0);
   t('an unparseable manifest ⇒ fires', judgeManifest('{').length === 1);
 
+  battery('clause 7 — every schedule cron and every job if: cron has its twin');
+  // Clause 7 -- the two spellings of one cron. The good fixture carries one
+  // twinned pair and is silent (asserted above); TWO_CLOCKS adds a second pair,
+  // so each case below is one edit to ONE side of one pair.
+  const IF_51 = "github.event.schedule == '51 2 * * *'";
+  const TWO_CLOCKS = `${GOOD.replace("    - cron: '51 2 * * *'\n", "    - cron: '51 2 * * *'\n    - cron: '7 2,8,14,20 * * *'\n")}`
+    + "  snapshot:\n    if: github.event_name != 'schedule' || github.event.schedule == '7 2,8,14,20 * * *'\n"
+    + '    runs-on: ubuntu-latest\n    steps:\n      - run: echo snapshot\n';
+  const twins = (text) => judgeScheduleTwins(parse(text));
+  t('two crons, each named by its own job ⇒ silent (positive control)', judgeWorkflow(TWO_CLOCKS, parse).failures.length === 0);
+  const NO_JOB_TWIN = TWO_CLOCKS.replace("    - cron: '7 2,8,14,20 * * *'\n", "    - cron: '7 2,8,14,20 * * *'\n    - cron: '23 4,16 * * *'\n");
+  t('⭐ a cron added under `on.schedule` with no job `if:` twin ⇒ fires', fires(NO_JOB_TWIN, 'declares the cron `23 4,16 * * *` but no job'));
+  t('…and it is the only finding', twins(NO_JOB_TWIN).length === 1);
+  const NO_SCHEDULE_TWIN = TWO_CLOCKS.replace("github.event.schedule == '7 2,8,14,20 * * *'", "github.event.schedule == '7 3,9,15,21 * * *'");
+  t('⭐ a job `if:` cron edited with no `on.schedule` twin ⇒ names the job', fires(NO_SCHEDULE_TWIN, "job `snapshot`'s `if:` compares `github.event.schedule` to `7 3,9,15,21 * * *`"));
+  t('…and the cron it left behind fires from the other side', fires(NO_SCHEDULE_TWIN, 'declares the cron `7 2,8,14,20 * * *` but no job'));
+  t('a cron edited under `on.schedule` alone ⇒ fires both ways', (() => {
+    const f = twins(GOOD.replace("    - cron: '51 2 * * *'\n", "    - cron: '52 2 * * *'\n"));
+    return f.length === 2 && f.some((m) => m.includes('`52 2 * * *` but no job')) && f.some((m) => m.includes('to `51 2 * * *`, which no'));
+  })());
+  t('a job `if:` cron with no `schedule:` at all ⇒ fires', fires(GOOD.replace(/  schedule:\n    - cron: '51 2 \* \* \*'\n/, ''), 'which no `on.schedule` entry declares'));
+  t('another spelling (`!=`) ⇒ refused as unreadable, not skipped', fires(
+    GOOD.replace(IF_51, "github.event.schedule != '51 2 * * *'"), 'in a spelling this pin does not read'));
+  t('the reversed spelling ⇒ refused as unreadable, not read as a twin', fires(
+    GOOD.replace(IF_51, "'51 2 * * *' == github.event.schedule"), 'in a spelling this pin does not read'));
+  t('a twin in a STEP-level `if:` is not a job twin ⇒ fires', fires(
+    GOOD.replace(IF_51, "github.event_name == 'schedule'")
+      .replace("        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'\n",
+        `        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request' && ${IF_51}\n`),
+    'declares the cron `51 2 * * *` but no job'));
+
   // ── The floor, evaluated BEFORE either verdict is printed ───────────────
   // A set difference over battery NAMES, so a battery that stopped running
   // names itself instead of hiding inside a smaller total.
@@ -646,6 +742,7 @@ async function main(argv) {
     console.log(`refused:  ${REFUSED_TRIGGERS.join(', ')}`);
     console.log(`pull_request: permitted, and only \`paths\`-filtered to exactly ${PR_TRIGGER_ALLOWED_PATHS.join(', ')}`);
     console.log(`board write:  every step calling the issues endpoint must carry \`${PR_WRITE_GUARD}\` in its own \`if:\``);
+    console.log("schedule:     every `on.schedule` cron named by some job's `if:` as `github.event.schedule == 'CRON'`, and every such cron declared");
   }
 
   if (failures.length > 0) {
@@ -655,7 +752,7 @@ async function main(argv) {
     process.exit(1);
   }
 
-  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, any pull_request trigger paths-filtered to this file and the sibling patrol jobs' own inputs alone, no board write reachable from a pull_request run, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
+  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, any pull_request trigger paths-filtered to this file and the sibling patrol jobs' own inputs alone, no board write reachable from a pull_request run, every schedule cron twinned with a job \`if:\`, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
 }
 
 if (isEntrypoint(import.meta.url)) {

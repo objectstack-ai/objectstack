@@ -314,12 +314,6 @@
       },
       "note": "Drilled because includeAll/placement diverge (dead) from the live core."
     },
-    "homePageId": {
-      "status": "dead",
-      "verifiedAt": "2026-08-09",
-      "evidenceScope": "cross-repo",
-      "note": "CROSS-REPO RE-VERIFIED 2026-08-09 against objectui @c2fd1223 (#4895 task 1): the retirement holds, and the renderer side now says so in code rather than by absence — OuiAppSchema REJECTS the key (with a pin test asserting it is not accepted again), AppPreview ignores it (pin test), AppContent.resolveLandingRoute() documents the removal, and RootLandingRedirect routes on isDefault. No reader remains. The verdict below was first reached by searching this repo alone and was wrong for two months on exactly that account, so this row now records how wide the last look was. REMOVED 2026-08-02 (#4667) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). PREMISE CORRECTED 2026-08-03 (#4709), removal upheld: #4667 justified this row with \"no shell ever read it\", which was FALSE and contradicted this repo's own 2026-06 AppSchema liveness audit (docs/audits/2026-06-appschema-property-liveness.md), which listed homePageId LIVE. objectui's console DID read it — resolveLandingRoute(), packages/app-shell/src/console/AppContent.tsx @785b8a5d — and it was the only thing deciding where an app opened. The key is retired for its SHAPE: an ID cross-reference into navigation with no referential integrity, silently falling back to the first item when it dangled. Post-v17 the landing IS the first navigation item (by order), and the ROOT landing follows isDefault routing (objectui RootLandingRedirect). Reorder navigation, or set isDefault, instead; if the capability returns it belongs on the navigation item itself (navigation[].landing), enforce-first. The three aliases that routed here (home / homepage / landingpage) were removed from AppSchema aliases and now carry the same prescription as guidance. Process lesson: a retirement citing liveness MUST reconcile against existing audit records — this contradiction went unnoticed for two months."
-    },
     "requiredPermissions": {
       "status": "live",
       "verifiedAt": "2026-09-27",
@@ -331,41 +325,6 @@
       "verifiedAt": "2026-08-01",
       "evidence": "ui/packages/app-shell/src/hooks/surfaceAgent.ts (:81 at objectui @940ba24), ui/packages/app-shell/src/layout/ChatDock.tsx (:253 at objectui @940ba24)",
       "note": "bounded surface-binding knob (ADR-0063): resolved to the two platform agents (ask/build), alias-aware, anything else rejected — exactly as the schema documents."
-    },
-    "version": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142, 2026-06 audit) — authoring it is parse-rejected with the prescription (an app is versioned by its package's manifest.version). Row stays while the tombstone keeps the key in the walked shape."
-    },
-    "aria": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142) — app-level ARIA was never read; declare aria on the rendering page component (`page.components[].aria`, live in page.json). NOT on a dashboard widget: `dashboard.widgets[].aria` is `dead` in dashboard.json, retired by #5010 in this same major — corrected 2026-08-08 (#6756)."
-    },
-    "objects": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142) — objects belong to the stack; the ambient chatbot derives an app's object list from its nav items (collectNavObjects), never from App.objects."
-    },
-    "apis": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142) — declarative endpoints belong to the stack."
-    },
-    "sharing": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142, ADR-0049) — a declared-but-unenforced security surface; the live sharing path is FormView.sharing."
-    },
-    "embed": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142, ADR-0049) — no iframe route ever read it; embedding is per form view."
-    },
-    "mobileNavigation": {
-      "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142) — fully unimplemented; returns if/when a real mobile navigation ships."
     },
     "_unpublished": {
       "status": "live",

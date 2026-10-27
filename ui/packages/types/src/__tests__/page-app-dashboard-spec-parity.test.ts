@@ -40,6 +40,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { z } from 'zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 import {
   AppSchema as SpecAppSchema,
   DashboardSchema as SpecDashboardSchema,
@@ -63,6 +65,11 @@ interface Case {
   /** objectui-only keys, each a conscious local-vs-upstream decision. */
   local: string[];
 }
+
+/** The App keys whose spec tombstones aged out at 18.2 (objectstack#25767); the twin's own refusals. */
+const AGED_OUT_APP_KEYS = ['version', 'homePageId', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation', 'aria'] as const;
+/** The Dashboard keys of the same cut. */
+const AGED_OUT_DASHBOARD_KEYS = ['aria', 'performance'] as const;
 
 const CASES: Record<string, Case> = {
   Page: {
@@ -116,15 +123,52 @@ const CASES: Record<string, Case> = {
     // (objectui#11363) is a refusal of the same kind: the spec refuses it, and
     // the mode is read only from `AppSchemaRenderer`'s prop or an
     // `app-schema-renderer` node, never from this document.
-    local: ['title', 'logo', 'favicon', 'mobileNavMode', 'layout', 'menu', 'actions'],
+    // The eight `AGED_OUT_APP_KEYS` are refusals of the same kind, since spec
+    // 18.2 (objectstack#25767): each was a spec tombstone the twin inherited
+    // by reference through 18.1, aged out of `AppSchema` one major on, and is
+    // declared here only so an authored value is refused by name instead of
+    // kept in silence. Pinned below.
+    local: ['title', 'logo', 'favicon', 'mobileNavMode', 'layout', 'menu', 'actions', ...AGED_OUT_APP_KEYS],
   },
   Dashboard: {
     spec: SpecDashboardSchema,
     oui: OuiDashboardSchema,
     // `dateRange` left this list with objectui#10334: it now flows in by reference.
     omitted: ['widgets', 'globalFilters'],
-    local: [],
+    // Refusals, not capabilities — the aged-out spec tombstones of
+    // objectstack#25767, declared so an authored value is refused by name
+    // (`AGED_OUT_DASHBOARD_KEYS`, pinned below).
+    local: [...AGED_OUT_DASHBOARD_KEYS],
   },
+};
+
+/**
+ * Pins one aged-out key on a twin: declared, unwritable (`invalid_type` at its
+ * own path, the console's refusal naming the key and the guide), and refused
+ * by the spec as an unknown key at the container's root — the control that
+ * the twin's refusal is not standing in for a spec member.
+ */
+const expectAgedOutRefusal = (
+  oui: z.ZodType, spec: z.ZodType, container: string, key: string, legal: Record<string, unknown>, specLegal: Record<string, unknown>,
+) => {
+  expect(Object.keys(shapeOf(oui)), `'${key}' is no longer declared — an authored value would be KEPT in silence`).toContain(key);
+  const twin = oui.safeParse({ ...legal, [key]: 'x' });
+  expect(twin.success, `'${key}' is accepted again`).toBe(false);
+  const issue = twin.success ? undefined : twin.error.issues.find((i) => i.path.join('.') === key);
+  expect(issue, `no issue at path '${key}'`).toBeTruthy();
+  expect(issue!.code).toBe('invalid_type');
+  expect(issue!.message).toContain(`Unrecognized key(s) on this ${container}: \`${key}\``);
+  // The guide sentence is the spec's own: `zod/tombstone.zod.ts` imports it from
+  // `@objectstack/spec/shared` (a declared TEXT exception of the mirrors' import
+  // boundary, imported-defaults-8317), so the twin's refusal carries the spec's words.
+  expect(issue!.message).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
+  expect(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE).toContain('https://objectstack.ai/docs/protocol-upgrade');
+  expect(issue!.message).toContain('objectstack#25767');
+  const specResult = spec.safeParse({ ...specLegal, [key]: 'x' });
+  expect(specResult.success, `the spec accepts '${key}' again — the twin's refusal would then hide a live member`).toBe(false);
+  const root = specResult.success ? '' : specResult.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+  expect(root).toMatch(new RegExp(`Unrecognized key\\(s\\)[^\\n]*\`${key}\``));
+  expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
 };
 
 describe.each(Object.keys(CASES))('%s spec parity (objectstack#4115 drift guard)', (name) => {
@@ -176,27 +220,39 @@ describe('spec-only keys are now VALIDATED, not passed through (objectstack#4115
 
   it('App declares the package-lock and access keys that used to ride through', () => {
     const keys = Object.keys(shapeOf(OuiAppSchema));
-    // `homePageId` was in this list until spec 17.0.0 retired it; it is now a
-    // tombstone rather than an authorable key, so it is pinned separately
-    // below — listing it here would read as "still authorable".
-    for (const key of ['branding', 'sharing', 'embed', 'objects', 'apis', 'requiredPermissions', '_packageId']) {
+    // `homePageId` was in this list until spec 17.0.0 retired it, and
+    // `sharing`, `embed`, `objects` and `apis` until spec 18.2 aged their
+    // tombstones out: all four are refusals now, pinned in the leg below, and
+    // listing one here would read as "still authorable".
+    for (const key of ['branding', 'requiredPermissions', '_packageId']) {
       expect(keys, `'${key}' is still undeclared`).toContain(key);
     }
   });
 
-  it('App REJECTS the retired `homePageId` rather than stripping it', () => {
-    // objectstack#4667 / #4709 retired the key: it was an ID cross-reference
-    // with no referential integrity, so a dangling id silently fell back to the
-    // first nav item. The landing page is now the first reachable nav item (by
-    // `order`), and the root landing follows `isDefault`.
+  it.each(AGED_OUT_APP_KEYS)('App `%s`: a spec tombstone that aged out at 18.2 is the twin\'s OWN refusal now, not a silent keep (objectstack#25767)', (key) => {
+    // objectstack#4667 / #4709 retired `homePageId` at spec 17.0.0 (an ID
+    // cross-reference with no referential integrity: a dangling id fell back
+    // to the first nav item in silence; the landing page is the first
+    // reachable nav item by `order`, the root landing follows `isDefault`),
+    // and the 2026-06 liveness audit retired the other seven with it. All
+    // eight were `retiredKey()` tombstones through 18.1, flowing into this
+    // twin by reference, so the twin REFUSED each at its own path.
     //
-    // Rejection, not stripping, is the whole point — objectui's derivation is
-    // strip-mode, so if the tombstone ever stopped flowing in by reference an
-    // author would get their landing-page intent silently deleted instead of an
-    // error naming the migration. That is the failure this pins.
-    const rejected = OuiAppSchema.safeParse({ type: 'app', name: 'app_x', homePageId: 'home' });
-    expect(rejected.success, '`homePageId` is being accepted again').toBe(false);
+    // At 18.2 the tombstones aged out (objectstack#25767, ADR-0087): the
+    // spec's strict `AppSchema` refuses the key as an unknown one at the app's
+    // own path, naming it and the protocol upgrade guide — that is where an
+    // author is told at every door that parses with the spec (the client
+    // validator, the server's 422). The twin inherits nothing under the name,
+    // and is `.passthrough()`, so without an arm of its own it would KEEP the
+    // value in silence: a refusal the console gave for two majors would
+    // vanish. So each key is declared here as the console's own refusal
+    // (`agedOutSpecKeyRefusal`, `zod/tombstone.zod.ts`), the TS twin is
+    // `?: never` (`../app.ts`), and this pin holds both the twin's verdict and
+    // the spec's — a twin whose refusal outlived a key the spec re-admitted
+    // goes red on the control.
+    expectAgedOutRefusal(OuiAppSchema, SpecAppSchema, 'app', key, { type: 'app', name: 'app_x' }, { name: 'app_x', label: 'App X' });
     expect(OuiAppSchema.safeParse({ type: 'app', name: 'app_x' }).success).toBe(true);
+    expect(SpecAppSchema.safeParse({ name: 'app_x', label: 'App X' }).success).toBe(true);
   });
 
   it('App validates branding instead of accepting any shape', () => {
@@ -205,14 +261,31 @@ describe('spec-only keys are now VALIDATED, not passed through (objectstack#4115
     expect(OuiAppSchema.safeParse({ type: 'app', branding: 'blue' }).success).toBe(false);
   });
 
-  it('Dashboard declares header/refreshIntervalSeconds/performance', () => {
+  it('Dashboard declares header/refreshIntervalSeconds/protection', () => {
     const keys = Object.keys(shapeOf(OuiDashboardSchema));
     // `refreshIntervalSeconds` is the post-rename spelling (objectui#7783); the
     // spec still carries `refreshInterval` as a `retiredKey` tombstone, so
     // asserting the OLD name here would pass on the tombstone and prove nothing.
-    for (const key of ['header', 'refreshIntervalSeconds', 'performance', 'protection']) {
+    // `performance` left this list at spec 18.2: it was a tombstone through
+    // 18.1, aged out of `DashboardSchema` one major on (objectstack#25767),
+    // and is the twin's own refusal now — pinned in the leg below.
+    for (const key of ['header', 'refreshIntervalSeconds', 'protection']) {
       expect(keys, `'${key}' is still undeclared`).toContain(key);
     }
+  });
+
+  it.each(AGED_OUT_DASHBOARD_KEYS)('Dashboard `%s`: a spec tombstone that aged out at 18.2 is the twin\'s OWN refusal now, not a silent keep (objectstack#25767)', (key) => {
+    // The #3896 audit close-out retired both at spec 17.0.0 (no dashboard
+    // renderer applied `aria`; nothing read `performance`); the twin refused
+    // each by reference through 18.1. The rule and the posture are the App
+    // leg's above; `dashboard-aria-retired-contract-twins.test.ts` pins the
+    // `aria` face pair in detail.
+    expectAgedOutRefusal(
+      OuiDashboardSchema, SpecDashboardSchema, 'dashboard', key,
+      { type: 'dashboard', widgets: [] }, { name: 'ops', label: 'Ops', widgets: [] },
+    );
+    expect(OuiDashboardSchema.safeParse({ type: 'dashboard', widgets: [] }).success).toBe(true);
+    expect(SpecDashboardSchema.safeParse({ name: 'ops', label: 'Ops', widgets: [] }).success).toBe(true);
   });
 
   it('Dashboard validates header instead of accepting any shape', () => {

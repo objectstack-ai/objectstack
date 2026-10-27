@@ -83,12 +83,17 @@ selector handed you has a verdict; planned ids are listed, not chased.
      the run issue, not a tracking or extracted card, not a comment. Relocating it is not a
      mitigation — a tracking card is a public issue in a public repo just the same. Such a
      `fail` **is a completed verdict** when it records the item id, the clause, and `detail
-     withheld pending maintainer`; the reproduction stays in the runner session, and the run
-     ends there with that report — a one-shot runner has no channel to wait on. Existence
-     published, recipe withheld, is a complete and actionable report — getting a defect
-     fixed never requires handing anyone a working exploit. (Maintainer disclosure ruling,
-     2026-08-18, recorded on #9387; the `checklist-test` skill states the same guardrail in
-     the same terms — one rule written in both places, not a precedence claim by either.)
+     withheld pending maintainer`; the reproduction stays in the runner session. The fix is
+     **dispatched directly through `pm-dispatch`**, never waiting on the maintainer: a card
+     carrying only the item id, the clause and `detail withheld pending maintainer`, then an
+     in-seat `mode:subagent` `os-dev` dispatch (a disclosure-discipline card) whose prompt
+     alone carries the reproduction. A one-shot runner with no dispatch channel hands that to
+     the session that dispatched it. Existence published, recipe withheld, is a complete and
+     actionable report — getting a defect fixed never requires handing anyone a working
+     exploit. (Maintainer disclosure ruling, 2026-08-18, recorded on #9387; fix-dispatch
+     ruling, 2026-10-27, recorded on #25807; the `checklist-test` skill states the same
+     guardrail in the same terms — one rule written in both places, not a precedence claim
+     by either.)
      **No other failure class is softened by this**: everything else owes its reproduction
      rule in full.
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
@@ -831,7 +836,10 @@ closing out the report includes the extraction, owed by the runner:
   card, a pointer back to the run record for the full evidence chain. A defect card does
   not carry `qa-run`; it enters triage first-touch normally. ⛔ An authentication or
   authorization defect is extracted under rule 2's carve-out — item, clause, `detail
-  withheld pending maintainer`, no recipe. The extracted card is public too.
+  withheld pending maintainer`, no recipe — and its fix is dispatched at once (rule 2). The
+  extracted card is public too. Every product defect the run meets, a clause `fail` or an
+  off-clause probe finding alike, is extracted in the same run — ⛔ never left only in the
+  run record or the chat.
 - **Checklist-accuracy findings and fixture gaps** close out through the wave's anchor
   card (the sweep's tracking issue) — ⛔ not extracted.
 - **Environment blockers**: recorded in the run record is enough.

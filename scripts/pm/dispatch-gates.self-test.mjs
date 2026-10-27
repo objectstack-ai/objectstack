@@ -140,6 +140,7 @@ import {
   declaresPullRequestTrigger,
   deepestTrackedPrefix,
   defaultedArgv,
+  derivationInputs,
   derivationProvenance,
   deriveTier,
   discoverFamilies,
@@ -208,6 +209,8 @@ import {
   maskShellComments,
   metadataFormModulePaths,
   metadataFormsSurfaceIsExtracted,
+  liveDerivationInputs,
+  narrowToDerivationInputs,
   notRunnableCommandSet,
   outsideBlockCounts,
   outsideBlockNames,
@@ -11106,6 +11109,55 @@ export function selfTest({ tier = 'full' } = {}) {
     benign.length === 2 && benign[0].includes('none of the commit(s)') && !benignText.includes('nothing this answer derives from changed'));
   t('it hands over the fetch, the one action that strengthens the reading', benignText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
   t('and the quiet spelling still does not cry stale, so the loud spelling stays rare', !benignText.includes('STALE TREE'));
+  // The narrowed reading (#26334): the moved paths the answer is NOT made of
+  // are set aside into `ignored`, and the quiet line NAMES them — a quiet that
+  // reads as a measurement, not as the silence a level tree gets. A reading
+  // that set nothing aside, or one taken before the field existed, renders
+  // byte-identically to `benign` above, which is what keeps every pin on the
+  // quiet shape green across the change.
+  const setAside = driftLines({ base: 'aaaaaaa', behind: 3, changed: [], ignored: ['scripts/sdui-manifest.record.json'], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' });
+  const setAsideText = setAside.join('\n');
+  t('a drift whose only moved paths are NOT inputs renders the quiet shape — two lines, scoped to what the tree can see, no STALE TREE',
+    setAside.length === 2 && setAside[0].includes('3 commit(s) behind') && setAside[0].includes('can SEE') && !setAsideText.includes('STALE TREE'));
+  t('and it names what moved and that none of it is an input, so the reader can see the quiet was measured',
+    setAside[0].includes('1 path(s) under the surface moved too, none of them an input') && setAside[0].includes('scripts/sdui-manifest.record.json'));
+  t('a reading that set nothing aside renders byte-identically to one that never carried the field',
+    driftLines({ base: 'aaaaaaa', behind: 7, changed: [], ignored: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' }).join('\n') === benignText);
+  t('more than three set-aside paths are counted past the third, never listed in full',
+    driftLines({ base: 'aaaaaaa', behind: 1, changed: [], ignored: ['scripts/a.json', 'scripts/b.json', 'scripts/c.json', 'scripts/d.json', 'scripts/e.json'] })[0].includes('5 path(s) under the surface moved too') && driftLines({ base: 'aaaaaaa', behind: 1, changed: [], ignored: ['scripts/a.json', 'scripts/b.json', 'scripts/c.json', 'scripts/d.json', 'scripts/e.json'] })[0].includes('… +2 more'));
+  const split = narrowToDerivationInputs(
+    ['scripts/sdui-manifest.record.json', 'scripts/pm/dispatch-gates.mjs', '.github/workflows/lint.yml'],
+    new Set(['scripts/pm/dispatch-gates.mjs', '.github/workflows/lint.yml']),
+  );
+  t('narrowToDerivationInputs keeps the inputs and sets the rest aside, order preserved on both sides',
+    split.changed.join() === 'scripts/pm/dispatch-gates.mjs,.github/workflows/lint.yml' && split.ignored.join() === 'scripts/sdui-manifest.record.json');
+  t('and with no inputs to narrow by it keeps everything and reads ignored as NOT MEASURED (null), never as an empty array',
+    narrowToDerivationInputs(['a', 'b'], null).changed.join() === 'a,b' && narrowToDerivationInputs(['a', 'b'], null).ignored === null
+      && narrowToDerivationInputs(['a'], undefined).changed.join() === 'a' && narrowToDerivationInputs(['a'], undefined).ignored === null);
+  // The MEASURED set, read off this tree's own discovery: the narrowing is
+  // only honest if the set it narrows by is closed under the answer, so these
+  // pin the members that closure needs — the manifest, every workflow, every
+  // gate file, this engine and its two-levels-down data module — and pin that
+  // the set is a strict subset of what the roots hold, so the narrowing is
+  // not vacuous. The last case pins the live specimen: the generated SDUI
+  // manifest record, which moves on ui landings and which no family opens.
+  const live = derivationInputs();
+  t('liveDerivationInputs on this tree answers the measured set itself, never a degraded null',
+    liveDerivationInputs() === live);
+  const trackedNow = new Set(trackedFiles());
+  const workflowFiles = readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f));
+  t('LIVE: every measured derivation input is a tracked file — no fabricated path', live.size > 0 && [...live].every((rel) => trackedNow.has(rel)));
+  t(`LIVE: the inputs hold the root manifest and all ${workflowFiles.length} workflow files`,
+    live.has('package.json') && workflowFiles.length > 0 && workflowFiles.every((f) => live.has(`.github/workflows/${f}`)));
+  t('LIVE: they hold this engine, its data module (two levels down from every family) and its battery',
+    live.has('scripts/pm/dispatch-gates.mjs') && live.has('scripts/pm/dispatch-gates.data.mjs') && live.has('scripts/pm/dispatch-gates.self-test.mjs') && live.has('scripts/pm/check-dispatch-gates.mjs'));
+  t('LIVE: and every gate file of every discovered family', [...discoverFamilies().byCheck.values()].every((entry) => entry.files.every((f) => live.has(f))));
+  const trackedUnderScripts = [...trackedNow].filter((rel) => rel.startsWith('scripts/'));
+  const inputsUnderScripts = trackedUnderScripts.filter((rel) => live.has(rel));
+  t(`LIVE: the narrowing is not vacuous — ${inputsUnderScripts.length} of ${trackedUnderScripts.length} tracked files under scripts/ are inputs, the rest can move without moving a family`,
+    inputsUnderScripts.length > 0 && inputsUnderScripts.length < trackedUnderScripts.length);
+  t('LIVE: the generated SDUI manifest record — the specimen that read STALE on every ui landing — is tracked and is NOT an input',
+    trackedNow.has('scripts/sdui-manifest.record.json') && !live.has('scripts/sdui-manifest.record.json'));
   // The THIRD unmeasured door (#13392): distance reads, changed set does not.
   // Under the old shape this state collapsed into `changed: []` and rendered
   // as the quiet clear sentence — a reassurance manufactured from a FAILED
@@ -11132,6 +11184,15 @@ export function selfTest({ tier = 'full' } = {}) {
   t('it names the stale files themselves, not just a count', loudText.includes('scripts/pm/dispatch-gates.mjs') && loudText.includes('.github/workflows/lint.yml'));
   t('it says the exit code is no defence — the measured failure exited 0', loudText.includes('exited 0'));
   t('the count is a LOWER bound, because the base ref is local and only a fetch moves it', loudText.includes('At least') && loudText.includes(`git fetch ${DEFAULT_BASE_REMOTE} ${DEFAULT_BASE_BRANCH}`));
+  // The loud reading says when it was NOT narrowed — a `--tier` run, which
+  // reads no workflow by contract — and names the run that measures the
+  // inputs; a narrowed loud reading carries no such line, its list IS the
+  // inputs. Pinned on the literal shape above (no `ignored` field at all) and
+  // on the two real readings in the temporary repository below.
+  t('a loud reading with NO narrowing says so and names the deriving runs that measure the inputs',
+    loudText.includes('Not narrowed to what the answer is made of') && loudText.includes('--commands or --ran'));
+  t('and a loud reading that WAS narrowed carries no such line — its list is the inputs',
+    !driftLines({ base: 'aaaaaaa', behind: 2, changed: ['scripts/pm/dispatch-gates.mjs'], ignored: [], headDate: '2026-01-01T00:00:00Z', baseDate: '2026-01-02T00:00:00Z' }).join('\n').includes('Not narrowed'));
   t('drift reaches the banner, and stays behind the repo line that must come first', bannerLines({ identity: hereIdentity, paths: [], drift: { base: 'aaaaaaa', behind: 9, changed: ['scripts/x.mjs'] } })[0].includes('gate list derived from the tree of'));
   t('and a banner given no drift is byte-identical to before the flag existed', bannerLines({ identity: hereIdentity, paths: [], drift: null }).join('\n') === bannerLines({ identity: hereIdentity, paths: [] }).join('\n'));
 
@@ -11148,6 +11209,10 @@ export function selfTest({ tier = 'full' } = {}) {
     // Positive control: a clone level with its base must read zero, or a
     // non-zero reading below proves nothing.
     t('a checkout level with its base measures zero drift (positive control)', baseDrift({ cwd: clone }).behind === 0);
+    // A level tree never pays for a discovery: the inputs function is not
+    // called when nothing moved, which a thrower proves.
+    t('and a level tree never asks for the inputs — the function handed in is not called when nothing moved',
+      baseDrift({ cwd: clone, inputs: () => { throw new Error('asked for inputs on a level tree'); } }).behind === 0);
     // The other end of the distinction, measured rather than hand-built: `up`
     // was `git init`-ed and has no remote at all, so the base ref genuinely
     // does not resolve there — the fresh-checkout state the object literals
@@ -11194,14 +11259,57 @@ export function selfTest({ tier = 'full' } = {}) {
     t('drift against a real repo is measured from git, never assumed', offSurface.behind === 1 && !!offSurface.base);
     t('and a commit outside the derivation surface stays off the loud list — and the quiet render says what it can see',
       offSurface.changed.length === 0 && driftLines(offSurface).length === 2 && driftLines(offSurface)[0].includes('can SEE'));
+    // Upstream regenerates a record UNDER the roots that nothing derives from
+    // (#26334) — the card's specimen, a per-package SDUI manifest record. A
+    // temporary repository has no discovery of its own, so the inputs are
+    // handed in; the measured set is pinned above on the live tree. The raw
+    // reading is kept beside the narrowed one as the departure pin: it is
+    // what used to go loud.
+    const INPUTS = new Set(['scripts/check-thing.mjs', '.github/workflows/lint.yml', 'package.json']);
+    mkdirSync(nodePath.join(up, 'scripts', 'sdui-manifest.sources'), { recursive: true });
+    writeFileSync(nodePath.join(up, 'scripts', 'sdui-manifest.sources', 'core.json'), '{"sha256":"a"}\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'regenerate a record nothing derives from'], up);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
+    const rawRecord = baseDrift({ cwd: clone, inputs: null });
+    const recordOnly = baseDrift({ cwd: clone, inputs: INPUTS });
+    t('a record under the roots that nothing derives from IS what the raw diff reports — the reading that used to go loud — with ignored NOT MEASURED',
+      rawRecord.behind === 2 && rawRecord.changed.join() === 'scripts/sdui-manifest.sources/core.json' && rawRecord.ignored === null);
+    t('and the raw loud reading SAYS it was not narrowed, where the narrowed quiet one below names what it set aside',
+      driftLines(rawRecord).join('\n').includes('STALE TREE') && driftLines(rawRecord).join('\n').includes('Not narrowed to what the answer is made of'));
+    const recordOnlyLazy = baseDrift({ cwd: clone, inputs: () => INPUTS });
+    t('inputs handed in as a function are asked for once something moved, and read identically to the set',
+      JSON.stringify(recordOnlyLazy) === JSON.stringify(baseDrift({ cwd: clone, inputs: INPUTS })) && recordOnlyLazy.ignored.join() === 'scripts/sdui-manifest.sources/core.json');
+    t('narrowed by the inputs the same tree reads FRESH: changed empty, the record set aside by name',
+      recordOnly.behind === 2 && recordOnly.changed.length === 0 && recordOnly.ignored.join() === 'scripts/sdui-manifest.sources/core.json');
+    const recordOnlyText = driftLines(recordOnly).join('\n');
+    t('and it renders quiet — the visible-range sentence naming the set-aside record, no STALE TREE',
+      driftLines(recordOnly).length === 2 && recordOnlyText.includes('can SEE') && recordOnlyText.includes('none of them an input') && recordOnlyText.includes('scripts/sdui-manifest.sources/core.json') && !recordOnlyText.includes('STALE TREE'));
+    t('a foreign checkout handed no inputs is NOT narrowed by this tree\'s set — the raw roots are its only honest reading',
+      baseDrift({ cwd: clone }).changed.join() === 'scripts/sdui-manifest.sources/core.json');
     // Now upstream moves a file the answer IS derived from — the measured shape.
     mkdirSync(nodePath.join(up, 'scripts'), { recursive: true });
     writeFileSync(nodePath.join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'change a check script'], up);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const onSurface = baseDrift({ cwd: clone });
-    t('a commit INSIDE the derivation surface is caught and named', onSurface.behind === 2 && onSurface.changed.includes('scripts/check-thing.mjs'));
+    t('a commit INSIDE the derivation surface is caught and named', onSurface.behind === 3 && onSurface.changed.includes('scripts/check-thing.mjs'));
     t('and that is the case that goes loud', driftLines(onSurface).join('\n').includes('STALE TREE'));
+    const onSurfaceNarrowed = baseDrift({ cwd: clone, inputs: INPUTS });
+    t('narrowed by the inputs a changed gate script STILL goes loud, named alone, with the record still set aside — and no not-narrowed line',
+      onSurfaceNarrowed.changed.join() === 'scripts/check-thing.mjs' && onSurfaceNarrowed.ignored.join() === 'scripts/sdui-manifest.sources/core.json'
+        && driftLines(onSurfaceNarrowed).join('\n').includes('STALE TREE') && driftLines(onSurfaceNarrowed).join('\n').includes('Stale here: scripts/check-thing.mjs')
+        && !driftLines(onSurfaceNarrowed).join('\n').includes('Not narrowed'));
+    // The other two kinds of input the ruling names: a workflow and the root
+    // manifest, moving upstream together.
+    mkdirSync(nodePath.join(up, '.github', 'workflows'), { recursive: true });
+    writeFileSync(nodePath.join(up, '.github', 'workflows', 'lint.yml'), 'on: pull_request\n');
+    writeFileSync(nodePath.join(up, 'package.json'), '{"scripts":{"check:thing":"node scripts/check-thing.mjs"}}\n');
+    gd(['add', '-A'], up); gd(['commit', '-qm', 'a workflow and the root manifest move'], up);
+    gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
+    const workflowAndManifest = baseDrift({ cwd: clone, inputs: INPUTS });
+    t('a workflow and the root manifest moving upstream are inputs and go loud, both named',
+      workflowAndManifest.behind === 4 && workflowAndManifest.changed.includes('.github/workflows/lint.yml') && workflowAndManifest.changed.includes('package.json')
+        && driftLines(workflowAndManifest).join('\n').includes('STALE TREE'));
     // Reachability from an ORDINARY checkout, which is what makes the door
     // above a state of working clones and not only of repos built to show it:
     // `clone` is fully fetched and has just measured a real distance, and one

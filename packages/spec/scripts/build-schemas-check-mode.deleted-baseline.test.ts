@@ -821,7 +821,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).toContain("waives THIS file's tombstone requirement only");
 
       // The aged-out tombstone survives as A route, no longer as THE reason.
-      expect(output).toContain('aged out (~two majors)');
+      expect(output).toContain('aged out (one major, #25767)');
       expect(output).toContain('RETIRED_KEYS_BY_MAJOR');
       expect(output).not.toContain('ONE legitimate reason');
 

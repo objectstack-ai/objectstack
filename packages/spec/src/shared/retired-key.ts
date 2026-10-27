@@ -89,8 +89,16 @@
  * code review.
  *
  * Tombstones age out, exactly like the `UNKNOWN_KEY_GUIDANCE` entries in
- * `data/object.zod.ts`: drop one ~two majors after the removal, by which point
- * it is archaeology rather than an upgrade (the history lives in CHANGELOG.md).
+ * `data/object.zod.ts`: a tombstone lives through the protocol major AFTER the
+ * one its key was removed in and leaves when the next major is cut (one major,
+ * ADR-0087 amendment 2026-10-26, #25767; ~two majors before that). After it
+ * leaves, the key is refused as a plain strict unknown key and the refusal's
+ * guide sentence (after its fix channels, ahead of its history) points at the
+ * protocol upgrade guide
+ * (`shared/protocol-upgrade-guide.ts`), where the history lives alongside
+ * CHANGELOG.md. Its D2 conversion leaves with it; the migration chain's step
+ * does not — `os migrate meta --from <N>` still replays down to the support
+ * floor (`MIGRATION_SUPPORT_FLOOR`), which only a release-policy ruling moves.
  */
 
 import { z } from 'zod';

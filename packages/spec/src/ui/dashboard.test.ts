@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '../shared/protocol-upgrade-guide';
 import {
   DashboardSchema,
   DashboardWidgetSchema,
@@ -218,10 +219,11 @@ describe('widget unknown-key message order — fix before history', () => {
   });
 
   it('is unchanged in SHAPE when no fix matches — full-message pin', () => {
-    // A key with no family, no guidance and no near-declared-key: the history
-    // follows the key statement directly. Any stray separator fails here.
+    // A key with no family, no guidance and no near-declared-key: the upgrade
+    // guide sentence (#25767, the last fix channel) and then the history follow
+    // the key statement directly. Any stray separator fails here.
     expect(messageFor({ zzWrongKey: 'blue' }))
-      .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${HISTORY}`);
+      .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`);
   });
 
   it('a near-miss of a DECLARED key now gets the rename the bespoke map never offered', () => {
@@ -233,7 +235,7 @@ describe('widget unknown-key message order — fix before history', () => {
     const m = messageFor({ colourVariant: 'blue' });
     expect(m).toBe(
       'Unrecognized key(s) on this dashboard widget: `colourVariant`. '
-      + `Did you mean \`colourVariant\` → \`colorVariant\`? ${HISTORY}`,
+      + `Did you mean \`colourVariant\` → \`colorVariant\`? ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${HISTORY}`,
     );
   });
 
@@ -540,7 +542,7 @@ describe('date-range preset vocabulary — one source, in the spec', () => {
 describe('DashboardWidgetSchema — retired `responsive`', () => {
   const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
 
-  it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
+  it('REFUSES an authored `responsive` as a strict unknown key, pointing at the upgrade guide (#25767)', () => {
     let message = '';
     try {
       DashboardWidgetSchema.parse({
@@ -549,24 +551,13 @@ describe('DashboardWidgetSchema — retired `responsive`', () => {
       });
     } catch (e) { message = String((e as Error).message); }
 
-    // The prescription itself, in the four parts an upgrading author needs:
-    // the fully-qualified key, the version, the issue, and the fix.
-    expect(message).toMatch(/dashboard\.widgets\[\]\.responsive/);
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 D2/);
-    expect(message).toMatch(/Delete the key/);
-    // The redirect correction (#11027): this message used to prescribe
-    // `page.components[].responsive` as the live home of the shared shape;
-    // that key measured equally unread and is retired too, so the message
-    // must (a) say so rather than silently dropping the old promise — an
-    // author who followed it needs the correction — and (b) point at the
-    // channel that IS applied.
-    expect(message).toMatch(/page\.components\[\]\.responsive[\s\S]*/);
-    expect(message).toMatch(/responsiveStyles/);
-    // `.strict()` on this schema would answer a DELETED key with a generic
-    // unrecognized-key error. The tombstone is what makes it a prescription —
-    // if this ever regresses to the strict path, this assertion is the tripwire.
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The tombstone was a 16.x retirement kit and aged out (ADR-0087 D2 = A):
+    // the strict widget shape refuses the key, and the refusal's trailing
+    // sentence names the guide that carries the prescription (the #11027
+    // `responsiveStyles` redirect included) from here. Never a silent strip.
+    expect(message).toMatch(/Unrecognized key\(s\)[^\n]*`responsive`/);
+    expect(message).toMatch(/Keys retired before the previous protocol major are no longer prescribed here/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('still accepts a widget with no `responsive` (the retirement strips nothing else)', () => {
@@ -622,47 +613,26 @@ describe('DashboardWidgetSchema — retired action trio + `aria`', () => {
     ['actionUrl', 'export_dashboard_pdf'],
     ['actionType', 'script'],
     ['actionIcon', 'download'],
-  ] as const)('REJECTS an authored `%s` with the prescription', (key, value) => {
+  ] as const)('REFUSES an authored `%s` as a strict unknown key, pointing at the upgrade guide (#25767)', (key, value) => {
     const message = parseWith({ [key]: value });
 
-    // The prescription, in the parts an upgrading author needs: the
-    // fully-qualified key, the version, the ADR, and the fix. NOT the tracker
-    // id — it resolves to nothing for the author reading this refusal.
-    expect(message).toMatch(new RegExp(`dashboard\\.widgets\\[\\]\\.${key}`));
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 enforce-or-remove/);
-    expect(message).not.toMatch(/#\d{3,5}\b/);
-    // The three went together — an author who deletes only the one key they
-    // were told about would hit this same error twice more.
-    expect(message).toMatch(/delete all three/i);
-    // It must name the surviving home, or this reads as "dashboards cannot have
-    // buttons" rather than "the button belongs on the header".
-    expect(message).toMatch(/header\.actions\[\]/);
-    // The tombstone is what makes it a prescription; a plain `.strict()`
-    // rejection of a DELETED key would be a generic unrecognized-key error.
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The trio's tombstones were 16.x retirement kits and aged out (ADR-0087
+    // D2 = A). The strict widget shape refuses each key; the "delete all
+    // three, the button lives on `header.actions[]`" prescription is the
+    // guide's now, named by the refusal's trailing sentence. Never a strip.
+    expect(message).toMatch(new RegExp(`Unrecognized key\\(s\\)[^\\n]*\`${key}\``));
+    expect(message).toMatch(/Keys retired before the previous protocol major are no longer prescribed here/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
-  it('REJECTS an authored `aria` with the prescription, naming its surviving homes', () => {
+  it('REFUSES an authored `aria` the same way (#25767)', () => {
     const message = parseWith({ aria: { ariaLabel: 'Total orders' } });
 
-    expect(message).toMatch(/dashboard\.widgets\[\]\.aria/);
-    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
-    expect(message).toMatch(/ADR-0049 D2/);
-    expect(message).toMatch(/Delete the key/);
-    // The shared shape survives elsewhere. Without this, the message reads as
-    // "AriaProps is gone", which would send an author deleting live metadata.
-    //
-    // ⚠️ This assertion used to require `/app\.aria/` — and `App.aria` is a
-    // `retiredKey()` tombstone removed in this same 17.0.0, so the pin was
-    // holding the prescription ON a dead surface (#6756). Re-aimed at the
-    // surfaces that really do still declare `aria: AriaPropsSchema` and are
-    // graded `live` in the liveness ledger. The full both-directions
-    // enumeration pin lives in `aria-carrier-tombstones.test.ts`.
-    expect(message).toMatch(/page\.aria/);
-    expect(message).toMatch(/page\.components\[\]\.aria/);
-    expect(message).not.toMatch(/app\.aria/i);
-    expect(message).not.toMatch(/Unrecognized key/);
+    // The surviving `aria` carriers (`page.aria`, `page.components[].aria`)
+    // are enumerated in `aria-carrier-tombstones.test.ts`; this refusal no
+    // longer names them itself — the guide does.
+    expect(message).toMatch(/Unrecognized key\(s\)[^\n]*`aria`/);
+    expect(message).toMatch(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('still accepts a widget carrying none of the four (nothing else was stripped)', () => {
@@ -779,11 +749,14 @@ describe('DashboardHeaderAction fields carry an item-level `title`', () => {
   const RETIRED_DESCRIPTION_PREFIX = '[REMOVED] ';
 
   /**
-   * Every `retiredKey()` tombstone on the `widgets[]` row, BY NAME, derived
-   * from `z.toJSONSchema(DashboardSchema)` on this tree — the same five under
-   * `io: 'input'` and `io: 'output'`, out of 22 row properties.
+   * Every `retiredKey()` tombstone on the dashboard ROOT, BY NAME, derived
+   * from `z.toJSONSchema(DashboardSchema)` on this tree — the same set under
+   * `io: 'input'` and `io: 'output'`. The five on the `widgets[]` row
+   * (`actionIcon`/`actionType`/`actionUrl`/`aria`/`responsive`) were ≤16.x
+   * kits and aged out on #25767: the row carries no tombstone now, so the
+   * root's 17.x tombstone carries the rule and the row is the control.
    */
-  const WIDGET_ROW_TOMBSTONES = ['actionIcon', 'actionType', 'actionUrl', 'aria', 'responsive'] as const;
+  const ROOT_TOMBSTONES = ['refreshInterval'] as const;
 
   // The console derives the panel schema with `io: 'input'`; `GET /meta`
   // derives it in output mode. The name must survive both.
@@ -807,21 +780,23 @@ describe('DashboardHeaderAction fields carry an item-level `title`', () => {
       // could each be titled with this file still green — so the set is
       // DERIVED from the served schema and every member is asserted.
       // (`widgets[].id` held this role until its carrier was titled.)
-      const widgetProps = js.properties.widgets.items.properties;
-      const tombstones = Object.keys(widgetProps).filter(
-        (k) =>
-          typeof widgetProps[k]?.description === 'string' &&
-          widgetProps[k].description.startsWith(RETIRED_DESCRIPTION_PREFIX),
-      );
+      const isTombstone = (props: any, k: string) =>
+        typeof props[k]?.description === 'string' && props[k].description.startsWith(RETIRED_DESCRIPTION_PREFIX);
+      const rootProps = js.properties;
+      const tombstones = Object.keys(rootProps).filter((k) => isTombstone(rootProps, k));
       // Floor, BY NAME — the loop below is vacuously green over an EMPTY set,
       // and the `'Widget ID'` leg guards only that the node resolved, not that
       // the predicate still selects anything. A floor rather than an equality:
-      // a sixth tombstone is covered by the loop on the day it lands, which is
+      // a second tombstone is covered by the loop on the day it lands, which is
       // the reason for deriving the set instead of listing it.
-      expect(tombstones.slice().sort()).toEqual(expect.arrayContaining([...WIDGET_ROW_TOMBSTONES]));
+      expect(tombstones.slice().sort()).toEqual(expect.arrayContaining([...ROOT_TOMBSTONES]));
       for (const key of tombstones) {
-        expect(widgetProps[key].title, `widgets.items.properties.${key}.title`).toBeUndefined();
+        expect(rootProps[key].title, `properties.${key}.title`).toBeUndefined();
       }
+      // CONTROL (#25767): the `widgets[]` row's five ≤16.x tombstones aged out
+      // — they are strict unknown keys now, not rows, so the row derives EMPTY.
+      const widgetProps = js.properties.widgets.items.properties;
+      expect(Object.keys(widgetProps).filter((k) => isTombstone(widgetProps, k))).toEqual([]);
       // Lit — the authorable sibling really does carry one, so the lines above
       // measure the tombstone rule, not an emitter that never writes titles.
       expect(widgetProps.id.title).toBe('Widget ID');

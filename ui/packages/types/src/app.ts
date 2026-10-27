@@ -748,6 +748,82 @@ export interface AppComponentSchema extends BaseSchema, Omit<SpecApp, (typeof AP
   actions?: never;
 
   /**
+   * RETIRED upstream at @objectstack/spec 17.0.0; its tombstone aged out of
+   * `AppSchema` at spec 18.2 (objectstack#25767, ADR-0087 one major on).
+   * Through 18.1 this face inherited the spec's retired-key type by reference
+   * from the `Omit< App, … >` projection above; the projection now carries
+   * nothing under the name, so the refusal is this face's own — `?: never` is
+   * the twin of `zod/app.zod.ts`'s `agedOutSpecKeyRefusal` arm, and an authored
+   * value is a compile error here as it is a parse error there. The same holds
+   * for the seven members after it (`homePageId`, `objects`, `apis`, `sharing`,
+   * `embed`, `mobileNavigation`, `aria`). Pinned by
+   * `__tests__/page-app-dashboard-spec-parity.test.ts` and
+   * `__tests__/twins-spec-by-reference-9736.test.ts`.
+   *
+   * @deprecated Not a key of this contract. An app is versioned by its owning
+   * package: `manifest.version`.
+   */
+  version?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. The landing page is the first
+   * reachable `navigation` item (by `order`); the root landing follows `isDefault`.
+   */
+  homePageId?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. Objects belong to the stack
+   * (`defineStack({ objects })`); an app reaches them through its navigation.
+   */
+  objects?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. Declare endpoints on the stack,
+   * `defineStack({ apis })` (ADR-0121) — read the protocol upgrade guide's
+   * `declarative-apis-endpoints-live` entry before moving one.
+   */
+  apis?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. Public access is granted per form
+   * view (`FormView.sharing`).
+   */
+  sharing?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. Embedding is a per-form-view
+   * surface (`FormView.sharing`), not an app-level switch.
+   */
+  embed?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. The console's mobile navigation
+   * mode is the `mobileNavMode` prop of `AppSchemaRenderer` or the same key of
+   * an `app-schema-renderer` node (see {@link AppComponentSchema.mobileNavMode}).
+   */
+  mobileNavigation?: never;
+
+  /**
+   * Aged-out spec tombstone (objectstack#25767); see `version` above.
+   *
+   * @deprecated Not a key of this contract. Declare `aria` on the page
+   * component that renders the DOM node (`page.components[].aria`).
+   */
+  aria?: never;
+
+  /**
    * Required permissions (ObjectStack Spec v2.0.1)
    * Permissions required to access this application
    */

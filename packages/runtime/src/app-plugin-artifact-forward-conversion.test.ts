@@ -67,10 +67,19 @@ import { AppPlugin } from './app-plugin.js';
 
 /**
  * One artifact carrying a legacy/retired shape in every security collection
- * the ADR-0087 registry can reach. `engines.protocol: '^17.1.0'` is the real
- * incident's declared floor — below the installed `@objectstack/spec`, so the
- * door's versioned window opens (the same evidence the 17.1-built hotcrm
+ * the ADR-0087 registry can STILL reach. `engines.protocol: '^17.1.0'` is the
+ * real incident's declared floor — below the installed `@objectstack/spec`, so
+ * the door's versioned window opens (the same evidence the 17.1-built hotcrm
  * artifact carries).
+ *
+ * [#25767] The kits retired at or below protocol 16.x aged out of the registry
+ * one major on (the `roles` → `positions` collection rename, the RLS
+ * `priority` tombstone, the `sharedWith.type: 'role'` recipient reconcile), so
+ * no conversion governs those keys any more: the door refuses each as a strict
+ * unknown key / invalid option naming the upgrade guide (pinned below), and
+ * this fixture writes them canonically. The 17.x kits — the `allowRestore` /
+ * `allowPurge` grant bits (17.2.0) and `accessLevel: 'full'` (17.7.0) — are
+ * what the conversion axis still measures.
  */
 const ARTIFACT = {
     manifest: {
@@ -80,9 +89,10 @@ const ARTIFACT = {
         version: '1.0.0',
         engines: { protocol: '^17.1.0' },
     },
-    // `roles` → `positions` is a COLLECTION-KEY rename (`stack-roles-to-positions`,
-    // ADR-0090 D3). The raw reader looks for `positions` and finds nothing.
-    roles: [{ name: 'sales_rep', label: 'Sales Rep' }],
+    // Canonical since #25767: the `roles` → `positions` collection-key rename
+    // (`stack-roles-to-positions`, ADR-0090 D3) aged out, and `roles` is a
+    // strict unknown key on the stack definition now.
+    positions: [{ name: 'sales_rep', label: 'Sales Rep' }],
     permissions: [
         {
             name: 'support_agent',
@@ -109,8 +119,9 @@ const ARTIFACT = {
                     allowPurge: false,
                 },
             },
-            // `priority` is a `retiredKey()` tombstone on the RLS policy
-            // (`permission-rls-priority-removed`).
+            // No `priority`: its tombstone (`permission-rls-priority-removed`)
+            // aged out at #25767, so the key is a strict unknown key on the
+            // RLS policy now, not a conversion-governed one.
             rowLevelSecurity: [
                 {
                     name: 'own_tasks',
@@ -118,7 +129,6 @@ const ARTIFACT = {
                     operation: 'select',
                     using: 'assignee == current_user.email',
                     enabled: true,
-                    priority: 10,
                 },
             ],
         },
@@ -129,13 +139,15 @@ const ARTIFACT = {
             name: 'share_open_deals',
             type: 'criteria',
             object: 'crm_deal',
-            // Both legacy spellings are REJECTED by the current schema:
-            // `accessLevel: 'full'` (→ 'edit') and the recipient type
-            // `'role'` (→ 'position'). A raw copy of this item is not merely
-            // stale — it is unparseable at the next re-validating seam.
+            // The legacy level is REJECTED by the current schema:
+            // `accessLevel: 'full'` (→ 'edit', the 17.7.0 conversion). A raw
+            // copy of this item is not merely stale — it is unparseable at the
+            // next re-validating seam. The recipient is written canonically:
+            // the `'role'` → `'position'` reconcile aged out at #25767, and
+            // `'role'` is an invalid option at the door now.
             accessLevel: 'full',
             condition: 'record.status == "open"',
-            sharedWith: { type: 'role', value: 'sales_mgr' },
+            sharedWith: { type: 'position', value: 'sales_mgr' },
         },
     ],
 };
@@ -233,19 +245,20 @@ function diffPaths(a: any, b: any, at = ''): string[] {
 /**
  * The keys the ADR-0087 conversion layer governs on these collections — the
  * axis #12844 was about, enumerated from the registry
- * (`packages/spec/src/conversions/registry.ts`): the two `permissions`
- * entries, the two `sharingRules` entries, and the `roles` -> `positions`
- * collection rename. Nothing else in that registry reaches the four security
- * collections.
+ * (`packages/spec/src/conversions/registry.ts`): the `permissions` grant-bit
+ * entry (`permission-allow-restore-purge-removed`, 17.2.0) and the
+ * `sharingRules` level entry (`sharing-rule-access-level-full-to-edit`,
+ * 17.7.0). Nothing else in that registry reaches the four security
+ * collections: the RLS `priority`, the `'role'` recipient and the `roles` ->
+ * `positions` rename left it at #25767 (a kit retired at or below 16.x ages
+ * out one major on) and are strict refusals now, not conversions.
  */
 const CONVERSION_GOVERNED_PATHS = [
     'objects.crm_ticket.allowRestore',
     'objects.crm_ticket.allowPurge',
     'objects.crm_lead.allowRestore',
     'objects.crm_lead.allowPurge',
-    'rowLevelSecurity.0.priority',
     'accessLevel',
-    'sharedWith.type',
 ];
 
 /** The ADR-0010 envelope `applyProtection` stamps from the manifest. */
@@ -301,14 +314,44 @@ describe('#12892 step 2 — the artifact boot has ONE registrar for its security
         // seam (Studio re-save through `saveMetaItem`) would apply.
         const raw = bytes();
         expect(raw.permissions[0].objects.crm_ticket.allowRestore).toBe(true);
-        expect(raw.permissions[0].rowLevelSecurity[0].priority).toBe(10);
         expect(raw.sharingRules[0].accessLevel).toBe('full');
-        expect(raw.sharingRules[0].sharedWith.type).toBe('role');
-        expect(raw.positions).toBeUndefined();
-        expect(raw.roles).toHaveLength(1);
+        // Written canonically since #25767: no conversion reaches these now.
+        expect(raw.permissions[0].rowLevelSecurity[0]).not.toHaveProperty('priority');
+        expect(raw.sharingRules[0].sharedWith.type).toBe('position');
+        expect(raw.positions).toHaveLength(1);
+        expect(raw.roles).toBeUndefined();
 
         // And the raw bytes are genuinely unparseable as authored.
         expect(ObjectStackDefinitionSchema.safeParse(raw).success).toBe(false);
+    });
+
+    it('[#25767] the aged-out ≤16.x spellings are refused at the door outright — strict unknown keys naming the upgrade guide, an invalid recipient option — with no conversion to reach them', () => {
+        // Each kit retired at or below protocol 16.x left the registry one
+        // major on: `stack-roles-to-positions`, `permission-rls-priority-removed`
+        // and the `'role'` recipient reconcile. The strict parse the door
+        // applies says so by name; the ADR-0057 reader has nothing to convert.
+        const messages = (r: ReturnType<typeof ObjectStackDefinitionSchema.safeParse>) =>
+            r.success ? '' : r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
+
+        const withRoles = { ...bytes(), roles: [{ name: 'legacy_rep', label: 'Legacy Rep' }] };
+        const roles = ObjectStackDefinitionSchema.safeParse(withRoles);
+        expect(roles.success).toBe(false);
+        expect(messages(roles)).toMatch(/Unrecognized key\(s\) on this stack definition: `roles`/);
+        expect(messages(roles)).toContain('https://objectstack.ai/docs/protocol-upgrade');
+
+        const withPriority = bytes();
+        withPriority.permissions[0].rowLevelSecurity[0].priority = 10;
+        const priority = ObjectStackDefinitionSchema.safeParse(withPriority);
+        expect(priority.success).toBe(false);
+        expect(messages(priority)).toMatch(/Unrecognized key\(s\) on this RLS policy: `priority`/);
+        expect(messages(priority)).toContain('https://objectstack.ai/docs/protocol-upgrade');
+
+        const withRole = bytes();
+        withRole.sharingRules[0].sharedWith = { type: 'role', value: 'sales_mgr' };
+        const role = ObjectStackDefinitionSchema.safeParse(withRole);
+        expect(role.success).toBe(false);
+        expect(messages(role)).toMatch(/sharingRules\.0\.sharedWith\.type: Invalid option/);
+        expect(messages(role)).toContain('"position"');
     });
 
     // ── ARTIFACT boot: one registrar ──────────────────────────────────────
@@ -391,7 +434,6 @@ describe('#12892 step 2 — the artifact boot has ONE registrar for its security
         expect(perm.objects.crm_ticket).not.toHaveProperty('allowPurge');
         expect(perm.objects.crm_lead).not.toHaveProperty('allowRestore');
         expect(perm.objects.crm_lead).not.toHaveProperty('allowPurge');
-        expect(perm.rowLevelSecurity[0]).not.toHaveProperty('priority');
         expect(perm.objects.crm_ticket).toMatchObject({
             allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
         });
@@ -408,10 +450,13 @@ describe('#12892 step 2 — the artifact boot has ONE registrar for its security
         expect(rule.sharedWith.type).toBe('position');
     });
 
-    it('non-artifact boot: positions — the collection-key rename reaches AppPlugin', async () => {
+    it('non-artifact boot: positions — the canonical collection key reaches AppPlugin', async () => {
         const bundle = collapse(await readerBundle());
         // Before #12844 this reader looked for `positions` on bytes that
-        // spelled the collection `roles`, and registered NOTHING.
+        // spelled the collection `roles`, and registered NOTHING; since #25767
+        // `roles` has no conversion at all (a strict unknown key at the door),
+        // so the fixture spells the collection `positions` and this reader
+        // registers it as authored.
         expect(bundle.get('position:sales_rep')).toMatchObject({
             name: 'sales_rep',
             label: 'Sales Rep',
@@ -449,7 +494,6 @@ describe('#12892 step 2 — the artifact boot has ONE registrar for its security
             expect(perm.objects.crm_ticket).not.toHaveProperty('allowPurge');
             expect(perm.objects.crm_lead).not.toHaveProperty('allowRestore');
             expect(perm.objects.crm_lead).not.toHaveProperty('allowPurge');
-            expect(perm.rowLevelSecurity[0]).not.toHaveProperty('priority');
             const rule = copy.get('sharing_rule:share_open_deals');
             expect(rule.accessLevel).toBe('edit');
             expect(rule.sharedWith.type).toBe('position');

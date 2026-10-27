@@ -298,15 +298,22 @@ describe('what stays as it was (lit controls)', () => {
     expect(flowNodeConfigRefusals('decision', { condition: 'a == b', whateverElse: 1 })).toEqual([]);
   });
 
-  it('CONTROL: a tombstoned retired script key keeps its existing path', () => {
+  it('an aged-out retired script key is an unknown key now, so the key arm refuses it at its own path (#25767)', () => {
+    // `actionType`'s tombstone was a 16.x retirement kit and left the shape at
+    // 18 (ADR-0087 D2 = A). The contract's own parse refuses it as an unknown
+    // key naming the upgrade guide, and this arm — which used to hold back
+    // because the tombstone answered at its own path — now draws its one
+    // refusal at the key, like any other undeclared key.
     const config = { ...MEASURED, actionType: 'email' };
     const own = getBuiltinNodeConfigContracts().get('script')!.schema.safeParse(config);
     expect(own.success ? [] : own.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.') }))).toEqual([
-      { code: 'invalid_type', path: 'actionType' },
+      { code: 'unrecognized_keys', path: '' },
     ]);
-    expect(own.success ? '' : own.error!.issues[0]!.message).toMatch(/was removed in @objectstack\/spec 17/);
-    expect(flowNodeConfigRefusals('script', config)).toEqual([]);
-    expect(issuesOf(flowWith('script', config))).toEqual([]);
+    expect(own.success ? '' : own.error!.issues[0]!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(flowNodeConfigRefusals('script', config).map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'node-config-refused-by-contract', path: 'actionType' },
+    ]);
+    expect(issuesOf(flowWith('script', config)).map(({ path }) => path)).toEqual(['nodes.1.config.actionType']);
   });
 });
 
@@ -337,18 +344,20 @@ describe('try_catch: its retry is closed, so the spec judges its keys like every
       .map(({ path }) => path).sort()).toEqual(['bogusKey', 'retry.other']);
   });
 
-  it('a retryDelayMs the conversion leaves behind is refused at its own path, in the tombstone\'s words', () => {
+  it('a retryDelayMs the conversion leaves behind is refused at its own path, as the unknown key it is now', () => {
     // `retry-policy-converged` keeps both spellings when the values differ, and
-    // leaves a `null`: registration's walk refused both as undeclared keys.
+    // leaves a `null`: registration's walk refused both as undeclared keys. The
+    // spelling's tombstone aged out at 18 (#25767), so the refusal is the
+    // strict unknown-key one — naming the key, the policy, and the upgrade
+    // guide the rename now lives in — closed by the arm's own "rename or remove".
     for (const retry of [{ backoffMs: 500, retryDelayMs: 700 }, { retryDelayMs: null }]) {
       const config = { try: TRY_REGION, retry };
       const refusals = flowNodeConfigRefusals('try_catch', config);
       expect(refusals.map(({ code, path }) => ({ code, path })), JSON.stringify(retry)).toEqual([
         { code: 'node-config-refused-by-contract', path: 'retry.retryDelayMs' },
       ]);
-      // The tombstone's upgrade is the remedy; no "undeclared key" closing on a key the contract declares retired.
-      expect(refusals[0]!.message).toContain('Rename the key to `backoffMs`');
-      expect(refusals[0]!.message).not.toMatch(/Rename the key to one/);
+      expect(refusals[0]!.message).toContain('Unrecognized key(s) on this retry policy: `retryDelayMs`');
+      expect(refusals[0]!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
       expect(issuesOf(flowWith('try_catch', config)).map(({ path }) => path)).toEqual(['nodes.1.config.retry.retryDelayMs']);
     }
   });
@@ -417,7 +426,8 @@ describe('try_catch: its retry is closed, so the spec judges its keys like every
     }
     expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
     expect(refusal!.issues!.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.retryDelayMs']);
-    expect(refusal!.issues![0]!.message).toContain('Rename the key to `backoffMs`');
+    expect(refusal!.issues![0]!.message).toContain('Unrecognized key(s) on this retry policy: `retryDelayMs`');
+    expect(refusal!.issues![0]!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 });
 

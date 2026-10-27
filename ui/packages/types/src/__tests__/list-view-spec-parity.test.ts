@@ -147,6 +147,19 @@ const HANDLER_KEY_REFUSALS = new Set<string>([
  */
 const PAGE_COMPONENT_ENVELOPE = new Set<string>(['dataSource']);
 
+/**
+ * A FIFTH category (objectstack#25767): spec keys whose `retiredKey()`
+ * tombstones aged out of the spec's `ListViewSchema` at 18.2, one major on
+ * (ADR-0087). Through 18.1 each flowed in by reference and refused at its own
+ * path; the spec now refuses each as an unknown key, and this arm declares the
+ * refusal itself (`agedOutSpecKeyRefusal`) so `BaseSchema.passthrough()` does
+ * not keep an authored value. Like {@link HANDLER_KEY_REFUSALS} the arm accepts
+ * nothing under these names, and the test below checks that — plus that the
+ * spec really declares none of them — so this set cannot park a live field.
+ * Full pins: `./list-view-aged-out-spec-keys-25767.test.ts`.
+ */
+const AGED_OUT_SPEC_REFUSALS = new Set<string>(['striped', 'bordered', 'virtualScroll', 'responsive', 'performance']);
+
 describe('ListView spec parity (#2231 drift guard)', () => {
   it('covers every @objectstack/spec ListView field (spec cannot grow a field objectui ignores)', () => {
     // Fails when the spec adds a field that objectui neither imports nor envelope-owns —
@@ -170,9 +183,23 @@ describe('ListView spec parity (#2231 drift guard)', () => {
         !ENVELOPE.has(k) &&
         !SANCTIONED_LOCAL.has(k) &&
         !HANDLER_KEY_REFUSALS.has(k) &&
-        !PAGE_COMPONENT_ENVELOPE.has(k),
+        !PAGE_COMPONENT_ENVELOPE.has(k) &&
+        !AGED_OUT_SPEC_REFUSALS.has(k),
     );
     expect(rogue).toEqual([]);
+  });
+
+  it('every AGED_OUT_SPEC_REFUSALS member really refuses and is no spec member — the set cannot hide a field (objectstack#25767)', () => {
+    const node = (extra: Record<string, unknown>) => ({ type: 'list-view', objectName: 'accounts', ...extra });
+    // ⭐ CONTROL first: the bare node parses, or the loop below proves nothing.
+    expect(OuiListViewSchema.safeParse(node({})).success).toBe(true);
+    for (const key of AGED_OUT_SPEC_REFUSALS) {
+      expect(ouiKeys.has(key), `${key} is listed but not declared on the arm`).toBe(true);
+      expect(specShape[key], `the spec declares ${key} again — triage it as a spec field instead`).toBeUndefined();
+      for (const value of [true, false, {}, 'x']) {
+        expect(OuiListViewSchema.safeParse(node({ [key]: value })).success, `${key} accepted ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
   });
 
   it('every PAGE_COMPONENT_ENVELOPE member is the spec binding — the set cannot hide a local field (objectui#11070)', () => {

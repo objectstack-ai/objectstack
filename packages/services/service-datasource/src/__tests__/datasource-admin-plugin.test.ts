@@ -414,11 +414,18 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
 
   // #4456 — this restore path is a stored-row rehydration seam (ADR-0087 D2
   // addendum, #3903): it reads sys_metadata directly, so it must replay the
-  // conversion chain itself. A row persisted before the #4410 config gate may
-  // carry the legacy spellings the factory's deleted `??` fallbacks used to
-  // tolerate; without the replay, a sqlite `file:` row would silently fall
-  // back to `:memory:` — the data-loss shape the conversion exists to prevent.
-  it('restores a pre-#4410 row with legacy config keys CANONICAL (conversion chain replayed)', async () => {
+  // conversion chain itself. [#25767] The chain it replays is the REGISTRY,
+  // and a kit retired at or below protocol 16.x leaves the registry one major
+  // on: the pre-#4410 config-key aliases (`file` → `filename`, `connectionString`
+  // / `user` → `url` / `username`, the mongo `uri` → `url`) are no longer
+  // conversions, so a row still spelled that way is served AS STORED — and the
+  // factory's deleted `??` fallbacks mean a sqlite `file:` row would open
+  // `:memory:`, the shape the retired conversion used to prevent. Per the
+  // ruling, such a row is canonicalized once with `os migrate meta --stored
+  // --apply` on 18.1 or earlier; nothing at 18.2 rewrites it. What the seam
+  // still replays is every 17.x row — the driver alias `mongo` → `mongodb`
+  // (`datasource-driver-mongo-to-mongodb`, 17.7.0) below.
+  it('restores a stored row through the registry: a 17.x kit still replays (the mongo driver alias); the aged-out ≤16.x config aliases are served as stored', async () => {
     const data = fakeSysMetadataEngine();
     const now = new Date().toISOString();
     for (const [name, driver, config] of [
@@ -444,14 +451,16 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
     // The list DTO is a summary; `getDatasource` (concrete service) is the
     // config-bearing read the admin routes serve.
     const svc = b.service as unknown as DatasourceAdminService;
-    expect((await svc.getDatasource('legacy_sqlite'))?.config).toEqual({ filename: '/tmp/legacy.db' });
+    // Served as stored: no conversion reaches these spellings any more.
+    expect((await svc.getDatasource('legacy_sqlite'))?.config).toEqual({ file: '/tmp/legacy.db' });
     expect((await svc.getDatasource('legacy_pg'))?.config).toEqual({
-      url: 'postgresql://db.internal/analytics',
-      username: 'analyst',
+      connectionString: 'postgresql://db.internal/analytics',
+      user: 'analyst',
     });
-    expect((await svc.getDatasource('legacy_mongo'))?.config).toEqual({
-      url: 'mongodb://mongo.internal:27017/events',
-    });
+    // The 17.7.0 driver alias still replays; the ≤16.x `uri` alias does not.
+    const mongo = await svc.getDatasource('legacy_mongo');
+    expect(mongo?.driver).toBe('mongodb');
+    expect(mongo?.config).toEqual({ uri: 'mongodb://mongo.internal:27017/events' });
   });
 
   it('removes the durable sys_metadata row when a datasource is deleted', async () => {

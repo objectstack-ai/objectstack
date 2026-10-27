@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1548 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1549 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 34 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 37 | 286 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 37 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 171 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1548** | 14 protocol modules |
+| **Total** | **200** | **1549** | 14 protocol modules |
 
 ---
 
@@ -319,7 +319,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 286 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 287 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -360,7 +360,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
 | [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |
 | [`tracing.zod.ts`](/docs/references/system/tracing) | `OpenTelemetryCompatibility`, `OtelExporterType`, `SamplingDecision`, `SamplingStrategyType`, `Span`, `SpanAttributeValue`, `SpanAttributes`, `SpanEvent`, `SpanKind`, `SpanLink`, `SpanStatus`, `TraceContext`, `TraceContextPropagation`, `TraceFlags`, `TracePropagationFormat`, `TraceSamplingConfig`, `TraceState`, `TracingConfig` |
-| [`translation.zod.ts`](/docs/references/system/translation) | `ActionResultDialogTranslation`, `CoverageBreakdownEntry`, `FieldTranslation`, `Locale`, `ObjectTranslationData`, `PlatformTranslationBundle`, `PlatformTranslationData`, `TranslationBundle`, `TranslationConfig`, `TranslationCoverageResult`, `TranslationData`, `TranslationDiffItem`, `TranslationDiffStatus`, `TranslationItem` |
+| [`translation.zod.ts`](/docs/references/system/translation) | `ActionResultDialogTranslation`, `CoverageBreakdownEntry`, `FieldTranslation`, `Locale`, `ObjectTranslationData`, `PlatformTranslationBundle`, `PlatformTranslationData`, `ServedTranslationData`, `TranslationBundle`, `TranslationConfig`, `TranslationCoverageResult`, `TranslationData`, `TranslationDiffItem`, `TranslationDiffStatus`, `TranslationItem` |
 | [`worker.zod.ts`](/docs/references/system/worker) | `BatchProgress`, `QueueConfig`, `Task`, `TaskExecutionResult`, `TaskPriority`, `TaskRetryPolicy`, `TaskStatus`, `WorkerStats` |
 
 ---

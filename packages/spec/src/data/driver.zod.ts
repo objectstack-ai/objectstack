@@ -280,8 +280,9 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
   // which is the very defect the removal closes. `retiredKey()` keeps each
   // key authored-unwritable: tsc rejects it at the authoring site (the class
   // literal of every driver that `implements IDataDriver`), and a parse
-  // rejects it with the prescription below. Tombstones age out ~two majors
-  // after 17 (see shared/retired-key.ts).
+  // rejects it with the prescription below. Tombstones age out one major
+  // after the removal (see shared/retired-key.ts; #25767) — these are 17.x
+  // retirements, so they leave when 19 is cut.
 
   create: retiredKey(capRemoved('create',
     'CRUD is not optional for a driver: `create`/`find`/`findOne`/`update`/`delete` are '

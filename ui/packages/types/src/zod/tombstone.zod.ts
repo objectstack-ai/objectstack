@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 
 /**
  * Declare an ADR-0049 RETIREMENT TOMBSTONE: a key that stays declared but is
@@ -63,6 +64,51 @@ import { z } from 'zod';
  */
 export function retirementTombstone(guidance: string) {
   return z.never({ error: guidance }).optional().describe(guidance);
+}
+
+/**
+ * Declare the console's OWN refusal for a key whose `@objectstack/spec`
+ * tombstone AGED OUT (objectstack#25767, ADR-0087 one major on). A key the spec
+ * retired at major N is a `retiredKey()` tombstone through N+1.x and leaves the
+ * spec's shape at the next major's cut; from then on the spec's strict
+ * container refuses it as an UNKNOWN key — `unrecognized_keys` at the
+ * container's own path, naming the key and the protocol upgrade guide.
+ *
+ * A twin derived from that shape by reference (`specFieldsExcept(...)` over
+ * `BaseSchema`, which is `.passthrough()`) inherits nothing under the name once
+ * the tombstone is gone: a refusal the console gave at the key's own path for
+ * two majors would turn into a silent KEEP. So the refusal moves to this side
+ * as the console's own arm, in the posture `app.zod.ts`'s `mobileNavMode` and
+ * `actions` set: {@link retirementTombstone}'s primitive, `invalid_type` at the
+ * key's own path, one string feeding both channels. The guidance opens with the
+ * sentence the spec answers the key with and the guide sentence the spec's
+ * refusal carries — `RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`, imported from
+ * `@objectstack/spec/shared` rather than restated (ui's `check:spec-symbols`
+ * refuses a hand-written declaration under a spec export's name); the mirrors'
+ * import boundary (`../__tests__/imported-defaults-8317.test.ts`) admits the
+ * read as a declared TEXT exception, a sentence being unable to write a value
+ * into a parsed document — then says what happened to the key and where its
+ * value went. The TS twin is `?: never`.
+ *
+ * ⛔ Asserts no spec behaviour that does not exist: the spec's tombstone text is
+ * gone and is not restated; the unknown-key refusal is the only spec verdict
+ * named. The other case keeps its rule — a key the twin NEVER refused gets no
+ * hand-written refusal (`complex.ts` `DashboardComponentSchema`, `title`).
+ *
+ * @param container the noun the spec's refusal uses (`'app'`, `'dashboard'`)
+ * @param def       the spec def and key as its ledger spelled it (`'App.version'`)
+ * @param key       the member name, spelled into the lead sentence
+ * @param retiredIn the spec version that retired the key (`'17.0.0'`)
+ * @param remedy    where the value went — one or two sentences ending in `Delete the key.`
+ */
+export function agedOutSpecKeyRefusal(container: string, def: string, key: string, retiredIn: string, remedy: string) {
+  const agedOutGuidance =
+    `Unrecognized key(s) on this ${container}: \`${key}\`. ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} `
+    + `\`${def}\` was retired in @objectstack/spec ${retiredIn}, and its tombstone aged out of the spec's shape one `
+    + 'major on (objectstack#25767, ADR-0087): the spec refuses the key as an unknown one, and this node — derived '
+    + 'from that shape by reference over a `.passthrough()` base — refuses it by name here rather than keeping it in '
+    + `silence. ${remedy}`;
+  return retirementTombstone(agedOutGuidance);
 }
 
 /** How a handler key sits on the TypeScript face (objectui#6124, measured per key). */

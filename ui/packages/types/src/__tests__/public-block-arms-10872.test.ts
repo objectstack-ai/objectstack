@@ -233,12 +233,17 @@ describe('the bag is the spec row, read by reference (objectui#10872)', () => {
       .toBe(true);
   });
 
-  it('a key the spec retired travels with the row — refused at the member', () => {
+  it('a key the spec retired travels with the row — refused at the bag, by name', () => {
+    // `page:card`'s `actions` tombstone (17.0.0) aged out of the row one major
+    // on (objectstack#25767): the strict row refuses the key as an unknown one
+    // at the bag's own path, naming it and the protocol upgrade guide, rather
+    // than at the member. Still the row's own refusal, travelling by reference.
     const document = { type: 'page:card', properties: { title: 'Summary', actions: ['edit'] } };
     const result = safeValidateSchema(document);
     expect(result.success).toBe(false);
-    expect(result.success ? [] : result.error.issues.map((issue) => issue.path.join('.')))
-      .toContain('properties.actions');
+    const atBag = result.success ? [] : result.error.issues.filter((issue) => issue.path.join('.') === 'properties');
+    expect(atBag.map((issue) => issue.message).join('\n')).toMatch(/Unrecognized key\(s\)[^\n]*`actions`/);
+    expect(atBag.map((issue) => issue.message).join('\n')).toContain('https://objectstack.ai/docs/protocol-upgrade');
     // Control: the spec's own row refuses it too.
     expect(rowOf('page:card').safeParse({ title: 'Summary', actions: ['edit'] }).success).toBe(false);
   });

@@ -293,11 +293,11 @@ describe('RetryPolicySchema', () => {
     expect(policy.jitter).toBe(true);
   });
 
-  it('rejects the retired `retryDelayMs` spelling with the rename prescription', () => {
+  it('refuses the aged-out `retryDelayMs` spelling as an unknown key naming the upgrade guide (#25767)', () => {
     const parse = () => RetryPolicySchema.parse({ retryDelayMs: 500 });
 
-    expect(parse).toThrow(/backoffMs/);
-    expect(parse).toThrow(/retryDelayMs/);
+    expect(parse).toThrow(/Unrecognized key\(s\) on this retry policy: `retryDelayMs`/);
+    expect(parse).toThrow(/https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   // Bounds the job side did not have before the merge. Both fail loudly rather

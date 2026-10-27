@@ -829,7 +829,16 @@ export const CEILINGS = new Map([
   // = 2724; headroom was 3 bytes, 0 tokens, so the ceiling moves +297, pinned
   // AT the measurement. Same maintainer ruling as the SKILL.md row above
   // (2026-10-27, tap A verbatim and untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2724],
+  // 10893 -> 10934 (#26515): no new fixture — three ideal answers rewritten
+  // to agree with their own assertions (eval 5 spelled the negated error-label
+  // string, eval 7 lacked the `type: 'position'` approver and spelled the
+  // negated positions check, eval 8 lacked `type: 'screen'`). Paid down first:
+  // evals 5 and 7 shortened by 25 and 7 bytes; the `approvers` line eval 7
+  // owed costs more than that. +41 bytes -> ceil(10934 / 4) = 2734; headroom
+  // was 3 bytes, 0 tokens, so the ceiling moves +10, pinned AT the
+  // measurement. Same maintainer ruling as the SKILL.md row above (2026-10-27,
+  // tap A verbatim and untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2734],
   // 894 -> 1095 (#26179): one regression case for the field permission `when`
   // (the contract prompt: lock the legal terms for finance from approval on,
   // legal keeps the edit) — expected: `when` on the finance set's entries with

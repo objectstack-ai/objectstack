@@ -13,8 +13,8 @@ description: "Translation schemas of the ObjectStack System Protocol — each pr
 ## TypeScript Usage
 
 ```typescript
-import { ActionResultDialogTranslationSchema, CoverageBreakdownEntrySchema, FieldTranslationSchema, LocaleSchema, ObjectTranslationDataSchema, PlatformTranslationBundleSchema, PlatformTranslationDataSchema, TranslationBundleSchema, TranslationConfigSchema, TranslationCoverageResultSchema, TranslationDataSchema, TranslationDiffItemSchema, TranslationDiffStatusSchema, TranslationItemSchema } from '@objectstack/spec/system';
-import type { ActionResultDialogTranslation, CoverageBreakdownEntry, FieldTranslation, Locale, ObjectTranslationData, PlatformTranslationBundle, PlatformTranslationData, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus, TranslationItem } from '@objectstack/spec/system';
+import { ActionResultDialogTranslationSchema, CoverageBreakdownEntrySchema, FieldTranslationSchema, LocaleSchema, ObjectTranslationDataSchema, PlatformTranslationBundleSchema, PlatformTranslationDataSchema, ServedTranslationDataSchema, TranslationBundleSchema, TranslationConfigSchema, TranslationCoverageResultSchema, TranslationDataSchema, TranslationDiffItemSchema, TranslationDiffStatusSchema, TranslationItemSchema } from '@objectstack/spec/system';
+import type { ActionResultDialogTranslation, CoverageBreakdownEntry, FieldTranslation, Locale, ObjectTranslationData, PlatformTranslationBundle, PlatformTranslationData, ServedTranslationData, TranslationBundle, TranslationConfig, TranslationCoverageResult, TranslationData, TranslationDiffItem, TranslationDiffStatus, TranslationItem } from '@objectstack/spec/system';
 
 // Validate data
 const result = ActionResultDialogTranslationSchema.parse(data);
@@ -306,6 +306,153 @@ Translation data for a single object
 | **sourceLabels** | `{ env?: string; global?: string; tenant?: string; user?: string; … }` | optional | Source badge labels by resolution layer |
 
 ### Nested Shape: `PlatformTranslationData.settings[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string` | optional | Translated settings manifest title |
+| **description** | `string` | optional | Translated settings manifest description |
+| **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
+| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
+| **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
+| **banners** | `Record<string, { title?: string; text?: string }>` | optional | Info banner translations keyed by the info_banner specifier id |
+
+
+---
+
+## ServedTranslationData
+
+Served translation data — the platform groups the browser reads, without the server-resolved `metadataForms`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
+| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
+| **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
+| **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
+| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
+| **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
+| **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
+| **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
+
+### Nested Shape: `ServedTranslationData.objects[string]`
+
+Translation data for a single object
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated singular label |
+| **pluralLabel** | `string` | optional | Translated plural label |
+| **description** | `string` | optional | Translated object description |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
+| **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
+| **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+
+### Nested Shape: `ServedTranslationData.picklists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated picklist label |
+| **options** | `Record<string, string>` | ✅ | Option value to translated label map — inherited by every field that references the picklist |
+
+### Nested Shape: `ServedTranslationData.apps[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | Translated app label |
+| **description** | `string` | optional | Translated app description |
+| **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
+
+### Nested Shape: `ServedTranslationData.globalActions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated action label |
+| **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
+| **confirmText** | `string` | optional | Translated confirmation prompt |
+| **successMessage** | `string` | optional | Translated success toast/message |
+| **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
+| **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
+| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+
+### Nested Shape: `ServedTranslationData.dashboards[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dashboard title |
+| **description** | `string` | optional | Translated dashboard description |
+| **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
+| **widgets** | `Record<string, { title?: string; description?: string }>` | optional | Widget translations keyed by widget id |
+| **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
+
+### Nested Shape: `ServedTranslationData.datasets[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dataset label |
+| **description** | `string` | optional | Translated dataset description |
+| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+
+### Nested Shape: `ServedTranslationData.reports[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated report label — overlays the report's own `label` |
+| **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+
+### Nested Shape: `ServedTranslationData.pages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated page label (nav / breadcrumb) |
+| **description** | `string` | optional | Translated page description |
+| **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
+| **subtitle** | `string` | optional | Translated `page:header` subtitle |
+| **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
+
+### Nested Shape: `ServedTranslationData.flows[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated flow label |
+| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
+| **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+
+### Nested Shape: `ServedTranslationData.positions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated position label — overlays the position's own `label` |
+| **description** | `string` | optional | Translated position description — overlays the position's own `description` |
+
+### Nested Shape: `ServedTranslationData.permissions[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
+| **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `ServedTranslationData.settingsCommon`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourceLabels** | `{ env?: string; global?: string; tenant?: string; user?: string; … }` | optional | Source badge labels by resolution layer |
+
+### Nested Shape: `ServedTranslationData.settings[string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

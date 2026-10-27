@@ -572,7 +572,10 @@ describe('validateComponentProps — value verdicts', () => {
    * the `safeParse` half of this rule (a `never` type is a value verdict, not
    * an unknown key), carrying the rename verbatim.
    */
-  it('surfaces the retired `displayField` prescription (#5775)', () => {
+  it('reports the aged-out `displayField` as an unknown key (#5775, #25767)', () => {
+    // [#25767] The #5775 tombstone was a ≤16.x retirement kit and left the
+    // picker's props, so the key is an unknown key now: the lint reports it
+    // under its unknown-key rule, and the rename lives in the upgrade guide.
     const findings = validateComponentProps(
       stackWith([
         {
@@ -582,10 +585,10 @@ describe('validateComponentProps — value verdicts', () => {
         },
       ]),
     );
-    const retired = invalid(findings).filter((f) => f.path.endsWith('.displayField'));
-    expect(retired).toHaveLength(1);
-    expect(retired[0].severity).toBe('error');
-    expect(retired[0].message).toMatch(/removed in @objectstack\/spec 17\.0\.0[\s\S]*`labelField`/);
+    expect(invalid(findings).filter((f) => f.path.endsWith('.displayField'))).toEqual([]);
+    const unknown = unknownKeys(findings).filter((f) => f.path.endsWith('.displayField'));
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0].severity).toBe('error');
   });
 
   /**
@@ -706,24 +709,20 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
-   * The other direction of the same card. `page:tabs.type` is now a tombstone,
-   * and a tombstone is REFUSED rather than reported as unknown — so the finding
-   * arrives as `component-props-invalid` carrying the rename prescription, not
-   * as `component-props-unknown-key` carrying nothing. The conversion that
-   * rewrites it is `retiredFromLoadPath`, so it deliberately does NOT run on
-   * this normalized input: an already-stored page keeps the old key and the
-   * author is told, which is the whole point of the tombstone.
+   * The other direction of the same card. `page:tabs.type` was a tombstone
+   * until #25767, when the ≤16.x kits aged out: the schema no longer declares
+   * it, so the finding arrives as `component-props-unknown-key`, not as
+   * `component-props-invalid` carrying the rename — that prescription now
+   * lives in the upgrade guide the strict parse names.
    */
-  it('refuses the retired `page:tabs.type` by name, with the prescription (#6776)', () => {
+  it('reports the aged-out `page:tabs.type` as an unknown key (#6776, #25767)', () => {
     const findings = validateComponentProps(
       stackWith([{ type: 'page:tabs', properties: { type: 'card', items: [] } }]),
     );
-    expect(invalid(findings).map((f) => f.path)).toEqual([
+    expect(invalid(findings)).toEqual([]);
+    expect(unknownKeys(findings).map((f) => f.path)).toEqual([
       'pages[0].regions[0].components[0].properties.type',
     ]);
-    expect(invalid(findings)[0].message).toContain('tabStyle');
-    // Not an unknown key — the schema still declares it, as a tombstone.
-    expect(unknownKeys(findings)).toEqual([]);
   });
 
   /**
