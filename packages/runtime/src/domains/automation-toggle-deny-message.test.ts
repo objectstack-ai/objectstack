@@ -298,11 +298,11 @@ describe('#11666 — the enablement door refuses in its own words', () => {
 
             const off = await h.dispatch('POST', `/automation/${FLOW}/toggle`, { enabled: false });
             expect(statusOf(off)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, false, expect.anything());
 
             const on = await h.dispatch('POST', `/automation/${FLOW}/toggle`, { enabled: true });
             expect(statusOf(on)).toBe(200);
-            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, true);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, true, expect.anything());
         });
 
         it('an entitled caller still writes definitions', async () => {

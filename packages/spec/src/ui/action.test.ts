@@ -1268,11 +1268,13 @@ describe('ActionSchema — the `execute` alias is REMOVED', () => {
   // was lowered into `target` at parse time and dropped from the output; as of
   // protocol 17 it is gone from the spec entirely.
   //
-  // It is TOMBSTONED rather than deleted, because `ActionSchema` is not
+  // It was TOMBSTONED rather than deleted while `ActionSchema` was not
   // `.strict()`: a plain deletion would have silently stripped the key, leaving
   // the action with no handler bound and no diagnostic — the #2169 "Mark Done
-  // does nothing" shape. The rejection is what makes the removal audible, and
-  // it carries the fix so an upgrading agent does not have to find our docs.
+  // does nothing" shape. The surface closed since, and the tombstone — a 16.x
+  // retirement kit — aged out at 18 (#25767, ADR-0087 D2 = A). The strict
+  // refusal is what keeps the removal audible now: it names the key and the
+  // protocol upgrade guide, where the `target` prescription lives.
   const parseWithExecute = () =>
     ActionSchema.parse({
       name: 'legacy_action',
@@ -1285,18 +1287,18 @@ describe('ActionSchema — the `execute` alias is REMOVED', () => {
     expect(parseWithExecute).toThrow();
   });
 
-  it('carries the upgrade prescription in the rejection itself', () => {
+  it('names the key and the upgrade guide in the refusal itself', () => {
     // This string is the one upgrade channel every consumer is guaranteed to
-    // hit — it must name the replacement AND the automated fix.
+    // hit — it must name the key and where its prescription now lives.
     let message = '';
     try {
       parseWithExecute();
     } catch (err) {
       message = String(err);
     }
-    expect(message).toContain('`execute` was removed');
-    expect(message).toContain('use `target`');
-    expect(message).toContain('os migrate meta');
+    expect(message).toContain('unrecognized_keys');
+    expect(message).toContain('`execute`');
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 
   it('rejects `execute` even when the canonical `target` is also present', () => {
@@ -1308,7 +1310,7 @@ describe('ActionSchema — the `execute` alias is REMOVED', () => {
       type: 'script',
       target: 'preferredHandler',
       execute: 'legacyHandler',
-    })).toThrow(/`execute` was removed/);
+    })).toThrow(/`execute`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('accepts the canonical `target` on its own', () => {
@@ -1476,13 +1478,13 @@ describe('ActionSchema - target required for non-script types', () => {
     // Before protocol 17 this parsed: `execute` was lowered into `target`, so a
     // flow action bound through the alias worked. The alias is gone, so the
     // action now fails BOTH on the removed key and on its missing `target` —
-    // and the first message tells the author which key to rename.
+    // and the refusal names the key (and, since #25767, the upgrade guide).
     expect(() => ActionSchema.parse({
       name: 'flow_legacy',
       label: 'Flow Legacy',
       type: 'flow',
       execute: 'my_flow',
-    })).toThrow(/`execute` was removed/);
+    })).toThrow(/`execute`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
 
     expect(ActionSchema.parse({
       name: 'flow_canonical',
@@ -1544,13 +1546,16 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
     it('refuses the value WITH the prescription — bare enum and whole action alike', () => {
       // The prescription: names the value, says it was removed, points at the
       // live alternatives (a served location, or the headless `locations: []`),
-      // and closes with the house `os migrate meta` sentence (#6856 route D).
+      // and closes with the house `os migrate meta` sentence (#6856 route D) —
+      // in its aged-out form since #25767: the 16.x conversion that carried
+      // the rewrite aged out with its kit, so the sentence says so and links the guide.
       const prescribes = (fn: () => unknown) => {
         expect(fn).toThrow(/`global_nav` was removed from `ACTION_LOCATIONS`/s);
         expect(fn).toThrow(/ADR-0049 enforce-or-remove/s);
         expect(fn).not.toThrow(/#\d{3,5}\b/);
         expect(fn).toThrow(/locations: \[\]/s);
-        expect(fn).toThrow(/os migrate meta --from 16/s);
+        expect(fn).toThrow(/protocol-16\.x conversions/s);
+        expect(fn).not.toThrow(/os migrate meta --from 16/s);
       };
 
       prescribes(() => ActionLocationSchema.parse('global_nav'));
@@ -1631,21 +1636,20 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
 });
 
 describe('audit close-out — retired shortcut/bulkEnabled, capability claims nothing enforced', () => {
-  it('REJECTS the retired `shortcut` and names the real keyboard stack', () => {
+  // Both tombstones were 16.x retirement kits and aged out at 18 (#25767):
+  // each key is a strict unknown key now, refused with the upgrade guide the
+  // keyboard-stack / `bulkActions` prescriptions moved to.
+  it.each([
+    ['shortcut', 'Ctrl+S'],
+    ['bulkEnabled', true],
+  ])('REFUSES the aged-out `%s` as an unknown key naming the upgrade guide', (key, value) => {
     let message = '';
     try {
-      ActionSchema.parse({ name: 'save_now', label: 'Save', type: 'script', target: 'h', shortcut: 'Ctrl+S' });
+      ActionSchema.parse({ name: 'save_now', label: 'Save', type: 'script', target: 'h', [key]: value });
     } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/keyboard stack/);
-    expect(message).toMatch(/audit close-out/);
-  });
-  it('REJECTS the retired `bulkEnabled` and points at the view bulkActions', () => {
-    let message = '';
-    try {
-      ActionSchema.parse({ name: 'close_all', label: 'Close', type: 'script', target: 'h', bulkEnabled: true });
-    } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/bulkActions/);
-    expect(message).toMatch(/audit close-out/);
+    expect(message).toMatch(/unrecognized_keys/);
+    expect(message).toContain(`\`${key}\``);
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 });
 

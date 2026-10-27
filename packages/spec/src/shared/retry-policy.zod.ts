@@ -75,7 +75,6 @@
 
 import { z } from 'zod';
 import { lazySchema } from './lazy-schema';
-import { retiredKey } from './retired-key';
 import { strictObject } from './strict-object';
 
 /**
@@ -113,28 +112,6 @@ export function retryPolicyShape() {
     jitter: z.boolean().default(false)
       .describe('Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries'),
 
-    // ── Tombstone (ADR-0087) ────────────────────────────────────────────
-    // `retryDelayMs` was the automation-side spelling of `backoffMs`, on BOTH
-    // `try_catch`'s `retry` (#4661) and `Flow.errorHandling` (#4964). It was
-    // tombstoned rather than deleted because two of the three owning shapes were
-    // not `.strict()` then: a plain deletion would have had Zod silently strip
-    // the authored value and drop the delay back to the 1000ms default, which is
-    // precisely the quiet-failure class ADR-0049 exists to remove. Every owning
-    // shape is strict since #22343, and the tombstone is still the better
-    // channel — it carries the rename, where a bare unknown-key rejection would
-    // only carry the key. `retry-policy-converged` rewrites it wherever stored
-    // documents are replayed (it left the load path at 18, #23543 F2, so an
-    // authored copy meets this tombstone directly); a copy that conversion
-    // leaves (a `backoffMs` beside it with a different value, or a `null`)
-    // meets it at parse too.
-    retryDelayMs: retiredKey(
-      '`retryDelayMs` was removed in @objectstack/spec 17.0.0 — the retry policy now ' +
-      'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
-      "a `try_catch` node's `retry` and `flow.errorHandling`. " +
-      'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
-      'is unchanged. ' +
-      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-    ),
   };
 }
 

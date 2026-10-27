@@ -171,7 +171,7 @@ const JOB_ID_RETIRED =
   + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
   + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
   + 'different identity. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * `job.timeout` → `job.timeoutMs` (#14478). The unit lived only in the

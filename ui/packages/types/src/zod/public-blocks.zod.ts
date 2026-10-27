@@ -231,6 +231,7 @@ import {
 import { BaseSchema } from './base.zod.js';
 import { stripImportedDefaults } from './imported-defaults.js';
 import {
+  agedOutSpecKeyRefusal,
   aliasKeyRefusal,
   handlerKeyRefusal,
   neitherContentChannelGuidance,
@@ -498,6 +499,20 @@ export const PageHeaderBlockSchema = BaseSchema.extend({
   ...NODE_ENVELOPE,
   // objectui#10872 batch 10: a row member written flat on the node is refused by name, toward `properties.KEY`.
   ...flatPropRefusals('page:header', stripImportedDefaults(SpecPageHeaderProps)),
+  // The row's `icon` was a `retiredKey()` tombstone through spec 18.1, so the
+  // spread above gave a flat `icon` the row's own retirement. At 18.2 it aged
+  // out of `PageHeaderProps` one major on (objectstack#25767, ADR-0087): the
+  // row refuses `properties.icon` as an unknown key, and the spec's page
+  // component refuses a flat one the same way, but the spread no longer sees
+  // the name, so `BaseSchema`'s `.passthrough()` would KEEP a flat value in
+  // silence. The console's own refusal (`agedOutSpecKeyRefusal`), pinned by
+  // `../__tests__/public-block-aged-out-spec-keys-25767.test.ts`.
+  icon: agedOutSpecKeyRefusal(
+    'page component', 'PageHeaderProps.icon', 'icon', '17.0.0',
+    'No renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the '
+      + 'header\'s own props, and `properties.icon` is refused as an unknown key too. The header\'s identity is '
+      + 'drawn by the record chrome (`recordChrome`), and each action carries its own `icon`. Delete the key.',
+  ),
   properties: propsBag('page:header', stripImportedDefaults(SpecPageHeaderProps)),
   // objectui#9256: the renderer reads NEITHER content channel, so both are refused by name, each
   // kept a MEMBER (see "The content channels" above).
@@ -555,6 +570,15 @@ export const PageCardBlockSchema = BaseSchema.extend({
   ...NODE_ENVELOPE,
   // objectui#10872 batch 10: a row member written flat on the node is refused by name, toward `properties.KEY`.
   ...flatPropRefusals('page:card', stripImportedDefaults(SpecPageCardProps)),
+  // `actions` aged out of `PageCardProps` at spec 18.2 (objectstack#25767,
+  // ADR-0087), as `page:header`'s `icon` did: the console's own refusal of the
+  // flat spelling, which `BaseSchema`'s `.passthrough()` would otherwise keep.
+  actions: agedOutSpecKeyRefusal(
+    'page component', 'PageCardProps.actions', 'actions', '17.0.0',
+    'No renderer ever read it: the card renderer has no actions area, and `properties.actions` is refused as an '
+      + 'unknown key too. Author the buttons as components in the card\'s `properties.children` or '
+      + '`properties.footer` (`element:button`, `record:quick_actions`), which is what renders. Delete the key.',
+  ),
   properties: propsBag('page:card', stripImportedDefaults(SpecPageCardProps)),
   // objectui#10872 batch 6: the child list is the row's `children` member, in the bag.
   body: retirementTombstone(PAGE_CARD_CHILD_LIST),
@@ -685,6 +709,15 @@ export const RecordDetailsBlockSchema = BaseSchema.extend({
   ...NODE_ENVELOPE,
   // objectui#10872 batch 10: a row member written flat on the node is refused by name, toward `properties.KEY`.
   ...flatPropRefusals('record:details', stripImportedDefaults(SpecRecordDetailsProps)),
+  // `layout` aged out of `RecordDetailsProps` at spec 18.2 (objectstack#25767,
+  // ADR-0087), as `page:header`'s `icon` did: the console's own refusal of the
+  // flat spelling, which `BaseSchema`'s `.passthrough()` would otherwise keep.
+  layout: agedOutSpecKeyRefusal(
+    'page component', 'RecordDetailsProps.layout', 'layout', '17.0.0',
+    'Its `auto` | `custom` semantics were never implemented, and `properties.layout` is refused as an unknown '
+      + 'key too. The body is chosen by what you author: `properties.sections` renders explicit groups, and '
+      + 'omitting it falls back to the object\'s `highlightFields`. Delete the key.',
+  ),
   properties: propsBag('record:details', stripImportedDefaults(SpecRecordDetailsProps)),
   // objectui#12294: the one-record binding this block's renderer reads (`RECORD_BLOCK_DATA_SOURCE`).
   dataSource: RECORD_BLOCK_DATA_SOURCE,

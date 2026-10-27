@@ -29,8 +29,16 @@
  *
  * The cases span both object modes and both value kinds, because `tsc` words
  * them differently: an array value reads as a missing property (TS2741), a
- * string as a plain non-assignable type (TS2322). `PageSchema` and
- * `FieldSchema` are `strictObject`s; `IndexSchema` is a plain `z.object`.
+ * string or boolean as a plain non-assignable type (TS2322). `PageSchema` and
+ * `ObjectSchema` are `strictObject`s; the stack's `api` block is a plain
+ * `z.object` (its `requireAuth` tombstone stays for exactly that reason).
+ *
+ * The two tombstones this used to probe on `FieldSchema` and `IndexSchema`
+ * (`conditionalRequired`, `indexes[].type`) were 16.x retirement kits and aged
+ * out at 18 (#25767): an authored one is TS2353 now — "does not exist in
+ * type" — the ordinary unknown-key diagnostic, with no retirement sentence
+ * because the key is no longer declared at all. The strict parse is where
+ * that author meets the upgrade-guide link.
  *
  * ⚠️ Anti-vacuity: a harness that resolves nothing reports import errors or
  * nothing at all, and both look like "no retirement text". The control probe
@@ -48,7 +56,7 @@ const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROBE_DIR = resolve(SRC_DIR, 'shared/__retired_key_tsc_probes__');
 
 /** The stack every probe authors; `retired` splices retired keys into it. */
-function stackProbe(retired: { page?: string; field?: string; index?: string }): string {
+function stackProbe(retired: { page?: string; object?: string; api?: string }): string {
   return [
     "import { defineStack } from '@objectstack/spec';",
     '',
@@ -57,15 +65,16 @@ function stackProbe(retired: { page?: string; field?: string; index?: string }):
     '  objects: [',
     '    {',
     "      name: 'deal',",
-    "      label: 'Deal',",
+    `      label: 'Deal'${retired.object ?? ''},`,
     '      fields: {',
     "        amount: { type: 'number', label: 'Amount' },",
-    `        stage: { type: 'text', label: 'Stage'${retired.field ?? ''} },`,
+    "        stage: { type: 'text', label: 'Stage' },",
     '      },',
-    `      indexes: [{ fields: ['amount']${retired.index ?? ''} }],`,
+    "      indexes: [{ fields: ['amount'] }],",
     '    },',
     '  ],',
     `  pages: [{ name: 'home_page', label: 'Home', type: 'home'${retired.page ?? ''} }],`,
+    ...(retired.api === undefined ? [] : [`  api: {${retired.api} },`]),
     '});',
     '',
   ].join('\n');
@@ -75,10 +84,10 @@ const PROBES = {
   control: stackProbe({}),
   // HotCRM's measured case: `page.assignedProfiles` (strictObject, array value).
   page: stackProbe({ page: ", assignedProfiles: ['sales_rep']" }),
-  // A rename retirement on a strictObject, string value.
-  field: stackProbe({ field: ", conditionalRequired: 'amount > 0'" }),
-  // A non-strict `z.object` tombstone, string value.
-  index: stackProbe({ index: ", type: 'btree'" }),
+  // A removal retirement on a strictObject, string value.
+  object: stackProbe({ object: ", externalSharingModel: 'private'" }),
+  // A non-strict `z.object` tombstone, boolean value.
+  api: stackProbe({ api: ' requireAuth: true' }),
 } as const;
 
 type ProbeName = keyof typeof PROBES;
@@ -149,8 +158,8 @@ describe('a retired key names its retirement in the tsc diagnostic', () => {
 
   const cases: ReadonlyArray<[ProbeName, string, number]> = [
     ['page', 'assignedProfiles', 2741],
-    ['field', 'conditionalRequired', 2322],
-    ['index', "type: 'btree'", 2322],
+    ['object', 'externalSharingModel', 2322],
+    ['api', 'requireAuth', 2322],
   ];
 
   it.each(cases)('%s: writing %s fails with TS%i, and the message says [REMOVED] and names `os validate`', (name, key, code) => {

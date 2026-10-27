@@ -7,13 +7,13 @@
 // ## The measurement this file turns around
 //
 // Stock showcase, fresh database, signed in as the dev admin. Switching off a
-// packaged action (`POST /api/v1/actions/_activation/:object/:action`) and a
-// declared position (`POST /api/v1/security/_activation/position/:name`)
-// answered 200 and wrote the row — and all four actor fields read null. The
-// doors wrote through the activation store's constant system context, which
-// names nobody, so neither the engine's audit stamps nor the audit plugin had a
-// user to record. The same request window's own sign-in rows did carry the
-// admin's id.
+// packaged action (`POST /api/v1/actions/_activation/:object/:action`), a
+// declared position (`POST /api/v1/security/_activation/position/:name`) and a
+// packaged flow (`POST /api/v1/automation/:name/toggle`) answered 200 and wrote
+// the row — and all four actor fields read null. The doors wrote through the
+// activation store's constant system context, which names nobody, so neither
+// the engine's audit stamps nor the audit plugin had a user to record. The same
+// request window's own sign-in rows did carry the admin's id.
 //
 // What only a boot can measure: the stamp lands through the REAL engine (the
 // unit suites pin the context each door hands down, not what the engine does
@@ -21,9 +21,9 @@
 // session. The showcase boot composes no audit plugin of its own, so this file
 // adds `AuditPlugin`, as `objectstack serve` composes it.
 //
-// ⛔ The flow toggle (`POST /api/v1/automation/:name/toggle`) is not here: it
-// reaches the ledger through `IAutomationService.toggleFlow(name, enabled)`, a
-// contract with no caller channel yet.
+// The flow door reaches the ledger through the automation service, not the
+// engine: `IAutomationService.toggleFlow`'s `caller` carries the admin's id
+// across that seam, so its case is the one that proves the id survives it.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -40,6 +40,8 @@ const ACTION = 'showcase_mark_done';
 const ACTION_OBJECT = 'showcase_task';
 /** A position the showcase declares and nobody needs switched on during this file. */
 const POSITION = 'auditor';
+/** A packaged showcase flow that no other flow calls as a subflow, so the §7.3 guard never refuses it. */
+const FLOW = 'showcase_scheduled_digest';
 
 interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
@@ -89,6 +91,7 @@ describe('the activation ledger names the administrator who switched an item', (
     for (const door of [
         { label: 'a packaged action', type: 'action', name: ACTION, path: `/actions/_activation/${ACTION_OBJECT}/${ACTION}` },
         { label: 'a declared position', type: 'position', name: POSITION, path: `/security/_activation/position/${POSITION}` },
+        { label: 'a packaged flow', type: 'flow', name: FLOW, path: `/automation/${FLOW}/toggle` },
     ] as const) {
         it(`${door.label}: switching it OFF names the admin on the row and on its audit row`, async () => {
             const res = await stack.apiAs(token, 'POST', door.path, { enabled: false });

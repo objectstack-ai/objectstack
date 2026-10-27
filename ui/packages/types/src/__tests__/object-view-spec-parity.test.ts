@@ -364,13 +364,31 @@ describe('the ADR-0087 tombstone filter this guard is built on (#2890)', () => {
   });
 
   it('reports retired ListView keys as DECLARED but not LIVE', () => {
-    // objectstack#7176 retired all five (maintainer-ruled 2026-08-10). They flow
-    // into objectui's ListViewSchema by reference on purpose, tombstones and
-    // all, so an author writing one gets a named rejection instead of silence.
-    for (const retired of ['striped', 'bordered', 'virtualScroll', 'responsive', 'performance']) {
+    // The tombstones the current pin still carries: `filterableFields`
+    // (objectstack#24640), `pageName` and `tabs` (17.5.0). They flow into
+    // objectui's ListViewSchema by reference on purpose, tombstones and all, so
+    // an author writing one gets a named rejection instead of silence.
+    for (const retired of ['filterableFields', 'pageName', 'tabs']) {
       expect(declared, `${retired} should still be declared`).toContain(retired);
       expect(isTombstoned(SpecListViewSchema, retired), `${retired} should read as a tombstone`).toBe(true);
       expect(live, `${retired} must not read as live`).not.toContain(retired);
+    }
+  });
+
+  it('the five objectstack#7176 retirements aged out of the shape — not declared, refused as unknown keys', () => {
+    // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance`
+    // were tombstones through spec 18.1; at 18.2 the ≤16.x kits left the schema
+    // one major on (objectstack#25767), so the filter no longer sees them —
+    // neither declared nor live — and the strict container refuses each as an
+    // unknown key naming the protocol upgrade guide.
+    for (const aged of ['striped', 'bordered', 'virtualScroll', 'responsive', 'performance']) {
+      expect(declared, `${aged} is declared again`).not.toContain(aged);
+      expect(live, `${aged} reads as live`).not.toContain(aged);
+      const r = SpecListViewSchema.safeParse({ name: 'all', label: 'All', [aged]: true });
+      expect(r.success, `${aged} is accepted`).toBe(false);
+      const msg = r.success ? '' : r.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+      expect(msg).toMatch(new RegExp('Unrecognized key\\(s\\)[^\\n]*`' + aged + '`'));
+      expect(msg).toContain('https://objectstack.ai/docs/protocol-upgrade');
     }
   });
 

@@ -65,11 +65,6 @@ describe('a conversion reaches a component nested in another component', () => {
       path: 'properties.items[0].children[0]',
     },
     {
-      label: 'properties.body[] — a page:card body',
-      properties: (child) => ({ body: [child] }),
-      path: 'properties.body[0]',
-    },
-    {
       label: 'properties.footer[] — a page:card footer',
       properties: (child) => ({ footer: [child] }),
       path: 'properties.footer[0]',
@@ -100,12 +95,13 @@ describe('a conversion reaches a component nested in another component', () => {
     });
   }
 
-  it('reaches every position `pageComponentSlotPositions()` names, the retired spelling included', () => {
+  it('reaches every position `pageComponentSlotPositions()` names', () => {
     const positions = pageComponentSlotPositions();
     // Guards the case against passing vacuously on an empty list, and ties it
-    // to the four explicit shapes above.
+    // to the three explicit shapes above. (`body`, the retired page:card
+    // spelling, left the list with its tombstone at 18 — #25767.)
     expect(positions.map(({ key, panelKey }) => (panelKey === undefined ? key : `${key}[].${panelKey}`)).sort())
-      .toEqual(['body', 'children', 'footer', 'items[].children']);
+      .toEqual(['children', 'footer', 'items[].children']);
     for (const { key, panelKey } of positions) {
       const properties = panelKey === undefined
         ? { [key]: [staleHeader('Nested')] }
@@ -163,27 +159,6 @@ describe('a conversion reaches a component nested in another component', () => {
     ]);
   });
 
-  it('visits a moved sub-tree ONCE — the descent reads the mapped component', () => {
-    // `page-card-body-to-children` renames `properties.body` → `children` on the
-    // outer card. Because the descent happens after the mapper, the inner card
-    // is walked under the canonical key and emits one notice, not one per
-    // spelling — and its own path is spelled with `children`, not `body`.
-    const { stack, notices } = collectConversionNotices(
-      regionPage({
-        type: 'page:card',
-        properties: { title: 'Outer', body: [{ type: 'page:card', properties: { title: 'Inner', body: [] } }] },
-      }),
-      { includeRetired: true },
-    );
-    expect(notices.map((n) => n.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.children',
-      'pages[0].regions[0].components[0].properties.children[0].properties.children',
-    ]);
-    expect(componentAt(stack, 'regions', 0, 'components', 0)).toEqual({
-      type: 'page:card',
-      properties: { title: 'Outer', children: [{ type: 'page:card', properties: { title: 'Inner', children: [] } }] },
-    });
-  });
 });
 
 describe('the page-component walk stays copy-on-write and shape-gated', () => {

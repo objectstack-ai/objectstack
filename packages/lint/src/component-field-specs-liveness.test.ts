@@ -88,10 +88,14 @@ describe('COMPONENT_FIELD_SPECS liveness against ComponentPropsMap (#6629)', () 
   // ── 0. the detector, before anything is asserted THROUGH it ─────────────
   describe('the tombstone detector actually detects (anti-vacuity)', () => {
     // `element:record_picker` is the incident's own schema, and it carries both
-    // halves of the discrimination at once: `labelField` live, `displayField`
-    // and `searchFields` tombstoned by #5775. If any of these four assertions
-    // goes red the reconciliation below is reporting nothing, whatever colour
-    // it shows.
+    // halves of the discrimination at once: `labelField` live, `object` and
+    // `filter` tombstoned (the flat-binding retirement, 17.x). The #5775 pair
+    // this block was born on — `displayField` / `searchFields` — was a 16.x
+    // retirement whose tombstones aged out on #25767 (ADR-0087 D2 = A): both
+    // keys are now ABSENT from the shape, refused as strict unknown keys, which
+    // is the other verdict the reconciliation keeps separate. If any of these
+    // assertions goes red the reconciliation below is reporting nothing,
+    // whatever colour it shows.
     const shape = shapeOf(map['element:record_picker']);
 
     it('reaches a real object shape through the lazySchema proxy', () => {
@@ -99,10 +103,13 @@ describe('COMPONENT_FIELD_SPECS liveness against ComponentPropsMap (#6629)', () 
       // Both spellings are PRESENT in the shape — that is the tombstone route
       // (declared-but-unwritable), and it is why "absent from the shape" and
       // "retired" have to be two separate verdicts below.
-      expect(Object.keys(shape!)).toEqual(expect.arrayContaining(['labelField', 'displayField', 'searchFields']));
+      expect(Object.keys(shape!)).toEqual(expect.arrayContaining(['labelField', 'object', 'filter']));
+      // The aged-out pair is gone from the shape outright (#25767).
+      expect(Object.keys(shape!)).not.toEqual(expect.arrayContaining(['displayField']));
+      expect(Object.keys(shape!)).not.toEqual(expect.arrayContaining(['searchFields']));
     });
 
-    it.each(['displayField', 'searchFields'])('recognises the #5775 `%s` tombstone', (key) => {
+    it.each(['object', 'filter'])('recognises the flat-binding `%s` tombstone', (key) => {
       expect(isRetiredTombstone(shape![key])).toBe(true);
     });
 

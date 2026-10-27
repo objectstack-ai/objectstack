@@ -394,6 +394,8 @@
     "SecurityContextConfigSchema": "system/SecurityContextConfig",
     "SecurityEventCorrelation": "system/SecurityEventCorrelation",
     "SecurityEventCorrelationSchema": "system/SecurityEventCorrelation",
+    "ServedTranslationData": "system/ServedTranslationData",
+    "ServedTranslationDataSchema": "system/ServedTranslationData",
     "ServerRateLimitConfig": "system/ServerRateLimitConfig",
     "ServerRateLimitConfigSchema": "system/ServerRateLimitConfig",
     "ServiceConfig": "system/ServiceConfig",

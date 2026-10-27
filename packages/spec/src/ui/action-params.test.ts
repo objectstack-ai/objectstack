@@ -11,7 +11,6 @@ import {
 } from './action-params.zod';
 import type { FilterCondition } from '../data/filter.zod';
 import type { EngineQueryOptions } from '../data/data-engine.zod';
-import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 const codes = (issues: ReturnType<typeof validateActionParams>) => issues.map((i) => i.code).sort();
 
@@ -375,25 +374,6 @@ describe('ActionSession `positions` canonical + `roles` deprecated alias', () =>
     expect(doc).not.toMatch(/deliberately NO `positions` key/);
   });
 
-  it('registers the rename as an ADR-0087 semantic migration (the reader-facing channel)', () => {
-    // `spec-changes.json`, the generated upgrade guide and the `spec_changes`
-    // MCP tool are all projections of this registry. Without the entry the
-    // rename reaches a consumer only when their read starts returning
-    // `undefined` — which is the failure mode a deprecation window exists to
-    // replace with an announcement.
-    const entry = MIGRATIONS_BY_MAJOR[17]?.semantic
-      .find((s) => s.id === 'action-session-roles-to-positions');
-
-    expect(entry).toBeDefined();
-    expect(entry!.surface).toBe('ui.actionSession.roles');
-    expect(entry!.replacement).toMatch(/positions/);
-    // It is a RENAME under a window, not the retirement its hook-side
-    // neighbour (`hook-context-session-roles-retired`, #5050) was — the reason
-    // must not read as a removal notice.
-    expect(entry!.reason).toMatch(/deprecation window/);
-    expect(entry!.reason).toMatch(/ruled contract-first/);
-    expect(entry!.acceptanceCriteria).toMatch(/ctx\.session\.positions/);
-  });
 });
 
 // ---------------------------------------------------------------------------

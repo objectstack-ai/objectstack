@@ -110,6 +110,13 @@ describe('parseIsoDuration', () => {
  * is EXTRACTED from the live message, never compared to a copy: a hard-coded
  * `'60000'` would go green the moment someone reworded the prose, which is
  * exactly when this needs to be checked.
+ *
+ * [#25767] The `timeoutMs` tombstone was a ≤16.x retirement, and a retirement
+ * kit lives one protocol major past the major it retired in: at 18 it left the
+ * shape, so `timeoutMs` is a strict unknown key whose prescription lives in the
+ * protocol upgrade guide, which this package does not read. The `timeout`
+ * misspelling's `guidance` entry is the channel still printing a
+ * `timerDuration` value here, so it is the one held to the round trip.
  */
 describe("the spec's `timeoutMs` → `timerDuration` prescription round-trips (#6758)", () => {
   const waitNode = (waitEventConfig: Record<string, unknown>) => ({
@@ -122,13 +129,13 @@ describe("the spec's `timeoutMs` → `timerDuration` prescription round-trips (#
   };
 
   it('every `timerDuration` it prints parses AND yields the wait it promises', () => {
-    // Channel 1 — the tombstone itself. Channel 2 — the `timeout` misspelling's
-    // `guidance` entry, which repeats the same advice to an author who has had
-    // no first failure to learn from.
-    const tombstone = issueMessage({ eventType: 'timer', timeoutMs: 60_000 }, 'invalid_type');
+    // The `timeout` misspelling's `guidance` entry repeats the advice to an
+    // author who has had no first failure to learn from. ([#25767] The
+    // `timeoutMs` tombstone, the first channel until the ≤16.x kits aged out,
+    // is pinned below as the strict refusal it is now.)
     const guidance = issueMessage({ eventType: 'timer', timeout: 60_000 }, 'unrecognized_keys');
 
-    for (const [channel, message] of Object.entries({ tombstone, guidance })) {
+    for (const [channel, message] of Object.entries({ guidance })) {
       // Anti-vacuity: gut either channel and this fails, rather than the loop
       // below passing because it found nothing to check.
       expect(message, `${channel}: raised no message at all`).toBeDefined();
@@ -156,20 +163,15 @@ describe("the spec's `timeoutMs` → `timerDuration` prescription round-trips (#
       }
     }
 
-    // The tombstone does not merely prescribe a value, it claims an EQUALITY:
-    // "`timeoutMs: N` and `timerDuration: X` the same wait". Read both sides out
-    // of the message and hold it to that claim.
-    const claimedMs = Number(/`timeoutMs:\s*(\d+)`/.exec(tombstone!)?.[1]);
-    expect(claimedMs, 'the tombstone must still name the `timeoutMs` wait it is equating')
-      .toBeGreaterThan(0);
-    for (const literal of [...tombstone!.matchAll(/`timerDuration:\s*([^`]+)`/g)].map((m) => m[1])) {
-      const authored = JSON.parse(literal.replace(/^'(.*)'$/, '"$1"')) as string;
-      expect(
-        parseIsoDuration(authored),
-        `the tombstone equates \`timeoutMs: ${claimedMs}\` with \`timerDuration: ${literal}\`, `
-        + 'but they are not the same wait',
-      ).toBe(claimedMs);
-    }
+  });
+
+  it('[#25767] the aged-out `timeoutMs` is refused as a strict unknown key naming the upgrade guide', () => {
+    // Its kit (tombstone, entry, conversion) left at 18 under the one-major
+    // rule, so the prescription that used to equate `timeoutMs: N` with a
+    // `timerDuration` lives in the guide now, and the parse says where.
+    const message = issueMessage({ eventType: 'timer', timeoutMs: 60_000 }, 'unrecognized_keys');
+    expect(message).toMatch(/`timeoutMs`/);
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
   });
 });
 

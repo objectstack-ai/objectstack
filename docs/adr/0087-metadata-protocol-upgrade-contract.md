@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A, scoped by ruling 6434038284 of 2026-10-27 — a retirement kit (the `retiredKey()` tombstone and its D2 conversion with fixtures) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide; the kit ages out, the chain's step stays, and the support floor stays 16; see the 2026-10-26 addendum, which also amends the "never deleted" wording in D2 and the conversion "forever" in the 2026-07-31 and 2026-09-13 addenda)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -144,7 +144,16 @@ new shape, and the *fleet* upgrades incrementally.
   accepts N−1 shapes at load), then retired from the load path in N+1 — but it is
   **never deleted**: a retired conversion graduates into the D3 migration chain as
   that major's mechanical step, so the transform history is permanent even though the
-  runtime only ever carries one major of it. The window is deliberately **not** a
+  runtime only ever carries one major of it. — **amended 2026-10-26 (#25767, D2 = A;
+  scope per ruling 6434038284):** "never deleted" is withdrawn for the CONVERSION, not
+  for the step. A retired conversion and its tombstone (the kit) are carried for **one
+  further major** (the kit retired in N is in the tree through N+1 and leaves when
+  N+2 is cut); after that the key is refused as a strict unknown key, the refusal
+  names the protocol upgrade guide, and the edit's prescription lives in the guide,
+  the CHANGELOG and git. The chain's step for that major — its semantic entries and
+  retired-key / retired-def rows — stays replayable down to the support floor (D3),
+  so `--from N` keeps working; only the aged-out edit is no longer applied for you
+  — see the 2026-10-26 addendum. The window is deliberately **not** a
   notification device — a warning window is worthless to a consumer that arrives
   three majors later. It is a **fleet-compatibility window**: the period both shapes
   are loadable, which is what lets a multi-app fleet upgrade incrementally and roll
@@ -550,7 +559,13 @@ diverged (#3903). This addendum extends the contract to data at rest:
   no author to teach, and refusing its historical shape would only break data
   that once worked. D3 keeps every conversion forever precisely so any past
   major replays forward — a stored row is the perpetual "consumer arriving
-  late", and the read path is its chain.
+  late", and the read path is its chain. (**Amended 2026-10-26**, #25767: the
+  CONVERSION's "forever" is now one major past its retirement. A stored row
+  carrying a spelling whose conversion aged out is no longer rewritten at read; it
+  is canonicalized once, with `os migrate meta --stored --apply` on a release that
+  still carries the conversion, before the deployment moves past it — the
+  2026-08-01 finish line is the mechanism, and for those rows it is the required
+  one, not an optional one.)
 - **Flows canonicalize at their own seam.** `AutomationEngine.registerFlow`
   (the rehydration seam PD #12 names) now also replays retired entries; the
   generic metadata seams deliberately skip `type: 'flow'` because flow-node
@@ -1210,7 +1225,9 @@ unconditional strip would start deleting legal metadata the day the keys return.
   manifest declares (`engines.protocol`, ADR-0025) and the `@objectstack/spec`
   version the process actually runs. `floor < runtime` replays the FULL chain,
   retired entries included, before the strict parse — the artifact is the
-  "consumer arriving late" D3 keeps every conversion forever for. ~~`floor >=
+  "consumer arriving late" D3 keeps every conversion forever for (**amended
+  2026-10-26**, #25767: for one major, after which the artifact's retired keys meet
+  the strict refusal and the guide link, exactly as an authored source does). ~~`floor >=
   runtime` replays nothing: the artifact claims the current or a newer surface,
   and the strict parse, tombstones included, stays the authority.~~ — **amended
   2026-09-30** — `floor >= runtime` replays only the retired entries whose
@@ -1325,3 +1342,76 @@ within-line retirements (17.1 → 17.2), which are the case that created it.
 > still answers first: the protocol constant moves to M when M's prerelease
 > opens, so a `^M` floor passes it while the package label still names the
 > last release of M-1, and only then does the window decide.
+
+## Addendum (2026-10-26) — retirement kits age out after one major (#25767, ruling D2 = A)
+
+**The ruling, as scoped.** A *retirement kit* — the `retiredKey()` tombstone and its D2
+conversion with fixtures — lives through the protocol major **after** the one it
+retired in, and is removed when the next major is cut. At major 18 that removes the
+kits whose conversion retired at or below 16.x; 19 repeats the move one major on. The
+maintainer's ruling of 2026-10-27 (#25767 comment 6434038284, 「同意」) kept that part
+and **withdrew** the original ruling's reach over the migration chain: the kit ages
+out, the step stays. The "never deleted" wording in D2 and the conversion "forever"
+in the 2026-07-31 and 2026-09-13 addenda are amended in place above; D3's "permanent,
+ordered chain", the "forever artifact" consequence and the 2026-08-01 addendum stand
+as written. No gate was added: the existing deletion gate's clock was shortened and
+given a second, registry-independent source.
+
+**What a removed key meets.** The key leaves the shape entirely, so a `strictObject`
+refuses it as an unknown key. The refusal carries one more sentence, after its fix
+channels and ahead of its history sentence (`RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`,
+`packages/spec/src/shared/protocol-upgrade-guide.ts`, keeping the #5955 order): it
+says that keys retired before the previous major are no longer prescribed in the
+error and names the protocol upgrade guide
+(`https://objectstack.ai/docs/protocol-upgrade`); the guide and the CHANGELOG carry
+the prescription from then on. A tombstone that stays (below) but whose conversion
+left says so in its own sentence: the edit left `os migrate meta` with the 16.x
+conversions, so it is applied by hand or by a release that still carries it.
+
+**The chain is not shortened.** `MIGRATION_SUPPORT_FLOOR` stays **16** (#19056): step
+17 and its entry files stay, and `os migrate meta --from 16` keeps replaying 16 → 18.
+Each step still lists every surviving conversion it graduated — the 12 conversions
+with `toMajor: 17` and `retiredAfter: 17.7.0` stay listed under step 17 — and its
+semantic to-dos; only the edits of the conversions that aged out are no longer
+applied by the replay. Moving the floor is its own release-policy decision (D3, "revisitable
+per major"), not a by-product of kit aging.
+
+**What was removed at 18 (this amendment's own diff).**
+
+- 50 D2 conversions with `retiredAfter` at or below 16.x (5 at 15.0.0, 45 at 16.1.0),
+  with their fixture pairs and the comments that named them. No semantic entry
+  linked one of them, but step 17's graduated list named the 45 at 16.1.0; those
+  ids left the list with their conversions (the step and its entries stay).
+- 55 tombstones whose key was already `[RETIRED]` at `@objectstack/spec@17.0.0` and
+  whose container is `strictObject` — the ones whose deletion yields a refusal. 58
+  tombstones in the same age class sit in containers that **strip** unknown keys
+  (`z.object` / `.strip()`): deleting one of those would downgrade a refusal to a
+  silent strip, the very defect PD #12 names, so they stay until their container is
+  made strict. The four inline-credential refusals (`refusedInlineCredentialKey`)
+  are security refusals, not retirements, and are untouched.
+- 61 `[RETIRED]` lines of the authorable surface.
+
+**The deletion gate (`check:authorable-surface`, proof 1).** `TOMBSTONE_AGE_MAJORS` is
+1. A deleted `[RETIRED]` line is dated either by an exact `RETIRED_KEYS_BY_MAJOR` row
+(registered at a major ≥ 1 behind the current one) or — new — by the previous major's
+release tag: a line already `[RETIRED]` on the authorable surface at
+`@objectstack/spec@<CURRENT_MAJOR − 1>.0.0` was retired before that cut, so its kit
+has lived its one major. The tag is immutable and lives on origin, so neither a row
+a PR writes nor one it deletes moves the clock. The rows alone do not suffice: 46 of
+the 61 deleted lines predate the table and no row names them. Where the tag cannot
+be read (offline), the gate falls back to the registry alone and says so — strictly
+more refusals, never fewer.
+
+**Stored rows.** A `sys_metadata` row still carrying a spelling whose conversion aged
+out is no longer rewritten at read. Canonicalize it once, `os migrate meta --stored
+--apply` on 18.2 or earlier, before moving the deployment to 18.3; the ruling
+puts that one-time notice in 18.2's release notes. One consequence is specific: `app-hidden-to-unpublished`
+(ADR-0045 amendment 2026-08-09) is among the removed conversions, so a pre-split
+`hidden: true` app row is no longer rewritten to `_unpublished` by any seam — the
+artifact door's refusal of it by id is moot and was removed.
+
+**Residuals.** The clock reads the release tag, so a repository whose checkout cannot
+fetch `refs/tags/@objectstack/spec@<N>.0.0` dates by the registry only; CI's shallow
+jobs fetch the one tag, `--depth=1`, exactly as they fetch `origin/main`. The 58 kept
+strip-container tombstones are a list in the #25767 report, to be retired container
+by container as each is made strict.

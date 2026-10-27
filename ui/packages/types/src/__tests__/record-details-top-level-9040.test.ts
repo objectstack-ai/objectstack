@@ -172,13 +172,15 @@ type _KeyofStillResolvesOnThisInterface = Expect<
 >;
 
 /**
- * The contract's face, untouched by this removal: the tombstone accepts nothing.
- * Its type is the spec's retired-key type — the branded `[REMOVED]` mark at the
- * pinned 18.1.0 and on objectstack `main`,
- * bare `undefined` through 17.5.0 — and the helper accepts
- * exactly those two spellings (objectui#11330).
+ * The contract's face. Through spec 18.1 the tombstone accepted nothing — its
+ * type was the spec's retired-key type, the branded `[REMOVED]` mark (bare
+ * `undefined` through 17.5.0), the two spellings `IsRetiredKeyType` accepts
+ * (objectui#11330). At 18.2 the ≤16.x tombstones aged out of the spec one
+ * major on (objectstack#25767, ADR-0087), so the contract no longer declares
+ * `layout` at all: a `keyof` absence, in the form the interface pin above
+ * uses, because indexing a key that no longer exists is itself a compile error.
  */
-type _LayoutOnTheContractFace = Expect<IsRetiredKeyType<SpecProps['layout']>>;
+type _LayoutOnTheContractFace = Expect<Equal<'layout' extends keyof SpecProps ? true : false, false>>;
 
 /** THE CONTROL for the line above, through the same helper: a live contract key is not retired. */
 type _ColumnsOnTheContractFaceIsLive = Expect<Equal<IsRetiredKeyType<SpecProps['columns']>, false>>;
@@ -191,7 +193,7 @@ type _ColumnsOnTheContractFaceIsLive = Expect<Equal<IsRetiredKeyType<SpecProps['
  */
 const layoutIsRefusedByTsc: RecordDetailsComponentProps = {
   columns: '2',
-  // @ts-expect-error objectui#9040 — `layout` is RETIRED from this face. `@objectstack/spec` removed it in 17.0.0 (ADR-0087 D2) and refuses it by name; there is no replacement key.
+  // @ts-expect-error objectui#9040 — `layout` is RETIRED from this face. `@objectstack/spec` removed it in 17.0.0 (ADR-0087 D2) and refuses it, since 18.2 as an unknown key (objectstack#25767); there is no replacement key.
   layout: 'stacked',
 };
 
@@ -234,22 +236,28 @@ describe('objectui#9040 — record:details top level, against the installed spec
     expect(nonsense.error?.issues[0]?.code).toBe('unrecognized_keys');
   });
 
-  it('PREMISE (spec-only): `layout` is refused BY NAME, not swept up as an unknown key', () => {
-    // The distinction this leg exists for: a tombstone is still a declared
-    // member typed `never`, so it fails with `invalid_type` at its own path
-    // and carries the removal prescription. An undeclared key fails with
-    // `unrecognized_keys` at the root. Reading them as the same failure is how
-    // a retired key gets mistaken for a typo.
+  it('PREMISE (spec-only): `layout` is refused as an unknown key naming it and the upgrade guide — its tombstone aged out', () => {
+    // Through spec 18.1 this leg read the tombstone: a declared member typed
+    // `never`, failing with `invalid_type` at its own path and carrying the
+    // removal prescription, which is what told a retired key from a typo. At
+    // 18.2 the ≤16.x tombstones aged out of the spec one major on
+    // (objectstack#25767): the strict container refuses `layout` with
+    // `unrecognized_keys` at the root, the one issue naming the key and the
+    // protocol upgrade guide. That is the contract's reading now, and a pin on
+    // the old path would call the age-out "accepted".
     for (const value of ['stacked', 'inline', 'compact', 'auto', 'custom']) {
       const refused = RecordDetailsProps.safeParse({ layout: value });
       expect(refused.success, `the contract accepted layout: ${value}`).toBe(false);
-      const issue = refused.error?.issues.find((i) => i.path.join('.') === 'layout');
-      expect(issue?.code).toBe('invalid_type');
-      expect(issue?.message).toContain('was removed in @objectstack/spec 17.0.0');
+      const issue = refused.error?.issues.find((i) => i.path.length === 0 && i.message.includes('`layout`'));
+      expect(issue?.code, `layout: ${value} was refused, but not as a named unknown key at the root`).toBe('unrecognized_keys');
+      expect(issue?.message).toMatch(/Unrecognized key\(s\)/);
+      expect(issue?.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     }
 
-    // CONTROL A — a near-miss typo of the same key gets the OTHER code, which
-    // is what makes "by name" a reading rather than a claim.
+    // CONTROL A — a near-miss typo of the same key gets the SAME code: the spec
+    // no longer tells the two apart, by design (the guide link is what a
+    // retired key's author follows). The reading above is therefore "refused
+    // by name at the root", not "distinguished from a typo".
     const typo = RecordDetailsProps.safeParse({ layoutt: 'compact' });
     expect(typo.success).toBe(false);
     expect(typo.error?.issues[0]?.code).toBe('unrecognized_keys');

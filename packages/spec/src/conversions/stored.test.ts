@@ -5,39 +5,60 @@ import { describe, expect, it } from 'vitest';
 import { applyConversionsToStoredItem } from './stored.js';
 import { CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from './types.js';
 
-// The stored pass replays the FULL chain (ADR-0087 addendum, #3903): a row at
-// rest was written under some past protocol and has no author to be taught by
-// a tombstone, so `retiredFromLoadPath` entries — which the authored load seam
-// skips — MUST apply here.
+// The stored pass replays the FULL registered chain (ADR-0087 addendum, #3903):
+// a row at rest was written under some past protocol and has no author to be
+// taught by a tombstone, so `retiredFromLoadPath` entries — which the authored
+// load seam skips — MUST apply here. "Registered" is the bound: a kit that has
+// aged out of the tree (ADR-0087 amendment 2026-10-26, #25767 — retired at or
+// below 16.x, at 18) is not in the table any more, so a row still carrying one
+// of those keys is NOT canonicalized here; it meets the strict refusal at the
+// parse, and is rehydrated on a release that still carried the kit first.
 describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
-  it('replays a RETIRED conversion over a stored object row (conditionalRequired → requiredWhen)', () => {
+  it('replays a RETIRED conversion over a stored object row (externalSharingModel removed)', () => {
     const row = {
-      name: 'crm_task',
-      label: 'Task',
-      fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
+      name: 'portal_case',
+      label: 'Case',
+      sharingModel: 'public_read',
+      externalSharingModel: 'private',
     };
     const notices: ConversionNotice[] = [];
-    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
-    expect(out.fields.due_date).toEqual({ type: 'date', requiredWhen: 'record.stage == "closed"' });
-    expect(notices.map((n) => n.conversionId)).toContain('field-conditionalRequired-to-requiredWhen');
+    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) }) as Record<string, unknown>;
+    expect(out).toEqual({ name: 'portal_case', label: 'Case', sharingModel: 'public_read' });
+    expect(notices.map((n) => n.conversionId)).toContain('object-external-sharing-model-removed');
   });
 
-  it('replays a retired conversion over a standalone stored action row (execute → target)', () => {
-    const row = { name: 'convert', label: 'Convert', type: 'script', execute: 'convertHandler' };
+  it('replays a retired conversion over a standalone stored action row (aria removed)', () => {
+    const row = { name: 'escalate', label: 'Escalate', type: 'script', aria: { ariaLabel: 'Escalate', role: 'button' } };
     const out = applyConversionsToStoredItem('action', row) as Record<string, unknown>;
-    expect(out.target).toBe('convertHandler');
-    expect('execute' in out).toBe(false);
+    expect(out).toEqual({ name: 'escalate', label: 'Escalate', type: 'script' });
+    expect('aria' in out).toBe(false);
   });
 
   it('reaches actions EMBEDDED in a stored object row', () => {
     const row = {
       name: 'crm_lead',
       label: 'Lead',
-      actions: [{ name: 'convert', type: 'script', execute: 'convertHandler' }],
+      actions: [{ name: 'reopen', type: 'script', aria: { ariaDescribedBy: 'reopen_help' } }],
     };
     const out = applyConversionsToStoredItem('object', row) as { actions: Array<Record<string, unknown>> };
-    expect(out.actions[0]!.target).toBe('convertHandler');
-    expect('execute' in out.actions[0]!).toBe(false);
+    expect(out.actions[0]).toEqual({ name: 'reopen', type: 'script' });
+    expect('aria' in out.actions[0]!).toBe(false);
+  });
+
+  // [#25767] The bound stated above, pinned: a ≤16.x kit is gone from the
+  // registered table, so its key is left exactly as stored — the row is not
+  // half-migrated by some other entry, and nothing is reported. This is what
+  // makes "rehydrate on ≤18.1 first" the prescription rather than a courtesy.
+  it('leaves an aged-out key (≤16.x kit) as stored — the stored pass converts only what is registered', () => {
+    const row = {
+      name: 'crm_task',
+      label: 'Task',
+      enable: { trash: false, searchable: true },
+      fields: { due_date: { type: 'date', conditionalRequired: 'record.stage == "closed"' } },
+    };
+    const notices: ConversionNotice[] = [];
+    expect(applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) })).toBe(row);
+    expect(notices).toEqual([]);
   });
 
   // #8321 — the authoring schema now refuses non-integer/negative
@@ -68,27 +89,9 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
   });
 
   it('accepts the legacy PLURAL row-type spelling', () => {
-    const row = { name: 'crm_deal', label: 'Deal', sharingModel: 'read' };
+    const row = { name: 'crm_deal', label: 'Deal', sharingModel: 'private', externalSharingModel: 'private' };
     const out = applyConversionsToStoredItem('objects', row) as Record<string, unknown>;
-    expect(out.sharingModel).toBe('public_read');
-  });
-
-  // #3207 — a 16.x row still carrying the retired `enable.trash`/`enable.mru`
-  // flags replays clean instead of tripping the registry's spec-conformance
-  // diagnostic forever (`.strict()` capabilities would flag it
-  // `metadata_spec_invalid` on every rehydration).
-  it('strips the retired enable.trash/mru flags from a stored object row', () => {
-    const row = {
-      name: 'sys_audit_log',
-      label: 'Audit Log',
-      enable: { trash: false, mru: false, searchable: true },
-    };
-    const notices: ConversionNotice[] = [];
-    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) }) as {
-      enable: Record<string, unknown>;
-    };
-    expect(out.enable).toEqual({ searchable: true });
-    expect(notices.filter((n) => n.conversionId === 'object-enable-trash-mru-removed')).toHaveLength(2);
+    expect(out).toEqual({ name: 'crm_deal', label: 'Deal', sharingModel: 'private' });
   });
 
   it('is idempotent — a canonical row passes through by reference', () => {
@@ -103,7 +106,8 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
   it('never mutates the stored input', () => {
     const row = {
       name: 'crm_task',
-      fields: { due_date: { type: 'date', conditionalRequired: 'record.x == 1' } },
+      sharingModel: 'private',
+      externalSharingModel: 'private',
     };
     const snapshot = structuredClone(row);
     applyConversionsToStoredItem('object', row);
@@ -119,52 +123,33 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
     expect(applyConversionsToStoredItem('object', arr)).toBe(arr);
   });
 
-  // #4456 — the driver-factory `??` fallback graduation. A runtime datasource
-  // persisted before the #4410 config gate may carry the legacy spellings; the
-  // stored pass MUST serve it canonical, because the factory now reads exactly
-  // one spelling per key (deleting the fallbacks without this replay would
-  // silently move a sqlite `file:` row's data to `:memory:`).
-  describe('stored datasource rows (datasource-config-driver-key-aliases)', () => {
-    // The fourth column is the driver id the stored pass SERVES, which differs
-    // from the stored one for exactly one row: commit e2798fab7 renamed the canonical mongo
-    // id to `mongodb`, and `datasource-driver-mongo-to-mongodb` converges the
-    // stored spelling in the same replay. Both conversions run over one row here,
-    // which is the case worth pinning — the config-key rename is keyed by
-    // canonical driver id, so it has to keep landing for a row whose id is itself
-    // being renamed.
+  // Commit e2798fab7 renamed the canonical mongo id to `mongodb`;
+  // `datasource-driver-mongo-to-mongodb` (retired from the load path at 18,
+  // #23543 F1) converges the stored spelling here. The driver-factory `??`
+  // fallback graduation that used to run over the same row
+  // (`datasource-config-driver-key-aliases`, #4456) aged out with the 16.x kits
+  // (#25767): a runtime datasource row still spelling `file:`/`uri:`/`user:` is
+  // served as stored, and is rehydrated on a release ≤18.1 to be canonicalized.
+  describe('stored datasource rows (datasource-driver-mongo-to-mongodb)', () => {
     it.each([
-      ['sqlite', { file: './data/app.db' }, { filename: './data/app.db' }, 'sqlite'],
-      ['sqlite', { database: './data/app.db' }, { filename: './data/app.db' }, 'sqlite'],
-      ['postgres', { connectionString: 'postgresql://db/x', user: 'svc' }, { url: 'postgresql://db/x', username: 'svc' }, 'postgres'],
-      ['mysql', { host: 'db', database: 'orders', user: 'svc' }, { host: 'db', database: 'orders', username: 'svc' }, 'mysql'],
-      ['mongo', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }, 'mongodb'],
-      ['mongodb', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }, 'mongodb'],
-    ])('serves a stored %s row with legacy config keys canonical', (driver, config, expected, servedDriver) => {
+      ['mongo', 'mongodb'],
+      ['mongodb', 'mongodb'],
+    ])('serves a stored %s row as %s, config untouched', (driver, servedDriver) => {
+      const config = { url: 'mongodb://db/x', username: 'svc' };
       const row = { name: 'legacy_ds', driver, config, origin: 'runtime' };
       const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
-      expect(out.config).toEqual(expected);
+      expect(out.config).toEqual(config);
       expect(out).toMatchObject({ name: 'legacy_ds', driver: servedDriver, origin: 'runtime' });
     });
 
-    it('leaves `database` alone for the drivers where it is canonical', () => {
+    it('leaves a canonical row of another driver alone, by reference', () => {
       const row = { name: 'wh', driver: 'postgres', config: { host: 'db', database: 'analytics' } };
       expect(applyConversionsToStoredItem('datasource', row)).toBe(row);
     });
 
-    it('keeps BOTH spellings on a stored row when they disagree', () => {
-      const row = { name: 'ds', driver: 'sqlite', config: { filename: './real.db', file: './stale.db' } };
-      const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
-      // `renameKey` convention since #4923: two DIFFERENT files under two names
-      // is the author's ambiguity to resolve, so the replay picks neither.
-      expect(out.config).toEqual({ filename: './real.db', file: './stale.db' });
-    });
-
-    it('drops a redundant alias on a stored row when it repeats the canonical value', () => {
-      const row = { name: 'ds', driver: 'sqlite', config: { filename: './real.db', file: './real.db' } };
-      const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
-      // Data at rest gets the same hygiene as a fresh load (#3903 replays the
-      // full chain), so a rehydrated row is canonical rather than half-migrated.
-      expect(out.config).toEqual({ filename: './real.db' });
+    it('leaves a pre-#4410 legacy config spelling as stored — the alias kit aged out (#25767)', () => {
+      const row = { name: 'ds', driver: 'sqlite', config: { file: './data/app.db' } };
+      expect(applyConversionsToStoredItem('datasource', row)).toBe(row);
     });
   });
 

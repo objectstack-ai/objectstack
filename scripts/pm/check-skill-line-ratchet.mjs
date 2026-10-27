@@ -1553,7 +1553,11 @@ export const CEILINGS = new Map([
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
   // `origin/main` (headroom 0, same convention as the entries above).
-  ['.claude/skills/checklist-test/SKILL.md', 238],
+  // 238 → 246: the ruling of record that orders text into the file — the
+  // maintainer's 「以上应该写入你的 checklist skills」, recorded verbatim with the
+  // rulings it orders in comment 6433562861 — +8 measured lines (write doors,
+  // file-every-defect, auth/authz fix dispatch, QA run is not a lane card).
+  ['.claude/skills/checklist-test/SKILL.md', 246],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],

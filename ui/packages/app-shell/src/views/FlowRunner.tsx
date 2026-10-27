@@ -116,8 +116,8 @@
  * dispatches a declared action runs it through `useActionTextLocalizer`
  * first, and the handler receives that copy, so there is no second
  * localization step here. Nothing else moves: the pause stays silent, an
- * intermediate step still toasts `flowRunner.nextStep`, and a `refused` or
- * failed end still shows no success toast.
+ * intermediate step toasts only a record it saved (objectstack#26578, below),
+ * and a `refused` or failed end still shows no success toast.
  *
  * The order of the first two is not this file's: it is `flowSuccessCopy` in
  * `utils/flowResponse`, which a run that goes straight through follows too
@@ -219,6 +219,25 @@
  * The values then go out through `screenResumeValues`, which reduces each file
  * field to its bare id: the engine reads `'file'` as a value domain and refuses
  * anything else.
+ *
+ * ## A step between screens toasts only a record it saved (objectstack#26578)
+ *
+ * Every step of a wizard used to answer its pause with `Saved — next step`,
+ * including a flat step that only collected variables: in a five-step wizard
+ * whose record is created on step 3, steps 1 and 2 told the user something was
+ * saved when nothing was. So the between-steps toast now follows what this
+ * dialog itself persisted: an `object-form` step has written its record (the
+ * form calls `onSuccess` only after the write lands, and passing `onSuccess`
+ * is what silences the form's own confirmation), so it keeps the toast; a flat
+ * step wrote nothing here, and the next screen appearing is its whole answer.
+ * The terminal toasts are untouched.
+ *
+ * The flat footer's button still reads Submit on every step, and that is a
+ * measured limit, not a choice. "Next" on a step that is not the last needs to
+ * know which step IS the last, and nothing on the wire says so: the paused
+ * screen (`ScreenSpec` in `@objectstack/spec/contracts`) carries no final-step
+ * or step-count member, and a flow can branch after any screen, so only the
+ * engine could tell from the graph. The same gap keeps a step counter out.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -479,8 +498,10 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
 
   // Resume the paused run with `inputs` (applied as bare flow variables) and
   // advance: render the next screen (multi-step wizard) or finish + refresh.
-  // Shared by the flat-field submit and the object-form save callback.
-  const resumeWith = async (inputs: Record<string, unknown>): Promise<void> => {
+  // Shared by the flat-field submit and the object-form save callback;
+  // `savedRecord` says whether this step persisted a record before resuming,
+  // which only an `object-form` step does (objectstack#26578 — see the header).
+  const resumeWith = async (inputs: Record<string, unknown>, savedRecord: boolean): Promise<void> => {
     const res = await authFetch(
       `${baseUrl}/api/v1/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inputs }) },
@@ -527,7 +548,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       setRunId(outcome.runId || runId);
       setFlowLabel(outcome.flowLabel);
       setValues(initialScreenValues(outcome.screen));
-      toast.success(t('flowRunner.nextStep', { defaultValue: 'Saved — next step' }));
+      // Only a step that saved a record says so; a flat step's answer is the
+      // next screen itself (objectstack#26578 — see the header).
+      if (savedRecord) toast.success(t('flowRunner.nextStep', { defaultValue: 'Saved — next step' }));
     } else {
       // Terminal success — the invoking action's own `successMessage` first
       // (objectui#12234 — see the header), then the flow's declared completion
@@ -596,7 +619,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     setSubmitting(true);
     try {
       // File fields go out as their bare `sys_file` id (objectstack#25801).
-      await resumeWith(screenResumeValues(screen, values));
+      await resumeWith(screenResumeValues(screen, values), false);
     } catch (err) {
       // The request never produced a response (network / abort), so the
       // suspension was not consumed — this one IS retryable.
@@ -617,7 +640,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     const inputs = screen.idVariable && id != null ? { [screen.idVariable]: id } : {};
     setSubmitting(true);
     try {
-      await resumeWith(inputs);
+      await resumeWith(inputs, true);
     } catch (err) {
       const message = (err as Error).message;
       toast.error(message);

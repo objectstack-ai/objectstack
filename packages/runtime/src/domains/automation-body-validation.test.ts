@@ -129,14 +129,14 @@ describe('#3899 ③ — POST /automation/:name/toggle is { enabled?: boolean }, 
         const result = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: false }, CTX);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data ?? result.response?.body).toMatchObject({ enabled: false });
-        expect(spies.toggleFlow).toHaveBeenCalledWith('welcome_flow', false);
+        expect(spies.toggleFlow).toHaveBeenCalledWith('welcome_flow', false, expect.anything());
     });
 
     it('keeps the documented legacy shape: an empty body enables', async () => {
         const { dispatcher, spies } = makeDispatcher();
         const result = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', undefined, CTX);
         expect(result.response?.status).toBe(200);
-        expect(spies.toggleFlow).toHaveBeenCalledWith('welcome_flow', true);
+        expect(spies.toggleFlow).toHaveBeenCalledWith('welcome_flow', true, expect.anything());
     });
 });
 

@@ -250,6 +250,9 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/spec/src/ui/component.test.ts',
     // The view write door's generic moved-key projection, modelled on the old fold.
     'packages/metadata-protocol/src/protocol.project-storable-view-body.test.ts',
+    // [#25767] The view union's prescription pin authors `visibleOn` on a form
+    // overlay to assert the branch-typed refusal names the alias prescription.
+    'packages/spec/src/ui/view-union-retirement-prescription.test.ts',
     // The SDUI parser tier's base-prop list (`SDUI_BASE_PROPS`) still accepts the
     // deprecated `visibleOn` on every node; this pin gives each member a
     // well-typed value (moved in from the renderer's copy by #25712).

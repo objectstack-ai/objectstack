@@ -134,18 +134,26 @@ export const SysPlatformSettingAudit = ObjectSchema.create({
       description: 'Free-text justification provided by the actor (optional).',
     }),
 
+    /**
+     * Same formats as `sys_setting_audit.old_hash`: `sha256:` + hex SHA-256
+     * of the canonical JSON for a non-secret value, the crypto provider's keyed
+     * `hmac-sha256:` digest for a secret (never an unkeyed hash). Null when
+     * previously unset, and null for a secret when no keyed digest is
+     * available. Older rows may carry `fnv32:`; compare only same-prefix values.
+     */
     old_hash: Field.text({
       label: 'Old Hash',
       readonly: true,
       maxLength: 128,
-      description: 'Digest of the previous value. Never the plaintext. Null when previously unset.',
+      description: 'Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest.',
     }),
 
+    /** Same formats as `old_hash`. Null on `reset`, and for a secret with no keyed digest. */
     new_hash: Field.text({
       label: 'New Hash',
       readonly: true,
       maxLength: 128,
-      description: 'Digest of the new value. Never the plaintext. Null on reset.',
+      description: 'Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest.',
     }),
 
     encrypted: Field.boolean({
