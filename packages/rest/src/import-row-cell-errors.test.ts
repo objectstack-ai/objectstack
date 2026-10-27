@@ -27,6 +27,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -79,6 +80,12 @@ async function boot() {
   // A real `single` install's Default Organization: the job row's system
   // writes derive it (ADR-0131 D9).
   await installDefaultOrganization(engine);
+  // The route reads the object's field metadata through the protocol, which
+  // reads the stored-metadata family: without it every cell passes through
+  // uncoerced and the engine's validator answers instead.
+  for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
+  }
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
