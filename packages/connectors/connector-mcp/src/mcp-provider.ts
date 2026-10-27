@@ -237,7 +237,9 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       });
     } catch (err) {
       // A credential the server rejects (HTTP 401 / 403 on connect, handshake
-      // or tools/list) is a configuration fault: retrying cannot make a wrong,
+      // or tools/list) is a configuration fault on ADR-0097's configuration /
+      // operational split, like an unresolvable credentialRef and like the
+      // openapi provider's 401 on its spec fetch: retrying cannot make a wrong,
       // missing or under-scoped credential valid, and a degraded instance
       // retried with backoff reads as "server down", hiding the misconfiguration
       // the author has to fix. Credential-protected remote servers are the
