@@ -23,7 +23,8 @@
  *   3. another object's sections are unaffected;
  *   4. the store receives the choice per object, both ways;
  *   5. with no store (no host, no signed-in user) the toggle is what it was:
- *      per section, gone on unmount.
+ *      per section, gone on unmount;
+ *   6. the choice never undoes an authored `hideEmpty: true` all-empty section.
  */
 
 import React from 'react';
@@ -160,6 +161,23 @@ describe('the empty-field toggle is one remembered choice per object (objectstac
     );
     expect(emptyShown('Details')).toBe(true);
     expect(mem.writes).toEqual([]);
+  });
+
+  it('a remembered choice does not undo an authored `hideEmpty: true` on an all-empty section', () => {
+    const mem = memoryStore({ opportunity: { showEmptyFields: true } });
+    render(
+      <Host mem={mem}>
+        <Section title="Details" objectName="opportunity" />
+        <DetailSection
+          section={{ ...section('Shipping'), hideEmpty: true }}
+          data={{ name: null, stage: '', next_step: null, lead_source: null }}
+          objectName="opportunity"
+        />
+      </Host>,
+    );
+    expect(emptyShown('Details')).toBe(true);
+    expect(screen.queryByText('Shipping')).toBeNull();
+    expect(screen.queryByText('Shipping Name')).toBeNull();
   });
 
   it('with no store, the toggle stays per section and is gone on unmount', () => {

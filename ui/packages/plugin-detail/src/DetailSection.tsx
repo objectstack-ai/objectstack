@@ -417,8 +417,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const foldAllEmptySection =
     allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
 
+  // The authored all-empty hide is not the reader's to undo: it applies
+  // whatever the reader's "show empty fields" choice is, now that the choice is
+  // one per object and reaches sections that never drew the toggle
+  // (objectstack#25883).
   const hideEmptyEffective =
-    !showEmptyOverride && (shouldAutoHideEmpty || hideAllEmptySection || foldAllEmptySection);
+    hideAllEmptySection || (!showEmptyOverride && (shouldAutoHideEmpty || foldAllEmptySection));
 
   // Filter out empty fields when the auto-hide heuristic kicked in, when an
   // all-empty section is folded, or when one is hiding itself (its early
