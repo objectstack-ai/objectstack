@@ -37,6 +37,11 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { RichMetadataTypeEntry } from './useMetadata';
+// The lock banner's zh row lives in `@object-ui/i18n`'s `studio` namespace,
+// whose `zh` catalogue is fetched on demand (objectstack#25922). Resident
+// before any case, so the zh-CN banner reads its zh row on first render.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const OVERLAY_TYPES = ['view', 'dashboard', 'report', 'translation', 'email_template'] as const;
 

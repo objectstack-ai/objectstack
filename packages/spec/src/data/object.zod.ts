@@ -33,6 +33,9 @@ import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
+// The one-name-per-action predicate, shared with the v18 stored-row listing.
+// Internal to the spec.
+import { duplicateActionNames } from './duplicate-action-names';
 // The object's default row scope (the RLS policy shape without `object`) and the
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
@@ -2288,6 +2291,30 @@ function refuseExternalBindingOnPrimaryDatasource(
   ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
 }
 
+/**
+ * [#26725] An object's `actions` array declares each action name once. One
+ * located issue per repeated name, at `['actions', <index>]` of its SECOND
+ * declaration, naming the name and every index. Before this, the object save
+ * door saved and published two actions under one name, and which one ran was
+ * undefined; `defineStack`'s duplicate action-key check refused the same pair
+ * only for a stack.
+ *
+ * Kept in the existing callback beside {@link refuseExternalBindingOnPrimaryDatasource}
+ * so it adds no check node the JSON Schema projection would have to drop.
+ * Predicate and message: `duplicate-action-names.ts`
+ * ({@link duplicateActionNames}), which the v18 stored-row listing reads too,
+ * so `os migrate meta --stored` lists each stored object this refuses.
+ *
+ * Metadata at rest still LOADS: a stored object this refuses registers under a
+ * `[metadata_spec_invalid]` diagnostic carrying this message, and its next
+ * save is refused.
+ */
+function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: z.RefinementCtx): void {
+  for (const duplicate of duplicateActionNames(objectName, actions)) {
+    ctx.addIssue({ code: 'custom', path: ['actions', duplicate.indexes[1]!], message: duplicate.message });
+  }
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -3388,6 +3415,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
   // managed primary datasource. See the helper's docblock.
   refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
+  // [#26725] Each action name once in this object's `actions` — the name is the
+  // key the action runs under. See the helper's docblock.
+  refuseDuplicateActionNames(object.name, object.actions, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author
