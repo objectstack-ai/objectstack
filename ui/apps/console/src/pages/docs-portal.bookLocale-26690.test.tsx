@@ -101,10 +101,13 @@ function Portal({ entry }: { entry: string }) {
   );
 }
 
-/** The book sidebar (rendered once wide, once as a narrow disclosure) — every copy. */
-async function sidebars(): Promise<HTMLElement[]> {
+/**
+ * The book sidebar, found by its accessible name — the book's title. It renders
+ * once wide and once in the narrow disclosure, so every copy is returned.
+ */
+async function sidebars(title: string): Promise<HTMLElement[]> {
   await screen.findByTestId('doc-content');
-  return screen.getAllByRole('navigation').filter((nav) => within(nav).queryAllByRole('link').length > 0);
+  return screen.getAllByRole('navigation', { name: title });
 }
 
 afterEach(() => {
@@ -116,10 +119,10 @@ describe('objectstack#26690 — the docs sidebar serves the request locale', () 
   it('a zh-CN reader sees the book title and every section title in zh-CN', async () => {
     REQUEST.locale = 'zh-CN';
     render(<Portal entry="/apps/com.example.crm/docs/manual/crm_start_login" />);
-    const navs = await sidebars();
+    const navs = await sidebars('使用手册');
     expect(navs.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByRole('navigation', { name: 'User Manual' })).toHaveLength(0);
     for (const nav of navs) {
-      expect(nav).toHaveAttribute('aria-label', '使用手册');
       expect(within(nav).getByText('快速上手')).toBeInTheDocument();
       expect(within(nav).getByText('销售管道')).toBeInTheDocument();
       expect(within(nav).queryByText('Getting started')).toBeNull();
@@ -128,10 +131,9 @@ describe('objectstack#26690 — the docs sidebar serves the request locale', () 
 
   it('an en-US reader is unchanged: the authored title and section titles', async () => {
     render(<Portal entry="/apps/com.example.crm/docs/manual/crm_start_login" />);
-    const navs = await sidebars();
+    const navs = await sidebars('User Manual');
     expect(navs.length).toBeGreaterThanOrEqual(1);
     for (const nav of navs) {
-      expect(nav).toHaveAttribute('aria-label', 'User Manual');
       expect(within(nav).getByText('Getting started')).toBeInTheDocument();
       expect(within(nav).getByText('Pipeline')).toBeInTheDocument();
     }
