@@ -188,7 +188,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读六行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `needs-user-decision`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;技能面 hunk 复核随面定档:席未达档起隔离达档复核。
-- 核对六项(席位读此):形态/前提实测/门禁 check-runs/接受的偏差/范围外去向/落地条款。
+- 核对六项:形态/前提实测/门禁 check-runs/接受的偏差/范围外去向+`Skills-docs:`/落地条款。
 - 速读六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
 - 草稿归 dev:每个 PR 正文带 `## 维护者速读` 六行,中文、业务角度,不写席位意见。
 - 终稿 = 席位对照自己读的 diff 校正六行、加席位意见行,置顶席位记录;维护者只读评论。
@@ -310,7 +310,7 @@ Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:;⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定>`
 Clause-②: yes | no
-Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; the level table is AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and every changeset body)
+Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; the level table is AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and every changeset body; a kind other than `none`, or a `(narrowing)` arm, owes the PR body a third line the dev writes from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = this diff teaches it in `skills/**` or the docs; the seat files the owed card and rewrites `owed — FILES` to `#N` before ACCEPT)
 Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
