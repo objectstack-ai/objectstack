@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT, type UnservableControlledByParentMaster } from './engine.js';
+import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
+import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
@@ -552,6 +554,23 @@ export class ObjectQLPlugin implements Plugin {
    * not honour. Reads the service without warning — a junk key was warned
    * about at `start()` and reads as the same empty set.
    */
+  /** [ADR-0142 D1] See the `kernel:ready` call site. */
+  private assertOwnershipQueueServicePresent(ctx: PluginContext): void {
+    const registry = this.ql?.registry;
+    if (!registry) return;
+    let registered = false;
+    try {
+      registered = Boolean(ctx.getService(OWNERSHIP_QUEUE_SERVICE));
+    } catch {
+      registered = false;
+    }
+    const refusal = describeMissingOwnershipQueueService(
+      { queues: registry.listItems('queue'), assignmentRules: registry.listItems('assignment_rule') },
+      registered,
+    );
+    if (refusal) throw refusal;
+  }
+
   private assertDeploymentPlatformGlobalObjectsUnchanged(ctx: PluginContext): void {
     let service: unknown;
     try {
@@ -691,6 +710,10 @@ export class ObjectQLPlugin implements Plugin {
     // `$in: []` (fail closed); a throw — the in-repo kernels' answer for a
     // name nothing registered — is one of them.
     (this.ql as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT] = () => ctx.getService('security');
+    // [ADR-0142 D5] The assignment seam reads the ownership-queue service the
+    // same way: a source, resolved at use. ⛔ `ownership-queue`, never the job
+    // queue's `queue`.
+    (this.ql as unknown as Record<symbol, unknown>)[OWNERSHIP_QUEUE_SOURCE_SLOT] = () => ctx.getService(OWNERSHIP_QUEUE_SERVICE);
 
     // Register as provider for Core Kernel Services
     ctx.registerService('objectql', this.ql);
@@ -959,6 +982,12 @@ export class ObjectQLPlugin implements Plugin {
         // this plugin's start() was never read, so its objects were provisioned
         // WITH the column. Refused here, by name, rather than served.
         this.assertDeploymentPlatformGlobalObjectsUnchanged(ctx);
+        // [ADR-0142 D1] A stack that declares `queues` or `assignmentRules`
+        // needs the service that serves them. Judged here, where every plugin
+        // has registered its services and its packages, by the service NAME
+        // `ownership-queue` — a composition that loads only the job queue
+        // (`queue`) would otherwise pass with nothing behind its declarations.
+        this.assertOwnershipQueueServicePresent(ctx);
         // A field naming a picklist no package declares fails the boot, naming
         // the field and the package — never served as a select with nothing to
         // choose — and so does an extension of such a list, whose values would

@@ -441,6 +441,7 @@
     "system/FieldEncryption:fieldName",
     "system/FieldEncryption:indexable",
     "system/FieldTranslation:help",
+    "system/FieldTranslation:inlineTitle",
     "system/FieldTranslation:label",
     "system/FieldTranslation:options",
     "system/FieldTranslation:placeholder",

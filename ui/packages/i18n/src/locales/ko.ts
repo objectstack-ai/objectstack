@@ -3105,6 +3105,8 @@ const ko = {
     recordAccessDeniedDescription: "이 유형의 레코드를 볼 권한이 없습니다. 접근이 필요하면 관리자에게 문의하세요.",
     recordLoadFailed: "이 레코드를 불러오지 못했습니다",
     recordLoadFailedDescription: "불러오는 중 문제가 발생했습니다. 연결을 확인하고 다시 시도하세요.",
+    recordAccessEnded: "결정이 기록되었습니다",
+    recordAccessEndedDescription: "승인 단계가 완료되어 이 레코드에 대한 접근 권한이 종료되었습니다.",
   },
   actionDialog: {
     title: "작업 매개변수",

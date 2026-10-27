@@ -220,6 +220,18 @@ export const SystemFieldName = {
    */
   OWNING_BUSINESS_UNIT_ID: 'owning_business_unit_id',
   /**
+   * [ADR-0142 D3] The ownership queue — a queue machine name. A record SITS IN
+   * queue Q when this column is Q and {@link SystemFieldName.OWNER_ID} is
+   * empty; with an owner set it names the record's home queue, conferring no
+   * access. **INJECTED** exactly where `owner_id` is (`ownership: 'user'` or
+   * omitted), and an eligible object that declares its own `queue` field is
+   * refused at registration rather than letting the author's field win.
+   * Written by an assignment rule (as the platform) and by claim / release /
+   * move through the ownership gate; on the public-form denylist with the other
+   * anchors.
+   */
+  QUEUE: 'queue',
+  /**
    * THE tenant isolation key — a lookup to `sys_organization`. INJECTED unless
    * tenancy is disabled for the object; org-scoping stamps it on insert (under
    * `single` with the Default Organization), and it is never NULL (ADR-0131 D1).

@@ -92,6 +92,13 @@ export const CrmTranslationBundle = defineTranslationBundle({
 
   'zh-CN': {
     objects: {
+      // The inline product grid's heading on the opportunity form. The field
+      // lives on the line item, so the key is the line item's.
+      crm_opportunity_line_item: {
+        fields: {
+          opportunity: { inlineTitle: '产品明细' },
+        },
+      },
       crm_account: {
         label: '客户',
         pluralLabel: '客户列表',

@@ -135,19 +135,20 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "Recipient Type",
-        help: "Who receives access. Picking a team, business unit or position gives access to everyone in it. \"Business unit and subordinates\" also covers every unit below the one you pick. \"Field\" shares each record with the user or users held in one of its own fields — name that field as the recipient.",
+        help: "Who receives access. Picking a team, business unit, position or queue gives access to everyone in it. \"Business unit and subordinates\" also covers every unit below the one you pick. \"Field\" shares each record with the user or users held in one of its own fields — name that field as the recipient.",
         options: {
           user: "User",
           team: "Team",
           business_unit: "Business unit",
           position: "Position",
           unit_and_subordinates: "Business unit and subordinates",
+          queue: "Queue",
           field: "Field"
         }
       },
       recipient_id: {
         label: "Recipient",
-        help: "The specific user, team, business unit or position that receives access — or, for the \"Field\" recipient type, the name of the record field that holds the user or users to share with."
+        help: "The specific user, team, business unit, position or queue that receives access — or, for the \"Field\" recipient type, the name of the record field that holds the user or users to share with."
       },
       access_level: {
         label: "Access Level",

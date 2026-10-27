@@ -71,6 +71,10 @@ function mapRecipientType(t: unknown): SharingRuleRecipientType | null {
     // `value` is a field NAME, held to the `FieldSchema.name` grammar at parse,
     // and `SharingRuleService` reads that column on each matched record.
     case 'field': return 'field';
+    // [ADR-0142 D7] A queue, by machine name — expanded through the
+    // ownership-queue service to the queue's members in the rule's
+    // organization.
+    case 'queue': return 'queue';
     // Defensive only: the authoring enum matches the cases above 1:1, but a
     // stale pre-built package could still register a retired shape — skip,
     // never seed match-all.

@@ -258,6 +258,26 @@ const screenFieldSpecShape = () => z.object({
 });
 
 /**
+ * The wire spelling of `ScreenProgressSpec` (`contracts/automation-service.ts`,
+ * #26657), module-local for the reason on {@link screenFieldSpecShape}.
+ */
+const screenProgressSpecShape = () => z.object({
+  nextScreen: z.enum(['none', 'possible', 'certain']).describe(
+    'Whether another screen can follow this one: `none` = no path reaches one (the last step, '
+    + '"Submit"); `certain` = every path pauses on one first ("Next"); `possible` = a branch, a '
+    + 'pause that serves no screen or a subflow decides, and the engine does not guess ("Next")',
+  ),
+  step: z.number().int().min(1).optional().describe(
+    '1-based position among the run\'s screens; present only when every path from the start '
+    + 'pauses on the same number of screens before this one',
+  ),
+  stepCount: z.number().int().min(1).optional().describe(
+    'Screens the run pauses on in all, this one included; present only alongside `step`, when '
+    + 'every path through this screen has the same count. A runner draws a counter only from it',
+  ),
+});
+
+/**
  * The screen a paused `screen` node wants the client to render — the wire
  * spelling of `ScreenSpec` (`contracts/automation-service.ts`), module-local
  * for the reason on {@link screenFieldSpecShape}.
@@ -281,6 +301,11 @@ const screenSpecShape = () => z.object({
   idVariable: z.string().optional().describe(
     'Flow variable that receives the saved record\'s id when the client '
     + 'resumes the run, so a later step can reference it',
+  ),
+  progress: screenProgressSpecShape().optional().describe(
+    'Where this screen sits among the screens of its run, read by the engine off the flow graph. '
+    + 'Absent = the engine cannot answer (a server that predates it, or a screen in a child run '
+    + 'whose own graph shows no further screen); a runner then keeps its previous label',
   ),
 });
 

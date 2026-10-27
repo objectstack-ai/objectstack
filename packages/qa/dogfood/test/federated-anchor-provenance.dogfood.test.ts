@@ -16,11 +16,12 @@
  * What this file proves, against the registry a deployed app would really run:
  *
  *  1. BEFORE-PICTURE PRESERVED — direction B keeps injecting: the federated
- *     `showcase_ext_customer` still registers all 7 platform anchors over the
+ *     `showcase_ext_customer` still registers all 8 platform anchors (the
+ *     card's 7 plus the ownership `queue`, ADR-0142 D3) over the
  *     4-column remote table, byte-identical to the shipped definition tables
  *     (no `provisioned` key in any served or registered field definition —
  *     the #7865 fence: the marker changes what no consumer accepts).
- *  2. THE MARKER — the 7 anchors, and only they, answer
+ *  2. THE MARKER — the 8 anchors, and only they, answer
  *     `'injected-unprovisioned'`; the local control answers
  *     `'injected-provisioned'`; declared columns answer `'author'`.
  *  3. GUARD PARITY — the marker agrees with the #7859 Layer-0 guard's live
@@ -44,6 +45,7 @@ import {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  QUEUE_FIELD_DEF,
   platformProvisionsStorage,
   resolveInjectedColumnProvenance,
   unprovisionedInjectedColumns,
@@ -65,6 +67,9 @@ const SEVEN_ANCHORS = [
   'owning_business_unit_id',
 ] as const;
 
+/** Every injected anchor today: the measured seven plus the ownership `queue` (ADR-0142 D3). */
+const INJECTED_ANCHORS = [...SEVEN_ANCHORS, 'queue'] as const;
+
 /** The remote table's real columns, as the showcase declares them. */
 const DECLARED = ['name', 'email', 'region', 'lifetime_value'] as const;
 
@@ -72,6 +77,7 @@ const SHIPPED_DEFS: Record<string, Readonly<Record<string, unknown>>> = {
   organization_id: TENANT_SCOPE_FIELD_DEF,
   owner_id: OWNER_FIELD_DEF,
   owning_business_unit_id: OWNING_BUSINESS_UNIT_FIELD_DEF,
+  queue: QUEUE_FIELD_DEF,
   ...AUDIT_FIELD_DEFS,
 };
 
@@ -119,24 +125,24 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
     await stack?.stop?.();
   });
 
-  it('BEFORE-PICTURE: the registry still injects all 7 anchors into the federated object (direction B keeps injecting)', () => {
+  it('BEFORE-PICTURE: the registry still injects all 8 anchors into the federated object (direction B keeps injecting)', () => {
     const names = Object.keys(fieldMap(federated));
-    for (const anchor of SEVEN_ANCHORS) expect(names, 'anchors').toContain(anchor);
+    for (const anchor of INJECTED_ANCHORS) expect(names, 'anchors').toContain(anchor);
     for (const declared of DECLARED) expect(names, 'declared').toContain(declared);
   });
 
   it('FENCE: every registered anchor definition is byte-identical to the shipped table — the marker adds nothing to the data', () => {
     const fields = fieldMap(federated);
-    for (const anchor of SEVEN_ANCHORS) {
+    for (const anchor of INJECTED_ANCHORS) {
       expect(fields[anchor], anchor).toEqual({ ...SHIPPED_DEFS[anchor] });
       expect('provisioned' in (fields[anchor] ?? {}), `${anchor} must not carry a provisioned key`).toBe(false);
     }
   });
 
-  it('THE MARKER: the 7 anchors — and only they — are unprovisioned on the federated object', () => {
+  it('THE MARKER: the 8 anchors — and only they — are unprovisioned on the federated object', () => {
     expect(platformProvisionsStorage(federated)).toBe(false);
-    expect(unprovisionedInjectedColumns(federated).sort()).toEqual([...SEVEN_ANCHORS].sort());
-    for (const anchor of SEVEN_ANCHORS) {
+    expect(unprovisionedInjectedColumns(federated).sort()).toEqual([...INJECTED_ANCHORS].sort());
+    for (const anchor of INJECTED_ANCHORS) {
       expect(resolveInjectedColumnProvenance(federated, anchor), anchor).toBe(
         'injected-unprovisioned',
       );
@@ -182,7 +188,7 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
     // Same field-name set as the registered schema — the #6562 invariant.
     expect(Object.keys(served).sort()).toEqual(Object.keys(fieldMap(federated)).sort());
     // The served anchors carry the shipped bytes and no marker key.
-    for (const anchor of SEVEN_ANCHORS) {
+    for (const anchor of INJECTED_ANCHORS) {
       expect(served[anchor], anchor).toEqual({ ...SHIPPED_DEFS[anchor] });
     }
     // And the platform files no defect report about its own document (#6810's

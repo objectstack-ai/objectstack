@@ -33,6 +33,14 @@ export const ApproverType = z.enum([
   'position',       // Holders of a position (sys_user_position, ADR-0090 D3)
   'department',     // Members of a department + all descendant departments (sys_business_unit)
   'team',           // Members of a flat collaboration team (sys_team)
+  // [ADR-0142 D6] The members of an ownership queue, named by its machine
+  // name (a declared queue or the organization's `sys_queue` row), resolved at
+  // node entry in the request's organization through the ownership-queue
+  // service — the one expander every queue consumer reads. An empty queue
+  // resolves to nobody and the node's `onEmptyApprovers` decides. It was
+  // parse-only (`xEnumDeprecated`, no runtime branch) until the queue entity
+  // landed; it now sits with the other indirect bindings, ahead of `user`.
+  'queue',
   'field',          // User ID defined in a record field
   /**
    * #3447 P2: a CEL expression resolved AT NODE ENTRY against three explicit
@@ -62,14 +70,6 @@ export const ApproverType = z.enum([
   // where it sits.
   'role',
   'user',           // A specific user id — least portable; see the note above
-  // @deprecated #3508 — declared-but-unenforced: `resolveApproverSpec` in
-  // `plugin-approvals` has no queue branch, so a queue approver resolves to
-  // nobody (the dead `queue:<value>` fallback literal). The sharing engine
-  // retired its `queue` recipient the same way (sys-sharing-rule). Still
-  // parses so stored flows keep rendering, but designers must not offer it
-  // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
-  // ownership-queue implementation (queue entity + membership + claim).
-  'queue',
 ])
   // The generated reference page renders THIS string under `## ApproverType`;
   // the JSDoc above the enum renders nowhere (`renderSchemaSection` prints
@@ -127,15 +127,16 @@ export function canonicalApproverType(type: string): string {
  * Approver types that still PARSE but must not be offered for new authoring.
  * Published to designers as `xEnumDeprecated` on the approver `type` (see
  * {@link ApprovalNodeApproverSchema}): a stored value keeps rendering, the
- * dropdown just stops handing authors the entry. Two sources:
- *   - the deprecated spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3);
- *   - `queue`, declared-but-unenforced in the runtime (#3508) — offering it
- *     would advertise a capability the engine doesn't deliver (Prime
- *     Directive #10: declared ≠ enforced).
+ * dropdown just stops handing authors the entry. One source: the deprecated
+ * spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3).
+ *
+ * `queue` was the second source while the runtime had no queue branch
+ * (offering it would have advertised a capability the engine did not deliver,
+ * Prime Directive #10). It left this list in the change that made the queue
+ * approver resolve to the queue's members (ADR-0142 D6).
  */
 export const NON_AUTHORABLE_APPROVER_TYPES: readonly string[] = [
   ...Object.keys(DEPRECATED_APPROVER_TYPES),
-  'queue',
 ];
 
 /**
@@ -181,6 +182,16 @@ export type ApproverValueBinding =
    * the stored value.
    */
   | { source: 'registry'; type: string }
+  /**
+   * [ADR-0142 D6, open item 1] `value` is the machine name of an item that has
+   * TWO sources under one name (ADR-0131 D6 regime C): a declared item of
+   * metadata `type`, listed by `GET /api/v1/meta/<type>`, and an organization's
+   * own row of `object`, listed through the data API, whose `valueField` holds
+   * the same name. The picker lists both and commits the name either way —
+   * never a row id, because a declared item has none and the two sources share
+   * one namespace (an authored row may not take a declared name).
+   */
+  | { source: 'registry-and-record'; type: string; object: string; valueField: 'name' }
   /** Closed value set — render a strict select, never free text. */
   | { source: 'enum'; values: readonly string[] }
   /**
@@ -238,7 +249,9 @@ export const APPROVER_VALUE_BINDINGS = {
   department: { source: 'record', object: 'sys_business_unit', valueField: 'id' },
   manager: { source: 'auto' },
   field: { source: 'trigger-field' },
-  queue: { source: 'unsupported' },
+  // A declared queue or an organization's `sys_queue` row, one name — see the
+  // `registry-and-record` member of ApproverValueBinding.
+  queue: { source: 'registry-and-record', type: 'queue', object: 'sys_queue', valueField: 'name' },
   expression: { source: 'expression', roots: APPROVER_EXPRESSION_ROOTS },
 } as const satisfies Record<z.infer<typeof ApproverType>, ApproverValueBinding>;
 
@@ -255,7 +268,7 @@ export const APPROVER_VALUE_BINDINGS = {
  * (#3508).
  *
  * The cure is NOT "never the registry": it is "the source the kind's value
- * actually names". So two lookup sources reach the wire:
+ * actually names". So three lookup sources reach the wire:
  *
  *   - `data` — a directory row. Query the data API for `object`, commit the
  *     row's `valueField`. `user`, `team` and `department`.
@@ -264,6 +277,9 @@ export const APPROVER_VALUE_BINDINGS = {
  *     (ADR-0131 D2), referenced by machine name and resolved registry-first
  *     (D4). A renderer that still reads `sys_position` rows for it lists a
  *     mirror the ADR-0131 cutover retires, not the catalog.
+ *   - `registry-and-data` — [ADR-0142 D6] both at once, one name: list the
+ *     declared items (`GET /api/v1/meta/<type>`) AND the organization's rows
+ *     of `object` (the data API), commit the `name` either way. `queue`.
  *
  * Publishing the binding closes that gap at the source: a renderer reads where
  * to look and what to commit off the schema instead of re-deriving it, and a
@@ -287,14 +303,18 @@ export const APPROVER_VALUE_SOURCES = Object.fromEntries(
         // `registry` names the metadata registry, for a kind whose value IS a
         // registry item's name (ADR-0131 D4).
         ? { source: 'registry', type: binding.type }
-        : binding.source === 'enum'
-          ? { source: 'enum', values: [...binding.values] }
-          : { source: binding.source },
+        : binding.source === 'registry-and-record'
+          // [ADR-0142 D6] Both lookups, one committed name.
+          ? { source: 'registry-and-data', type: binding.type, object: binding.object, valueField: binding.valueField }
+          : binding.source === 'enum'
+            ? { source: 'enum', values: [...binding.values] }
+            : { source: binding.source },
   ]),
 ) as Record<
   z.infer<typeof ApproverType>,
   | { source: 'data'; object: string; valueField: string }
   | { source: 'registry'; type: string }
+  | { source: 'registry-and-data'; type: string; object: string; valueField: string }
   | { source: 'enum'; values: string[] }
   | { source: 'auto' | 'trigger-field' | 'expression' | 'unsupported' }
 >;
@@ -354,7 +374,9 @@ export const APPROVER_ORG_SCOPED = {
   department: true,
   manager: false,
   field: false,
-  queue: false,
+  // [ADR-0142 D6] A queue is an organization's: it resolves, and its members
+  // expand, in the request's organization or the one `organization` targets.
+  queue: true,
   expression: true,
 } as const satisfies Record<z.infer<typeof ApproverType>, boolean>;
 
@@ -484,9 +506,9 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // `xEnumDeprecated` lists enum members that still PARSE but must not be
   // offered for new authoring. Without it the Studio designer derives its
   // approver-type dropdown straight from this enum and keeps offering `role`
-  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`
-  // — and `queue`, which the runtime never resolves (#3508). Renderers omit
-  // these from pickers while still rendering a stored value.
+  // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
+  // (`queue` was listed too until the runtime resolved it, ADR-0142 D6.)
+  // Renderers omit these from pickers while still rendering a stored value.
   type: ApproverType.meta({
     xEnumDeprecated: [...NON_AUTHORABLE_APPROVER_TYPES],
   }),
@@ -494,7 +516,7 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
    * The approver reference, interpreted per `type`: a user id (`user`), a
    * membership tier — owner/admin/member (`org_membership_level`), a position
    * machine name (`position`), team/department id (`team`/`department`), field
-   * name holding a user id (`field`), or queue id (`queue`). Omitted for
+   * name holding a user id (`field`), or queue machine name (`queue`). Omitted for
    * `manager` (resolved from the submitter's `manager_id`).
    */
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
@@ -511,13 +533,13 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // entry: it maps to the SAME picker as the canonical spelling, so a stored
   // legacy node still renders correctly for its deprecation window. `manager`
   // maps to a picker kind that renders as "auto-resolved" (no free text);
-  // `queue` stays mapped so stored rows keep rendering even though the type
-  // is no longer authorable (see NON_AUTHORABLE_APPROVER_TYPES).
+  // `queue` maps to the queue picker, which lists declared queues and the
+  // organization's `sys_queue` rows (ADR-0142 D6).
   // `expression` is intentionally ABSENT from the map: an unmapped type keeps
   // the value as free text, so the designer renders a plain input for the CEL
   // source until a dedicated expression editor lands (objectui follow-up).
   value: z.string().optional().meta({
-    description: 'User id / membership tier / position / team / department / field — per `type`; '
+    description: 'User id / membership tier / position / team / department / field / queue name — per `type`; '
       + 'for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*`',
     xRef: {
       kindFrom: 'type',
