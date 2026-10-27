@@ -1010,6 +1010,20 @@ function methodNotAllowedResponse(): Response {
 }
 
 /**
+ * Extract the text value from a ToolExecutionResult's output.
+ *
+ * The output may be a `{ type: 'text', value: string }` object (from the
+ * Vercel AI SDK ToolResultPart) or any serialisable value.
+ */
+function formatToolOutput(result: ToolExecutionResult): string {
+  const output = result.output;
+  if (output && typeof output === 'object' && 'value' in output) {
+    return String((output as { value: unknown }).value);
+  }
+  return JSON.stringify(output ?? '');
+}
+
+/**
  * Register a single tool on an {@link McpServer} from an AIToolDefinition.
  *
  * The definition's JSON Schema `parameters` is forwarded as the tool's
@@ -1067,7 +1081,7 @@ function registerToolFromDefinition(
           input: args,
         });
 
-        const outputText = MCPServerRuntime.formatToolOutput(result);
+        const outputText = formatToolOutput(result);
 
         if (result.isError) {
           return {
@@ -1242,22 +1256,6 @@ export class MCPServerRuntime {
   /** Whether the server is currently connected and running. */
   get isStarted(): boolean {
     return this.started;
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────────
-
-  /**
-   * Extract the text value from a ToolExecutionResult's output.
-   *
-   * The output may be a `{ type: 'text', value: string }` object (from the
-   * Vercel AI SDK ToolResultPart) or any serialisable value.
-   */
-  private static formatToolOutput(result: ToolExecutionResult): string {
-    const output = result.output;
-    if (output && typeof output === 'object' && 'value' in output) {
-      return String((output as { value: unknown }).value);
-    }
-    return JSON.stringify(output ?? '');
   }
 
   // ── Tool Bridge ────────────────────────────────────────────────

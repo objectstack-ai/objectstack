@@ -160,7 +160,10 @@ async function call(runtime: MCPServerRuntime, bridge: any, body: unknown, o: Ca
       ? { authoring: { registry: o.registry, principal: PRINCIPAL, environmentId: ENVIRONMENT_ID } }
       : {}),
   });
-  return { status: res.status, json: res.status === 202 ? null : await res.json() };
+  // The buffered JSON-RPC answer, read untyped on purpose: these pins assert
+  // on the wire shape (`result` / `error` / `isError`), not on an SDK type.
+  const json: any = res.status === 202 ? null : await res.json();
+  return { status: res.status, json };
 }
 
 async function listTools(runtime: MCPServerRuntime, bridge: any, o: CallOptions = {}): Promise<string[]> {
@@ -170,6 +173,26 @@ async function listTools(runtime: MCPServerRuntime, bridge: any, o: CallOptions 
 
 function callTool(runtime: MCPServerRuntime, bridge: any, name: string, args: unknown, o: CallOptions = {}) {
   return call(runtime, bridge, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } }, o);
+}
+
+/**
+ * The refusal a `tools/call` on an UNREGISTERED tool gets, read structurally.
+ * The pinned SDK answers it as a tool error (`result.isError: true`, the text
+ * naming the tool); an older SDK answered a JSON-RPC error. Either way it is a
+ * refusal and never a successful result — what matters here is that the
+ * authoring family gets the SAME one the native families get.
+ */
+function refusalOf(json: any): { kind: 'rpc-error'; code: number; message: string } | { kind: 'tool-error'; text: string } {
+  if (json.error) return { kind: 'rpc-error', code: json.error.code, message: json.error.message };
+  if (json.result?.isError === true) {
+    return { kind: 'tool-error', text: (json.result.content ?? []).map((c: any) => c.text ?? '').join('\n') };
+  }
+  throw new Error(`not a refusal: ${JSON.stringify(json)}`);
+}
+
+/** True when the answer is a refusal of either shape, never a successful result. */
+function refused(json: any): boolean {
+  return Boolean(json.error) || json.result?.isError === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +227,7 @@ describe('[#26464] authoring tools over HTTP — the metadata:write gate', () =>
       grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE],
       registry,
     });
-    expect(json.error).toBeDefined();
-    expect(json.result).toBeUndefined();
+    expect(refused(json)).toBe(true);
     expect(registry.calls).toEqual([]);
   });
 
@@ -217,7 +239,7 @@ describe('[#26464] authoring tools over HTTP — the metadata:write gate', () =>
       grantedScopes: [MCP_OAUTH_SCOPE_ACTIONS],
       registry,
     });
-    expect(json.error).toBeDefined();
+    expect(refused(json)).toBe(true);
     expect(registry.calls).toEqual([]);
   });
 
@@ -228,7 +250,7 @@ describe('[#26464] authoring tools over HTTP — the metadata:write gate', () =>
     expect(withRegistry).toEqual(withoutRegistry);
 
     const { json } = await callTool(runtime, bridge, 'create_object', { name: 'invoice' }, { registry });
-    expect(json.error).toBeDefined();
+    expect(refused(json)).toBe(true);
     expect(registry.calls).toEqual([]);
   });
 
@@ -252,13 +274,20 @@ describe('[#26464] authoring tools over HTTP — the metadata:write gate', () =>
       grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_ACTIONS],
       registry,
     });
-    expect(native.json.error).toBeDefined();
-    expect(authoring.json.error).toBeDefined();
-    expect(authoring.json.error.code).toBe(native.json.error.code);
-    // Both name the tool and nothing else: the SDK's unknown-tool answer.
-    expect(native.json.error.message).toMatch(/create_record/);
-    expect(authoring.json.error.message).toMatch(/create_object/);
-    expect(authoring.json.error.message.replace('create_object', 'create_record')).toBe(native.json.error.message);
+    const control = refusalOf(native.json);
+    const subject = refusalOf(authoring.json);
+    // Same shape …
+    expect(subject.kind).toBe(control.kind);
+    // … and the same text once the tool name is swapped: the SDK's one
+    // unknown-tool answer, not a second dialect written for authoring.
+    if (control.kind === 'rpc-error' && subject.kind === 'rpc-error') {
+      expect(subject.code).toBe(control.code);
+      expect(control.message).toMatch(/create_record/);
+      expect(subject.message.replace('create_object', 'create_record')).toBe(control.message);
+    } else if (control.kind === 'tool-error' && subject.kind === 'tool-error') {
+      expect(control.text).toMatch(/create_record/);
+      expect(subject.text.replace('create_object', 'create_record')).toBe(control.text);
+    }
     expect(registry.calls).toEqual([]);
     expect(bridge.calls.find((c: any[]) => c[0] === 'create')).toBeUndefined();
   });
@@ -327,14 +356,16 @@ describe('[#26464] authoring tools over HTTP — door provenance in the tool con
   });
 
   it('spoofed provenance headers are ignored: the context is built from the host inputs alone', async () => {
+    // Values chosen so none is a substring of anything the host legitimately
+    // passes (keys included — `clientId` contains `cli`).
     const spoof = {
-      'x-door': 'studio',
-      'x-objectstack-door': 'cli',
+      'x-door': 'studio-spoofed',
+      'x-objectstack-door': 'cli-spoofed',
       'x-environment-id': 'env_victim',
-      'x-user-id': 'usr_admin',
-      'x-forwarded-user': 'usr_admin',
+      'x-user-id': 'usr_admin_spoofed',
+      'x-forwarded-user': 'usr_admin_spoofed',
       'x-organization-id': 'org_victim',
-      'x-principal': 'usr_admin',
+      'x-principal': 'usr_admin_spoofed',
     };
     const { json } = await callTool(runtime, bridge, 'verify_build', {}, {
       grantedScopes: GRANT,
