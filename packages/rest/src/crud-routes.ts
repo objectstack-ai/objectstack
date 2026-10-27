@@ -205,12 +205,12 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     // caller who may not read this object should not learn
                     // the shape of its ingress before being refused.
                     //
-                    // This gate RESPONDS rather than throwing, which on this
-                    // route is load-bearing and not a style choice: the catch
-                    // below rewrites every 400 into a 404 (a bad id is a
-                    // miss, not a malformed request). A refusal routed
-                    // through it would reach the caller as "no such record"
-                    // — the silent-drop defect wearing a different status.
+                    // This gate RESPONDS rather than throwing, as every
+                    // `refuseUnknownQueryParams` door does. That was
+                    // load-bearing here while the catch below rewrote every
+                    // 400 into a 404; since #26816 it answers the mapped
+                    // status, so the catch no longer turns a refusal into
+                    // "no such record" either way.
                     if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
                     const { select, expand } = req.query || {};
                     const getRequest: ServerScopedDataRequest<GetDataRequest> = {
@@ -224,9 +224,21 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     const result = await p.getData(getRequest);
                     res.json(result);
                 } catch (error: any) {
+                    // [#26816] The mapped status, as on every other data route
+                    // and on the dispatcher's twin. This catch used to answer
+                    // every mapped 400 as 404 — a rewrite kept from the days
+                    // it answered EVERY error 404 (867ad87e5e), not an
+                    // existence guard — so a malformed query on a real record
+                    // (`?select=nope`, a blank `?select=`) read as "no such
+                    // record". The 404s need no rewrite: a missing id and a
+                    // row the caller may not read are the same no-row read,
+                    // which `getData` answers `RECORD_NOT_FOUND`, declared
+                    // 404. And a 400 says nothing about existence: each one
+                    // `getData` raises comes before the read, byte-identical
+                    // for any id (`data-record-read-malformed-query-door.test.ts`).
                     const mapped = mapDataError(error, req.params?.object);
                     logUnexpectedRouteError(error, mapped);
-                    res.status(mapped.status === 400 ? 404 : mapped.status).json(mapped.body);
+                    res.status(mapped.status).json(mapped.body);
                 }
             },
             metadata: {

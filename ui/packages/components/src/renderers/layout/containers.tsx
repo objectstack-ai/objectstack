@@ -2366,14 +2366,18 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // it: that verdict is a fact about the record, read off the action spec.
     // The inline-edit lock above is the host's own state, and the host's Edit /
     // Delete carry a boolean the host computed (see `authoredKeys` in the plan
-    // memo), so neither says "not available for this record". The reason is
-    // the generic one; an author-written reason beside the predicate would be a
-    // spec key, which is objectstack's to declare.
+    // memo), so neither says "not available for this record". The text is the
+    // action's declared `disabledReason` (objectstack#26619), already resolved
+    // against the bundle by `localizeActionTexts` in the `headerActions` memo,
+    // and the generic reason when it declares none.
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
       if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
-      return tt('actions.notAvailableForRecord', 'Not available for this record');
+      const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
+      return declared.trim() !== ''
+        ? declared
+        : tt('actions.notAvailableForRecord', 'Not available for this record');
     };
     const renderButton = (action: any, idx: number) => {
       const label = resolveLabel(action);
