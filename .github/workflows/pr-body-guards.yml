@@ -1,0 +1,498 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# PR-body guards — four pull-request-scoped blocking checks in ONE workflow, ONE
+# job, FOUR steps (#26071, ruling A step (iii)). Formerly four files, each one job
+# with one gate step:
+#
+#   closing-target-claim-guard.yml   → step `The card this PR closes must claim this branch`
+#   duplicate-fix-guard.yml          → step `No other open PR may claim the same issue`
+#   partof-closing-keyword-guard.yml → step `Part-of PR must not also close its card`
+#   single-claim-path-guard.yml      → step `No other open PR may claim the same single-writer path`
+#
+# Each retired file's header is carried whole as the comment block above its step,
+# and each gate step is the retired step verbatim but for its `name:` (the retired
+# JOB's display name, which was its check-run name) and an `if:`. The rules, the
+# wording of every failure and the exit contracts live in the scripts the steps
+# run (the duplicate-fix guard is an inline github-script, as it was); this file is
+# the invocation.
+#
+# What one job changes, and what it keeps:
+#
+#   - ONE check run, `PR-body guards (…)`, where there were four. Each guard's
+#     verdict is its STEP, and every step runs even when an earlier one failed
+#     (`if: ${{ !cancelled() }}`), so one run still shows all four verdicts and a
+#     PR red on two guards is red on two steps, not on the first alone. None of
+#     the four was a required context (`REQUIRED_CONTEXTS` names only `ci.yml`,
+#     `lint.yml` and `governed-surface-guard.yml`), so no required context moves.
+#   - The retired files' run history stays under their retired names (GitHub
+#     keeps a deleted workflow's runs; `GET /actions/workflows/FILE.yml` answers
+#     `state: deleted`). New history lands under `PR-Body Guards`.
+#   - `merge_group`: only the closing-target claim guard took the queue leg (its
+#     script reads the pull request the queue ref NAMES). It keeps it. The other
+#     three steps are gated to the `pull_request` leg, because a merge-queue event
+#     carries no pull request and therefore no body or file list for them to judge
+#     — exactly the reason their retired files subscribed no `merge_group:` at all.
+#   - No checkout for the step that needs none: the duplicate-fix guard is an
+#     inline github-script and runs FIRST, before the one checkout + setup-node
+#     pair the three script-backed guards share.
+#   - `permissions:` is the union of the four retired grants, all read; one
+#     `concurrency:` group per pull request; `timeout-minutes` is the largest of
+#     the four (10), with the three measured siblings' walls recorded at their
+#     steps.
+#
+# Three self-tests read THIS FILE by name and pin its shape — the wiring batteries
+# of `scripts/check-closing-target-claim.mjs`, `scripts/check-partof-closing-keyword.mjs`
+# and `scripts/check-single-claim-paths.mjs` — and `scripts/check-closing-keyword-parity.mjs`
+# extracts the duplicate-fix guard's keyword parser from the github-script step
+# below. Renaming this file, a gate step, or the env spelling of a step reddens
+# `pnpm check:closing-target-claim`, `check:partof-closing-keyword`,
+# `check:single-claim-paths` or the parity gate, by design.
+# ══════════════════════════════════════════════════════════════════════════════
+name: PR-Body Guards
+
+# The trigger set is the one all four retired files carried, and every activity
+# type in it is load-bearing for at least one guard:
+#
+# `edited`: three guards' whole input is the PR BODY (the closing-target claim,
+# the duplicate-fix and the Part-of keyword guards), and GitHub does not
+# re-deliver a `pull_request` event when a body changes under any other activity
+# type — while `rerun_failed_jobs` replays the FROZEN payload, so a re-run of a
+# fixed body stays red forever. With `edited` subscribed, rewording the sentence
+# or dropping the closing keyword fires a fresh event carrying the fresh body and
+# the check goes green with no push and no re-run. The single-claim path guard
+# keeps it for the same recovery: closing the earlier of two colliding PRs must
+# let the surviving one go green without a push.
+#
+# `synchronize`: the single-claim path guard's input is the PR's CHANGED FILES,
+# which move on every push, and the closing-target guard's is half the head
+# BRANCH — a push that changes what the PR contains must be re-judged on the
+# commit that changed it.
+#
+# `merge_group`: the closing-target claim guard's leg, and ITS ALONE. A
+# merge-queue event carries no pull request — but the queue REF NAMES its pull
+# request (`gh-readonly-queue/<base>/pr-<N>-<sha>`); that script reads the number
+# with the governed queue guard's own shipped parser and then reads the same PR
+# body and the same live comment threads, so the queue build judges the SAME
+# pull request by the SAME rule. The other three steps have nothing to judge on
+# a queue build and are gated to the `pull_request` leg (see their `if:`).
+#
+# ⚠️ In a MULTI-PR group the queue ref names only the LAST pull request; the
+# script header states that limit. Every member of the group passed the
+# `pull_request` leg to be armed at all.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  merge_group:
+
+# ⛔ NO `paths:` filter, on either leg. A skipped job counts as SUCCESS in branch
+# protection, so a path filter would hand a green check to the very PR the
+# filter mis-scoped — and three of these gates' input is a PR BODY, which no path
+# filter can see at all. (`merge_group` has no paths support either, so a filter
+# would also make the two legs disagree about what they cover.)
+
+# Read-only, and that is the whole grant — the UNION of the four retired files'
+# blocks, every scope `read`. These gates report; none closes a PR, comments,
+# edits a body, or writes a label.
+#
+# `contents: read` is not optional padding: naming a `permissions:` block at all
+# sets every scope NOT listed to `none`, and this job checks the repo out to get
+# at three of the scripts; with only the pull-requests scope the job dies in the
+# checkout step, before any gate runs. `issues: read` is what the closing-target
+# guard's card comment threads need — the claim record is an ISSUE comment, and
+# the pull-requests scope does not reach it. `pull-requests: read` is what the
+# duplicate-fix and single-claim guards' reads of OTHER open PRs need, and what
+# the merge_group leg needs to read the body of the pull request its queue ref
+# names.
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# A newer run for the same pull request supersedes this one, so the older run is
+# cancelled. On the merge_group leg `github.ref` is the queue ref, unique per
+# queue build, so no other PR's build is ever cancelled.
+concurrency:
+  group: pr-body-guards-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-body-guards:
+    # ⚠️ THE STEP NAMES BELOW ARE PINNED, not this job's. Each gate step is named
+    # as the retired job was — the literal `CHECK_CONTEXT_NAME` in
+    # `scripts/check-closing-target-claim.mjs`, and the sibling-gate string the
+    # single-claim self-test looks for — and those self-tests read THIS FILE and
+    # fail if a step name drifts. The check run itself is this job's display
+    # name, one for all four guards.
+    #
+    # ⛔ Making this a required context is NOT this PR's step. Branch protection
+    # takes a `REQUIRED_CONTEXTS` row PLUS the Settings → Rulesets entry, in one
+    # sitting, and the settings half is the maintainer's. Either half alone is
+    # an outage. What the merge_group leg above buys today is that the claim
+    # question is asked on the queue build; what it buys the day someone does
+    # make this required is that it cannot deadlock the queue, which a workflow
+    # with no queue leg always does.
+    name: PR-body guards (claim · duplicate · Part-of · single-writer path)
+    runs-on: ubuntu-latest
+    # The largest of the four retired budgets (closing-target 10; the other three
+    # 5, each with a measured p99 under a minute — recorded at their steps). The
+    # four gates now run in sequence after ONE checkout + setup-node, so the sum
+    # of the measured walls stays well inside this.
+    timeout-minutes: 10
+    steps:
+      # ══ `duplicate-fix-guard` — formerly `.github/workflows/duplicate-fix-guard.yml` (`Duplicate Fix Guard`) ══
+      #
+      # The retired file's header, carried whole; the step at the end of this block
+      # is its gate step, verbatim but for its `name:` (now the retired JOB's display
+      # name, so the verdict reads in the step list as it read on the Checks tab) and
+      # the `if:` that keeps every guard's verdict visible on one run.
+      #
+      # GitHub happily lets any number of open PRs declare `Fixes #N` for the same
+      # issue. On 2026-08-02 that cost a full duplicate implementation: #4555 and
+      # #4559 both declared `Fixes #4551`, both ran the whole gate suite green, and
+      # the duplication sat machine-detectable from the moment the second PR opened
+      # (03:08) until a human noticed it (08:52). All agents here share one GitHub
+      # identity, so the issue's assignee could not warn the second author either —
+      # "assigned to os-zhuang" reads the same whether it is you or another session.
+      # Full post-mortem: #4588.
+      #
+      # This gate makes the second PR red at open time. First come, first served —
+      # the EARLIER open PR (lower number) keeps its claim and stays green; the
+      # later one fails with a pointer to it. That matches the pm-dispatch claim
+      # convention ("first claim comment wins") already in .claude/skills/.
+      #
+      # Scope: same-repo references only (bare `#N` and qualified `<this repo>#N`).
+      # Cross-repo references are the cross-repo-issue-closer's territory, and a
+      # duplicate across repos cannot be resolved by failing one side's CI anyway.
+      #
+      # Gated to the pull_request leg: a merge-queue event carries no pull request,
+      # so there is no body to read declared issues from. No checkout precedes this
+      # step — it is an inline github-script and needs none.
+      #
+      # Run wall of the retired job over its 100 most recent completed runs to
+      # 2026-10-27: p99 0.3 min, max 0.8.
+      - name: No other open PR may claim the same issue
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const thisRepo = `${context.repo.owner}/${context.repo.repo}`;
+
+            // GitHub's own closing-keyword set. The optional colon is part of
+            // GitHub's accepted syntax (`Fixes: #123`). Two same-repo forms:
+            // bare `#N` and qualified `owner/repo#N` naming THIS repo.
+            const KEYWORDS = 'close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved';
+            const pattern = new RegExp(
+              `\\b(?:${KEYWORDS}):?\\s+(?:([\\w.-]+)\\/([\\w.-]+))?#(\\d+)\\b`,
+              'gi',
+            );
+
+            // Strip fenced blocks and inline code spans before matching.
+            // GitHub's own closing-keyword parser ignores code formatting, and
+            // this guard must not be stricter than the linker it protects:
+            // this very PR's first run counted its own DISCUSSION of
+            // `Fixes #4551` (in backticks, describing the incident) as a
+            // declaration. Benign there — #4551 is closed — but a prose
+            // mention of an issue some other open PR really fixes would have
+            // been a spurious red.
+            const declaredIssues = (body) => {
+              const prose = (body || '')
+                .replace(/```[\s\S]*?```/g, ' ')
+                .replace(/`[^`\n]*`/g, ' ');
+              const found = new Set();
+              for (const [, owner, repo, number] of prose.matchAll(pattern)) {
+                // A qualified reference to ANOTHER repo is not ours to judge.
+                if (owner && `${owner}/${repo}`.toLowerCase() !== thisRepo.toLowerCase()) continue;
+                found.add(Number(number));
+              }
+              return found;
+            };
+
+            const mine = declaredIssues(pr.body);
+            if (mine.size === 0) {
+              core.info('This PR declares no same-repo closing keywords — nothing to guard.');
+              return;
+            }
+            core.info(`This PR declares: ${[...mine].map((n) => `#${n}`).join(', ')}`);
+
+            // Branch-name convention (advisory, never red): a fix branch named
+            // `claude/issue-<n>-<slug>` is discoverable by the next session
+            // with one `git ls-remote --heads origin | grep -E 'issue-<n>(-|$)'`.
+            // #4555 vs #4559 happened partly because the branches shared no
+            // token to grep. Both spellings delimit the number on the RIGHT:
+            // undelimited, `issue-186` matches `claude/issue-18611-x`, so the
+            // advisory stays silent for a branch naming a DIFFERENT card —
+            // the false negative. The `$` arm keeps the slug-less spelling
+            // `claude/issue-186` matching; `issue-` anchors the left, so
+            // `issue-1186` and `issue-0186` do not match card 186 either.
+            // Warning only — existing branches must not go red retroactively.
+            const branch = pr.head.ref;
+            if (![...mine].some((n) => new RegExp(`issue-${n}(-|$)`).test(branch))) {
+              core.warning(
+                `Branch \`${branch}\` does not name any declared issue. ` +
+                `Convention: claude/issue-<n>-<slug> (e.g. claude/issue-${[...mine][0]}-short-slug) ` +
+                `so parallel sessions can discover in-flight work with git ls-remote.`,
+              );
+            }
+
+            // Drafts count: a draft PR is work in flight, which is exactly
+            // what the second session needs to see.
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const conflicts = [];
+            for (const other of openPrs) {
+              if (other.number === pr.number) continue;
+              const theirs = declaredIssues(other.body);
+              const shared = [...mine].filter((n) => theirs.has(n));
+              if (shared.length > 0) conflicts.push({ other, shared });
+            }
+
+            if (conflicts.length === 0) {
+              core.info('No other open PR declares these issues.');
+              return;
+            }
+
+            // First come, first served: only the LATER PR goes red. Failing
+            // both would leave the original author red through no action of
+            // their own; failing the earlier one would reward racing.
+            const older = conflicts.filter((c) => c.other.number < pr.number);
+            const newer = conflicts.filter((c) => c.other.number > pr.number);
+
+            for (const { other, shared } of newer) {
+              core.info(
+                `#${other.number} (newer) also declares ${shared.map((n) => `#${n}`).join(', ')} — ` +
+                `it will fail its own run of this guard; this PR keeps its claim.`,
+              );
+            }
+
+            if (older.length > 0) {
+              const lines = older.map(({ other, shared }) =>
+                `  - ${shared.map((n) => `#${n}`).join(', ')} is already claimed by #${other.number} ` +
+                `(${other.html_url}, branch \`${other.head.ref}\`${other.draft ? ', draft' : ''})`,
+              );
+              core.setFailed(
+                `Another open PR already declares a fix for the same issue(s):\n${lines.join('\n')}\n` +
+                `If this PR is the duplicate, close it and add anything it uniquely covers to the ` +
+                `earlier PR or a follow-up issue (that is what saved #4560 when #4559 was closed). ` +
+                `If the EARLIER one is abandoned, close it first — this check re-runs on 'edited' ` +
+                `and 'synchronize', and goes green once the conflict is gone.`,
+              );
+            }
+
+      # ── The one checkout + setup-node the three script-backed guards share ──
+      #
+      # Taken from the Part-of guard's file, whose setup-node comment recorded the
+      # measured incident the other two retired files cited; the closing-target and
+      # single-claim files carried the same two steps byte-for-byte.
+      #
+      - name: Checkout repository
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v7
+
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo, and for a measured reason rather than tidiness. The first draft of
+      # the Part-of guard's retired file used `actions/setup-node@v5` with
+      # `node-version-file`, and the job died IN THIS STEP, before the script
+      # ever ran:
+      #
+      #   ##[error]Unable to locate executable file: pnpm.
+      #
+      # v5 defaults `package-manager-cache: true` (the run log echoes it as an
+      # input), which reads `packageManager: pnpm@...` out of package.json and
+      # shells out to pnpm to locate the store to cache. This job installs no
+      # package manager on purpose — the three scripts are dependency-free and
+      # import at most two sibling modules — so pnpm is not on PATH and the action
+      # hard-errors.
+      # The failure is worth naming because nothing in the step that failed
+      # mentions pnpm: it is an implicit default of the action, invisible in the
+      # workflow source, and the misleading first read is that the `run:` line
+      # below invoked a package manager. It does not, and never did.
+      #
+      # The check-links workflow's ADR-links job is the known-good shape this
+      # matches: checkout, setup-node, `node scripts/check-*.mjs` calls, no install
+      # and no corepack. It is green on this repo today.
+      - name: Setup Node.js
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # ══ `closing-target-claim` — formerly `.github/workflows/closing-target-claim-guard.yml` (`Closing-Target Claim Guard`) ══
+      #
+      # The retired file's header, carried whole; the step at the end of this block
+      # is its gate step, verbatim but for its `name:` (now the retired JOB's display
+      # name, so the verdict reads in the step list as it read on the Checks tab) and
+      # the `if:` that keeps every guard's verdict visible on one run.
+      #
+      # A pull request may close a card only while that card's own thread carries a
+      # `Claim:` naming this pull request's head branch.
+      #
+      # Every agent here shares ONE GitHub identity, so the assignee field is a
+      # presence bit and the `Claim:` comment is the identity record. Two guards
+      # already run at pull-request time — the Duplicate Fix Guard ("no other open PR
+      # may claim the same issue") and the Single-Claim Path Guard — and neither asks
+      # the question that decides ownership. That question WAS already asked, by row
+      # H46 of the half-state sweep, and asked AFTER THE FACT as a report-only patrol
+      # input: the cloud-repo incident (one card implemented 29 minutes apart by two
+      # seats, the second with no claim) and an objectstack card implemented twice in
+      # one morning were both visible to that predicate and stopped by nothing. A
+      # control that detects a defect it cannot prevent is a TIMING defect in an
+      # existing control, not an absent one — so this workflow runs the same
+      # predicate at the moment the merge can still be stopped.
+      #
+      # The rule, the imported predicates, the declined-number policy, the
+      # branch-rename remedy and the exit contract all live in
+      # `scripts/check-closing-target-claim.mjs`; that header is authoritative and
+      # this file is the invocation.
+      #
+      # Sibling shape, deliberately copied rather than reinvented: the Part-of
+      # Closing-Keyword Guard and the Single-Claim Path Guard are this workflow's
+      # other script-backed steps, and this shares their runtime pin and their
+      # `pull_request` trigger set.
+      #
+      # Runs on BOTH legs — not gated to pull_request, by design; see the `on:`
+      # comment and the step comment below.
+      #
+      # Everything reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` line. A PR body is arbitrary author-controlled text,
+      # and an expression interpolated into a shell line is substituted before
+      # bash ever sees it; through `env:` it is inert data. The script's
+      # self-test pins this spelling.
+      #
+      # On the merge_group leg every `github.event.pull_request.*` expression
+      # renders EMPTY and `MERGE_GROUP_HEAD_REF` carries the queue ref, which is
+      # what selects the leg inside the script. On the pull_request leg the
+      # reverse holds. Neither leg needs its own step.
+      #
+      # `PR_HEAD_REF` is not decoration: the head branch IS the question this
+      # gate asks, so a blank one exits NOT MEASURED rather than green.
+      #
+      # The token is required, not optional: the claim record is a comment on
+      # another issue, which cannot be answered from the event payload.
+      - name: The card this PR closes must claim this branch
+        if: ${{ !cancelled() }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-closing-target-claim.mjs
+
+      # ══ `partof-closing-keyword` — formerly `.github/workflows/partof-closing-keyword-guard.yml` (`Part-of Closing-Keyword Guard`) ══
+      #
+      # The retired file's header, carried whole; the step at the end of this block
+      # is its gate step, verbatim but for its `name:` (now the retired JOB's display
+      # name, so the verdict reads in the step list as it read on the Checks tab) and
+      # the `if:` that keeps every guard's verdict visible on one run.
+      #
+      # A PR that declares itself only `Part of #N` must not also tell GitHub to
+      # close `#N`. GitHub's closing-keyword parser matches the keyword plus the
+      # number and ignores the surrounding prose entirely — negations and modals
+      # included — so the sentence an author writes to PREVENT an auto-close is
+      # exactly what performs it on merge. That happened: a half-delivered card was
+      # closed `completed` two seconds after its PR merged, by its own warning
+      # sentence, and a closed card reads as finished, so it was found only by a
+      # post-merge inventory re-pull. The author wrote the warning correctly and
+      # still lost the card, which is why this is mechanical and not advice.
+      #
+      # The rule, the wording of the failure, and the code-stripping this depends on
+      # all live in `scripts/check-partof-closing-keyword.mjs` and the predicate it
+      # reuses; that header is authoritative, this file is the invocation.
+      #
+      # Sibling shape, deliberately copied rather than reinvented: the Duplicate Fix
+      # Guard is this workflow's other PR-body-scoped blocking check, and both take
+      # the same trigger set for the same measured reason.
+      #
+      # Gated to the pull_request leg, and that is not an oversight: a merge-queue
+      # event carries no pull request and therefore no body, so this check has
+      # nothing to judge there. A skipped STEP is not a green check: the job's
+      # verdict on a queue build is the closing-target step's alone.
+      #
+      # Run wall of the retired job over its 100 most recent completed runs to
+      # 2026-10-27: p99 0.8 min, max 0.8.
+      #
+      # The body reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` script. An expression interpolated into a shell line
+      # is substituted before bash ever sees it, so a PR body is arbitrary
+      # attacker-controlled text landing in a command; through `env:` it is
+      # inert data. The script's self-test pins this spelling.
+      #
+      # `PR_NUMBER` is not only for the message: GitHub renders a null body as
+      # an EMPTY value, so it is the witness that separates "this PR has an
+      # empty body" (a real, clean verdict) from "this step was handed nothing"
+      # (a wiring failure, which exits 2 and says so).
+      #
+      # No install step: the script imports one sibling module and reads no
+      # workspace package, so `node` on the pinned runtime is the whole
+      # toolchain it needs.
+      - name: Part-of PR must not also close its card
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/check-partof-closing-keyword.mjs
+
+      # ══ `single-claim-path` — formerly `.github/workflows/single-claim-path-guard.yml` (`Single-Claim Path Guard`) ══
+      #
+      # The retired file's header, carried whole; the step at the end of this block
+      # is its gate step, verbatim but for its `name:` (now the retired JOB's display
+      # name, so the verdict reads in the step list as it read on the Checks tab) and
+      # the `if:` that keeps every guard's verdict visible on one run.
+      #
+      # Two PRs reached green independently while shipping ONE physical change: both
+      # rewrote the objectui pin from the same old sha to the same new sha and both
+      # added the same generated changeset — a byte-identical hunk under two card
+      # numbers. The first entered the merge queue; the second was green and one flip
+      # from enqueueing behind it, where it would have conflicted on both files.
+      #
+      # The repo's Duplicate Fix Guard is not broken and is not touched by this step.
+      # It asks whether two open PRs claim the same CARD, and it answered correctly:
+      # these claimed two genuinely different, independently filed cards, neither a
+      # duplicate of the other as written. The duplication existed only in the diff.
+      # This step adds the second question — do two open PRs write the same
+      # at-most-one-writer path — and the two gates run side by side, as steps
+      # of one job.
+      #
+      # The rule, the declared path list, the measured false-positive rates that
+      # forced a declared list instead of repo-wide diff intersection, and the wording
+      # of the failure all live in `scripts/check-single-claim-paths.mjs`; that header
+      # is authoritative and this file is the invocation.
+      #
+      # Sibling shape, deliberately copied rather than reinvented: the Part-of
+      # Closing-Keyword Guard is this workflow's other single-script PR-scoped
+      # blocking check, and this shares its runtime pin and its trigger set.
+      #
+      # Gated to the pull_request leg, and not by oversight: a merge-queue event
+      # carries no pull request, so this check has nothing to judge there.
+      #
+      # Run wall of the retired job over its 100 most recent completed runs to
+      # 2026-10-27: p99 0.8 min, max 0.9.
+      #
+      # Everything reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` line. Nothing here is attacker-controlled text today
+      # — a PR number is a number — but the spelling is the one the sibling
+      # guard's self-test pins, and keeping both gates identical on this point
+      # is what stops a later edit from introducing the unsafe form by analogy.
+      #
+      # `PR_NUMBER` is also the witness that separates a real verdict from an
+      # unwired run: with it absent the script exits 2 and says it judged
+      # nothing, rather than exiting 0 and reading as "no violations".
+      #
+      # The token is required, not optional: this gate's question is about OTHER
+      # open PRs, which cannot be answered from the event payload. The read is
+      # short-circuited on the cheap side — when this PR touches none of the
+      # declared paths, which is ~99.7% of runs by measurement, the job makes a
+      # single API call and stops.
+      - name: No other open PR may claim the same single-writer path
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-single-claim-paths.mjs
