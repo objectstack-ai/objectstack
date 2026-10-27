@@ -1,0 +1,133 @@
+# Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+#
+# setup-workspace -- the one setup sequence every job that installs the
+# workspace runs after its checkout: Node from .nvmrc, the pinned pnpm, the
+# pnpm store restored from cache, `pnpm install --frozen-lockfile`, and the
+# store saved back on `push` and `schedule` runs only.
+#
+# Why one place. The same five steps were copied by hand into about forty
+# jobs, each carrying its own `node-version` literal and its own copy of the
+# store cache key, so a change to any of them was a forty-site edit and a
+# site that missed it drifted silently. `scripts/check-node-version.mjs`
+# reads `.github/actions/**` as well as the workflows, so the Node pin here is
+# audited like any other.
+#
+# The store is RESTORED on every run and SAVED only on `push` and `schedule`.
+# A pull request or merge-queue run that touches the lockfile used to post-save
+# a multi-GB store entry under its own key into the same 10 GB Actions cache
+# pool that holds `main`'s Turbo seeds, and those entries evicted the seeds.
+# `main`'s push and scheduled runs keep the store warm for everyone: a cache
+# entry saved on the default branch is restorable from every pull request and
+# queue branch, while one saved on a pull request is restorable only from that
+# pull request. ⛔ No `pull_request` or `merge_group` run saves the store.
+#
+# The save is a main-phase step right after the install, not `actions/cache`'s
+# post-job save: the store changes only during the install, and a composite
+# action has no post phase of its own. It is `continue-on-error` -- a store
+# that failed to upload says nothing about the code under test.
+#
+# Pnpm is acquired through `.github/actions/setup-pnpm` (the cached Corepack
+# store), called as a step here rather than inlined, because three callers
+# still use it directly and keep their own steps:
+#   - ci.yml's five ui jobs (`ui-deps`, `type-check-ui`, `test-ui`, `lint-ui`,
+#     `build-e2e-ui`), whose steps pins under `ui/scripts/__tests__/` read by
+#     name and by text;
+#   - governed-surface-guard.yml, whose toolchain steps are each gated and
+#     each degrade on their own, pinned one by one by
+#     `scripts/pm/check-governed-queue-guard.mjs --self-test`;
+#   - release.yml's `release-integrity`, which installs the version commit's
+#     tree, not the checkout.
+#
+# Inputs:
+#   install       'false' stops after pnpm is on PATH: no store, no install.
+#                 For jobs that run pnpm but install nothing.
+#   install-args  appended to `pnpm install --frozen-lockfile`.
+#   save-store    'false' never saves the store, on any event. For jobs that
+#                 deliberately restore only.
+
+name: Setup workspace
+description: >-
+  Set up Node from .nvmrc and the repo-pinned pnpm, restore the pnpm store,
+  run `pnpm install --frozen-lockfile`, and save the store on push and
+  schedule runs only.
+
+inputs:
+  install:
+    description: "'false' sets up Node and pnpm only, with no store cache and no install."
+    required: false
+    default: 'true'
+  install-args:
+    description: Extra arguments appended to `pnpm install --frozen-lockfile`.
+    required: false
+    default: ''
+  save-store:
+    description: "'false' never saves the pnpm store. Otherwise it is saved on push and schedule runs, on a miss of its exact key."
+    required: false
+    default: 'true'
+
+outputs:
+  store-path:
+    description: The pnpm store directory (empty when `install` is 'false').
+    value: ${{ steps.store.outputs.path }}
+  store-cache-hit:
+    description: "'true' when the store was restored from its exact key."
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+        # pnpm is not on PATH yet, and a setup-node that caches for the
+        # `packageManager` it reads shells out to it and dies here
+        # (partof-closing-keyword-guard.yml carries the receipt). The store is
+        # cached by the steps below instead.
+        package-manager-cache: false
+
+    - name: Setup pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Get pnpm store directory
+      id: store
+      if: inputs.install != 'false'
+      shell: bash
+      run: |
+        path="$(pnpm store path --silent)"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "STORE_PATH=$path" >> "$GITHUB_ENV"
+
+    # The one definition of the store cache key. `-v3-` and the lockfile hash
+    # are unchanged from the hand-copied steps, so the entries `main` already
+    # holds stay valid.
+    - name: Restore pnpm store
+      id: restore
+      if: inputs.install != 'false'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pnpm-store-v3-
+
+    - name: Install dependencies
+      if: inputs.install != 'false'
+      shell: bash
+      env:
+        INSTALL_ARGS: ${{ inputs.install-args }}
+      run: |
+        # shellcheck disable=SC2086 # INSTALL_ARGS is a word list on purpose.
+        pnpm install --frozen-lockfile $INSTALL_ARGS
+
+    - name: Save pnpm store
+      if: >-
+        inputs.install != 'false'
+        && inputs.save-store != 'false'
+        && (github.event_name == 'push' || github.event_name == 'schedule')
+        && steps.restore.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}

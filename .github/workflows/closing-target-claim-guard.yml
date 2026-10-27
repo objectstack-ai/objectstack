@@ -111,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # Everything reaches the script through `env:`, never through `${{ }}`
       # inside the `run:` line. A PR body is arbitrary author-controlled text,

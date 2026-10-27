@@ -17,8 +17,9 @@
 //
 // Zero is the dangerous number here. It is a TRUE answer about Corepack that
 // reads as a complete answer about pnpm acquisition, and those are not the same
-// question: `showcase-smoke.yml` acquires pnpm through `pnpm/action-setup@v6`,
-// which contains no Corepack string and is therefore invisible to that key.
+// question: `showcase-smoke.yml` acquired pnpm through `pnpm/action-setup@v6`
+// (until it moved onto `.github/actions/setup-workspace`), which contains no
+// Corepack string and is therefore invisible to that key.
 // Anyone greping the key in six months gets 0 and concludes the class is
 // closed, while a job still downloads pnpm from the registry on every run.
 //
@@ -65,10 +66,10 @@
 // headers. It is statically decidable, so it is checked here: a job whose
 // setup-node asks for the pnpm store cache must acquire pnpm strictly earlier.
 //
-// That invariant is what makes `showcase-smoke.yml` safe to LEAVE on
-// `pnpm/action-setup` (see the census note below) and what would catch the
-// naive conversion of it -- moving the acquisition after setup-node to match
-// the house pattern, while leaving `cache: pnpm` behind.
+// That invariant is what made `showcase-smoke.yml` safe to leave on
+// `pnpm/action-setup`, and what would have caught the naive conversion of it
+// -- moving the acquisition after setup-node to match the house pattern, while
+// leaving `cache: pnpm` behind. Its conversion dropped `cache: pnpm`.
 //
 // ## Recognised spellings -- published, because an unrecognised one is silent
 //
@@ -76,6 +77,7 @@
 // can see is part of the contract, so it is published rather than left inside
 // the implementation.
 //
+//   uses: ./.github/actions/setup-workspace  workspace     cache-backed (calls setup-pnpm)
 //   uses: ./.github/actions/setup-pnpm     composite       cache-backed
 //   uses: pnpm/action-setup@<ref>          action-setup    downloads per job
 //   run:  ... corepack enable ...          corepack-inline downloads per job
@@ -116,6 +118,7 @@ const WORKFLOW_DIR = '.github/workflows';
  * remaining exposure is legible without opening any workflow.
  */
 export const MECHANISMS = [
+  { id: 'workspace', label: 'uses: ./.github/actions/setup-workspace', cached: true },
   { id: 'composite', label: 'uses: ./.github/actions/setup-pnpm', cached: true },
   { id: 'action-setup', label: 'uses: pnpm/action-setup@<ref>', cached: false },
   { id: 'corepack-inline', label: 'run: corepack enable', cached: false },
@@ -135,6 +138,7 @@ const RE_STANDALONE = /get\.pnpm\.io\/install/;
 // npm's global flag and `pnpm` on the same line, in either order.
 const RE_NPM_GLOBAL_LINE = /\bnpm\s+(?:i|install|add)\b/;
 
+const RE_WORKSPACE_USES = /^\.\/\.github\/actions\/setup-workspace\/?$/;
 const RE_COMPOSITE_USES = /^\.\/\.github\/actions\/setup-pnpm\/?$/;
 const RE_ACTION_SETUP_USES = /^pnpm\/action-setup(?:@|$)/;
 const RE_SETUP_NODE_USES = /^actions\/setup-node(?:@|$)/;
@@ -151,6 +155,7 @@ function isNpmGlobalPnpm(run) {
 /** The mechanism a step uses to acquire pnpm, or null. */
 function classifyStep({ uses, run }) {
   if (uses) {
+    if (RE_WORKSPACE_USES.test(uses)) return 'workspace';
     if (RE_COMPOSITE_USES.test(uses)) return 'composite';
     if (RE_ACTION_SETUP_USES.test(uses)) return 'action-setup';
   }
@@ -252,7 +257,7 @@ export function scan(root) {
             where: `${where}:${firstInvoke.line}`,
             jobId,
             problem: 'runs pnpm but no step in the job acquires it by any recognised mechanism',
-            fix: 'add `uses: ./.github/actions/setup-pnpm` -- or, if this job DOES acquire pnpm by a mechanism this gate has never seen, teach the gate: that unseen path is the defect in this script\'s header',
+            fix: 'add `uses: ./.github/actions/setup-workspace` (or `./.github/actions/setup-pnpm` alone) -- or, if this job DOES acquire pnpm by a mechanism this gate has never seen, teach the gate: that unseen path is the defect in this script\'s header',
           });
         } else if (before.length === 0) {
           problems.push({
@@ -382,7 +387,7 @@ function withFixture(files, fn) {
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-pnpm-acquisition self-test': 12,
+  'check-pnpm-acquisition self-test': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -448,6 +453,34 @@ export function selfTest() {
       t('the house shape passes', r.problems.length === 0, JSON.stringify(kinds(r)));
       t('the composite is recognised', mechs(r).join() === 'composite', JSON.stringify(mechs(r)));
       t('the job is counted as needing pnpm', r.pnpmJobs.length === 1, String(r.pnpmJobs.length));
+    },
+  );
+
+  // The workspace composite: it acquires pnpm (through setup-pnpm, inside it)
+  // and installs, so a job that calls it and then runs pnpm is the house shape
+  // too -- and calling it AFTER the first pnpm is the same late acquisition.
+  withFixture(
+    {
+      'a.yml': wf(
+        '  j:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - uses: actions/checkout@v7',
+        '      - uses: ./.github/actions/setup-workspace',
+        '      - run: pnpm test',
+      ),
+      'b.yml': wf(
+        '  j:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - run: pnpm test',
+        '      - uses: ./.github/actions/setup-workspace',
+      ),
+    },
+    (root) => {
+      const r = scan(root);
+      t('the workspace composite is recognised', mechs(r).join() === 'workspace,workspace', JSON.stringify(mechs(r)));
+      t('the workspace composite before pnpm passes, after it FAILS', kinds(r).join() === 'acquired-late', JSON.stringify(kinds(r)));
     },
   );
 
