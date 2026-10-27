@@ -25,15 +25,18 @@
  * - An ACTION body's denial keeps the #4431 fault contract
  *   (`capability-denial-is-a-fault.test.ts`); this card ruled on hooks only.
  *
- * Measured in composition — a real `ObjectQL`, a real driver, the real
+ * Measured in composition — a real `ObjectQL`, a real SQLite driver, the real
  * `QuickJSScriptRunner` and hook wrapper — and read off `mapDataError`, the
  * ADR-0112 table every data door answers with.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { mapDataError } from '@objectstack/types';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { hookBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
 
@@ -73,17 +76,22 @@ const GATES = [
 
 describe('[#26903] a hook body\'s capability denial is a coded refusal', () => {
   let engine: ObjectQL | null = null;
+  let dir: string | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
+    if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
   });
 
   async function boot(hook: Record<string, unknown>) {
     const hookLog = recordingLogger();
     const bodyLog = recordingLogger();
+    dir = mkdtempSync(join(tmpdir(), 'os-hook-cap-26903-'));
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
+    await driver.initObjects([NOTE, LOG]);
     engine = new ObjectQL();
-    engine.registerDriver(new InMemoryDriver() as any, true);
+    engine.registerDriver(driver as any, true);
     await engine.init();
     for (const o of [NOTE, LOG]) engine.registry.registerObject(o as any);
     const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql: engine, appId: 'cap', logger: bodyLog });
