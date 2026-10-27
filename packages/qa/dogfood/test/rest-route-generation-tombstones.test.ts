@@ -123,12 +123,14 @@ describe('[#26572] rest-route-generation-tombstones — every retired selector r
 
     for (const [key, value] of RETIRED) {
       const plugin = createRestApiPlugin({ api: { routes: { [key]: value } } } as any);
-      let message = '';
-      await plugin.start!(bootCtx()).then(
-        () => { throw new Error(`plugin path started with routes.${key} — the tombstone was stripped`); },
-        (err: Error) => { message = err.message; },
-      );
-      expectRefusal(message, key);
+      let message: string | undefined;
+      try {
+        await plugin.start!(bootCtx());
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message, `plugin path started with routes.${key} — the tombstone was stripped`).toBeDefined();
+      expectRefusal(message!, key);
     }
   });
 
