@@ -114,23 +114,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Kept as this job's own step rather than folded into the composite below.
-      # ⛔ No longer because a gate cannot see it: `scripts/check-node-version.mjs`
-      # reads `.github/actions/**` too since #19229, so its census follows a
-      # setup-node step wherever it is written. Kept because the pin is already
-      # here and moving it buys nothing.
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
       # `pnpm` itself is the requirement, NOT the workspace. The generator is
       # invoked through its PACKAGE SCRIPT (`pnpm gen:checklist-status`), which
       # runs its `--self-test` first: an inlined `node scripts/...` copy would
       # drop that leg, and the whole product of this job is a page full of
       # numbers that nothing downstream disagrees with.
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          install: 'false'
 
       # No `pnpm install`. The generator imports `node:` builtins and one
       # repo-local module — no npm dependency — so installing the workspace

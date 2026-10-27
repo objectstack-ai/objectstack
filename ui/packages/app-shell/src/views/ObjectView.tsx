@@ -9,7 +9,7 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, createElement, type ReactNode } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
 import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -22,30 +22,20 @@ const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
 import { ListView } from '@object-ui/plugin-list';
-import { ObjectView as PluginObjectView, ViewTabBar, ManageViewsDialog } from '@object-ui/plugin-view';
-import type { ViewTabItem } from '@object-ui/plugin-view';
+import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/plugin-view';
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
 import {
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  Empty,
-  EmptyTitle,
-  EmptyDescription,
   NavigationOverlay,
 } from '@object-ui/components';
-import { Plus, Upload, Lock, MoreHorizontal, RotateCcw } from 'lucide-react';
-import { FavoriteMenuItem, useObjectListFavorite } from '../layout/SidebarItemMenu.js';
+import { Plus } from 'lucide-react';
+import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from './viewTabLabel.js';
-import { getIcon } from '../utils/getIcon.js';
-import type { ActionBarSchema, DataSource, UIActionSchema, ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { DataSource, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
@@ -57,10 +47,8 @@ import {
   PREVIEW_QUERY_FLAG,
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
-import { PageHeader } from '../layout/PageHeader.js';
 import { useMobileViewSwitcherRegistration } from '../layout/MobileViewSwitcherContext.js';
 import type { MobileViewSwitcherItem } from '../layout/MobileViewSwitcherContext.js';
-import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { RecordDetailView } from './RecordDetailView.js';
 import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
@@ -72,19 +60,16 @@ import { resolveViewId } from '../utils/resolveViewId.js';
 import { defaultListViewId, viewRowId, isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
-import { useObjectTranslation, useObjectLabel, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
+import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { ActionProvider, SchemaRenderer, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
+import { ActionProvider, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
-import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import {
     VIEW_TYPE_ICONS,
     FALLBACK_USER,
     substituteFilterTokens,
-    declaredPrimaryToolbarAction,
-    MOBILE_FAB_LIST_CLEARANCE,
 } from './objectViewHelpers.js';
 import {
     defaultListColumnsFromObject,
@@ -104,13 +89,18 @@ import {
     isSameOptionsValue,
     dispatchViewPatches,
 } from './objectViewOptions.js';
-import { ObjectNotFoundState, useViewTabsFit, keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { ObjectNotFoundState, keepInlineEditModeForTheSession } from './objectViewChrome.js';
 import { useObjectViewLiveData } from './objectViewLiveData.js';
 import { useObjectViewIdentity } from './objectViewIdentity.js';
 import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectViewListUrlState.js';
+import { useObjectViewTabBar } from './objectViewTabBar.js';
+import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
+import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
+import { ObjectViewPageHeader } from './objectViewPageHeader.js';
+import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -1128,82 +1118,29 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // effect, so each host re-render re-issued the identical list query.
     const heldListFilter = useRef<unknown>(undefined);
 
-    /*
-     * View Tabs — Airtable-style switcher with rename / delete / duplicate /
-     * pin / set-default / drag-reorder. Built-in views (sourced from
-     * objectDef.listViews) only support switching; mutating callbacks
-     * short-circuit with a toast.
-     *
-     * objectui#12440 — the strip is no longer a row of its own above the list:
-     * it is handed to `ListView` as its `toolbarLeading` host prop, so the tabs
-     * and the list's Filter · Sort · Display · Search share one row. From
-     * `sm` up only; below it nothing is handed over and the app bar's mobile
-     * view switcher (registered above) stays the phone's view control.
-     */
-    const viewTabsFit = useViewTabsFit();
-    // objectui#12528 — the view's description rides on its tab (the active
-    // tab's tooltip and ▾ menu header) instead of a row above the toolbar.
-    // Resolved the way `ListView` resolves the same text (`pickLocalized` on
-    // the display locale), and gated on the same switch the relay below hands
-    // `ListView` as `appearance.showDescription`: `false` shows it nowhere.
-    const displayLocale = useDisplayLocale();
-    const viewTabItems: ViewTabItem[] = views.map((view: any) => {
-        const saved = savedViews.find((sv: any) => viewRowId(sv) === view.id);
-        // System views (loaded from objectDef.listViews / metadata) are
-        // *read-only*. Only sys_view-backed records can be mutated by
-        // the user; admins must duplicate a system view to customize it.
-        const isSystem = !saved;
-        return {
-            id: view.id,
-            label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
-            type: view.type,
-            hasActiveFilters: Array.isArray(view.filter) && view.filter.length > 0,
-            hasActiveSort: Array.isArray(view.sort) && view.sort.length > 0,
-            isDefault: !!(saved?.isDefault ?? view.isDefault),
-            isPinned: !!(saved?.isPinned ?? view.isPinned),
-            visibility: saved?.visibility ?? view.visibility,
-            readonly: isSystem,
-            readonlyReason: isSystem
-                ? t('console.objectView.systemViewReadonly')
-                : undefined,
-            description: (view.showDescription ?? view.appearance?.showDescription) === false
-                ? undefined
-                : pickLocalized(view.description, displayLocale) || undefined,
-        } as ViewTabItem;
+    // objectstack#25992 slice 9: the view tab items, the `ViewTabBar` strip and its
+    // own-row face moved to `./objectViewTabBar.tsx`.
+    const { viewTabItems, viewTabBar, viewTabRow } = useObjectViewTabBar({
+        views,
+        savedViews,
+        objectDef,
+        servedViews,
+        viewLabel,
+        unlabelledViewText,
+        language,
+        t,
+        viewAccess,
+        activeViewId,
+        handleViewChange,
+        isAdmin,
+        handleAddView,
+        handleRenameView,
+        handleDeleteView,
+        handlePinView,
+        handleSetDefaultView,
+        handleConfigView,
+        setManageViewsOpen,
     });
-    const viewTabBar = viewTabsFit && views.length >= 1 ? (
-        <ViewTabBar
-            views={viewTabItems}
-            activeViewId={viewAccess.refusal ? '' : activeViewId}
-            onViewChange={handleViewChange}
-            viewTypeIcons={VIEW_TYPE_ICONS}
-            config={{
-                reorderable: false,
-                showAddButton: isAdmin,
-                showPinnedSection: true,
-                showVisibilityGroups: true,
-            }}
-            onAddView={isAdmin ? handleAddView : undefined}
-            onRenameView={isAdmin ? handleRenameView : undefined}
-            onDeleteView={isAdmin ? handleDeleteView : undefined}
-            onPinView={isAdmin ? handlePinView : undefined}
-            onSetDefaultView={isAdmin ? handleSetDefaultView : undefined}
-            onConfigView={isAdmin ? handleConfigView : undefined}
-            onManageViews={isAdmin ? () => setManageViewsOpen(true) : undefined}
-        />
-    ) : null;
-
-    // objectui#13114 — the strip as a row of its own, for the faces that have
-    // no `ListView` toolbar to carry it: a view the server refused (drawn
-    // page-level below) and a `type: 'chart'` view (drawn above the chart in
-    // `renderListView`'s chart branch, which returns before `ListView`). Every
-    // other face gets the strip in the list's toolbar row instead, so no face
-    // ever draws two. Gated on `viewTabBar`, so below `sm` it is absent too.
-    const viewTabRow = viewTabBar ? (
-        <div className="border-b px-3 sm:px-4 bg-background overflow-x-auto shrink-0" data-testid="view-tab-row">
-            {viewTabBar}
-        </div>
-    ) : null;
 
     // Render multi-view content via ListView plugin (for kanban, calendar, etc.)
     const renderListView = useCallback(({ schema: listSchema, dataSource: ds, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
@@ -1972,178 +1909,54 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         );
     }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker]);
 
-    // Memoize the merged views array so PluginObjectView doesn't get a new
-    // reference on every render (which would trigger unnecessary data refetches).
-    const mergedViews = useMemo(() =>
-        views.map((v: any) =>
-            v.id === activeViewId && viewDraft && viewDraft.id === v.id
-                ? { ...v, ...viewDraft }
-                : v
-        ),
-        [views, activeViewId, viewDraft]
-    );
+    // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
+    // moved to `./objectViewPluginSchema.ts`.
+    const { mergedViews, objectViewSchema } = useObjectViewPluginSchema({
+        views,
+        activeViewId,
+        viewDraft,
+        activeView,
+        objectDef,
+        onEdit,
+        isAdmin,
+        location,
+        navigate,
+        viewId,
+        servedViews,
+        viewLabel,
+        unlabelledViewText,
+        language,
+    });
 
-    // objectui#11013 — the active view's toolbar policy, read under its declared
-    // spelling `userActions.search` / `.filter` / `.sort`. These used to be read
-    // as the bare `showSearch` / `showFilters` / `showSort` flags, so a view
-    // that declared `userActions: { search: false }` still got a search box
-    // here. A stored view that still carries a bare flag is folded onto
-    // `userActions` by `normalizeListViewSchema`, the one fold the relay's own
-    // `userActions` rung already runs; this read names no legacy key. Not
-    // memoised: `activeView` is a fresh object on every render while a draft is
-    // open, and the schema below keys on the three booleans, not on this value.
-    const activeViewUserActions = (normalizeListViewSchema(activeView ?? {}) as {
-        userActions?: { search?: boolean; filter?: boolean; sort?: boolean };
-    }).userActions;
-    const activeViewSearch = activeViewUserActions?.search !== false;
-    const activeViewFilter = activeViewUserActions?.filter !== false;
-    const activeViewSort = activeViewUserActions?.sort !== false;
-
-    // Build the ObjectViewSchema for the plugin — reads from activeView (which merges draft)
-    const objectViewSchema = useMemo(() => ({
-        type: 'object-view' as const,
-        objectName: objectDef.name,
-        layout: 'page' as const,
-        showSearch: activeViewSearch,
-        showFilters: activeViewFilter,
-        showSort: activeViewSort,
-        showCreate: false, // We render our own create button in the header
-        allowCreateView: isAdmin,
-        viewActions: isAdmin ? [
-            { type: 'settings' as const },
-            { type: 'share' as const },
-            { type: 'delete' as const },
-        ] : [],
-        onNavigate: (recordId: string | number, mode: 'view' | 'edit') => {
-            if (mode === 'edit') {
-                onEdit?.({ id: recordId });
-            } else if (mode === 'view') {
-                const originState = {
-                  from: {
-                    pathname: location.pathname + (location.search || ''),
-                    label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
-                  },
-                };
-                if (viewId) {
-                    navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });
-                } else {
-                    navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
-                }
-            }
-        },
-    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, location.pathname, location.search, viewLabel, unlabelledViewText, servedViews, language]);
-
-    // The header's primary action, drawn the same in both of the header's
-    // faces (below). [#5153] `objectCanCreate && createVisible` — the
-    // object-level verdict, then the toolbar-scope `visibleWhen` layer on top
-    // of it. Greyed, not gone, is the `disabledWhen` case. Same pair drives the
-    // phone FAB below, so the two render points cannot disagree.
-    const showCreate = objectCanCreate && createVisible;
-    // objectui#13134 — the list's end-of-scroll room for the phone FAB, on the
-    // list host below, exactly while the FAB is drawn (see
-    // `MOBILE_FAB_LIST_CLEARANCE`).
-    const listFabClearance = showCreate ? MOBILE_FAB_LIST_CLEARANCE : undefined;
-    const createButton = showCreate ? (
-        <Button
-            size="sm"
-            onClick={actions.create}
-            disabled={createDisabled}
-            className="shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
-            data-testid="object-view-new-button"
-        >
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('console.objectView.new')}</span>
-        </Button>
-    ) : null;
-
-    // objectui#12705 — the header's actions folded, for a header too narrow
-    // for them and the description: the primary action stays labelled and
-    // every other action goes into one `⋯` menu, above the page's own entries
-    // (favorites, Reset view). The header decides when; this decides what.
-    //
-    // The primary is DECLARED, never read off the row's order: the page's own
-    // New when it draws one, else the toolbar action authored
-    // `variant: 'primary'` (lowest `order` first) — `sys_user`'s Invite User.
-    // Everything else goes through one `action:bar` with no inline slots, so
-    // the menu is that bar's one overflow menu: the toolbar actions keep the
-    // bar's capability, location and `visible` / `disabled` gates and its
-    // execute path, as when they spill past `maxVisible` today. Import and the
-    // page's own entries join it as host callbacks, the way the record page's
-    // menu carries Favorite and Share.
-    //
-    // A `?runAction=` deep link still runs once: the arrival's render consumes
-    // it before the header can fold, so no action in the folded face carries
-    // `autoTrigger`. Not offered on the environment list, whose toolbar is
-    // `EnvironmentListToolbar`, not this bar.
-    const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list_toolbar'))
-        ? toolbarActionsWithDeepLink
-        : [];
-    const primaryToolbarAction = showCreate ? undefined : declaredPrimaryToolbarAction(toolbarRowActions);
-    const importShown = identityImportEnabled || (objectCanImport && importVisible);
-    const foldedMenuBar: ActionBarSchema = {
-        type: 'action:bar',
-        location: 'list_toolbar',
-        actions: [
-            ...(importShown ? [{
-                name: 'object_view_import',
-                label: t('console.objectView.import'),
-                icon: 'upload',
-                type: 'script' as const,
-                locations: ['list_toolbar' as const],
-                disabled: importDisabled,
-                onClick: () => setShowImport(true),
-            }] : []),
-            ...toolbarRowActions.filter((a) => a.name !== primaryToolbarAction?.name),
-        ],
-        systemActions: [
-            ...(listFavorite ? [{
-                name: 'object_view_favorite',
-                label: listFavorite.isFavorite
-                    ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
-                    : t('common.addToFavorites', { defaultValue: 'Add to favorites' }),
-                icon: listFavorite.isFavorite ? 'star-off' : 'star',
-                type: 'script' as const,
-                onClick: listFavorite.toggle,
-            }] : []),
-            ...(activeViewHasPreference ? [{
-                name: 'object_view_reset_view',
-                label: t('console.objectView.resetView'),
-                icon: 'rotate-ccw',
-                type: 'script' as const,
-                onClick: handleResetView,
-            }] : []),
-        ],
-        variant: 'ghost',
-        size: 'icon',
-        maxVisible: 0,
-        mobileMaxVisible: 0,
-    };
-    const foldedHeaderActions = !isEnvironmentList ? (
-        <>
-            {createButton}
-            {/* One inline slot at every width: `toolbarBar` keeps none below
-                `md` (`mobileMaxVisible: 0`), which would send the primary into
-                a second `⋯` beside the menu's. */}
-            {primaryToolbarAction && (
-                <SchemaRenderer schema={{ ...toolbarBar, actions: [primaryToolbarAction], maxVisible: 1, mobileMaxVisible: 1 }} />
-            )}
-            <SchemaRenderer schema={foldedMenuBar} />
-        </>
-    ) : undefined;
-
-    // objectui#12112 — the list area for a view the server refused: said as a
-    // permission refusal, in the server's own sentence, which names the view.
-    const refusedViewFace = viewAccess.refusal ? (
-        <div className="h-full flex items-center justify-center p-8">
-            <Empty data-testid="view-access-denied">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                    <Lock className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <EmptyTitle>{t('list.loadErrorForbiddenTitle')}</EmptyTitle>
-                {viewAccess.refusal.message && <EmptyDescription>{viewAccess.refusal.message}</EmptyDescription>}
-            </Empty>
-        </div>
-    ) : null;
+    // objectstack#25992 slice 9: the header's create button, folded actions menu and
+    // the refused-view face moved to `./objectViewHeaderChrome.tsx`.
+    const {
+        showCreate,
+        listFabClearance,
+        createButton,
+        importShown,
+        foldedHeaderActions,
+        refusedViewFace,
+    } = useObjectViewHeaderChrome({
+        objectCanCreate,
+        createVisible,
+        createDisabled,
+        actions,
+        t,
+        listActions,
+        toolbarActionsWithDeepLink,
+        identityImportEnabled,
+        objectCanImport,
+        importVisible,
+        importDisabled,
+        setShowImport,
+        listFavorite,
+        activeViewHasPreference,
+        handleResetView,
+        isEnvironmentList,
+        toolbarBar,
+        viewAccess,
+    });
 
     return (
         <ActionProvider {...actionRuntime.actionProviderProps}>
@@ -2164,120 +1977,26 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  chrome that real-app conventions (Gmail / Notion / Linear)
                  reclaim for content. The create / import / overflow
                  actions move to a floating action button (see below). */}
-             <div className="hidden sm:block">
-             <PageHeader
-                 // The page lists the object's records, so it is titled with
-                 // the plural, as the nav entry that opens it is
-                 // (objectui#11696); the record page keeps the singular.
-                 title={objectPluralLabel(objectDef)}
-                 // The kind chip, in the header's own slot after the title
-                 // (objectui#12606).
-                 badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
-                 subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
-                 // `createElement`, not a JSX tag: the looked-up icon is a value,
-                 // which react-hooks/static-components refuses in tag position
-                 // (the convention ObjectDataPage set).
-                 icon={createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
-                 actions={
-                   <>
-                    {/* No favorite star here since objectui#12423: the one-row
-                        header is icon, title, description and these actions.
-                        The favorites entry is in the overflow menu at the end
-                        of this row (objectui#12427). */}
-
-                    {/* Primary action (see `createButton`). */}
-                    {createButton}
-
-                    {/* Data import — desktop only on phones. CSV imports
-                        are inherently a desk/laptop workflow; the button
-                        was eating header space on mobile next to the
-                        primary "+" action. */}
-                    {/* [#5142] `objectCanImport && importVisible` — the object-level
-                        verdict, then the toolbar-scope `visibleWhen` layer on top of
-                        it. Greyed, not gone, is the `disabledWhen` case below. */}
-                    {importShown && (
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShowImport(true)}
-                        disabled={importDisabled}
-                        className="hidden sm:inline-flex shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
-                        title={t('console.objectView.importTitle')}
-                        data-testid="object-view-import-button"
-                    >
-                        <Upload className="h-4 w-4" />
-                        <span className="hidden sm:inline">{t('console.objectView.import')}</span>
-                    </Button>
-                    )}
-
-                    {/* Schema-driven toolbar actions */}
-                    {listActions?.some((a: any) => a.locations?.includes('list_toolbar')) && (
-                      isEnvironmentList ? (
-                        <EnvironmentListToolbar
-                          actions={headerToolbarActions}
-                          entitlements={environmentEntitlements}
-                        />
-                      ) : (
-                      <SchemaRenderer schema={toolbarBar} />
-                      )
-                    )}
-
-                    {/* The page's overflow menu (objectui#12427), last in the
-                        row: the favorites entry that replaced the header star.
-                        Favorites is a once-and-forget act, so it lives behind
-                        the ⋯ rather than in the header's most prominent slot.
-                        "Reset view" (objectui#12418) is the same kind of act and
-                        lives beside it, so the one-row header keeps its shape
-                        as the user sorts. The ⋯ is drawn when either applies. */}
-                    {(listFavorite || activeViewHasPreference) && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="shadow-none h-8 sm:h-9 px-2"
-                            aria-label={t('detail.moreActions', { defaultValue: 'More actions' })}
-                            data-testid="object-view-more-actions"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {listFavorite && (
-                            <FavoriteMenuItem
-                              isFavorite={listFavorite.isFavorite}
-                              onToggle={listFavorite.toggle}
-                              testId="object-view-favorite"
-                            />
-                          )}
-                          {/* objectui#12418 — the user's own list state for
-                              this view (sort, filters, column layout) back to
-                              the view's. Only while they have stored some. */}
-                          {activeViewHasPreference && (
-                            <DropdownMenuItem
-                              onSelect={handleResetView}
-                              title={t('console.objectView.resetViewTitle')}
-                              data-testid="object-view-reset-view-button"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                              <span>{t('console.objectView.resetView')}</span>
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-
-                    {/*
-                       Design Tools dropdown removed — its items were redundant:
-                       - "Edit view"  → use chevron menu's "Edit view config"
-                       - "Add view"   → use the `+` button on the tab bar or the "Add new view" footer in Manage Views
-                       - "Metadata inspector" → still toggleable via the `?__debug` URL flag (see useMetadataInspector)
-                    */}
-                   </>
-                 }
-                 foldedActions={foldedHeaderActions}
+             {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
+             <ObjectViewPageHeader
+                 objectDef={objectDef}
+                 objectPluralLabel={objectPluralLabel}
+                 objectDesc={objectDesc}
+                 createButton={createButton}
+                 importShown={importShown}
+                 setShowImport={setShowImport}
+                 importDisabled={importDisabled}
+                 t={t}
+                 listActions={listActions}
+                 isEnvironmentList={isEnvironmentList}
+                 headerToolbarActions={headerToolbarActions}
+                 environmentEntitlements={environmentEntitlements}
+                 toolbarBar={toolbarBar}
+                 listFavorite={listFavorite}
+                 activeViewHasPreference={activeViewHasPreference}
+                 handleResetView={handleResetView}
+                 foldedHeaderActions={foldedHeaderActions}
              />
-             </div>
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned
@@ -2524,28 +2243,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* Record Detail Overlay — navigation mode driven by objectDef.navigation */}
              {navOverlay.mode !== 'split' && (
-             <NavigationOverlay
-                 {...navOverlay}
-                 setIsOpen={(open: boolean) => { if (!open) handleDrawerClose(); }}
-                 title={objectLabel(objectDef)}
-                 onExpand={handleExpandDrawer}
-                 expandLabel={t('console.objectView.expandToPage', { defaultValue: 'Open as full page' })}
-                 storageKey={`drawer-width:${objectDef.name}`}
-             >
-                 {(record: Record<string, unknown>) => {
-                     const recordId = (record.id || record._id) as string;
-                     return (
-                         <RecordDetailView
-                             dataSource={dataSource}
-                             objects={objects}
-                             onEdit={onEdit}
-                             objectNameOverride={objectDef.name}
-                             recordIdOverride={recordId}
-                             embedded
-                         />
-                     );
-                 }}
-             </NavigationOverlay>
+             /* objectstack#25992 slice 10: the overlay moved to `./objectViewRecordOverlay.tsx`. */
+             <ObjectViewRecordOverlay
+                 navOverlay={navOverlay}
+                 handleDrawerClose={handleDrawerClose}
+                 objectLabel={objectLabel}
+                 objectDef={objectDef}
+                 handleExpandDrawer={handleExpandDrawer}
+                 t={t}
+                 dataSource={dataSource}
+                 objects={objects}
+                 onEdit={onEdit}
+             />
              )}
         </div>
         {actionRuntime.dialogs}

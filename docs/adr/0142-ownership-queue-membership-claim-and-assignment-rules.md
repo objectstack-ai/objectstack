@@ -651,6 +651,7 @@ at merge (the card's own words; HotCRM `AGENTS.md` rule 2: *merged is not availa
    owner), the analogue of the `field` recipient; not in the card, noted as the next pull.
 5. **The dogfood matrix** gains rows for the claim admission, the access path and the two re-admitted members, each on an
    `enforced` row naming its site.
+6. **Where the `queue` column is injected** — Whether the queue column is injected on every ownership: user object (D3 as accepted) or moves to a per-object opt-in was put to the maintainer in objectstack#26359, who confirmed D3 as accepted (ruling A, https://github.com/objectstack-ai/objectstack/issues/26359#issuecomment-6429748166).
 
 ## Open questions for the maintainer's merge decision
 

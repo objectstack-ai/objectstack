@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 260 — spawns the real producer once per single-cause fixture: ten boots in one beforeAll, each a distinct precedence leg: three `os dev`, seven `os start`, each a supervisor plus its `serve` child read through the metadata door; slowest CI reading 206.80 s (run 40424746941) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * #21501 — an explicitly named artifact is the stack that is SERVED, even from

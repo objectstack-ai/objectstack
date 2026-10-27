@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: two `os serve` migrate-and-exit runs in one beforeAll, the server boot and the --no-server boot whose table sets are compared; slowest CI reading 30.02 s (run 40392443783) of the two scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941), x 1.25, rounded up
 
 /**
  * [#22202] A `--no-server` migrate-and-exit run provisions the SAME table set

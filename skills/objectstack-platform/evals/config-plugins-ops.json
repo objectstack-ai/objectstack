@@ -60,6 +60,16 @@
         "must_contain": ["os start", "PORT", "OS_TRUSTED_ORIGINS", "driver-sql"],
         "must_not_contain": ["new DriverPlugin", "@objectstack/plugin-prometheus"]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Prepare a demo of our contracts app: the seed data assigns matters to 'Legal Counsel 1' and 'Paralegal 1', and the demo should open signed in as Legal Counsel 1.",
+      "expected_output": "Both people go in `demoStaff` — `name` exactly as the seed references them, `email`, and a `position` / `permissionSets` the stack itself declares — and `os dev` creates the accounts with the seed password (`admin123` by default): no `password` key, no `role:` alias, no platform set such as `admin_full_access`, and no hand-written `sys_user` seed row (refused). `devLogins` creates nothing: at most one entry naming Legal Counsel 1's address so the boot banner prints it. Notes that `os build` drops `demoStaff` and a production boot creates no demo account.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["demoStaff", "position", "permissionSets", "os dev"],
+        "must_not_contain": ["role:", "admin_full_access"]
+      }
     }
   ]
 }

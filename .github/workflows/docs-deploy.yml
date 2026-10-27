@@ -129,34 +129,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-
       # The same key ci.yml's jobs use, so a scheduled run restores the store
       # CI already saved for this lockfile instead of downloading it again.
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
       # `vercel build` runs vercel.json's `installCommand` again; with the tree
       # already installed from the frozen lockfile that pass has nothing to do,
       # and a lockfile problem fails HERE, under its own name.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # ## Every Vercel command runs from the REPOSITORY ROOT, not apps/docs
       #

@@ -16,7 +16,8 @@ import {
 //
 //   ./cloud  — since #16325 ./marketplace — the DECLARATION form an author
 //     writes into a package manifest:
-//     `{ packageId, versionRange, optional }`, embedded in
+//     `{ packageId, versionRange, optional }` (`optional` since retired,
+//     ADR-0141 D8), embedded in
 //     `PackageManifestSchema.dependencies[]` → `sys_package_version.manifest_json`;
 //   ./kernel — the RESOLVER form the dependency resolver walks:
 //     `{ name, versionConstraint, type, resolvedVersion }`, embedded in
@@ -144,10 +145,10 @@ describe('PackageDependency dual-source retirement (C7)', () => {
       packageId: 'com.objectstack.core',
       versionRange: '^1.0.0',
     });
+    // `optional` is a retired tombstone (ADR-0141 D8): it materializes nothing.
     expect(declared).toEqual({
       packageId: 'com.objectstack.core',
       versionRange: '^1.0.0',
-      optional: false, // the `.default(false)` still applies
     });
   });
 
@@ -163,13 +164,14 @@ describe('PackageDependency dual-source retirement (C7)', () => {
     const kernelKeys = keysOf(ResolvedPackageDependencySchema as never);
     const cloudKeys = keysOf(PackageDependencySchema as never);
     expect([...kernelKeys].sort()).toEqual(['name', 'resolvedVersion', 'type', 'versionConstraint']);
+    // `optional` stays in the shape as a retiredKey() tombstone (ADR-0141 D8).
     expect([...cloudKeys].sort()).toEqual(['optional', 'packageId', 'versionRange']);
     expect([...kernelKeys].filter((k) => cloudKeys.has(k)), 'key sets must stay disjoint').toEqual([]);
 
     // Neither side is `.strict()`, so cross-pasting a document does not throw —
     // it silently strips. That is exactly the failure mode the shared name hid,
     // and it is why the pin above forbids a "helpful" re-export alias.
-    const manifestDoc = { packageId: 'com.objectstack.core', versionRange: '^1.0.0', optional: true };
+    const manifestDoc = { packageId: 'com.objectstack.core', versionRange: '^1.0.0' };
     const strippedByResolver = ResolvedPackageDependencySchema.safeParse(manifestDoc);
     expect(strippedByResolver.success, 'resolver form rejects a manifest doc only on required keys').toBe(false);
 

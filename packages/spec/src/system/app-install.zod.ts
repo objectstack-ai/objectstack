@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * App Installation Protocol
@@ -56,8 +57,28 @@ export const AppManifestSchema = lazySchema(() => z.object({
   /** Seed data records to populate on install */
   seedData: z.array(z.record(z.string(), z.unknown())).default([]).describe('Seed data records'),
 
-  /** App dependencies (other apps that must be installed first) */
-  dependencies: z.array(z.string()).default([]).describe('Required app dependencies'),
+  /**
+   * REMOVED (#25792 item 6; ADR-0141 D8 item 3, ADR-0049 enforce-or-remove).
+   *
+   * A list of bare ids with no version range, "other apps that must be
+   * installed first", and no install path ever consulted it. The ADR-0141 D2
+   * pre-install check judges one declaration, the manifest record
+   * `ManifestSchema.dependencies` (`{ [packageId]: versionRange }`), which says
+   * the same thing with a range. Measured at retirement: no reader and no
+   * writer of the key outside `packages/spec` (this repository and HotCRM).
+   *
+   * Tombstoned rather than deleted, so the rejection carries this prescription
+   * in both channels (`tsc` and the parse). No D2 conversion: an app manifest is
+   * not a stack collection member (the `kernel/Manifest:capabilities`
+   * precedent); the D3 record is `dependency-unread-spellings-retired`.
+   */
+  dependencies: retiredKey(
+    '`AppManifest.dependencies` was removed in @objectstack/spec 18 (ADR-0049 ' +
+    'enforce-or-remove, ADR-0141 D8) — nothing read it: it listed bare ids with ' +
+    'no version range, and no install path consulted it. Delete the key. Declare ' +
+    'each dependency with its range in the package\'s `manifest.dependencies` ' +
+    '(`{ \'com.acme.core\': \'^1.0.0\' }`), which the pre-install check enforces.',
+  ),
 }).describe('App manifest for marketplace installation'));
 
 export type AppManifest = z.input<typeof AppManifestSchema>;

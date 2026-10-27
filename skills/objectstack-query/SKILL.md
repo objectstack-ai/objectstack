@@ -86,7 +86,7 @@ procedure and the full tombstone register are **objectstack-upgrade**.
 
 ## Quick Reference — Detailed Rules
 
-- **[Filters](./rules/filters.md)** — all operators, logical combinations, filtering by a related record, date macros and session tokens
+- **[Filters](./rules/filters.md)** — all operators, logical combinations, filtering by a related record, now-anchored comparands, date macros and session tokens
 - **[Aggregation](./rules/aggregation.md)** — groupBy, date bucketing, functions, `having`, per-measure `filter`
 - **[Pagination](./rules/pagination.md)** — offset vs keyset, best practices, performance
 
@@ -195,7 +195,9 @@ the two-step route past them: **[filter rules → Relation Filters](./rules/filt
 ### Cross-field comparisons
 
 `{ $field: '...' }` compares two columns of the same row, in a **comparison**
-position only — see **[filter rules → Field References](./rules/filters.md)**.
+position only; `{ $now: true, addDays: OFFSET }` is the instant the query runs
+at, shifted by whole days a number field of the record holds — see **[filter
+rules → Field References / Now-Anchored Comparands](./rules/filters.md)**.
 
 ## Sorting
 

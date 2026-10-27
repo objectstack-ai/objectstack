@@ -69,6 +69,25 @@ const splitDesigner = (props: Record<string, any>) => {
   return { designer: { 'data-obj-id': id, 'data-obj-type': type, style }, rest };
 };
 
+/**
+ * The label of a terminal stage on the desktop row: centred, and WRAPPING
+ * rather than truncated or held on one line, so the stage that ends the path
+ * is never the one whose name is cut (#25895).
+ */
+const TERMINAL_LABEL_CLASS = 'text-center [overflow-wrap:anywhere]';
+
+// ── Every stage gets an EQUAL share of the desktop rail (#25895) ──────────
+//
+// The alt group used to be `shrink-0` around content-width, `whitespace-nowrap`
+// stages, so on a short path its terminal stages were only as wide as their
+// words: HotCRM's event drew `✗ 已取消  客户未到` in one narrow cell at the
+// right edge while two forward stages took the rest. Now both groups start
+// from zero and grow by the number of stages they hold, and each stage fills
+// its share, so a terminal stage is exactly as wide as any other. Its label
+// wraps instead of being cut, so it stays legible on a narrow rail too. The
+// mobile row scrolls horizontally and keeps its content-width stages.
+const shareOf = (stageCount: number): React.CSSProperties => ({ flexGrow: stageCount, flexShrink: 1, flexBasis: '0%' });
+
 type StageState = 'completed' | 'current' | 'upcoming';
 
 type PathStage = { value: unknown; label: string; terminal?: 'won' | 'lost' };
@@ -419,7 +438,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
         className="hidden sm:flex w-full items-start gap-2"
         {...railAria}
       >
-        <div className="flex flex-1 items-start gap-1.5">
+        <div className="flex min-w-0 items-start gap-1.5" style={shareOf(forwardStages.length)}>
           {forwardStages.map((stage, idx) => {
             const isCompleted = !currentInLost && currentIdx >= 0 && idx < currentIdx;
             const isCurrent = !currentInLost && idx === currentIdx;
@@ -429,7 +448,9 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
               state: isCurrent ? 'current' : isCompleted ? 'completed' : 'upcoming',
               terminal: stageTerminals[idx],
               className: 'flex-1 min-w-0',
-              labelClassName: 'text-center truncate',
+              // The won terminus wraps like the alt group's stages (#25895);
+              // an ordinary stage keeps its one truncated line.
+              labelClassName: stageTerminals[idx] ? TERMINAL_LABEL_CLASS : 'text-center truncate',
             });
           })}
         </div>
@@ -463,7 +484,10 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
           //      ("both rows carry identical names").
           //
           // So the wrapper stays a presentational box.
-          <div className="flex items-start gap-1.5 pl-2 border-l border-border/40">
+          <div
+            className="flex min-w-0 items-start gap-1.5 pl-2 border-l border-border/40"
+            style={shareOf(lostStages.length)}
+          >
             {lostStages.map((stage, lIdx) => {
               const absIdx = firstLostIdx + lIdx;
               return renderStage({
@@ -471,8 +495,8 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
                 stage,
                 state: absIdx === currentIdx ? 'current' : 'upcoming',
                 terminal: stageTerminals[absIdx],
-                className: 'shrink-0',
-                labelClassName: 'text-center whitespace-nowrap',
+                className: 'flex-1 min-w-0',
+                labelClassName: TERMINAL_LABEL_CLASS,
               });
             })}
           </div>
