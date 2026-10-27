@@ -687,7 +687,12 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // accepts `expression` on every type and the engine computes and stores it
     // on a non-formula field, so the formula-only row hid a live key; the row
     // is now shown for every type, as the field form's own row already was.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(88);
+    // It is 89 today, an ADDITION of ONE: #26548 offered the report form's
+    // "Period & export" section, gated like the container `chart` row on
+    // `data.type != 'joined'` (`ReportSchema` refuses `dateRange` and
+    // `exportOptions` on a joined report). It reaches the literal-comparison
+    // census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(89);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -804,7 +809,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `flow`, the third type its parse accepts, and respelled the gate
     // `data.type in ['api','script','flow']` — an `in`-list, outside this rule,
     // so its two `==` literal comparisons left the census.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(63);
+    // It is 64 today: #26548's report "Period & export" section is gated on
+    // `data.type != 'joined'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(64);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
