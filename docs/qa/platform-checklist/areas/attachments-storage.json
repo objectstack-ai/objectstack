@@ -8,7 +8,7 @@
     "qa-scratch-authz": {
       "title": "Scratch authz parents (qa_vault / qa_shared / qa_nofiles) + two real member personas",
       "why": "Stock showcase has NO private files-enabled parent: its only `enable.files` object is showcase_project, which is public_read_write AND readable through the showcase `everyone` baseline. Without this recipe the entire authz core of this area — the 403 deny side of download-authz-both-sides, the invisible-parent case of read-inherits-parent-rls, and the read-but-not-edit split of attach-requires-parent-edit — is blocked(fixture) on every run. Run #7635 closed the gap at runtime and scored those items instead of blocking them; this block is that provisioning made permanent and replayable.",
-      "provenance": "run #7635 (framework 92f26f75) → #7670 Step 6 gained persona B's sys_attachment read after QA run #23166 met the panel's up-front refusal (#23169). Step 6 pinned the three persona set payloads (#24036, from the intent QA run #23929 recorded; replayed on main c91af8ed6: 200 saves, 201 bindings, the split proof as stated), and step 5 mints three members, invited first.",
+      "provenance": "run #7635 (framework 92f26f75) → #7670 Step 6 gained persona B's sys_attachment read after QA run #23166 met the panel's up-front refusal (#23169). Step 6 pinned the three persona set payloads (#24036, from the intent QA run #23929 recorded; replayed on main c91af8ed6: 200 saves, 201 bindings, the split proof as stated), and step 5 mints three members, invited first. #26791: replayed steps 1-4 on a fresh stock showcase boot at main 8eef9a8d (REST only, 2026-10-27). As written (no namespace) step 1 answered 201 with the derived namespace 'attachments' and steps 2-4 each answered 422 NAMESPACE_PREFIX; with step 1 declaring namespace 'qa', step 1 answered 201 and steps 2-4 each answered 200; on that boot step 6's three set saves answered 200 and the teardown DELETE answered 200, removing the three objects and the three sets.",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
@@ -19,9 +19,9 @@
         {
           "step": 1,
           "call": "POST /api/v1/packages",
-          "body": { "manifest": { "id": "com.objectstack.qa.attachments", "name": "QA attachments fixture", "version": "1.0.0", "type": "app" }, "enableOnInstall": true },
-          "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
-          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts"
+          "body": { "manifest": { "id": "com.objectstack.qa.attachments", "name": "QA attachments fixture", "version": "1.0.0", "type": "app", "namespace": "qa" }, "enableOnInstall": true },
+          "expect": "2xx with the installed package echoed back, manifest.namespace 'qa'. The namespace is DECLARED on purpose: every object a package defines must be named NS_SHORT, and a manifest that declares none gets one derived from the id's last segment ('attachments'), under which steps 2-4 answer 422 NAMESPACE_PREFIX ('Rename it to attachments_qa_vault'). Declaring 'qa' keeps the qa_ names every later step and item uses. The namespace must be unique on the boot: a sibling recipe installed beside this one must not declare 'qa' too. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts. The derived namespace is packages/metadata-protocol/src/protocol-package-install.ts#deriveNamespaceFromPackageId (an explicitly declared one wins); the prefix judge every object save asks is packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix (ADR-0129 D2)"
         },
         {
           "step": 2,
@@ -248,7 +248,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
@@ -347,6 +347,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a) (acceptance[2]), re-read on main f6c61932, plus the retired console-pin wording this card carries for #26035. acceptance[2]: automated.ref said the permission-matrix file's 'uploader/entitled 200' covers clause 2, but its owner case is the admin, who also owns and reads the parent, and it never follows the url — so the uploader-bypass-against-an-unreadable-parent leg and the 'url serves the bytes' leg are unasserted. The ref now scopes the file to the envelope and names those two legs as hand-driven. The ref's 'a console bundle this repo does not build' and source[3]'s objectui path predate the objectui import: the panel is read at ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx, and the console is built from ui/ by `pnpm console:build`. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "qa-scratch-authz step 1 now declares manifest.namespace 'qa' (#26791). Replayed on a fresh stock showcase boot at main 8eef9a8d: as written, the install derived namespace 'attachments' from the package id and steps 2-4 each answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no scratch parent and this item's recipe-backed clauses would have scored blocked(fixture). With the declared namespace, steps 1-4 answered 201/200/200/200 and step 6's three set saves 200. The object names (qa_vault / qa_shared / qa_nofiles) are unchanged, so no step or clause of this item changed",
+          "ref": "#26791"
         }
       ]
     },
@@ -355,7 +361,7 @@
       "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
       "since": "v15.1",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["member who can read the parent record", "member who cannot read the parent record"],
@@ -458,6 +464,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a) (acceptance[3]), re-read on main f6c61932: the probe half (ADR-0139 D5's classes, the warning, the probe-failure deny) is pinned in-process and at unit only, which the item already says, but the verify did not name either pin's layer, and the warning's text is asserted only at unit. acceptance[3].verify now names both layers (attachment-read-leaf.integration.test.ts: real engine and SQL driver, silent logger; attachment-read-leaf.test.ts: stand-in engine, recording logger) and says the unit file asserts the warning by fragment, never the '[storage] attachment read visibility' prefix and never a server's log. No clause or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "qa-scratch-authz step 1 now declares manifest.namespace 'qa' (#26791). Replayed on a fresh stock showcase boot at main 8eef9a8d: as written, the install derived namespace 'attachments' from the package id and steps 2-4 each answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no scratch parent and this item's recipe-backed clauses would have scored blocked(fixture). With the declared namespace, steps 1-4 answered 201/200/200/200 and step 6's three set saves 200. The object names (qa_vault / qa_shared / qa_nofiles) are unchanged, so no step or clause of this item changed",
+          "ref": "#26791"
         }
       ]
     },
@@ -466,7 +478,7 @@
       "title": "Attaching requires EDIT on the parent record; deleting requires uploader-or-parent-editor; unscoped multi-delete is refused outright",
       "since": "v15.1",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["member with EDIT on the parent", "member with READ but not EDIT on the parent", "member who uploaded the attachment", "member who is neither uploader nor parent editor", "admin (isolates clause 5's FILES_DISABLED refusal from ATTACHMENT_PARENT_ACCESS by holding EDIT on both the original and target parent)"],
@@ -586,6 +598,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932. (1) acceptance[2]: automated.ref said the permission-matrix file pins the uploader-vs-outsider delete split, but its uploader legs are the admin (who edits everything) and memberA on att_case (public_read_write, so memberA edits it), so 'the uploader succeeds even without parent edit' is not driven. (2) negative[1]: none of the refused-attach cases ((b), (item 3), (#2727)) re-reads sys_attachment for a row the refusal left. The ref now scopes clause 2 to the three delete answers the file asserts and names both gaps as hand-driven. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "qa-scratch-authz step 1 now declares manifest.namespace 'qa' (#26791). Replayed on a fresh stock showcase boot at main 8eef9a8d: as written, the install derived namespace 'attachments' from the package id and steps 2-4 each answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no scratch parent and this item's recipe-backed clauses would have scored blocked(fixture). With the declared namespace, steps 1-4 answered 201/200/200/200 and step 6's three set saves 200. The object names (qa_vault / qa_shared / qa_nofiles) are unchanged, so no step or clause of this item changed",
+          "ref": "#26791"
         }
       ]
     },
