@@ -32,7 +32,7 @@
     "mingo": "^7.2.4"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "@types/sql.js": "^1.4.11",
     "sql.js": "^1.14.2",
     "typescript": "^6.0.3",

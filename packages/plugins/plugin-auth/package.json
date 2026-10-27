@@ -69,7 +69,7 @@
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "hono": "^4.13.9",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
