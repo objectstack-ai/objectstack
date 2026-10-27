@@ -36,6 +36,7 @@
  * surface does not move.
  */
 
+import type { IFieldFileService } from '@objectstack/spec/contracts';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     canonicalMetaType,
@@ -62,7 +63,10 @@ export interface PublishBatchHost {
 
 /** The body of `ObjectStackProtocolImplementation#applySeedBodies`; the method's docblock there is its contract. */
 export async function applySeedBodies(
-    this: Pick<PublishBatchHost, 'engine' | 'getMetaItem'>,
+    this: Pick<PublishBatchHost, 'engine' | 'getMetaItem'> & {
+        /** [#25779] The `field-files` service a seed file is stored through, read from the kernel's registry. */
+        getFieldFiles?: () => IFieldFileService | null | undefined;
+    },
     bodies: unknown[],
 ): Promise<{
     success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
@@ -90,6 +94,7 @@ export async function applySeedBodies(
             this.engine as any,
             metadataAdapter as any,
             console as any,
+            { getFieldFiles: () => this.getFieldFiles?.() },
         );
         // [#8333 · P9] `safeParse`, not `parse` — see {@link
         // seedRequestValidationError}. A malformed seed body used to reach

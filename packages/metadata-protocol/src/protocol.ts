@@ -164,8 +164,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
-import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
+import { FIELD_FILE_SERVICE, RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -23077,6 +23077,9 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof applySeedBodies> = {
             get engine() { return readEngine(); },
             getMetaItem: (...a) => this.getMetaItem(...a),
+            // [#25779] The `field-files` service, so a published seed's files
+            // are stored as the boot seed's are.
+            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
         };
         return applySeedBodies.call(host, bodies);
     }
