@@ -460,7 +460,9 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
+        "$TURBO_ROOT$/scripts/nightly-tiers.d.mts"
       ]
     },
     "@objectstack/plugin-auth#test": {
