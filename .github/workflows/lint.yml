@@ -3474,6 +3474,7 @@ jobs:
         run: |
           node scripts/ci/scheduled-full-run.mjs --self-test
           node scripts/ci/scheduled-full-run.mjs --check-concurrency
+          node scripts/ci/scheduled-full-run-card.mjs --self-test
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
