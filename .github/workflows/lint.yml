@@ -3485,7 +3485,7 @@ jobs:
         continue-on-error: true
         run: |
           node scripts/ci/scheduled-full-run-card.mjs --self-test
-          node scripts/ci/test-nightly-tiers-card.mjs --self-test
+          node scripts/ci/nightly-tiers-card.mjs --self-test
           bash scripts/ci/board-snapshot-r2-upload.selftest.sh
 
       # Gate-family selection self-test (#16496). The "Select the gate families

@@ -416,9 +416,9 @@ jobs:
           # otherwise discard a completed sweep.
           retries: 3
           script: |
-            // The body lives in scripts/ci/test-nightly-tiers-card.mjs (#26086), driven
+            // The body lives in scripts/ci/nightly-tiers-card.mjs (#26086), driven
             // offline by its --self-test; this step hands it the same github/context/core.
-            const { fileNightlyCard } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/test-nightly-tiers-card.mjs`);
+            const { fileNightlyCard } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/nightly-tiers-card.mjs`);
             await fileNightlyCard({ github, context, core });
 
       - name: Publish the verdict to the run summary
