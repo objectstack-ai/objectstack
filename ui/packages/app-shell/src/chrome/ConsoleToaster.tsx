@@ -50,7 +50,22 @@ const DEFAULT_OFFSET: ToasterProps['offset'] = { top: APP_HEADER_HEIGHT + APP_HE
  *   no part of the drawer is covered.
  * - Otherwise (a phone, or a drawer nearly as wide as the window) it drops
  *   below the drawer's header, the block that carries the dialog's title and
- *   its controls.
+ *   its controls, and below the first row of controls under that header
+ *   (objectstack#26418). In the record drawer that row is the record's own
+ *   header: Edit, the header actions and the ⋯ menu. Clearing only the
+ *   drawer's header put a 1024px window's toast straight onto Edit, the button
+ *   a user reaches for right after creating a record.
+ *
+ * The row is measured, not assumed: the drawer's topmost visible control
+ * outside its header, widened by every control that overlaps it vertically
+ * (a title's star and copy buttons beside a taller Edit). Measuring keeps the
+ * offset right for any drawer content, without a pixel taken from one page.
+ * A first control in the drawer's lower half is body or footer content, not a
+ * header row, and dropping below it would push the toast off the window, so
+ * then only the header counts. Not the drawer's bottom-right corner instead:
+ * that is where the record's inline-edit Save / Cancel bar sticks
+ * (`InlineEditSaveBar`), and a failed save raises its toast exactly while that
+ * bar is up.
  *
  * "A right-edge drawer" is read off the DOM, not off a prop: an open Radix
  * dialog (`role="dialog"`, `data-state="open"`) laid out fixed against the
@@ -58,7 +73,9 @@ const DEFAULT_OFFSET: ToasterProps['offset'] = { top: APP_HEADER_HEIGHT + APP_HE
  * matches, the record drawer included; popovers, centred dialogs, left and
  * bottom sheets do not. Its header is the dialog's top-level block that holds
  * its `aria-labelledby` title. Sizes are layout sizes (`offsetWidth`,
- * `offsetTop`), so the drawer's slide-in transform does not skew them.
+ * `offsetTop`), so the drawer's slide-in transform does not skew them, and a
+ * control's `offsetTop` is where it sits with the drawer scrolled to the top:
+ * a toast raised mid-scroll still clears the row once the user scrolls back.
  */
 const VIEWPORT_GAP = 24; // sonner's VIEWPORT_OFFSET
 const MOBILE_VIEWPORT_GAP = 16; // sonner's MOBILE_VIEWPORT_OFFSET
@@ -87,21 +104,62 @@ function headerOf(drawer: HTMLElement): HTMLElement | null {
   return block;
 }
 
+/** What counts as a control when finding the first row of them. */
+const CONTROLS =
+  'button, a[href], input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="tab"]';
+
+/**
+ * `el`'s layout top inside `drawer`, summed up its `offsetParent` chain; null
+ * when it is not laid out (`display: none` has no `offsetParent`) or its chain
+ * leaves the drawer (a nested fixed layer).
+ */
+function topWithin(drawer: HTMLElement, el: HTMLElement): number | null {
+  let top = 0;
+  for (let node = el; node !== drawer; ) {
+    top += node.offsetTop;
+    const parent = node.offsetParent;
+    if (!(parent instanceof HTMLElement) || !drawer.contains(parent)) return null;
+    node = parent;
+  }
+  return top;
+}
+
+/** The bottom of the drawer's first row of controls below its header, or 0 when there is none. */
+function firstControlRowBottom(drawer: HTMLElement, header: HTMLElement | null): number {
+  const boxes: { top: number; bottom: number }[] = [];
+  for (const el of Array.from(drawer.querySelectorAll<HTMLElement>(CONTROLS))) {
+    if (header?.contains(el) || el.offsetHeight === 0) continue;
+    const top = topWithin(drawer, el);
+    if (top !== null) boxes.push({ top, bottom: top + el.offsetHeight });
+  }
+  boxes.sort((a, b) => a.top - b.top);
+  const first = boxes[0];
+  if (!first || first.top > drawer.offsetHeight / 2) return 0;
+  let bottom = first.bottom;
+  for (const box of boxes) {
+    if (box.top >= bottom) break;
+    bottom = Math.max(bottom, box.bottom);
+  }
+  return bottom;
+}
+
 function clearanceFor(drawers: HTMLElement[]): DrawerClearance | null {
   if (drawers.length === 0) return null;
   let width = 0;
-  let headerBottom = 0;
+  let clearBelow = 0;
   for (const drawer of drawers) {
     width = Math.max(width, drawer.offsetWidth);
     const header = headerOf(drawer);
-    if (header) headerBottom = Math.max(headerBottom, header.offsetTop + header.offsetHeight);
+    if (header) clearBelow = Math.max(clearBelow, header.offsetTop + header.offsetHeight);
+    clearBelow = Math.max(clearBelow, firstControlRowBottom(drawer, header));
   }
   const fitsBeside = window.innerWidth - width >= TOAST_WIDTH + 2 * VIEWPORT_GAP;
   return {
-    offset: fitsBeside ? { right: width + VIEWPORT_GAP } : { top: headerBottom + VIEWPORT_GAP },
+    offset: fitsBeside ? { right: width + VIEWPORT_GAP } : { top: clearBelow + VIEWPORT_GAP },
     // Below 600px sonner spans the toaster across the viewport, so there is
-    // never a strip beside the drawer: always drop below its header.
-    mobileOffset: { top: headerBottom + MOBILE_VIEWPORT_GAP },
+    // never a strip beside the drawer: always drop below its header and its
+    // first row of controls.
+    mobileOffset: { top: clearBelow + MOBILE_VIEWPORT_GAP },
   };
 }
 
@@ -111,14 +169,19 @@ function useDrawerClearance(): DrawerClearance | null {
   useEffect(() => {
     let frame = 0;
     const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => schedule());
+    const contents = new MutationObserver(() => schedule());
     const measure = () => {
       frame = 0;
       const drawers = openRightDrawers();
       sizes?.disconnect();
+      contents.disconnect();
       for (const drawer of drawers) {
         sizes?.observe(drawer);
         const header = headerOf(drawer);
         if (header) sizes?.observe(header);
+        // The record renders after the drawer opens (its header and actions
+        // arrive with the data), so the first control row can appear late.
+        contents.observe(drawer, { childList: true, subtree: true });
       }
       const next = clearanceFor(drawers);
       // Compared by value: a fresh-but-equal object would re-render the
@@ -141,6 +204,7 @@ function useDrawerClearance(): DrawerClearance | null {
       if (frame) window.cancelAnimationFrame(frame);
       portals.disconnect();
       states.disconnect();
+      contents.disconnect();
       sizes?.disconnect();
       window.removeEventListener('resize', schedule);
     };
