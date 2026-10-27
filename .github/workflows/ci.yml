@@ -4397,12 +4397,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Restore-only: the per-push jobs above own saving the store and the
-      # turbo seeds.
-      - name: Setup workspace
-        uses: ./.github/actions/setup-workspace
+      # The setup is spelled out, as in the ui jobs above, rather than the
+      # `setup-workspace` composite: `ui/scripts/check-pre-install-import-graph.mjs`
+      # finds a job's install by its `pnpm install` line, and reads every step
+      # of a job with none as running before `node_modules` exists, which the
+      # two gates below (they import `typescript`) cannot.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
-          save-store: 'false'
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only, here and below: the per-push jobs above own saving the
+      # store and the turbo seeds.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
