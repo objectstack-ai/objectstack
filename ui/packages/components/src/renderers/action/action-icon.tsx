@@ -27,6 +27,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
+import { toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -191,6 +192,9 @@ const ActionIconRenderer = forwardRef<
           // (objectui#13022).
           operation: schema.operation,
           confirmText: schema.confirmText,
+          // See action-button.tsx — the block's `variant` in the runner's
+          // dialect (objectstack#26665).
+          variant: toRunnerVariant(schema.variant),
           successMessage: schema.successMessage,
           // See action-button.tsx — success copy per handler outcome, the
           // toast's first rung (objectui#11344).

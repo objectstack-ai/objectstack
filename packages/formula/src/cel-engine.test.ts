@@ -511,13 +511,15 @@ describe('celEngine', () => {
         isBlank: 'isBlank("")', isEmpty: 'isEmpty([])', coalesce: 'coalesce(null, "x")', len: 'len("ab")',
         size: 'size([1, 2])', has: 'has(record.a)', int: 'int("3")', string: 'string(3)',
         bool: 'bool("true")', double: 'double("3.5")', timestamp: 'timestamp("2026-01-01T00:00:00Z")',
-        duration: 'duration("3600s")',
+        duration: 'duration("3600s")', label: 'label(record.a)',
       };
       const unresolved: string[] = [];
       for (const fn of CEL_STDLIB_FUNCTIONS) {
         const src = call[fn];
         expect(src, `no probe call defined for advertised function \`${fn}\``).toBeTruthy();
-        const r = celEngine.evaluate(cel(src), { now, record: { a: 1 } });
+        // `optionLabels` is the data `label()` answers from (#26608); the other
+        // probes read nothing from it.
+        const r = celEngine.evaluate(cel(src), { now, record: { a: 1 }, optionLabels: { a: { 1: 'One' } } });
         if (!r.ok) unresolved.push(`${fn}: ${r.error.message.split('\n')[0]}`);
       }
       expect(unresolved, `advertised functions that fault at runtime:\n${unresolved.join('\n')}`).toEqual([]);

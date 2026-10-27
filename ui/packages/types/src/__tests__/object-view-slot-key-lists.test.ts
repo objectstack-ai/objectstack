@@ -292,9 +292,12 @@ describe('the source schemas still declare their full member sets', () => {
     expect(declaresStringIndex(grid)).toBe(false);
   });
 
-  it('ObjectFormSchema declares 69 members and no longer carries the #5155 index signature', () => {
+  // 71 since objectstack#25923 (work item 4) declared `contentLayout` and
+  // `confirmOnDiscard` by reference to `ComponentPropsMap['object-form']`; the
+  // `form` slot carries both.
+  it('ObjectFormSchema declares 71 members and no longer carries the #5155 index signature', () => {
     const form = exportedType('ObjectFormSchema');
-    expect(memberNames(form)).toHaveLength(69);
+    expect(memberNames(form)).toHaveLength(71);
     expect(memberNames(form)).toEqual(expect.arrayContaining(['fields', 'sections', 'submitText']));
     expect(declaresStringIndex(form)).toBe(false);
   });
