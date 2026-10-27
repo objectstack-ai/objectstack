@@ -2323,15 +2323,29 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         // a block key named like a node key that overrode the node's own value).
         // `colorField` and `allDayField`, which only the spread carried, are
         // named now. `ListView`'s twin retired the same spread.
+        //
+        // ⭐ objectstack#25923 — and it hands them on NESTED, as the node's own
+        // `calendar` block, the shape `ListView` hands `ObjectCalendar` too: the
+        // spec's `ComponentPropsMap['object-calendar']` refuses the five flat, so
+        // the published `ObjectCalendarSchema` no longer declares them flat.
+        // Only when a start binding is declared: the block requires one, and a
+        // present block counts as configured, so a start-less block would skip
+        // the renderer's own refusal screen that a view with no binding reaches.
         const calendarCfg = (viewOptions.calendar || {}) as Record<string, any>;
         return {
           type: 'object-calendar',
           ...baseProps,
-          ...(calendarCfg.startDateField ? { startDateField: calendarCfg.startDateField } : {}),
-          ...(calendarCfg.endDateField ? { endDateField: calendarCfg.endDateField } : {}),
-          ...(calendarCfg.titleField ? { titleField: calendarCfg.titleField } : {}),
-          ...(calendarCfg.colorField ? { colorField: calendarCfg.colorField } : {}),
-          ...(calendarCfg.allDayField ? { allDayField: calendarCfg.allDayField } : {}),
+          ...(calendarCfg.startDateField
+            ? {
+                calendar: {
+                  startDateField: calendarCfg.startDateField,
+                  ...(calendarCfg.endDateField ? { endDateField: calendarCfg.endDateField } : {}),
+                  ...(calendarCfg.titleField ? { titleField: calendarCfg.titleField } : {}),
+                  ...(calendarCfg.colorField ? { colorField: calendarCfg.colorField } : {}),
+                  ...(calendarCfg.allDayField ? { allDayField: calendarCfg.allDayField } : {}),
+                },
+              }
+            : {}),
         };
       }
       case 'gallery':
@@ -2416,18 +2430,28 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         // Deleting them cannot resurrect a config — `getGanttConfig` gates on
         // the two date fields alone, so the refusal screen stays as reachable
         // as it was (`plugin-gantt/src/ObjectGantt.unconfiguredRefusal-7070`).
+        //
+        // ⭐ objectstack#25923 — the block goes out NESTED, as the node's own
+        // `gantt`, the shape `ListView` hands `ObjectGantt` too: the spec's
+        // `ComponentPropsMap['object-gantt']` refuses every `GanttConfig` key
+        // written flat, so the published `ObjectGanttSchema` no longer declares
+        // them flat. Handed on under the two conditions the renderer's flat
+        // branch applied: only once BOTH date fields are declared, and with
+        // `titleField` floored at `'name'`, which the block requires.
         return {
           type: 'object-gantt',
           ...baseProps,
-          ...(viewOptions.gantt?.startDateField
-            ? { startDateField: viewOptions.gantt.startDateField }
+          ...(viewOptions.gantt?.startDateField && viewOptions.gantt?.endDateField
+            ? {
+                gantt: {
+                  // The block's DECLARED keys, where a raw spread of the whole
+                  // block stood until objectui#6152 round 14. See
+                  // `GANTT_CONFIG_SPELLING`.
+                  ...pickFlatMapConfig(viewOptions.gantt, GANTT_CONFIG_SPELLING),
+                  titleField: viewOptions.gantt.titleField || 'name',
+                },
+              }
             : {}),
-          ...(viewOptions.gantt?.endDateField
-            ? { endDateField: viewOptions.gantt.endDateField }
-            : {}),
-          // The block's DECLARED keys, where a raw spread of the whole block
-          // stood until objectui#6152 round 14. See `GANTT_CONFIG_SPELLING`.
-          ...pickFlatMapConfig(viewOptions.gantt, GANTT_CONFIG_SPELLING),
         };
       case 'map':
         // Whitelisted flatten (objectui#5177) — see `FLAT_MAP_CONFIG_SPELLING`,

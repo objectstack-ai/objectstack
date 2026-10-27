@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
+import type { ObjectCalendarSchema, ObjectCalendarBlockConfig, DataSource, CalendarConfig } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import { usePullToRefresh } from '@object-ui/mobile';
@@ -133,6 +133,26 @@ import {
  */
 
 /**
+ * The five field-name keys written FLAT on the node: the package-local
+ * hand-off spelling (objectstack#25923, ui/AGENTS.md Commandment #0.1).
+ *
+ * `@objectstack/spec` refuses all five on `object-calendar` and prescribes the
+ * `calendar` block, so the published {@link ObjectCalendarSchema} declares
+ * none of them, and both producers in this tree (`ListView`, and
+ * `ObjectView`'s `generateViewSchema`) emit the block. `getCalendarConfig`
+ * still reads the flat five when a node carries no block, so a host that mounts
+ * `<ObjectCalendar schema={…}>` with them keeps its calendar; this type is that
+ * read, kept here, beside the one consumer, and off the authoring face.
+ * DERIVED from the block's own type, so the two spellings cannot fork.
+ */
+export type ObjectCalendarFlatFields = Partial<
+  Pick<ObjectCalendarBlockConfig, 'startDateField' | 'endDateField' | 'titleField' | 'colorField' | 'allDayField'>
+>;
+
+/** The node `ObjectCalendar` reads: the published schema plus {@link ObjectCalendarFlatFields}. */
+export type ObjectCalendarHandoff = ObjectCalendarSchema & ObjectCalendarFlatFields;
+
+/**
  * Props of the `ObjectCalendar` React component.
  *
  * Renamed off the bare `ObjectCalendarProps` (objectui#4650): from 17.0.0
@@ -149,7 +169,7 @@ import {
  * no importer breaks. Tripwire: `__tests__/spec-symbol-4650.test.ts`.
  */
 export interface ObjectCalendarComponentProps {
-  schema: ObjectCalendarSchema;
+  schema: ObjectCalendarHandoff;
   dataSource?: DataSource;
   className?: string;
   /** Pre-fetched records passed by a parent (e.g. ObjectView). When provided, skips internal data fetching. */
@@ -320,13 +340,17 @@ type ObjectCalendarConfig = CalendarConfig & {
  * `calendar-date-alias-refusal-8355.test.ts` and `plugin-list`'s
  * `ListView.calendarAliasRefused-8355.test.tsx`.
  */
-function getCalendarConfig(schema: ObjectCalendarSchema): ObjectCalendarConfig | null {
+function getCalendarConfig(schema: ObjectCalendarHandoff): ObjectCalendarConfig | null {
   // The declared configuration container — read FIRST, as the spec declares it.
   if (schema.calendar) {
     return schema.calendar as ObjectCalendarConfig;
   }
 
-  // The flat spelling, which `ObjectView` and `ListView` emit.
+  // The flat spelling — the package-local hand-off (`ObjectCalendarFlatFields`).
+  // No producer in this tree emits it since objectstack#25923 (`ListView` and
+  // `ObjectView` hand the view's block on as `calendar`), and the spec refuses
+  // it on an authored node; a host that mounts this component with it is the
+  // reader this branch keeps working.
   //
   // ⛔ The two alias rungs are spelled as a cast ON `schema` at each read site,
   // never through a renamed local. The repo's read census (objectui#6576's
