@@ -34,6 +34,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { declaredEnvelopeForThrow } from '@objectstack/plugin-hono-server';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const PACKAGE_ID = 'objectstack-test';
@@ -83,6 +84,8 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
         await engine.init();
         engine.registry.registerObject(INQUIRY as any, PACKAGE_ID);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization (ADR-0131 D9, D1).
+        await installDefaultOrganization(engine);
         for (const id of ['r1', 'r2', 'r3']) await engine.insert('inquiry', { id, name: `n-${id}`, note: `x-${id}` } as any);
         for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
             const real = driver[verb].bind(driver);
