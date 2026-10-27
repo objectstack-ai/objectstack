@@ -73,9 +73,13 @@ async function renderRls(served: ServerDiagnostics | undefined, policies = 1) {
   await user.click(screen.getByText('perm.rls.title'));
 }
 
-/** The editor wrapping each clause, in render order: policy 0 USING, policy 0 CHECK, policy 1 USING, … */
+/** The editor wrapping each clause, in render order: policy 0 USING, policy 0 CHECK, policy 1 USING, …
+ *  (the CEL textareas only — the operation picker is a combobox too). */
 const clauseBoxes = () =>
-  screen.getAllByRole('combobox').map((ta) => ta.closest('div')!.parentElement as HTMLElement);
+  screen
+    .getAllByRole('combobox')
+    .filter((el) => el.tagName === 'TEXTAREA')
+    .map((ta) => ta.closest('div')!.parentElement as HTMLElement);
 
 describe('the RLS clause editor reads the served verdict at its path (objectstack#26858)', () => {
   it('a USING clause the server refuses shows the server message and no "Valid CEL"; its CHECK still reads valid', async () => {
