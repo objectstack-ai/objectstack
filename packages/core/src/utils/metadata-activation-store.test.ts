@@ -346,6 +346,49 @@ describe('ObjectStoreMetadataActivationStore — an item no package ships', () =
     });
 });
 
+// [#26474] A door writes the row ON BEHALF of the administrator who asked, so
+// the write runs under that caller's own envelope, elevated — the engine stamps
+// `created_by` / `updated_by` from its `userId`, and the audit plugin reads
+// `user_id` / `actor` from the same session. The store's constant system
+// context names nobody, which is what left both rows' actor null.
+describe('ObjectStoreMetadataActivationStore — the write names the caller who asked for it', () => {
+    const CALLER = { userId: 'usr_admin', organizationId: 'org_acme', positions: ['org_admin'], isSystem: true as const };
+
+    it('INSERTS under the context it is handed, and reads the existing row under the same one', async () => {
+        const { engine, calls } = makeStoreEngine([]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'action')
+            .setActive({ name: 'convert_lead', packageId: 'crm', active: false }, { context: CALLER });
+
+        expect(calls.map((c) => [c.op, c.options?.context])).toEqual([
+            ['find', CALLER],
+            ['insert', CALLER],
+        ]);
+    });
+
+    it('UPDATES under the context it is handed', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'action', name: 'convert_lead', package_id: 'crm', active: false },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'action')
+            .setActive({ name: 'convert_lead', packageId: 'crm', active: true }, { context: CALLER });
+
+        expect(calls.find((c) => c.op === 'update')?.options?.context).toEqual(CALLER);
+    });
+
+    it('with no caller, writes under the system context it always has — a boot-time write names nobody', async () => {
+        const { engine, calls } = makeStoreEngine([]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'flow').setActive({ name: 'nightly_sync', active: false });
+
+        expect(calls.map((c) => c.options?.context)).toEqual([
+            { isSystem: true, positions: [], permissions: [] },
+            { isSystem: true, positions: [], permissions: [] },
+        ]);
+    });
+});
+
 describe('InMemoryMetadataActivationStore', () => {
     it('round-trips a row and reflects the latest flip', async () => {
         const store = new InMemoryMetadataActivationStore();

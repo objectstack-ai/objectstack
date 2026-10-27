@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -88,7 +88,7 @@ Flows are built from **20 built-in node types** (plugins register more via
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally |
 
 #### Human Decision
 
@@ -179,6 +179,17 @@ variables: [
 > dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
 > the whole flow silently elevates every other write in it.
 >
+> **Elevation stops at identity assignment.** A `runAs: 'system'` flow's
+> insert, update, delete, transfer, restore or purge of `sys_user_position`,
+> `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused with
+> `PERMISSION_DENIED`, and moving that step into a dedicated `runAs: 'system'`
+> subflow does not lift it: a governed identity write is judged by a door that
+> judges a person. Grant positions and permission sets from a flow whose
+> `runAs` is `'user'` — the delegated-administration gate then judges the user
+> the run acts for and records them as the grant's `granted_by`. Invitations
+> and memberships change through the organization endpoints (row 1b,
+> https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
+>
 > **A `runAs: 'system'` sweep must pin its organization.** System context has no
 > trigger user, so nothing narrows the query: a scan or rollup with no
 > organization predicate reads and writes across every tenant. The tenant column
@@ -206,8 +217,8 @@ variables: [
   evaluated before the query (`filter: { id: { dialect: 'cel', source:
   'record.id' } }`). A whole-string **query placeholder** (`{current_user_id}`,
   `{today}`, `{current_year_start}`) passes through verbatim for the query
-  engine to expand; every other `{…}` token is refused (`expression-invalid`)
-  with its envelope, and a flow variable never shadows a placeholder. Only
+  engine to expand; every other `{…}` token is refused, and a flow variable
+  never shadows a placeholder. Only
   `filter` gets this hand-off — in a text slot `{{ current_year_start }}` is a
   nonsense reference.
 - **An operand that evaluates to `null` refuses the node** (not

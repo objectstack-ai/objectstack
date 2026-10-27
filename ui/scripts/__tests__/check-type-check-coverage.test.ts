@@ -769,20 +769,13 @@ describe('examples/schema-catalog is wired up, in this repository', () => {
     // layout is fine — but it must arrive wired up, and this list is where the
     // next reader finds out.
     //
-    // `@object-ui/example-console-starter` is that second package
-    // (objectui#3528). Its vite-alias closure test lives in `test/` for the same
-    // structural reason schema-catalog's do: that example's `tsconfig.json` IS
-    // the app build (`tsc && vite build`, `include: ["src"]`), and a fork-ready
-    // template should not hand the customer a test file inside the `src/` they
-    // are meant to edit.
+    // `@object-ui/example-console-starter` was the second (objectui#3528), until
+    // that example was deleted with the host-console posture (#25922).
     const outsideSrc = packages
       .filter((p) => p.testFilePaths.some((rel: string) => !rel.startsWith('src/')))
       .map((p) => p.name)
       .sort();
-    expect(outsideSrc).toEqual([
-      '@object-ui/example-console-starter',
-      '@object-ui/example-schema-catalog',
-    ]);
+    expect(outsideSrc).toEqual(['@object-ui/example-schema-catalog']);
 
     // "It must arrive wired up" is now enforced here rather than left to the
     // reader: appending a name above is not enough on its own, because a package

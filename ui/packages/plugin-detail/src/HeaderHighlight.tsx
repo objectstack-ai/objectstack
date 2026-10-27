@@ -21,6 +21,7 @@ import { EXPANDABLE_FIELD_TYPES, resolveFieldAffordance, isDeadlineSettled } fro
 import { usePermissions } from '@object-ui/permissions';
 import { getCellRenderer, resolveCellRendererType, useBooleanValueLabel } from '@object-ui/fields';
 import { useSafeFieldLabel, useInlineEdit, usePredicateScope } from '@object-ui/react';
+import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import { Check, X, Pencil } from 'lucide-react';
 import { InlineFieldInput } from './InlineFieldInput';
 import {
@@ -53,6 +54,9 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
   dataSource,
 }) => {
   const { fieldLabel } = useSafeFieldLabel();
+  // The session language a declared label's inline locale map is read in,
+  // the read the details body makes for the same rung (`record-details.tsx`).
+  const { language } = useObjectTranslation();
   const { t } = useDetailTranslation();
   // The boolean chip's word (objectui#11689) — the one every read-only boolean
   // word in `@object-ui/fields` reads, so this strip cannot say a different
@@ -157,6 +161,23 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // (objectui#7190, contract review on PR #10255). Same rule as the
             // details body, which reads `DetailView`'s merged record.
             const value = stagedRecord ? stagedRecord[field.name] : rawValue;
+
+            // The chip's caption climbs the details body's label ladder
+            // (objectstack#26417): the bundle's translation, then the entry's
+            // own label, then the label the OBJECT declares, then the field
+            // name. Rungs 2-3 are `withDeclaredLabel` in `record-details.tsx`
+            // (an authored label, even an empty one, is never replaced) and
+            // rung 4 is `DetailSection`'s `field.label || field.name`.
+            // `record:highlights` hands this strip bare names as `{ name }`, so
+            // with no bundle entry the caption used to resolve to `undefined`
+            // and render empty on every object without a bundle, which is every
+            // AI-built one. Read on every render, so a definition that arrives
+            // after the record replaces the field-name caption.
+            const entryLabel =
+              field.label !== undefined
+                ? field.label
+                : pickLocalized(objectDefField?.label, language) || undefined;
+            const caption = fieldLabel(objectName || '', field.name, entryLabel || field.name);
 
             // Field-level editability gate — shares `isComputedFieldType` with
             // DetailSection so the strip and the body agree on which highlights
@@ -331,7 +352,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                 )}
               >
                 <span className="text-xs font-medium text-muted-foreground">
-                  {fieldLabel(objectName || '', field.name, field.label)}
+                  {caption}
                 </span>
 
                 {editorActive ? (
@@ -448,7 +469,9 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            // Revealed on keyboard focus too, as in the details
+                            // body (objectstack#25883).
+                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity"
                             aria-label={t('detail.editInlineHint')}
                             onClick={(e) => {
                               e.stopPropagation();

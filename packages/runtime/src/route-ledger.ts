@@ -9,9 +9,10 @@
  * That was one instance of a class: at audit time, six whole domains had zero
  * client expression. This ledger makes the class visible and ratchets it —
  * `route-ledger.conformance.test.ts` fails when a dispatcher domain appears
- * with no ledger entry, and when an entry claims a client method that does not
- * exist. A new route therefore lands with an explicit, reviewed disposition or
- * not at all.
+ * with no ledger entry, and (#26513) when a route the dispatcher plugin mounts
+ * has no row; the client-side guards fail when an entry claims a client method
+ * that does not exist. A new route therefore lands with an explicit, reviewed
+ * disposition or not at all.
  *
  * SCOPE. Dispatcher (`http-dispatcher.ts`) routes, expressed as
  * dispatcher-internal `cleanPath` patterns (prepend `/api/v1` for the wire
@@ -182,9 +183,10 @@ export interface RouteLedgerEntry {
    * identity, was guarded. Recorded so the next reader does not re-derive a
    * figure that has now been checked. ⛔ The rejection stands either way, and
    * the second spelling strengthens it — a syntactic scanner has to know both
-   * before it can read the file even this badly. The full reading lives in
-   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, the
-   * authority on this population.
+   * before it can read the file even this badly. The full reading is in
+   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts` at commit
+   * 67461403; that census was retired after it for a reach check derived
+   * from this ledger (`authz-probe-blind-spot.test.ts` beside it).
    *
    * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
    * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
@@ -294,11 +296,16 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
  * "correct" the digits to make a build green — regenerate them, and read what
  * they moved by.
  *
- * It is a DELETION detector and deliberately NOT a route-granularity check
- * against what the dispatcher registers: whether this ledger should be checked
- * per route, given `DomainHandlerRegistry.list()` exposes domains and not
- * routes, is an open maintainer decision in #17041. A census stays correct
- * whichever way that is ruled.
+ * It is a DELETION detector, not a route-granularity check. That check lives
+ * in `route-ledger.conformance.test.ts` since #26513: every route
+ * `dispatcher-plugin.ts` mounts must have a row, so deleting a mounted route's
+ * row reds there. It sees only what the plugin mounts, so a row with no mount
+ * of its own spelling (a route only `dispatch()` answers behind a catch-all
+ * host, a `servedBy` specialization, a raw-app door) is still guarded per row
+ * by this census alone. Whether the ledger should be checked per route beyond
+ * the mount is an open maintainer question, left open and tracked at #26513
+ * (the issue it was first filed under no longer resolves). A census stays
+ * correct whichever way that is ruled; whether it retires is #26431's call.
  */
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── well-known ────────────────────────────────────────────────────────────

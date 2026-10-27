@@ -57,6 +57,7 @@ import {
   CHANGESET_PROBE_PATH,
   CHANGE_KIND_GATES,
   bindChangeKindRows,
+  ciJobRunsRunner,
   bindMandatoryTierRows,
   bindSuspectTierRows,
   COMPOUND_ANCHOR_KEYS,
@@ -279,6 +280,8 @@ import {
   withoutAnchor,
   workflowEnvValues,
   zeroSegmentForms,
+  readByUiScriptsSuite,
+  UI_SCRIPTS_SUITE_ROOTS,
 } from './dispatch-gates.mjs';
 import {
   COMPOUND_ANCHOR_LEDGER,
@@ -1014,10 +1017,12 @@ export function selfTest({ tier = 'full' } = {}) {
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
     // The card named three; the third, `scripts/check-prerelease-pin-watch.mjs
-    // --verbose`, left with the objectui pin it watched (objectstack#25711).
+    // --verbose`, left with the objectui pin it watched (objectstack#25711), and
+    // `scripts/check-engine-split-ratio.mjs --days 90` left with the weekly
+    // workflow that ran it (objectstack#26445). Both stay as fixture rows above.
     t(
-      '⭐ …and the two the card called value-bearing that are really LITERAL render as runnable commands instead',
-      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set']
+      '⭐ …and the one the card called value-bearing that is really LITERAL renders as a runnable command instead',
+      ['scripts/check-required-contexts.mjs --verify-required-set']
         .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
     );
     t(
@@ -1607,7 +1612,8 @@ export function selfTest({ tier = 'full' } = {}) {
 
   // ── The step's `env:` is the OTHER carrier of a workflow value (#15761) ────
   //
-  // `partof-closing-keyword-guard.yml` passes the whole input through `env:`
+  // `pr-body-guards.yml` (the Part-of closing-keyword guard's step; formerly
+  // `partof-closing-keyword-guard.yml`) passes the whole input through `env:`
   // and leaves the argv bare, so the argv-shaped classifier scored
   // `node scripts/check-partof-closing-keyword.mjs` as a command a dev can
   // paste — one whose only possible outcome here is the gate's own exit 2
@@ -1643,7 +1649,7 @@ export function selfTest({ tier = 'full' } = {}) {
     '            NESTED: ${{ github.sha }}',
     '        run: node scripts/check-nested-env.mjs',
   ].join('\n');
-  const envInvs = extractCheckInvocations(envWf, 'partof-closing-keyword-guard.yml');
+  const envInvs = extractCheckInvocations(envWf, 'pr-body-guards.yml');
   const envOf = (name) => (envInvs.find((i) => i.script === name)?.envVariables ?? null);
   // (a) The specimen: the step's `env:` names ride the invocation, in order.
   t(
@@ -4831,6 +4837,76 @@ export function selfTest({ tier = 'full' } = {}) {
   t('an undiscoverable durability guard renders STALE for this entry',
     seamStale.filter((l) => l.includes(`⚠ ${DURABILITY_SEAM_GATE}: STALE`)).length === 1);
 
+  // ── The ui/scripts/__tests__ suite (#26318) ─────────────────────────────────
+  //
+  // The 178 files run only in CI's Test UI shards, so no family named them and a
+  // card under ui package source or skills/objectui learned of a red one CI round
+  // later. The entry stands in for that CI JOB (`ciJobRunsRunner`): pinned here
+  // are the predicate on all four roots and outside them, the rendering and the
+  // runnable union through the whole table, the `--ran` verdict without it, the
+  // STALE branch, and the binding against the live workflows.
+  const UI_SUITE = 'pnpm --dir ui exec vitest run scripts/';
+  const UI_SUITE_SPECIMENS = Object.freeze({
+    'ui/packages/**/src': 'ui/packages/sdui-parser/src/expression-carriage.ts',
+    'ui/apps/**': 'ui/apps/console/src/App.tsx',
+    'skills/objectui/**': 'skills/objectui/SKILL.md',
+    'ui/scripts/**': 'ui/scripts/check-skill-examples.mjs',
+  });
+  const UI_SUITE_CONTROLS = Object.freeze([
+    'packages/core/src/x.ts',
+    'ui/packages/core/package.json',
+    'skills/objectstack/SKILL.md',
+    'scripts/pm/dispatch-gates.mjs',
+  ]);
+  const uiEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === UI_SUITE));
+  t('exactly one entry in the table names the ui/scripts suite, bound to the Test UI job',
+    uiEntry.length === 1 && uiEntry[0].matches('ui/scripts/x.mjs') && uiEntry[0].gates[0].ciJob === 'Test UI' && UI_SUITE.startsWith(`${uiEntry[0].gates[0].ciRunner} `));
+  t('the roots are the card\'s four, in the trigger language', ['ui/packages/**/src/**', 'ui/apps/**', 'skills/objectui/**', 'ui/scripts/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
+  for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
+    t(`a path under ${root} is read by the ui/scripts suite (${specimen})`, readByUiScriptsSuite(specimen));
+  }
+  t('a dispatch surface given as a ui package\'s src DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts'));
+  for (const control of UI_SUITE_CONTROLS) {
+    t(`CONTROL: ${control} is outside the four roots`, !readByUiScriptsSuite(control));
+  }
+  // A resolver that resolves a family by its `pnpm` spelling and a CI-job gate by
+  // its own name — the shape `derive`'s resolver has.
+  const uiResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const throughTableUi = (p) => changeKindLines([p], uiResolved).some((l) => l.includes(`- ${UI_SUITE}   —`));
+  for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
+    t(`through the whole table, a diff under ${root} derives the suite, anchored on the delimiter`, throughTableUi(specimen));
+    t(`…and the runnable union carries it for ${specimen}`, commandsFor({ kindGroups: changeKindGates([specimen], uiResolved) }).includes(UI_SUITE));
+  }
+  for (const control of UI_SUITE_CONTROLS) {
+    t(`…and ${control} derives no suite line and no suite command`,
+      !throughTableUi(control) && !commandsFor({ kindGroups: changeKindGates([control], uiResolved) }).includes(UI_SUITE));
+  }
+  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['skills/objectui/**']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
+  t('the suite line states its build prerequisite, runnably', /seven @objectstack packages/.test(uiLine) && uiLine.includes('turbo run build') && uiLine.includes('--filter=@objectstack/sdui-parser...'));
+  t('…and says it is the whole suite, never a subset', /The whole suite, never a subset/.test(uiLine));
+  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['ui/apps/**']], uiResolved) });
+  const uiWithout = runReconciliation({
+    derived: uiDerived,
+    record: parseRunRecord(uiDerived.filter((c) => c !== UI_SUITE).map((c) => `${c} :: exit 0`).join('\n')),
+  });
+  t('⭐ a run record carrying every derived command BUT the suite is NOT ok, and names the suite unrun', !uiWithout.ok && uiWithout.unrun.some((u) => u.command === UI_SUITE));
+  const uiWith = runReconciliation({ derived: uiDerived, record: parseRunRecord(uiDerived.map((c) => `${c} :: exit 0`).join('\n')) });
+  t('CONTROL: the same record WITH the suite is ok', uiWith.ok);
+  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['ui/scripts/**']], () => null, uiEntry);
+  t('an unresolvable binding renders STALE, naming the job and the runner it lost',
+    uiStale.filter((l) => l.includes(`⚠ ${UI_SUITE}: STALE`) && l.includes("job named 'Test UI…'") && l.includes("'pnpm --dir ui exec vitest run'")).length === 1);
+  // The binding itself, against fixtures and then the LIVE workflows.
+  const uiJobFixture = (name, run) => [{ file: 'ci.yml', text: `on: pull_request\njobs:\n  test-ui:\n    name: ${name}\n    runs-on: ubuntu-latest\n    steps:\n      - name: Run\n        run: |\n          ${run}\n` }];
+  const uiBinding = uiEntry[0]?.gates[0] ?? {};
+  t('the binding resolves where the job runs the runner', ciJobRunsRunner(uiBinding, uiJobFixture('Test UI (${{ matrix.shard }}/16)', 'pnpm --dir ui exec vitest run --shard=1/16 "${filters[@]}"')));
+  t('…and not once the job is renamed', !ciJobRunsRunner(uiBinding, uiJobFixture('UI tests (${{ matrix.shard }}/16)', 'pnpm --dir ui exec vitest run --shard=1/16')));
+  t('…nor once the runner is respelled', !ciJobRunsRunner(uiBinding, uiJobFixture('Test UI (${{ matrix.shard }}/16)', 'pnpm --dir ui run test --shard=1/16')));
+  t('⭐ the binding resolves against the LIVE workflows — the census guard for a gate no family carries', ciJobRunsRunner(uiBinding, discoverFamilies().workflowEntries));
+  t('a half-declared CI-job binding REFUSES at load',
+    (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'x y', ciJob: 'Test UI', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
+  t('…and so does one whose name does not narrow its runner',
+    (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'pnpm vitest run', ciJob: 'Test UI', ciRunner: 'pnpm --dir ui exec vitest run', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -5867,7 +5943,9 @@ export function selfTest({ tier = 'full' } = {}) {
     }
   }
   t('the live workflows discover a farm at all (the guard is not vacuous)', liveFamilies.size > 20);
-  const declared = CHANGE_KIND_GATES.flatMap((k) => k.gates.map((g) => g.name));
+  // A CI-job-subset gate (#26318) is no family by construction; its census is
+  // the live-binding case under the ui/scripts entry, so it is left out here.
+  const declared = CHANGE_KIND_GATES.flatMap((k) => k.gates.filter((g) => !g.ciJob).map((g) => g.name));
   const missing = declared.filter((n) => !liveFamilies.has(n));
   t(`every convention gate named in the table is a live family (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
   // The two gates this card moved out of the closing prose, pinned individually
@@ -7474,7 +7552,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 131 -> 133 (#22998): the header gained two lines naming the full-battery-only jobs.
       // 133 -> 137 (#25867): the header gained four lines on the ui jobs' queue-diff outputs.
       'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:736 inherited-population',
+      // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
+      'scripts/pm/dispatch-gates.mjs:738 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
@@ -13683,7 +13762,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // a runnable command, and running it here exits 2 with the gate's own
   // "NOT WIRED" refusal.
   {
-    const envLive = runCli(['--commands', '.github/workflows/partof-closing-keyword-guard.yml']);
+    const envLive = runCli(['--commands', '.github/workflows/pr-body-guards.yml']);
     const envLiveOut = (envLive.stdout ?? '').split('\n');
     const envLiveErr = envLive.stderr ?? '';
     t(

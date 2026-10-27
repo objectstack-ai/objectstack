@@ -253,6 +253,22 @@ export interface ApprovalResumeSurface {
    */
   hasSuspendedRun?(runId: string): Promise<boolean>;
   /**
+   * [#26477] Why a suspension that DOES exist can never be resumed — its flow
+   * is no longer registered, or the node it parked on was edited away — as
+   * the cause the engine's resume would answer `RUN_NOT_FOUND` with; or
+   * `undefined` when it can continue (or when no suspension exists, which is
+   * {@link hasSuspendedRun}'s answer). The second half of the pre-flight in
+   * {@link ApprovalService.assertRunResumable}: a parked row outlives its
+   * flow, so {@link hasSuspendedRun} alone answered `true` for a run whose
+   * flow was deleted, and the decision was recorded before the resume failed.
+   *
+   * ⚠️ Declares a method `AutomationEngine` implements publicly
+   * (`unresumableSuspensionCause`). Read-only, and rejects when the store
+   * cannot be read, as {@link hasSuspendedRun} does. Optional: an engine
+   * without it gets the existence check alone.
+   */
+  unresumableSuspensionCause?(runId: string): Promise<string | undefined>;
+  /**
    * [#15389] Where each suspended run is currently parked. Read by
    * {@link ApprovalService.continueRestoredRun} to prove the pause it was asked
    * to continue is the one THIS request's recorded outcome was issued at, and
@@ -4613,9 +4629,19 @@ export class ApprovalService implements IApprovalService {
    * flipped to `approved`, a success toast, and a flow that never moves. Once
    * the decision row is written there is nothing left to fail cleanly.
    *
+   * Two questions, both the resume's own (#26477): does a suspension exist
+   * for the run at all, and can it be dispatched — is its flow still
+   * registered and the node it parked on still there? A parked row outlives
+   * its flow (a `DELETE /automation/:name`, an uninstall), so the first alone
+   * passed a run whose flow was deleted, and the decision was recorded before
+   * the resume failed with 500 `RESUME_FAILED`. Both answer the same 409
+   * `RESUME_TARGET_LOST`, with nothing written.
+   *
    * Deliberately permissive at the edges:
    *  - no automation attached, or an engine without `hasSuspendedRun` → no
    *    pre-flight at all (standalone approvals compositions are unaffected);
+   *    an engine without `unresumableSuspensionCause` gets the first question
+   *    alone;
    *  - the store cannot be READ → fail OPEN. A transient outage must not block
    *    every decision in the tenant; the post-resume check still catches a real
    *    failure and reports it loudly.
@@ -4625,8 +4651,12 @@ export class ApprovalService implements IApprovalService {
     if (typeof this.automation?.resume !== 'function') return;
     if (typeof this.automation?.hasSuspendedRun !== 'function') return;
     let alive: boolean;
+    let lostCause: string | undefined;
     try {
       alive = await this.automation.hasSuspendedRun(runId);
+      if (alive && typeof this.automation.unresumableSuspensionCause === 'function') {
+        lostCause = await this.automation.unresumableSuspensionCause(runId);
+      }
     } catch (err: any) {
       this.logger?.warn?.('[approvals] could not verify the flow run is resumable — proceeding', {
         request: requestId, run: runId, error: err?.message ?? String(err),
@@ -4637,6 +4667,13 @@ export class ApprovalService implements IApprovalService {
       throw new Error(
         `RESUME_TARGET_LOST: the flow run '${runId}' behind request ${requestId} no longer exists ` +
         `(it was cancelled, or it paused in a process that did not persist suspended runs). ` +
+        `Nothing was recorded. An administrator can recall the request to release the record.`,
+      );
+    }
+    if (lostCause !== undefined) {
+      throw new Error(
+        `RESUME_TARGET_LOST: the flow run '${runId}' behind request ${requestId} can never be resumed: ` +
+        `${lostCause} (the flow was deleted or edited while the run was paused). ` +
         `Nothing was recorded. An administrator can recall the request to release the record.`,
       );
     }

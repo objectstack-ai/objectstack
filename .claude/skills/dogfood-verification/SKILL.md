@@ -87,8 +87,8 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       进 `packages/console/dist/.objectui-sha`;当这个章与仓库的 `.objectui-sha` pin
       不一致时,`os dev` **拒绝挂载 `/_console`** 并打印补救 —— `/_console/` 404,横
       幅不再宣传 console URL。那是要修的前置条件,不是产品缺陷:跑
-      **`pnpm objectui:build`**(在*钉住的* SHA 上重建 —— `objectui:refresh` 会把
-      pin 重新 bump 到你本地 `../objectui` 的 HEAD)再重启。`pnpm check:console-sha`
+      **`pnpm console:build`**(在仓库根目录跑,从本仓 `ui/` 下的 Console 源码重建;
+      改 Console 就改 `ui/` 下的源码)再重启。`pnpm check:console-sha`
       不启动也能报同一比较。`OS_ALLOW_CONSOLE_DRIFT=1` 是故意启动陈旧 bundle —— 那之
       后你做的每个 console 观察,描述的都是一个仓库没有钉住的 commit。
 

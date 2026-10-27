@@ -1,0 +1,1427 @@
+name: Fleet Patrols
+
+# Four daily patrols, one file — ruling: batch #397 item 2 · letter A, the
+# maintainer's 「同意」, recorded on the decision card that measured the fleet's
+# scheduled workflows. Each job below is one retired workflow moved here whole:
+# its steps, its `permissions:` grant, its `concurrency:` group and its `env:`
+# are the retired file's, so the job's failure signal, its least-privilege
+# grant and its budget are still its own, and nothing is widened to the
+# workflow level.
+#
+#   job                            formerly                                  cron
+#   required-set-patrol            required-set-patrol.yml                   23 4,16 * * *
+#   platform-checklist-watchdog    platform-checklist-watchdog.yml           51 2 * * *
+#   release-coverage-patrol        release-coverage-patrol.yml               19 4 * * *
+#   board-snapshot                 board-snapshot.yml                        7 2,8,14,20 * * *
+#
+# ## One file, four clocks
+#
+# A `schedule` event carries the cron expression that fired it
+# (`github.event.schedule`), and every job's `if:` compares against its own, so
+# a scheduled run executes exactly one job and the other three read as skipped.
+# ⛔ A cron string under `schedule:` and the same string in its job's `if:` are
+# ONE fact spelled twice: change both in the same edit. A cron no `if:` names
+# fires a run that does nothing, and a job whose `if:` names a cron the
+# schedule does not declare never runs — neither shape is red anywhere.
+#
+# `workflow_dispatch` takes one input, `patrol`: `all` (the default) runs every
+# job, a job id runs that one alone — the manual fire and the smoke test each
+# retired workflow offered, without spending the board-snapshot's request budget
+# to smoke-test the watchdog.
+#
+# ## The `pull_request` trigger, and what it is allowed to do
+#
+# Every patrol in this tree exercises itself on the pull requests that change it
+# (`scripts/pm/dispatch-gates.mjs` pins tree-wide that no discovered gate family
+# is reachable only through a schedule), so this file's `pull_request:` trigger
+# is `paths`-filtered to the UNION of what the four retired files declared: this
+# file, plus each job's own inputs. A matching pull request runs all four jobs.
+# A `pull_request` run proves transport, invocation and rendering on a real
+# runner and WRITES NOTHING — no job files, refreshes or archives anything on a
+# pull_request event: every board write below carries that guard in its own
+# `if:`, and `scripts/check-platform-checklist-watchdog.mjs` refuses one that
+# does not. That pin also freezes this path list: widen it by one entry and the
+# pin goes red, so the checklist gate cannot drift onto the per-PR path by
+# accident. The standing decision that keeps `check:platform-checklist` out of
+# per-PR CI — "an unrelated PR is never blocked by checklist drift" — holds in
+# substance: no job here publishes a required context, and the watchdog job
+# never reds on drift.
+#
+# ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:`, ever — refused outright
+# by the same pin; `scripts/check-required-contexts.mjs` asserts from its side
+# that this file declares no `merge_group:` (a workflow without one deadlocks
+# the queue if it is ever required-ized) and that no REQUIRED_CONTEXTS row
+# names it.
+#
+# ## Where the retired files' history went
+#
+# GitHub keeps the runs of a deleted workflow file: the Actions sidebar lists
+# each retired workflow by name while runs of it exist, and the workflow runs
+# API still answers for the retired file (its workflow reads `state: deleted`).
+# New history lands under "Fleet Patrols", one job per patrol — open a run and
+# read its job list, or filter the run list by job name, to follow one patrol.
+
+on:
+  schedule:
+    # ── `required-set-patrol` ─────────────────────────────────────────────────────────
+    # Twice a day, twelve hours apart, at :23 past the hour.
+    #
+    # The live required set is changed by hand, by the maintainer, a few times a
+    # month at most — detection latency of half a day is already two orders of
+    # magnitude better than the status quo (never), and the #5617 incident it
+    # guards against sat undetected for days. The minute is offset off the top
+    # of the hour on purpose: scheduled workflows queue behind everyone else's
+    # :00 cron, and this sweep shares the core API quota with the loop's hot
+    # path.
+    - cron: '23 4,16 * * *'
+    # ── `platform-checklist-watchdog` ─────────────────────────────────────────────────────────
+    # Daily. The gate is a ~1s offline read, so cadence is bounded by how long a
+    # red may sit unseen, not by cost; a day is the same order the sibling
+    # patrols settled on and is two orders better than the status quo (never).
+    #
+    # The minute is offset off the top of the hour ON PURPOSE — scheduled
+    # workflows queue behind everyone else's `:00` cron — and off the three
+    # sibling patrols' minutes, so two patrols never contend for the same runner
+    # minute.
+    #
+    # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
+    # the `env:` block below, where the report step computes the deadline the
+    # card's own `Swept` line is judged against (#17720). Change the cron and
+    # change that env in the same edit, or the card publishes a deadline nobody
+    # schedules.
+    - cron: '51 2 * * *'
+    # ── `release-coverage-patrol` ─────────────────────────────────────────────────────────
+    # Nightly. #10268's acceptance criterion is "visible within a day of a minor
+    # publishing", so the cadence is a day, not a week. Offset from
+    # half-state-patrol.yml's `37 1,7,13,19` so two patrols never contend for the
+    # same runner minute.
+    #
+    # ⚠️ Two readers, one fact. This value is also handed to the renderer as
+    # `PATROL_SCHEDULE` (the "Render the report" step below) so the anchor body
+    # can state the deadline its own heartbeat line is judged against (#17720).
+    # Change the cron and change that env in the same edit, or the anchor
+    # publishes a deadline nobody schedules.
+    - cron: '19 4 * * *'
+    # ── `board-snapshot` ─────────────────────────────────────────────────────────
+    # Four times a day, six hours apart, at :07 past the hour. The HOURS are
+    # chosen against the other standing spenders listed above, not for tidiness.
+    #
+    # This job first shipped at `37 1,7,13,19` — the half-state patrol's cron to
+    # the minute. Both are scheduled board readers, both authenticate as this
+    # repository's `GITHUB_TOKEN`, and that budget is per repository per hour, so
+    # a snapshot run spending its full 800 leaves the patrol the remainder of the
+    # same window. Measured on the day this moved: the 13:37Z patrol run and the
+    # 13:41Z snapshot run were BOTH green, so nothing had been starved yet — the
+    # offset is PREVENTION, taken while the archive was still small enough that
+    # no run had yet spent its whole cap against the patrol's window.
+    #
+    # Of the five hour sets that share no hour with the patrol's 1,7,13,19, this
+    # is the least contended on this repository's cron inventory: 08, 14 and 20
+    # UTC carry no other scheduled workflow at all, and 02 UTC carries only the
+    # platform-checklist watchdog at :51 — 44 minutes after this run starts —
+    # plus CodeQL on Mondays. `4,10,16,22` was the obvious alternative and is
+    # worse on the same measurement: it drops an 800-request run into the busiest
+    # scheduled hour on this board (04:19 release-coverage patrol, 04:23
+    # required-set patrol, 04:37 branch reaper on Mondays, 04:41 create-smoke)
+    # and shares hour 16 with the required-set patrol.
+    #
+    # The minute is off the top of the hour on purpose, as in every patrol here:
+    # scheduled workflows queue behind everyone else's :00 cron.
+    #
+    # Six-hourly is the loss window this accepts: a card created and destroyed
+    # inside one interval was never archived, and nothing cheaper than a webhook
+    # closes that, which is a different card.
+    - cron: '7 2,8,14,20 * * *'
+  # The manual fire, and the smoke test. One input: `all` runs every job, a job
+  # id runs that one alone (each job's `if:` reads it).
+  workflow_dispatch:
+    inputs:
+      patrol:
+        description: 'Which patrol to run by hand: all, or one job id'
+        type: choice
+        default: all
+        options:
+          - all
+          - required-set-patrol
+          - platform-checklist-watchdog
+          - release-coverage-patrol
+          - board-snapshot
+  # Changes to a patrol, or to the sweep it calls, get exercised before they
+  # merge: the transport, the flags, the exit-code split and the rendering are
+  # proven on a real runner rather than argued about. No job publishes a
+  # required context, so a red here blocks nothing — and a pull_request run
+  # never writes the board or the archive (see the header).
+  #
+  # ⛔ Do NOT widen this list by hand. It is the union of the four retired
+  # files' own filters, frozen as a SET in
+  # `scripts/check-platform-checklist-watchdog.mjs`: a new entry is a reviewed
+  # edit to that pin in the same PR, never a quiet addition here.
+  pull_request:
+    paths:
+      - '.github/workflows/fleet-patrols.yml'
+      # `required-set-patrol`
+      - 'scripts/check-required-contexts.mjs'
+      # `release-coverage-patrol`
+      - 'scripts/check-release-section-coverage.mjs'
+      # `board-snapshot` — every file the run actually loads: the archiver, the
+      # module it imports its proxy plan and repo resolver from, and the
+      # entry-guard helper both import. An undeclared dependency is one a change
+      # can break without this trigger firing.
+      - 'scripts/pm/board-snapshot.mjs'
+      - 'scripts/pm/check-half-states.mjs'
+      - 'scripts/invoked-as.mjs'
+      # `platform-checklist-watchdog` names no path beyond this file: its gate
+      # runs through `pnpm check:platform-checklist`, which stays OFF the per-PR
+      # path by a standing maintainer decision.
+
+jobs:
+
+  # ══ `required-set-patrol` — formerly `.github/workflows/required-set-patrol.yml` ══
+  #
+  # The standing caller for
+  # `node scripts/check-required-contexts.mjs --verify-required-set` (#9678).
+  #
+  # ## Why a workflow, and not "a seat should run it"
+  #
+  # `--verify-required-set` (#9642) diffs this repo's REQUIRED_CONTEXTS registry
+  # against the LIVE ruleset's required set, in both directions:
+  #
+  #   A. a registry row whose context is absent from the live set — the gate
+  #      family that row names is advisory RIGHT NOW, with no signal anywhere.
+  #      #5617 verbatim: PR #5584 merged with its gate-carrying job red for 19
+  #      minutes because that job was not in the required set at all.
+  #   B. a live required context with no registry row — renaming that job detaches
+  #      its gate silently, which is the defect check-required-contexts exists for.
+  #
+  # It shipped with no standing caller, so the only thing CI ran was its OFFLINE
+  # self-test: the mechanism existed and measured nothing. A sweep whose value is
+  # realized only when something runs it on a schedule, with nothing on a
+  # schedule, is the `check-half-states.mjs` shape verbatim — an alarm added to a
+  # script nobody runs is still silence, and half-state-patrol.yml exists because
+  # that cost a shift's worth of unnoticed findings.
+  #
+  # "Some seat should run it" also keeps not happening for a MEASURED reason
+  # rather than a discipline one. Re-measured 2026-08-19 from a dev session
+  # container, both spellings the script documents:
+  #
+  #   node scripts/check-required-contexts.mjs --verify-required-set
+  #       -> NOT VERIFIED, GET /repos/... answered HTTP 401  (exit 2)
+  #   NODE_OPTIONS=--use-env-proxy node ... --verify-required-set
+  #       -> NOT VERIFIED, GET /repos/... answered HTTP 403  (exit 2)
+  #
+  # i.e. the documented proxy remedy is not enough: the seat's egress policy
+  # refuses api.github.com outright. The seats that would notice drift are exactly
+  # the ones that cannot measure it, so the caller had to move somewhere the
+  # transport prerequisite is actually met. A GitHub Actions runner reaches the
+  # API directly with the workflow's own GITHUB_TOKEN — no proxy env, no
+  # `--use-env-proxy`; the read's whole price is `metadata=read`, which every
+  # token carries and none can give up.
+  #
+  # ## Where the report lands, and why nowhere else
+  #
+  # The run log and the run's STEP SUMMARY, and nothing else. Deliberately not an
+  # issue:
+  #
+  #   - a NEW tracker is refused outright — this repo has one board, and a per-run
+  #     comment stream or a fresh anchor is a second one that nobody prunes;
+  #   - the EXISTING anchor (#9857) is owned end-to-end by half-state-patrol.yml,
+  #     whose generator rewrites that body whole every run. A second writer would
+  #     make each patrol silently discard the other's findings.
+  #
+  # What that costs is honestly stated: a completed sweep that FINDS drift exits 0
+  # and shows a green check in the Actions list, so the drift is one click deep.
+  # The `::warning::` annotation below is what keeps it from being invisible —
+  # annotations render on the run list itself. Routing findings to a durable
+  # surface (the PM round report, a rotating anchor) is a governed-surface change
+  # and is not this workflow's to make.
+  #
+  # ## Report-only, and the one thing that is NOT report-only
+  #
+  # ⛔ This workflow is NEVER a required context and must never become one.
+  # That is structural, not squeamish: the settings half of any required-set
+  # change is maintainer-only and lands AFTER the merge (the #9325 two-step), so a
+  # blocking version would be red on precisely the PR carrying the repo half and
+  # could not go green before merging — it would deadlock the sitting it claims to
+  # protect. The script's own header argues this at length, and
+  # check-required-contexts' self-test pins it from this side too: it asserts that
+  # this is the ONLY workflow running the flag, that this file declares no
+  # `merge_group:` trigger (a workflow without one deadlocks the queue the moment
+  # it is required-ized — assertion 6 of the pin), and that no REQUIRED_CONTEXTS
+  # row names this file.
+  #
+  # So FINDINGS never fail anything: a completed sweep exits 0 whether it found 0
+  # or 40 disagreements, and this job never writes a label, an issue or a state.
+  #
+  # The job DOES fail when the sweep could not RUN, or when its report could not
+  # be DELIVERED. That is not a gate on the repo; it is the patrol reporting its
+  # own death. `NOT VERIFIED` is not a pass and not a failure of the tree (#4690):
+  # exit 2 classifies the ENVIRONMENT, and a patrol that quietly stops reading
+  # would leave a run history of green checks that reads exactly like a clean
+  # required set. Failing costs nobody a PR — this workflow gates no branch and
+  # blocks no queue.
+  required-set-patrol:
+    # ⛔ This name is NOT a required context and must never be added to the
+    # ruleset — see the header. It is deliberately not registered in
+    # REQUIRED_CONTEXTS, and check-required-contexts' self-test asserts so.
+    name: Live required-set sweep
+    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # each job runs only on its own cron; `workflow_dispatch` runs the one the input
+    # names (default: all four); a `pull_request` run exercises every job.
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '23 4,16 * * *')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'required-set-patrol')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Least privilege. The sweep is read-only against the API by construction and
+    # this job writes no issue, no label and no comment, so `contents: read` is the
+    # whole grant — the ruleset read's documented price is `metadata=read`, which is
+    # below anything a workflow can toggle.
+    permissions:
+      contents: read
+    # One patrol at a time; a scheduled run overlapping a manual dispatch would burn
+    # two readings of the same set for one report.
+    concurrency:
+      group: required-set-patrol-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # No `pnpm install`: the live mode imports nothing outside node: builtins
+      # and global fetch. Installing the workspace would buy nothing and would
+      # give a scheduled patrol a lockfile it could fail on.
+      #
+      # No NODE_OPTIONS=--use-env-proxy either, and that is not an omission: a
+      # runner reaches api.github.com directly. The flag exists for agent
+      # session containers, where it is necessary but (measured, #9678) still
+      # not sufficient — that is why this caller lives here and not there.
+      - name: Run the live required-set sweep
+        id: sweep
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/check-required-contexts.mjs --verify-required-set \
+            > "$RUNNER_TEMP/required-set.md" 2> "$RUNNER_TEMP/required-set.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` would report the
+          # PIPE's status — `tail` essentially never fails, so a swept run and
+          # an unreadable one both read as 0, and the exit split (0 swept / 2
+          # environment) is the entire classification this patrol delivers.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "check-required-contexts --verify-required-set exited $code"
+          cat "$RUNNER_TEMP/required-set.err" >&2 || true
+
+      - name: Publish the sweep to the run summary
+        # Always: this IS the delivery, on every trigger. A run whose summary is
+        # empty because an earlier step died is itself the signal.
+        if: always()
+        run: |
+          {
+            echo "### Required-set patrol — sweep exit ${{ steps.sweep.outputs.exit_code }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/required-set.md" 2>/dev/null || echo '(no report produced)'
+            cat "$RUNNER_TEMP/required-set.err" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate a completed sweep that found drift
+        # A finding is NOT a failure (see the header) — but a green check that
+        # hides one is the #4690 shape with a tick on it, so a completed sweep
+        # that did not render its clean mark gets an annotation on the run list.
+        #
+        # The marker is the script's own `✅ the live required set and this
+        # registry agree in both directions.` line, and its ABSENCE is what is
+        # read: every non-agreeing reading the script can produce (direction A,
+        # direction B, a dry-run ruleset, no enforcing ruleset at all) withholds
+        # that line, and check-required-contexts' self-test pins both directions
+        # of that rendering — including this workflow's dependence on it by
+        # name. Erring this way is deliberate: a rendering change costs a FALSE
+        # ALARM, never a false all-clear.
+        if: steps.sweep.outputs.exit_code == '0'
+        run: |
+          if grep -qF '✅' "$RUNNER_TEMP/required-set.md"; then
+            echo "::notice::required-set sweep: the live required set and REQUIRED_CONTEXTS agree in both directions."
+          else
+            echo "::warning::required-set sweep found a registry-vs-live DISAGREEMENT. Nothing is blocked and nothing is judged — read this run's summary. Direction A (a registry row that is not live) is the maintainer's to resolve; direction B (a live context with no row) is a dev's."
+          fi
+
+      - name: Fail the run if the sweep could not run
+        # LAST, on purpose: the summary carries the classified output BEFORE the
+        # job goes red, so the run that raised the alarm also holds the reason.
+        #
+        # Findings are NOT a failure condition and never reach here: exit 0 with
+        # 40 disagreements is a successful patrol.
+        if: steps.sweep.outputs.exit_code != '0'
+        run: |
+          echo "::error::check-required-contexts --verify-required-set exited ${{ steps.sweep.outputs.exit_code }} — the standing patrol did not read the live required set. NOT VERIFIED is not a clean reading (#4690); see this run's summary."
+          exit 1
+
+  # ══ `platform-checklist-watchdog` — formerly `.github/workflows/platform-checklist-watchdog.yml` ══
+  #
+  # The standing caller for `pnpm check:platform-checklist` (#11730).
+  #
+  # ## What this changes, and the one thing it deliberately does NOT
+  #
+  # The gate stays OUT of per-PR CI. That is a recorded maintainer decision, kept
+  # verbatim in the `lint.yml` NOTE beside the checklist gates and in
+  # `docs/qa/platform-checklist/README.md` under "Operating cadence": the
+  # checklist is a QA ledger, not a code gate, so an unrelated PR is never blocked
+  # by checklist drift. ⛔ This workflow does not touch that. Only the REPORTING
+  # CHANNEL changes — which is the whole of what was ruled.
+  #
+  # So this job's triggers are this file's: `schedule:` (its own cron, read by
+  # its `if:`), `workflow_dispatch:`, and a `pull_request:` trigger
+  # `paths`-filtered to THIS FILE AND THE SIBLING JOBS' OWN INPUTS, nothing
+  # else — the list is frozen as a set in
+  # `scripts/check-platform-checklist-watchdog.mjs` — the posture
+  # `half-state-patrol.yml` and every job in this file keep, so a change to the
+  # patrol is exercised before it merges. ⛔ NO `merge_group:` and ⛔ NO
+  # `pull_request_target:`, ever.
+  #
+  # The filter is what makes that trigger compatible with the standing decision
+  # rather than a back door through it. The decision's own words, in
+  # `.github/workflows/lint.yml`: "keeping it out of the per-PR path means an
+  # unrelated PR is never blocked by checklist drift." A trigger that fires only
+  # on a pull request editing this workflow or a sibling patrol's own script
+  # blocks no unrelated pull request at all — this job publishes no required
+  # context and never reds on checklist drift — so it preserves the decision's
+  # purpose while changing its letter, which is exactly what the maintainer
+  # ruled on 2026-09-06.
+  #
+  # ⛔ A `pull_request` run NEVER writes to the board. It runs the gate, publishes
+  # the output to the run summary, and stops there.
+  #
+  # ## Why a workflow, and not "a seat should run it"
+  #
+  # Measured, twice, not supposed. The gate went RED on `main` (a coverage.json /
+  # manifest UNCLASSIFIED reading) and NO lane turned red, because there was no
+  # channel: the red was found by a dev who happened to run the gate. Two further
+  # checklist cards had their devs run the gate on their own initiative and record
+  # the verdict honestly. Three for three is good discipline and says nothing at
+  # all about the mechanism — the gate's correctness was resting on somebody
+  # remembering, which is the shape a gate exists to replace. An alarm added to a
+  # script nobody runs is still silence.
+  #
+  # ## What lands where — and why this one is NOT a pinned anchor
+  #
+  # The other three patrols own ONE pinned anchor issue and rewrite its body every
+  # run, heartbeat included. This one files or refreshes an issue only when the
+  # gate is RED, and does nothing whatsoever on green. That is the ruled
+  # behaviour, and the difference is a real trade, stated plainly in both
+  # directions:
+  #
+  #   * Their heartbeat is what tells a reader the patrol is still alive — a
+  #     `Swept` timestamp that stops advancing past the cadence the same line
+  #     states is how a dead caller is noticed (#17720: the cadence is rendered
+  #     because 「stalled」 is undecidable without it, and the four patrols here
+  #     differ by 4×). ON GREEN this workflow has no such tell at all, because it
+  #     has no card, so a silent death on a green tree reads exactly like a clean
+  #     checklist. What stands in for it: this job goes RED (and the Actions run
+  #     list shows it) whenever the gate could not run or the report could not be
+  #     delivered, and the run history itself is the record. A card that DOES
+  #     stand carries the heartbeat and its deadline like the other three — with
+  #     the one ambiguity this workflow's shape implies, stated in the card
+  #     itself: a stalled `Swept` there means the caller died OR the gate went
+  #     green, and nothing closes the card either way.
+  #   * In exchange, a green tree has no standing issue to prune, and the card the
+  #     devx seat grades is minted only when there is something to grade.
+  #
+  # ⛔ On green this job files nothing, edits nothing and CLOSES nothing — an open
+  # watchdog issue that has gone green is a triage judgement for the devx seat
+  # (which owns the filed cards), not a state for an unattended run to clear.
+  #
+  # ## De-duplication — read off `merge-queue-triage.yml`, whose lesson is negative
+  #
+  # The anchor lookup keys on an IDENTITY LABEL that is never graded off, plus a
+  # stable body marker, plus the exact title as a third way in. Each of those three
+  # is there because one of the others fails on its own:
+  #
+  #   * ⛔ NOT `pm:queue` and ⛔ NOT `tooling`. Those are TRIAGE-STATE labels:
+  #     first-touch grading takes `pm:queue` off by definition, and a lookup keyed
+  #     on it stops seeing the anchor the moment somebody triages it — turning
+  #     every further red into a fresh duplicate. `merge-queue-triage.yml` paid
+  #     for that reading already and its header records it; this file inherits the
+  #     fix rather than re-deriving it.
+  #   * The TITLE is stable across refreshes — it names no failing item, no count
+  #     and no date. A title carrying the first failing item would change with the
+  #     failure and make the anchor unfindable by title the moment the checklist
+  #     drifted somewhere else.
+  #   * The BODY MARKER is plain text, ⛔ never an HTML comment: this platform's
+  #     body sanitizer is measured to eat short angle-bracket fragments, and a
+  #     de-dup key that can be silently swallowed is a de-dup key that files a
+  #     duplicate a day. `half-state-patrol.yml`'s generated body uses the same
+  #     plain-text marker idiom for the same reason.
+  #
+  # A CLOSED anchor is evidence too, and is not reopened: the gate going red again
+  # after the card was answered is a REGRESSION, so a new issue is filed and it
+  # names the one it regressed from. Reopening would bury that distinction.
+  platform-checklist-watchdog:
+    # ⛔ This job is NOT a required context and must never become one. It runs on
+    # no pull request at all, so a ruleset naming it would block every PR
+    # forever on a check that cannot report.
+    name: Platform checklist gate sweep
+    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # each job runs only on its own cron; `workflow_dispatch` runs the one the input
+    # names (default: all four); a `pull_request` run exercises every job.
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '51 2 * * *')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'platform-checklist-watchdog')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Least privilege. The gate is read-only against the filesystem by construction
+    # (no socket, no token), and this job writes issues and nothing else — no label
+    # on anybody's PR, no state, no comment stream.
+    permissions:
+      contents: read
+      issues: write
+    # One watchdog at a time. A scheduled run overlapping a manual dispatch would
+    # have two runs racing to file the same anchor, and the loser would mint a
+    # duplicate.
+    concurrency:
+      group: platform-checklist-watchdog
+      cancel-in-progress: false
+    env:
+      # The anchor's IDENTITY — all three ways in, single-sourced here so the
+      # workflow and its static pin read the same strings.
+      #
+      # ⛔ The identity label is the machine's and is never graded off. It is NOT a
+      # triage-state label; see the header.
+      ANCHOR_IDENTITY_LABEL: platform-checklist-watchdog
+      ANCHOR_TITLE: 'check:platform-checklist is red on main'
+      ANCHOR_MARKER: os-platform-checklist-watchdog
+      # Applied on CREATE only, beside the identity label: the ruled routing for the
+      # cards this watchdog mints. Never rewritten on a refresh — grading is the
+      # devx seat's and a refresh must not undo it.
+      ANCHOR_ROUTING_LABELS: 'pm:queue,tooling'
+      # This workflow's own `cron:`, restated here so the report step can state the
+      # cadence that makes the card's `Swept` line decidable (#17720). The three
+      # sibling patrol anchors carry the same heartbeat reading and one of them
+      # fires every six hours, so a reader who carries a cadence over from a
+      # neighbour is wrong by 4× — which is why each anchor states its own rather
+      # than leaving the reader to go and read a workflow file.
+      #
+      # ⛔ A literal, not a parse of this file: the report body is inline
+      # `github-script` that no test reaches, so the cheapest honest route is the
+      # one with the least inline logic. The cost is the restatement above, and the
+      # comment at the `cron:` is what pays it.
+      PATROL_SCHEDULE: '51 2 * * *'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # `pnpm` itself is the requirement, NOT the workspace. The gate is invoked
+      # through its PACKAGE SCRIPT (`pnpm check:platform-checklist`), which is a
+      # pinned property of this file — an inlined `node scripts/...` copy would
+      # drift from the script the maintainer's cadence documentation names, and
+      # would silently drop the `checklist-select --self-test` leg the alias runs
+      # first.
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          install: 'false'
+
+      # No `pnpm install`. Both halves of the alias import `node:` builtins and
+      # repo-local modules only — no npm dependency — so installing the
+      # workspace would buy nothing and would give an unattended daily run a
+      # lockfile it could fail on.
+      - name: Run the platform checklist gate
+        id: gate
+        run: |
+          set +e
+          pnpm check:platform-checklist \
+            > "$RUNNER_TEMP/gate.out" 2> "$RUNNER_TEMP/gate.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` reports the PIPE's
+          # status — `tail` essentially never fails — so a red gate and a green
+          # one would both read as 0, and this exit code is the entire input to
+          # the decision below.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "pnpm check:platform-checklist exited $code"
+
+      - name: Publish the gate output to the run summary
+        # Always: on a green run this IS the whole product, and on a red one it
+        # makes the run log self-contained for whoever opens it from the issue.
+        if: always()
+        run: |
+          {
+            echo "### Platform-checklist watchdog — gate exit ${{ steps.gate.outputs.exit_code }}"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "_Board write skipped: a pull_request run proves the sweep without filing or refreshing anything._"
+              echo
+            fi
+            echo '```'
+            cat "$RUNNER_TEMP/gate.out" 2>/dev/null || echo '(no stdout captured)'
+            cat "$RUNNER_TEMP/gate.err" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File or refresh the watchdog issue
+        # RED only. On green this step does not run, and nothing else in this
+        # job writes anything — that is the ruled behaviour.
+        #
+        # ⛔ And NEVER on a `pull_request` run, whatever the gate said. A pull
+        # request proves the transport, the invocation and the rendering on a
+        # real runner; it must not touch the board. That is the posture every
+        # patrol in this repo keeps, and
+        # `scripts/check-platform-checklist-watchdog.mjs` refuses a board write
+        # whose `if:` lacks this guard.
+        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        env:
+          GATE_EXIT: ${{ steps.gate.outputs.exit_code }}
+        with:
+          # Delivery is retried, never assumed: this write is the entire product
+          # of a red run, and a transient answer from the issues endpoint would
+          # otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const marker = process.env.ANCHOR_MARKER;
+            const title = process.env.ANCHOR_TITLE;
+            const identityLabel = process.env.ANCHOR_IDENTITY_LABEL;
+            const routingLabels = process.env.ANCHOR_ROUTING_LABELS
+              .split(',').map((s) => s.trim()).filter(Boolean);
+            const gateExit = process.env.GATE_EXIT;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+
+            // The gate's OWN output, verbatim, both streams — the ruling asks
+            // for the gate's output and this workflow does not re-word it.
+            const output = [read('gate.out'), read('gate.err')]
+              .filter((s) => s.trim()).join('\n').trimEnd();
+            if (!output.trim()) {
+              // A red gate that printed nothing is not a finding anybody can
+              // act on, and filing it would mint an empty card that reads like
+              // a judged one. Fail instead: the last step turns the run red.
+              throw new Error(`the gate exited ${gateExit} but produced no output on either stream — refusing to file an empty card`);
+            }
+
+            // ── Anchor lookup ────────────────────────────────────────────────
+            // Three ways in, none of them sufficient alone; see this file's
+            // header. `pull_request` excludes PRs, which the issues endpoint
+            // returns alongside issues.
+            const isThisAnchor = (i) => !i.pull_request
+              && (String(i.body ?? '').includes(marker) || i.title === title);
+            const MAX_PAGES = 3;
+            const candidates = [];
+            let scanComplete = true;
+            for (let page = 1; page <= MAX_PAGES; page += 1) {
+              const res = await github.rest.issues.listForRepo({
+                owner, repo, state: 'all', labels: identityLabel,
+                sort: 'created', direction: 'desc', per_page: 100, page,
+              });
+              candidates.push(...res.data.filter(isThisAnchor));
+              if (res.data.length < 100) break;
+              if (page === MAX_PAGES) scanComplete = false;
+            }
+            if (!scanComplete) {
+              // A truncated scan cannot establish ABSENCE, and filing on an
+              // unestablished absence is how a watchdog mints a duplicate a
+              // day. Refusing is the safe direction: the finding is still in
+              // this run's summary and the next run retries.
+              throw new Error(`the anchor scan hit its ${MAX_PAGES}-page bound without completing — absence is NOT established, so nothing was filed. The gate output is in this run's summary.`);
+            }
+
+            // Resolution order: an OPEN anchor wins, and the OLDEST open one
+            // wins among those — that is the issue any duplicates were closed
+            // against.
+            const open = candidates.filter((i) => i.state !== 'closed')
+              .sort((a, b) => a.number - b.number);
+            const closed = candidates.filter((i) => i.state === 'closed')
+              .sort((a, b) => b.number - a.number);
+            const existing = open[0] ?? null;
+            // A closed anchor that was not closed as a duplicate is an ANSWERED
+            // one: the gate is red again, which is a regression rather than a
+            // continuation, and the new card has to say which issue it
+            // regressed from or the previous answer is lost.
+            const priorAnchor = !existing
+              ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null)
+              : null;
+
+            // The cadence that makes the `Swept` line below decidable (#17720).
+            // `PATROL_SCHEDULE` is this workflow's own `cron:`, restated in the
+            // `env:` block beside the other single-sourced card strings.
+            // ⛔ Only the daily `M H * * *` form is computed; anything else says
+            // so in the body rather than publishing a deadline derived from a
+            // schedule this did not read.
+            const sweptAt = new Date();
+            const schedule = String(process.env.PATROL_SCHEDULE ?? '').trim();
+            const cronFields = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule);
+            let expectation = `⚠️ expected cadence UNSTATED — PATROL_SCHEDULE is \`${schedule}\`, which is not the daily \`M H * * *\` form this step computes a deadline from`;
+            if (cronFields && Number(cronFields[1]) <= 59 && Number(cronFields[2]) <= 23) {
+              const next = new Date(sweptAt);
+              next.setUTCHours(Number(cronFields[2]), Number(cronFields[1]), 0, 0);
+              if (next <= sweptAt) next.setUTCDate(next.getUTCDate() + 1);
+              expectation = `expected every 24h while this card stands (cron \`${schedule}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
+            }
+
+            const body = [
+              `${marker} — machine-findable marker for this generated view. ⛔ Do not delete this line: it is how the watchdog finds this card instead of filing a new one every day.`,
+              '',
+              `# \`check:platform-checklist\` is RED on \`main\``,
+              '',
+              `_Swept ${sweptAt.toISOString()} · ${expectation} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · gate exit ${gateExit}._`,
+              '',
+              'The `Swept` line above is this watchdog\'s heartbeat, and it states the cadence that makes',
+              '「stalled」 decidable: while the gate stays red this card is refreshed on that schedule, so a',
+              'timestamp still sitting there past the `next by` deadline means either the standing caller',
+              'died or the gate went green — this watchdog files nothing and closes nothing on green, so',
+              'both readings end at this card. ⛔ Do not carry a cadence over from a sibling patrol anchor:',
+              'they differ by up to 4× and each states its own.',
+              '',
+              'The platform test checklist gate is red. It is **not** wired into per-PR CI (a standing',
+              'maintainer decision — the checklist is a QA ledger, not a code gate), so this card is the',
+              'channel that sees the red. Nothing is blocked by it.',
+              '',
+              '⛔ The remedy is **never** to edit the checklist data to make the gate green. Read the',
+              'output below, fix what it names, and re-run `pnpm check:platform-checklist` locally.',
+              '',
+              ...(priorAnchor
+                ? [
+                  `⚠️ The previous watchdog card #${priorAnchor.number} was closed on its own merits (not as a`,
+                  'duplicate) and the gate is red again ⇒ this is a **regression**; the earlier conclusion is',
+                  'in that issue.',
+                  '',
+                ]
+                : []),
+              "The gate's own output, verbatim:",
+              '',
+              '```',
+              output,
+              '```',
+            ].join('\n');
+
+            if (existing) {
+              // Rewritten in place, never a comment per run: a per-run comment
+              // stream is a second tracker nobody prunes, and this platform's
+              // edit history is already the archive. ⛔ Labels are NOT rewritten
+              // — grading is the devx seat's and a refresh must not undo it.
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body,
+              });
+              core.info(`refreshed watchdog anchor #${existing.number} (${body.length} chars, gate exit ${gateExit})`);
+              core.notice(`check:platform-checklist is red on main — watchdog card #${existing.number} refreshed.`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner, repo, title, body,
+              // Additive on create; ⛔ nothing here ever replaces a whole label
+              // set (`check:whole-set-label-write` refuses that verb outright).
+              labels: [identityLabel, ...routingLabels],
+            });
+            core.info(`filed watchdog anchor #${created.data.number} (${body.length} chars, gate exit ${gateExit})`);
+            core.notice(`check:platform-checklist is red on main — watchdog card #${created.data.number} filed.`);
+
+      - name: Fail the run if the sweep left no reading
+        # LAST, on purpose: on a red gate the card is filed or refreshed BEFORE
+        # this runs, so the run that raises an alarm has already landed the
+        # truth.
+        #
+        # ⛔ A RED GATE is not a failure condition and never reaches here — a
+        # red gate is a SUCCESSFUL patrol, and a job that went red every day the
+        # checklist was red would teach everyone to skim it, which is the
+        # failure this whole card is about. Delivery failure needs no step
+        # either: the github-script above throws, and a throw fails that step.
+        #
+        # What is left is the one reading that must never look green: a sweep
+        # step that finished without recording an exit code at all. Nothing
+        # downstream could tell that apart from `exit_code=0`, and "the gate was
+        # not read" must never render as "the checklist is clean".
+        if: always() && steps.gate.outputs.exit_code == ''
+        run: |
+          echo "the gate step recorded no exit code, so this run is NOT a reading about the checklist -- it is neither a clean one nor a red one. See this run's summary."
+          exit 1
+
+  # ══ `release-coverage-patrol` — formerly `.github/workflows/release-coverage-patrol.yml` ══
+  #
+  # The standing caller for `scripts/check-release-section-coverage.mjs` (#10803).
+  #
+  # ## Why a workflow, when the gate ALREADY runs on every PR
+  #
+  # Unlike `half-state-patrol.yml` and `required-set-patrol.yml`, this check does
+  # not need a runner for TRANSPORT reasons. It is fully offline — it reads
+  # `packages/spec/CHANGELOG.md` and `content/docs/releases/**` straight out of the
+  # tree, opens no socket, and runs inside `lint.yml` on every pull request today.
+  # Measured, not assumed: a network-shaped scan of the script (`fetch(`, `http`,
+  # `api.github.com`, `execSync`, `child_process`, `octokit`, `GITHUB_TOKEN`)
+  # matches ZERO lines, against 4 matches each in those two patrols' workflows.
+  #
+  # So the reason for a standing caller here is AUDIENCE, not reachability, and it
+  # was measured on a live gap rather than argued (#10803):
+  #
+  #   17.2.0's CHANGELOG heading landed 2026-08-23T06:29:35Z. Over the next 40
+  #   hours, 262 pull requests landed on `main`. Every one of their `lint.yml`
+  #   runs emitted the two advisory `::warning::` annotations. Commits touching
+  #   `content/docs/releases/` in that window: ZERO. Open PRs authoring the
+  #   section: ZERO. #10268's acceptance criterion is "visible within a day of a
+  #   minor publishing" — already exceeded, with the advisory in place and firing.
+  #
+  # Three structural reasons that reading is not bad luck, all verified against a
+  # real PR head sha through the check-runs API:
+  #
+  #   1. The annotation is registered at `path=.github`, line 19/20 — the WORKFLOW
+  #      file, because the gate emits `::warning::` with no `file=` parameter. It
+  #      therefore cannot appear on `content/docs/releases/v17.mdx` in the
+  #      Files-changed tab, which is the only place a reviewer reads by default.
+  #   2. It rides a GREEN required check. That PR head carried 31 check runs, 0 of
+  #      them failing, which GitHub collapses to "All checks have passed". It is
+  #      step 74 of 106 in that job.
+  #   3. It is addressed to whoever opened the next PR. That author did not create
+  #      the debt and does not own the remedy. A finding every PR author sees and
+  #      no PR author owns is the shape that stays unfixed for 25 days.
+  #
+  # Volume is NOT the problem and this file does not pretend otherwise: those two
+  # annotations were the only `##[warning]` lines in a 4004-line job log, and 2 of
+  # only 5 annotations across all 31 checks. The advisory is quiet and correct. It
+  # is simply pointed at the wrong reader, and no amount of shouting on a PR fixes
+  # that. This workflow adds the reader; it does not replace the advisory.
+  #
+  # ## Why this calls `--strict`, and why it still cannot go red
+  #
+  # `--strict` promotes findings to exit 1 "for a caller that OWNS the remedy". It
+  # had no standing caller at all, which is the defect #10803 records. It has one
+  # here — as a PREDICATE, never as a verdict.
+  #
+  # The two runs below are not redundant, and the order is load-bearing. The gate
+  # deliberately returns 1 for BOTH "findings, under --strict" and "the instrument
+  # is broken", so `--strict` alone is ambiguous and could not be branched on:
+  #
+  #   run 1, ADVISORY  — exit 0 means the instrument READ the corpus (findings or
+  #                      not); non-zero means it could not, and that is fatal in
+  #                      every mode by the gate's own design. This run also
+  #                      produces the authored, human-readable finding text.
+  #   run 2, --STRICT  — with the instrument already proven healthy by run 1,
+  #                      exit 1 now means exactly one thing: findings exist.
+  #
+  # That is what lets the patrol branch on a machine-readable boolean instead of
+  # grepping prose, while the JOB stays green whenever findings exist. A `--strict`
+  # run stays red for as long as the prose is unwritten — 25 days, in the 16.1.0
+  # case — and a chronically red scheduled job is how people learn to skim red,
+  # which the retired `prerelease-pin-watch.yml`'s header warned about directly. Findings land
+  # in the anchor issue; they never colour this job.
+  #
+  # ## What lands where
+  #
+  # One pinned ANCHOR ISSUE, rewritten in place every run (`ANCHOR_ISSUE` below) —
+  # `half-state-patrol.yml`'s shape and its argument, which applies verbatim here:
+  # never a comment per run, because a per-run comment stream is a second tracker
+  # nobody prunes and GitHub's edit history is already the archive this needs.
+  #
+  # It fits this finding particularly well. The population is tiny — 5 in-scope GA
+  # minors exist in total (16.0.0, 16.1.0, 17.0.0, 17.1.0, 17.2.0) — so the anchor
+  # is quiet almost always, and the remedy is owner-shaped: one person writes one
+  # curated section. An issue can be assigned. An annotation cannot.
+  #
+  # The `Swept` timestamp is the patrol's heartbeat and is refreshed even when the
+  # findings are unchanged: a timestamp that stops advancing is how a reader learns
+  # the standing caller died. The run must not "optimize away" that no-op edit.
+  #
+  # ## Report-only, and the one thing that is NOT report-only
+  #
+  # Findings never fail anything. This job never writes release prose — it cannot,
+  # and the gate's header argues why at length: a curated section is a judgement
+  # about what is user-facing, read out of 69 package changelogs, and this gate
+  # GENERATES NOTHING.
+  #
+  # The job DOES fail when the sweep could not run, or when its report could not be
+  # delivered. That is not a gate on the release pages; it is the patrol reporting
+  # its own death. Silent non-delivery would leave a stale anchor body that reads
+  # exactly like a clean corpus — "could not read the input" must never look like
+  # "input is clean" (#4690), with a heartbeat on it. Failing costs nobody a PR:
+  # this workflow gates no branch and blocks no queue.
+  release-coverage-patrol:
+    name: Release section-coverage sweep
+    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # each job runs only on its own cron; `workflow_dispatch` runs the one the input
+    # names (default: all four); a `pull_request` run exercises every job.
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '19 4 * * *')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'release-coverage-patrol')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Least privilege: this job reads the repo and writes exactly one issue BODY.
+    # `issues: write` is the narrowest scope GitHub offers for that edit; the job
+    # never uses it for labels, comments, assignees or state, and the gate it calls
+    # is read-only against the filesystem by construction.
+    permissions:
+      contents: read
+      issues: write
+    # One patrol at a time. A scheduled run overlapping a manual dispatch would have
+    # two runs racing to rewrite the same body, and the loser's findings would vanish
+    # with no trace but an edit-history entry.
+    concurrency:
+      group: release-coverage-patrol
+      cancel-in-progress: false
+    env:
+      # The pinned anchor issue whose body this workflow owns.
+      #
+      # Resolution: the repository variable `RELEASE_COVERAGE_ANCHOR_ISSUE` if set,
+      # else this repo's own pinned number, else EMPTY — and empty makes the job
+      # refuse to write rather than guess. The literal is guarded by the repository
+      # name on purpose: an unguarded fallback would let a verbatim copy in a sibling
+      # repo rewrite ITS #11879 — some unrelated card — with this repo's findings,
+      # silently, every night. A number is only meaningful in the repo it was minted
+      # in.
+      #
+      # TO ROTATE (here): open a new `tracking`-labeled issue, put its number below,
+      # and note the handover in the OLD issue's body before closing it (its edit
+      # history is the archive and does not travel).
+      # TO ADOPT (a sibling repo): change NOTHING here — set the repository variable.
+      #
+      # ⚠️ Folded scalar, and every continuation line sits at the SAME indent on
+      # purpose: a more-indented line in a `>-` block keeps its newline literally,
+      # which would hand the expression parser a multi-line string instead of one
+      # expression.
+      ANCHOR_ISSUE: >-
+        ${{ vars.RELEASE_COVERAGE_ANCHOR_ISSUE
+        || (github.repository == 'objectstack-ai/objectstack' && '11879')
+        || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # No `pnpm install`: the gate imports `node:fs` and one local module.
+      # Installing the workspace here would buy nothing and would give a
+      # scheduled patrol a lockfile it could fail on.
+      #
+      # No `--self-test` either. lint.yml runs it on every pull request, so this
+      # job would be re-proving a property already proven on the commit it just
+      # checked out — and two node invocations in one `run:` block is precisely
+      # the shape `check:step-collector` exists to refuse, because the first
+      # one's failure is masked by the second.
+      - name: Sweep the corpus
+        id: sweep
+        run: |
+          # ── run 1: ADVISORY. Exit code answers "did the instrument READ the
+          # corpus", which is the only thing that may colour this job.
+          set +e
+          node scripts/check-release-section-coverage.mjs \
+            > "$RUNNER_TEMP/report.txt" 2> "$RUNNER_TEMP/report.err"
+          advisory_code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` would report the
+          # PIPE's status — `tail` essentially never fails, so a healthy and a
+          # broken instrument would both read as 0.
+          echo "advisory_code=$advisory_code" >> "$GITHUB_OUTPUT"
+          echo "advisory run exited $advisory_code"
+
+          # ── run 2: --STRICT, used ONLY as a findings predicate. Meaningful
+          # solely because run 1 has already established the instrument is
+          # healthy; the gate returns 1 for a broken instrument too.
+          strict_code=0
+          if [ "$advisory_code" -eq 0 ]; then
+            set +e
+            node scripts/check-release-section-coverage.mjs --strict \
+              > "$RUNNER_TEMP/strict.txt" 2> "$RUNNER_TEMP/strict.err"
+            strict_code=$?
+            set -e
+            echo "strict run exited $strict_code"
+          else
+            echo "instrument is broken — skipping the --strict predicate"
+          fi
+          echo "strict_code=$strict_code" >> "$GITHUB_OUTPUT"
+
+          cat "$RUNNER_TEMP/report.err" >&2 || true
+
+      - name: Resolve the anchor issue
+        # An install with no anchor configured has nowhere to land its report,
+        # and the ONLY safe behaviour is to say so loudly. The two alternatives
+        # are both the failure this file exists to prevent: guessing a number
+        # would rewrite an unrelated card in this repo, and skipping the write
+        # quietly would leave a patrol that runs, finds, and tells nobody —
+        # indistinguishable from a clean corpus.
+        #
+        # Placed AFTER the sweep so the run summary still carries the findings,
+        # and skipped on a pull_request run, which never writes an anchor.
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
+            echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and set the repository variable RELEASE_COVERAGE_ANCHOR_ISSUE to its number (Settings -> Secrets and variables -> Actions -> Variables)."
+            exit 1
+          fi
+          case "$ANCHOR_ISSUE" in
+            *[!0-9]*|'') echo "::error::RELEASE_COVERAGE_ANCHOR_ISSUE is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
+          esac
+          echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
+
+      - name: Render the report
+        id: render
+        env:
+          ADVISORY_CODE: ${{ steps.sweep.outputs.advisory_code }}
+          STRICT_CODE: ${{ steps.sweep.outputs.strict_code }}
+          # This workflow's own `cron:`, handed to the renderer so the anchor
+          # body states the cadence that makes its heartbeat line decidable
+          # (#17720). It lives HERE rather than in the script because the
+          # schedule is declared here: a second copy in the renderer would be a
+          # second place to drift from, and a drifted deadline reads exactly
+          # like a correct one. ⛔ Unset, the renderer says so in the body
+          # rather than assuming a period — it never guesses.
+          PATROL_SCHEDULE: '19 4 * * *'
+          PROVENANCE: >-
+            run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
+        # Runs its own `--self-test` first (#11150). That leg is not ceremony
+        # here: the renderer's assertions pin `verdict()` — the mapping from the
+        # sweep's two exit codes onto did-not-run / findings / clean — and a
+        # broken mapping still renders a body. The live run below would stay
+        # exit 0 and publish a WRONG report, including the one reading #4690
+        # forbids, a broken instrument rendered as a clean corpus. Only the live
+        # run is redirected; the self-test's own verdict goes to the step log.
+        run: |
+          node scripts/render-release-coverage-anchor.mjs --self-test
+          node scripts/render-release-coverage-anchor.mjs > "$RUNNER_TEMP/body.md"
+
+      # The rendered body is the product of the run, so it goes to the step
+      # summary on EVERY trigger — including the pull_request runs that must not
+      # touch the anchor. A reader of this workflow's own PR sees exactly what
+      # would have landed.
+      - name: Publish the report to the run summary
+        run: cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update the pinned anchor issue
+        # A pull_request run proves the sweep; it must not touch the board.
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          # Delivery is retried, never assumed: this single PATCH is the entire
+          # product of the run, and a transient answer from the issues endpoint
+          # would otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const anchor = Number(process.env.ANCHOR_ISSUE);
+            const body = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'body.md'), 'utf8');
+            if (!body.trim()) {
+              throw new Error('the renderer produced an empty body — refusing to blank the anchor');
+            }
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: anchor,
+              body,
+            });
+            core.info(`anchor #${anchor} updated (${body.length} chars)`);
+
+      # LAST, so a completed sweep always lands its report before the patrol
+      # raises the alarm about itself — "land the truth, then raise the alarm".
+      # This is the ONLY step that may redden the job, and findings can never
+      # reach it: it reads the instrument's verdict, not the corpus's.
+      - name: Fail if the sweep could not run
+        if: steps.sweep.outputs.advisory_code != '0'
+        run: |
+          echo "::error::check-release-section-coverage could not read the corpus (exit ${{ steps.sweep.outputs.advisory_code }}). The patrol is DOWN — findings, if any, were NOT judged this run. A sweep that could not run must never read as a clean corpus."
+          exit 1
+
+  # ══ `board-snapshot` — formerly `.github/workflows/board-snapshot.yml` ══
+  #
+  # The standing caller for `scripts/pm/board-snapshot.mjs` (#17390).
+  #
+  # ## Why a scheduled backup, and why it lands on a branch
+  #
+  # Three fleet accounts were suspended in two months and the appeals are
+  # unanswered. #17374 F3 measured what a suspension destroys: every issue, pull
+  # request and comment the account authored — while every branch and commit
+  # survives, because those belong to the repository rather than to a user. The
+  # board IS the fleet's state by rule (pm-dispatch SKILL.md, 全体座位的不变量:
+  # 「GitHub 之外永不维护任何跟踪状态」), so today one suspension erases state that
+  # nothing else holds; six cards, one of them a p1 security decision, are gone.
+  #
+  # The maintainer's answer, verbatim and untranslated, in chat on 2026-09-10:
+  # 「或者用 ci 写个定时任务备份？」 — this file is that scheduled task. It runs as
+  # `github-actions[bot]`, which is not a fleet account and cannot be suspended
+  # with one, and it writes to an ORPHAN BRANCH of this same repository: no second
+  # repo, no second credential, and a branch is precisely the thing a suspension
+  # leaves standing.
+  #
+  # ## An archive is not a tracker — the one-board rule still holds
+  #
+  # ⛔ Nothing reads `board-archive` for state. Not a seat, not a patrol, not a
+  # gate, not a query; every reading of the board still goes to GitHub. The
+  # archive answers exactly one question, after a loss: what did the record say?
+  # The script it runs has NO write path to GitHub in any mode — two of its
+  # self-test cases read its own source and hold that structurally — and
+  # `--restore` PRINTS a recreate payload for a seat to post, or for nobody to.
+  #
+  # ## The budget this run is capped against, and who else spends it
+  #
+  # `GITHUB_TOKEN` is limited to 1,000 requests per hour PER REPOSITORY. That is
+  # ONE pool for every workflow in this repo that calls the API — not a per-workflow
+  # allowance — and this job is far from its only caller:
+  #
+  #   this archiver             800 per run (the `--max-requests` cap below), 4/day
+  #   half-state patrol         a board sweep, 4/day at :37 on hours 1,7,13,19
+  #   required-set patrol       2/day at :23 on hours 4,16
+  #   release-coverage patrol   daily at 04:19; platform-checklist watchdog at 02:51
+  #   merged-branch reaper      Mondays 04:37, an API sweep over branches and PRs
+  #   every CI, lint and smoke run
+  #                             a handful of requests each, hourly and per push
+  #
+  # 800 is chosen against that pool rather than against this job's appetite: it is
+  # the largest cap that still leaves a fifth of the hour to whatever else lands in
+  # the same window, and the schedule below keeps the two heavy board readers out
+  # of each other's hours entirely. ⛔ Raising the cap is not a tuning decision,
+  # ⛔ there is no retry loop, and ⛔ there is no second token — a run that wants
+  # more requests waits for the next slot, which is what the resume cursor is for.
+  #
+  # ## Why a run may stop before it is finished — and what it reads FIRST
+  #
+  # A first full snapshot of this board — several thousand numbers, each with a
+  # comment thread — does not fit one run and must not try, so the script stops at
+  # its own `--max-requests` ceiling, writes its phase cursor into the manifest and
+  # exits 0. The next scheduled run continues from that cursor. Four runs a day
+  # walk the backlog in a few days without ever exceeding the budget, and a
+  # steady-state incremental run costs a few hundred requests.
+  #
+  # WHICH records it reads first is the part that matters, and it is measured
+  # rather than assumed. The first scheduled run of this workflow walked
+  # `state=all` oldest-first and spent all 800 requests on 137 closed issues and
+  # 268 closed pull requests from February — ZERO open cards, with days of runs
+  # still to go. The open board is exactly what a suspension destroys (#17374 F3),
+  # so it was the half being archived last. A first walk now runs the OPEN phase to
+  # completion — issues and pull requests, one listing — before the closed history
+  # starts, and a run that runs out of budget inside the open set resumes inside
+  # it. The manifest's `walk_phase` says which phase a run is in, so "open set
+  # complete, history resuming" is never read as "still inside the open set".
+  #
+  # ⛔ On a real rate-limit refusal the script does NOT retry: it stops, writes the
+  # cursor and exits non-zero with the reset time. A loop against a spent budget
+  # starves every other automated caller in the repository for the rest of the hour.
+  #
+  # ## A stale archive is not a green run
+  #
+  # A run that stops on its own budget is a planned pause and exits 0. A run whose
+  # archive has not been CONFIRMED against the live board for longer than a day is
+  # a different thing, and until #18137 it exited 0 as well: NINETEEN consecutive
+  # runs of this workflow reported `count_check: pending` between 2026-09-10T20:23Z
+  # and 2026-09-14T20:24Z and every one of them is `success` in this workflow's own
+  # run history — including 2026-09-14T02:34Z, whose delta cursor was two days
+  # behind the live board on the morning an account suspension destroyed cards the
+  # archive did not hold. The script now carries a `freshness` row and exits 5 when
+  # that streak passes a day; its header is the authority on the anchor and the
+  # window, and ⛔ the row prescribes no remedy: the cadence above and the
+  # 800-request cap are the maintainer's decisions, not this row's.
+  #
+  # The ORDER of the steps below is what makes that safe, and it is deliberate: the
+  # commit and the R2 mirror run BEFORE the step that reads the exit code, so a red
+  # freshness row never costs the records the same run archived. ⛔ Do not move the
+  # failing step above them — a stale archive is better than none.
+  #
+  # ## The `pull_request` trigger, and what it is allowed to do
+  #
+  # Every patrol in this tree exercises itself on the pull requests that change
+  # it, and that is not a style preference: `check:pm-dispatch-gates` pins that NO
+  # discovered gate family is reachable only through a schedule, so a workflow
+  # whose script CI never runs at PR time reddens that gate by existing. A first
+  # draft of this file omitted the trigger to keep PR-time cost at zero and was
+  # refused by exactly that pin.
+  #
+  # So a pull_request run DOES execute the snapshot on a real runner — the
+  # transport, the flags, the page walk and the rendering, proven where they will
+  # actually run — and it writes NOTHING: no archive branch is checked out, the
+  # run is `--dry-run` into the runner's temp dir, and the commit step is skipped.
+  # It is also capped hard (`--limit`, `--max-requests` below), because the
+  # repository's request budget is shared with the half-state patrol and the
+  # closed-card sweep and must not be spent per push. ⛔ A pull request must never
+  # write to the board OR to the archive.
+  #
+  # The offline half is held for free beside it: `check:pm-board-snapshot` runs the
+  # script's 70-case `--self-test` inside the required `Lint & Repo Gates` job,
+  # which has no paths filter (`check:self-test-wired` is what requires that step
+  # to exist). This job runs the same self-test again before it touches the
+  # archive, so a broken tool fails loudly instead of committing a broken backup.
+  #
+  # ## Adopting this in a sibling repo
+  #
+  # Copy FIVE files, unchanged: `scripts/pm/board-snapshot.mjs`,
+  # `scripts/pm/check-half-states.mjs` (the archiver imports its proxy-re-exec plan
+  # and its repo resolver), `scripts/invoked-as.mjs` (imported by both),
+  # `scripts/ci/board-snapshot-r2-upload.sh` (the R2 step runs it) and this
+  # file — the `board-snapshot` job of it; a repo that wants only the archiver
+  # deletes the three sibling jobs and their crons. A repo that has already
+  # adopted the half-state patrol has the second and third.
+  # ⛔ Do not shorten this list from memory — the imports decide it, not this
+  # comment, and the patrol's own adopt list was wrong for months in exactly that
+  # way, which installed a dead sweeper that failed before its first predicate.
+  #
+  # There is nothing to configure. The board archived is `github.repository`,
+  # passed explicitly below, and the script REFUSES its resolver's default rather
+  # than falling back to one: a copy of this file quietly archiving the repo it was
+  # copied FROM would produce a complete, well-formed, green archive of the wrong
+  # board.
+  board-snapshot:
+    name: Snapshot the board to the archive branch
+    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # each job runs only on its own cron; `workflow_dispatch` runs the one the input
+    # names (default: all four); a `pull_request` run exercises every job.
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '7 2,8,14,20 * * *')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'board-snapshot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Least privilege. `contents: write` is for the archive BRANCH and nothing else;
+    # the two read scopes are what the snapshot reads. ⛔ This job never writes to
+    # `main` and never writes to any issue, pull request, label or comment — there is
+    # no scope here that would let it, which is the mechanical half of the one-board
+    # rule stated above.
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
+    # One archiver at a time. Two runs racing the same branch would have the loser
+    # push a snapshot built from a stale checkout, silently discarding the winner's.
+    concurrency:
+      group: board-snapshot
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # No `pnpm install`: the archiver imports only `node:` builtins, global
+      # `fetch`, and two repo-local modules — no npm dependency, so installing
+      # the workspace here would buy nothing and would give a scheduled backup a
+      # lockfile it could fail on.
+      - name: The tool's own cases, before it touches the archive
+        run: node scripts/pm/board-snapshot.mjs --self-test
+
+      # The archive branch is an ORPHAN: it shares no history with `main`, so a
+      # checkout of it carries the archive and nothing else. First run creates it
+      # locally; the push below is what publishes it.
+      #
+      # It is fetched with its WHOLE history but without file contents
+      # (`--filter=blob:none`), because the R2 step reads each record's
+      # last-change time out of that history; see "Only changed records are
+      # uploaded" there. The worktree checkout then fetches the tip's blobs in
+      # one batch, which is the same content a `--depth=1` fetch downloaded, so
+      # the history adds only commits and trees: ~7 MB for 127 commits over
+      # 41,047 files, measured 2026-10-12. ⛔ Do not put `--depth` back: a
+      # truncated history makes the R2 step re-upload every record older than
+      # the cut on every run (safe, but the cost that step exists to avoid).
+      - name: Check out or create the archive branch
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --filter=blob:none origin '+refs/heads/board-archive:refs/remotes/origin/board-archive' || true
+          if git rev-parse --verify --quiet refs/remotes/origin/board-archive > /dev/null; then
+            git worktree add archive -b board-archive refs/remotes/origin/board-archive
+            echo "archive branch exists; checked out at $(git -C archive rev-parse --short HEAD)"
+          else
+            git worktree add --detach archive HEAD
+            git -C archive checkout --orphan board-archive
+            git -C archive rm -rf --quiet .
+            # An orphan that still carries main's tree would commit the whole
+            # repository into the archive branch on its first run, so this is
+            # asserted rather than assumed.
+            tracked=$(git -C archive ls-files | wc -l)
+            if [ "$tracked" != "0" ]; then
+              echo "::error::the new orphan branch still tracks $tracked file(s) from main; refusing to seed the archive with them."
+              exit 1
+            fi
+            echo "archive branch created as an orphan (first run)"
+          fi
+
+      - name: Run the snapshot
+        id: snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # WHICH board this run archives: the repo this workflow is installed
+          # in, always. A copy of this file cannot end up archiving the repo it
+          # was copied FROM, and the script refuses to guess when this is unset.
+          PM_SWEEP_REPO: ${{ github.repository }}
+          # A pull_request run PROVES the tool on a runner and writes nothing:
+          # the temp dir has no manifest, so it is a full read, capped to a
+          # handful of numbers and a budget the shared quota will not notice.
+          # ⛔ The two spellings differ in WHERE they write and in nothing else,
+          # so what a PR exercises is the path a schedule takes.
+          SNAPSHOT_ARGS: ${{ github.event_name == 'pull_request' && '--out=board --dry-run --limit=5 --max-requests=25' || '--out=archive/board' }}
+        run: |
+          set +e
+          node scripts/pm/board-snapshot.mjs $SNAPSHOT_ARGS \
+            > "$RUNNER_TEMP/snapshot.md" 2> "$RUNNER_TEMP/snapshot.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` reports the PIPE's
+          # status — `tail` essentially never fails, so a clean snapshot and a
+          # failed count check would both read as 0, and this script's exit
+          # register (0 / 2 / 3 / 4) is the whole point of having one.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "board-snapshot exited $code"
+          cat "$RUNNER_TEMP/snapshot.md" || true
+          cat "$RUNNER_TEMP/snapshot.err" >&2 || true
+
+      # Land the truth, THEN raise the alarm: whatever the snapshot managed to
+      # read is committed before the run is allowed to go red, so a failing count
+      # check never costs the records the same run archived.
+      - name: Commit and push the archive
+        id: commit
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          if [ -z "$(git -C archive status --porcelain)" ]; then
+            echo "committed=none" >> "$GITHUB_OUTPUT"
+            echo "no change on the board since the last run — nothing committed."
+            exit 0
+          fi
+          git -C archive add -A
+          files=$(git -C archive diff --cached --name-only | wc -l)
+          git -C archive \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "board snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                     -m "run ${{ github.run_id }} · ${files} file(s) changed"
+          git -C archive push origin board-archive
+          echo "committed=${files}" >> "$GITHUB_OUTPUT"
+          echo "pushed ${files} changed file(s) to board-archive"
+
+      # ## The copy that outlives the platform, not just the account
+      #
+      # The archive branch above survives an ACCOUNT suspension, because a
+      # branch belongs to the repository rather than to a user. It does not
+      # survive an action against the organisation or the repository itself,
+      # and that is the remaining hole. The maintainer's answer, verbatim and
+      # untranslated, in chat on 2026-09-13:
+      #
+      #   「那如果推 s3 呢？」 「Cloudflare R2」
+      #
+      # So this step mirrors the archive CHECKOUT — the same tree the commit
+      # above just pushed — into one R2 prefix. Two things follow from R2
+      # having NO bucket versioning:
+      #
+      #   - `--delete` makes the prefix equal to the branch tip and nothing
+      #     else, so a restore never reads a file the board no longer has;
+      #   - a mirror therefore keeps no HISTORY at all, so once per UTC day the
+      #     tree is also written as `snapshots/YYYY-MM-DD.tar.gz`. That key
+      #     lives OUTSIDE the mirrored prefix on purpose: inside it, the very
+      #     next `--delete` sync would remove it as an object with no local
+      #     counterpart, and the history would be exactly one day long.
+      #
+      # The daily tarball is decided by asking the bucket for today's key
+      # rather than by the clock, so a missed 02:07 run, a re-run and a
+      # `workflow_dispatch` all converge on one tarball per day.
+      #
+      # ## Only changed records are uploaded
+      #
+      # `aws s3 sync` uploads a file when its size differs from the object's,
+      # or when the file's mtime is newer than the object's LastModified
+      # (aws-cli `SizeAndLastModifiedSync`). A fresh checkout stamps every file
+      # with the checkout time, so each run re-PUT all ~41,000 objects:
+      # measured on the bucket, 1.2M PutObject in 11 days (~110k a day, ~$10 a
+      # month of R2 Class A operations against a 1M-a-month free tier).
+      #
+      # So before syncing, every file's mtime is set to the committer time of
+      # the last commit on the archive branch that changed it. That makes the
+      # comparison mean what sync assumes it means:
+      #
+      #   - an object's LastModified is the time it was last uploaded, and every
+      #     upload happens AFTER the commit whose content it carries (the commit
+      #     step runs before this one), so an object that is current has a
+      #     LastModified newer than its file's mtime and is skipped;
+      #   - a file changed by a commit made after its object was last uploaded
+      #     has the newer mtime and is uploaded. That covers this run's changes
+      #     AND anything an earlier run failed to upload, with no state kept
+      #     between runs;
+      #   - a file the archive no longer has is still removed by `--delete`.
+      #
+      # ⛔ Not `--size-only`: a record edit can keep its byte count (every
+      # `updated_at` move does, and so does a count gaining no digit), and a
+      # size-only comparison would leave the stale copy in R2 for good.
+      #
+      # This relies on two things being true. The archive branch is written
+      # only by this workflow, so its committer times follow real time. And
+      # nothing else writes under the mirror prefix: an out-of-band write
+      # with the same size and a newer LastModified would not be overwritten,
+      # where the old full re-upload replaced it within six hours. If the
+      # history cannot be read, the step does not guess. It leaves the
+      # checkout times in place, which re-uploads everything, and says so in
+      # a warning and in the run's R2 status line: more Class A operations,
+      # never a weaker copy.
+      #
+      # ## Unset secrets are a notice, not a failure
+      #
+      # The bucket and its scoped API token are the maintainer's to create.
+      # Until all four secrets exist this step prints one notice and exits 0,
+      # so this workflow keeps archiving to the branch and nothing here has to
+      # be merged in the same hour as the bucket. A CONFIGURED upload that then
+      # fails is the opposite case and goes red: a backup that silently stops
+      # copying is the failure mode this whole file exists to prevent.
+      #
+      # ⛔ The four secrets are read, never echoed, and never written to the
+      # summary; the run below also never touches the board, `main`, or the
+      # archive branch — it only reads the checkout that is already on disk.
+      - name: Upload the archive to R2
+        id: r2
+        if: github.event_name != 'pull_request'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # R2 is S3-compatible with one fixed pseudo-region.
+          AWS_DEFAULT_REGION: auto
+          # S3-compatible endpoints other than S3 itself are the documented
+          # case for this setting: the CLI then sends an integrity checksum
+          # only where the API requires one, instead of on every request.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        # The body lives in scripts/ci/board-snapshot-r2-upload.sh (#26086); its
+        # offline self-test is scripts/ci/board-snapshot-r2-upload.selftest.sh.
+        run: bash scripts/ci/board-snapshot-r2-upload.sh
+
+      - name: Publish the run to the summary
+        if: always()
+        run: |
+          {
+            echo "### Board snapshot — exit ${{ steps.snapshot.outputs.exit_code }}"
+            echo
+            echo "Committed: ${{ steps.commit.outputs.committed || 'nothing (the run stopped before the commit step)' }}"
+            echo
+            echo "R2: ${{ steps.r2.outputs.status || 'not attempted (a pull_request run, or the job stopped before the upload step)' }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/snapshot.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/snapshot.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # LAST on purpose: every step that lands the records is above it, so this
+      # one only ever decides the colour of the run. See the header.
+      - name: Fail the run if the snapshot did not read the board, or the archive is behind it
+        if: steps.snapshot.outputs.exit_code != '0'
+        run: |
+          echo "::error::board-snapshot exited ${{ steps.snapshot.outputs.exit_code }} — 2 is a failed count check (the archive and the board disagree about how many open issues exist), 3 is a prerequisite the runner did not meet, 4 is a rate-limit stop with a resume cursor written, 5 is a STALE archive (no run has confirmed it against the live board for longer than a day; the run summary names the streak and what clears it). Whatever was read HAS been committed; see this run's summary."
+          exit 1

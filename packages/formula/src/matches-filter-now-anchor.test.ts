@@ -164,7 +164,13 @@ describe('[#25808] the own-clock arm and the fail-closed arms', () => {
     expect(ids({ completed_on: { $lte: anchored({ $field: 'id' }) } })).toEqual(['2', '3', '4', '6', '8', '9']);
   });
 
-  it('the anchor is read by SHAPE: an extra key does not disqualify it', () => {
+  // [#26413] An extra key is refused at every filter door before a filter
+  // reaches this evaluator (`normalizeFilterComparandTypes` in
+  // `@objectstack/spec`: `INVALID_FILTER` / 400, the key named). The engine
+  // calls this evaluator for `having` and the `aggregations[i].filter` rows
+  // fallback, both behind that door; the CEL lowering for the RLS `check`
+  // emits no anchor. So the evaluator does not judge the anchor's keys again.
+  it('behind the door, the evaluator reads the anchor by SHAPE: it does not re-judge an extra key', () => {
     expect(ids({ completed_on: { $eq: { ...anchored(0), note: 'x' } } })).toEqual(['2']);
   });
 });

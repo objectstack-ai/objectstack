@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { createHash } from 'node:crypto';
+
 /**
  * Pluggable adapter for at-rest encryption of `Specifier.encrypted: true`
  * values. The default {@link NoopCryptoAdapter} provides a transparent
@@ -14,8 +16,14 @@ export interface CryptoAdapter {
   /** Returns the plaintext used by the resolver. */
   decrypt(ciphertext: string, ctx: { namespace: string; key: string }): Promise<string>;
   /**
-   * Stable, short, non-reversible digest used for audit-log entries so
-   * operators can correlate value changes without leaking secrets.
+   * Stable, short, non-reversible digest of a plaintext.
+   *
+   * Not read by the settings audit trail since #26465: `sys_setting_audit`
+   * and `sys_platform_setting_audit` declare SHA-256 for `old_hash` /
+   * `new_hash`, so the non-secret fingerprint is {@link settingAuditDigest}
+   * whatever adapter is injected, and a secret is fingerprinted only by the
+   * crypto provider's keyed digest. Kept on the interface so existing
+   * adapters still satisfy it.
    */
   digest(plaintext: string): string;
   /**
@@ -79,7 +87,8 @@ export class NoopCryptoAdapter implements CryptoAdapter {
     return Buffer.from(ciphertext.slice(4), 'base64').toString('utf8');
   }
   digest(plaintext: string): string {
-    // FNV-1a 32-bit — short, stable, non-cryptographic. Audit-only.
+    // FNV-1a 32-bit — short, stable, non-cryptographic. The settings audit
+    // no longer records it (#26465, see `settingAuditDigest`).
     let h = 0x811c9dc5;
     for (let i = 0; i < plaintext.length; i++) {
       h ^= plaintext.charCodeAt(i);
@@ -87,6 +96,24 @@ export class NoopCryptoAdapter implements CryptoAdapter {
     }
     return 'fnv32:' + h.toString(16).padStart(8, '0');
   }
+}
+
+/**
+ * The fingerprint the settings audit trail records for a NON-secret value
+ * (#26465): `sha256:` followed by the hex SHA-256 of the value's canonical
+ * JSON, which is the algorithm `old_hash` / `new_hash` declare on
+ * `sys_setting_audit` and `sys_platform_setting_audit`.
+ *
+ * Computed here rather than through {@link CryptoAdapter.digest}, so an
+ * injected adapter cannot change the column's format. The prefix keeps the
+ * value self-describing beside the rows written before it (`fnv32:` from the
+ * old adapter digest) and the keyed secret fingerprints (`hmac-sha256:`), so a
+ * reader comparing two rows can tell a different algorithm from a different
+ * value. Never used for a secret: an unkeyed hash of a short secret lets any
+ * reader of the audit rows confirm a guess offline.
+ */
+export function settingAuditDigest(canonicalJson: string): string {
+  return 'sha256:' + createHash('sha256').update(canonicalJson, 'utf8').digest('hex');
 }
 
 /**

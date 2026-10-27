@@ -80,6 +80,8 @@ function makeEngine(opts: EngineOptions = {}) {
         [LEDGER]: [],
     };
     const writes: Array<{ op: 'insert' | 'update'; data: Row }> = [];
+    /** The context each ledger write ran under, in write order — who the engine stamps the row with. */
+    const writeContexts: unknown[] = [];
     const matches = (row: Row, where: Row | undefined): boolean =>
         Object.entries(where ?? {}).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
@@ -99,9 +101,10 @@ function makeEngine(opts: EngineOptions = {}) {
             const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where));
             return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
         },
-        async insert(object: string, data: Row) {
+        async insert(object: string, data: Row, options?: any) {
             if (opts.writeError) throw opts.writeError;
             writes.push({ op: 'insert', data });
+            writeContexts.push(options?.context);
             const row = { id: `act_${nextId++}`, ...data };
             (tables[object] ??= []).push(row);
             return row;
@@ -113,13 +116,14 @@ function makeEngine(opts: EngineOptions = {}) {
             if (dispatch.kind !== 'by-id') throw new Error('fake engine: only by-id updates are modelled');
             if (opts.writeError) throw opts.writeError;
             writes.push({ op: 'update', data });
+            writeContexts.push(options?.context);
             const row = (tables[object] ?? []).find((r) => r.id === dispatch.id);
             if (row) Object.assign(row, data);
             return row;
         },
     };
     if (!opts.unbound) bindTestSecurityCatalog(engine, CATALOG);
-    return { engine, tables, writes };
+    return { engine, tables, writes, writeContexts };
 }
 
 interface Harness {
@@ -127,6 +131,7 @@ interface Harness {
     engine: any;
     tables: Record<string, Row[]>;
     writes: Array<{ op: 'insert' | 'update'; data: Row }>;
+    writeContexts: unknown[];
 }
 
 function boot(
@@ -134,7 +139,7 @@ function boot(
     opts: EngineOptions = {},
     extraServices: Record<string, unknown> = {},
 ): Harness {
-    const { engine, tables, writes } = makeEngine(opts);
+    const { engine, tables, writes, writeContexts } = makeEngine(opts);
     const services: Record<string, unknown> = { objectql: engine, data: engine, ...extraServices };
     if (posture) services.tenancy = { posture };
     const resolve = (name: string): unknown => services[name] ?? null;
@@ -143,7 +148,7 @@ function boot(
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel as never), engine, tables, writes };
+    return { dispatcher: new HttpDispatcher(kernel as never), engine, tables, writes, writeContexts };
 }
 
 /** A tenant org admin holding `manage_metadata` — the §5 gate is then the only thing left. */
@@ -544,6 +549,27 @@ describe('the catalog activation door — an environment-authored item', () => {
         expect(off.permissions).not.toContain(ENV_SET);
         expect(off.systemPermissions).not.toContain('cap_audit');
     });
+});
+
+// [#26474] The row is written ON BEHALF of the administrator who asked, so the
+// door hands the store that caller's own envelope, elevated: the elevation keeps
+// the engine-owned ledger writable, and the caller's `userId` is what the engine
+// stamps on `created_by` / `updated_by` and the audit plugin records as
+// `user_id` / `actor`. The store's bare system context names nobody.
+describe('the catalog activation door — the write names the caller who asked for it', () => {
+    for (const [type, name] of [['position', POSITION], ['permission', SET]] as const) {
+        it(`\`${type}\`: the insert AND the later update run under the caller's envelope, elevated`, async () => {
+            const h = boot('isolated');
+            const ctx = PLATFORM_OPERATOR();
+            const expected = { ...(ctx.executionContext as object), isSystem: true };
+
+            expect(statusOf(await flip(h, ctx, `/_activation/${type}/${name}`, { enabled: false }))).toBe(200);
+            expect(statusOf(await flip(h, PLATFORM_OPERATOR(), `/_activation/${type}/${name}`, { enabled: true }))).toBe(200);
+
+            expect(h.writes.map((w) => w.op)).toEqual(['insert', 'update']);
+            expect(h.writeContexts).toEqual([expected, expected]);
+        });
+    }
 });
 
 describe('the catalog activation door — the resolver honours what it writes', () => {

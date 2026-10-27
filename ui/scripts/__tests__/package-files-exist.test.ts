@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceGlobs as readWorkspaceGlobs } from '../workspace-root.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -229,12 +230,15 @@ const missing = declared.filter((d) => !d.onDisk && !isDeclaredBuildOutput(d));
 describe('package.json `files` entries exist on disk (objectui#3663)', () => {
   it('discovers the workspace (guard cannot pass by finding nothing)', () => {
     // npm's silence is the whole hazard here, so a guard that inspects an empty
-    // list would reproduce it exactly: green output, nothing checked. These
-    // floors sit just under the measured values on main@dae1ac41e (40 packages
-    // declaring `files`, 159 entries) so that losing a workspace root, a broken
-    // glob parser or a moved directory is a failure and not a quiet pass.
-    expect(packagesWithFiles.length).toBeGreaterThanOrEqual(38);
-    expect(declared.length).toBeGreaterThanOrEqual(150);
+    // list would reproduce it exactly: green output, nothing checked. Losing a
+    // workspace root, a broken glob parser or a moved directory must be a
+    // failure and not a quiet pass. Every published package declares `files`,
+    // so the shared published-package floor bounds this population too (39
+    // measured on objectstack 6a7c0fe3). The entry floor is about two thirds of
+    // the 153 entries measured there: a floor against an empty scan, not a
+    // census, so deleting a package leaves both green.
+    expect(packagesWithFiles.length).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
+    expect(declared.length).toBeGreaterThanOrEqual(100);
 
     // The specimen package must be in scope by name: if plugin-tree ever drops
     // out of the scan, the guard has stopped watching the exact spot that
@@ -439,13 +443,12 @@ const KNOWN_LICENSE_TEXT_MISSING: Record<string, { issue: string }> = {};
 
 describe('published packages that declare a license ship its text (objectui#3696)', () => {
   it('discovers the packages that owe license text (guard cannot pass by finding nothing)', () => {
-    // Same anti-vacuity floor as the guard above, sitting just under the 39
-    // measured on main@3e601773e. A predicate that quietly matches nothing —
-    // a renamed `license` field, a lost workspace root, a `private` default
-    // flipped — would otherwise report success over an empty set. Lowered by
-    // one when `@object-ui/sdui-parser` was retired for the root
-    // `@objectstack/sdui-parser` (objectstack#25712 item 3): 37 measured then.
-    expect(owingPackages.length).toBeGreaterThanOrEqual(37);
+    // Same anti-vacuity floor as the guard above: the shared published-package
+    // floor (36 owing measured on objectstack 6a7c0fe3). A predicate that
+    // quietly matches nothing — a renamed `license` field, a lost workspace
+    // root, a `private` default flipped — would otherwise report success over
+    // an empty set. Retiring or unpublishing a package moves no floor here.
+    expect(owingPackages.length).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
 
     // The package objectui#3696 fixed must be in scope BY NAME. If it drops
     // out of the population, this guard has stopped watching the exact spot
@@ -803,13 +806,14 @@ const exportKey = (e: DeclaredExport): string => `${e.pkg.name}${e.subpath === '
 
 describe('every declared `exports` subpath resolves to a file that ships (objectui#4059)', () => {
   it('discovers the exports surface (guard cannot pass by finding nothing)', () => {
-    // Same anti-vacuity floor as the two guards above, sitting just under the
-    // values measured on main@59df371f7 (38 packages declaring `exports`, 140
-    // target strings). A broken flattener, a lost workspace root or a renamed
+    // Same anti-vacuity floors as the two guards above: the shared
+    // published-package floor (38 packages declaring `exports` measured on
+    // objectstack 6a7c0fe3) and about two thirds of the 150 target strings
+    // measured there. A broken flattener, a lost workspace root or a renamed
     // field would otherwise report success over an empty set — which is the
     // failure mode this whole file exists to prevent.
-    expect(packagesWithExports.length).toBeGreaterThanOrEqual(36);
-    expect(declaredExports.length).toBeGreaterThanOrEqual(130);
+    expect(packagesWithExports.length).toBeGreaterThanOrEqual(UI_PUBLISHED_PACKAGE_FLOOR);
+    expect(declaredExports.length).toBeGreaterThanOrEqual(100);
 
     // The specimen and its control must be in scope BY NAME and BY SUBPATH. Both
     // declare the identical `"./style.css": "./dist/index.css"`; the only

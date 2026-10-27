@@ -68,28 +68,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
       # Restore-only, here and below: a nightly reads `main`'s caches and the
       # per-push workflows own saving them.
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+          save-store: 'false'
 
       # ci.yml's Build UI Deps saves its turbo entries for exactly the build
       # below on every `main` push, so the build replays them.
@@ -101,9 +85,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-ui-deps-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # The same command as the step of this name in ci.yml's ui jobs:
       # objectui's suite resolves the seven @objectstack packages from their
@@ -200,36 +181,13 @@ jobs:
         if: needs.ui-coverage.result == 'success'
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        if: needs.ui-coverage.result == 'success'
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        if: needs.ui-coverage.result == 'success'
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        if: needs.ui-coverage.result == 'success'
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Restore pnpm cache
-        if: needs.ui-coverage.result == 'success'
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
       # No build: `--merge-reports` runs no test file, and the vitest config
       # imports nothing from the @objectstack packages.
-      - name: Install dependencies
+      - name: Setup workspace
         if: needs.ui-coverage.result == 'success'
-        run: pnpm install --frozen-lockfile
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-store: 'false'
 
       - name: Download every shard's blob report
         if: needs.ui-coverage.result == 'success'

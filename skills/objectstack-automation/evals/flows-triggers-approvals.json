@@ -80,6 +80,45 @@
         "must_contain": ["type: 'screen'", "type: 'file'", "create_record", "signed_copy"],
         "must_not_contain": ["type: 'upload'", "type: 'attachment'"]
       }
+    },
+    {
+      "id": 9,
+      "prompt": "Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a `crm_contact` linked to it, and ends on a screen that shows links to both new records.",
+      "expected_output": "A `screen` flow (`type: 'screen'`): a first `screen` node collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact's `fields` linking it with `account: { dialect: 'cel', source: 'account.id' }`; then a last `screen` node whose fields are two `type: 'record_link'` fields, each with `reference` naming its object (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `{ dialect: 'cel', source: 'contact.id' }`, carrying no `required`, `placeholder` or `options`. The `end` node carries no `message` (refused on a completed end) and the screen `description` holds no markdown link — the links are the `record_link` fields, spelled `record_link`, never the object field type.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record_link", "reference", "defaultValue", "outputVariable", "dialect: 'cel'"],
+        "must_not_contain": ["type: 'record'", "]("]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "The `expense` record page shows an Edit button to every member who can read the record. While an expense is under approval, members who are not on the approval still get the button and their save is refused with `409 RECORD_LOCKED`. Make the page know the record is locked before it offers the edit.",
+      "expected_output": "Read the lock itself: `client.approvals.getRecordLock('expense', recordId)` (`GET /api/v1/approvals/records/expense/:recordId/lock`) answers `{ locked }` to anyone who can read the record, participant or not — the same judgement the lock hook applies to the write — so the page hides or disables Edit while `locked` is `true`. Not the request row: a non-participant is served none, and request content stays behind the object's `approvalsVisibleToReaders`, which is not switched on for this. A record the caller cannot read answers `404 RECORD_NOT_FOUND`, the same as a missing one.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["getRecordLock", "locked"],
+        "must_not_contain": ["lock_record", "approvalsVisibleToReaders: true"]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "When a `contractor` record is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set. Make the flow run as system so the grant always lands.",
+      "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a dedicated system subflow included. Emits the `record_change` flow with `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired the flow, recorded as the grant's `granted_by`; a user the gate would not let grant the set is refused, which is the rule, not a defect to route around.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "runAs: 'user'",
+          "sys_user_permission_set",
+          "PERMISSION_DENIED",
+          "delegated-administration",
+          "granted_by"
+        ],
+        "must_not_contain": [
+          "runAs: 'system'",
+          "sudo"
+        ]
+      }
     }
   ]
 }

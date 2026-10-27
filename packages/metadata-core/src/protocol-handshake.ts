@@ -84,8 +84,16 @@ export interface ProtocolIncompatibleDiagnostic {
    * lowest of its alternatives', whatever order they are written in.
    */
   targetMajor: number | null;
-  /** The command that resolves the refusal (wired end-to-end by ADR-0087 P2). */
-  migrateCommand: string;
+  /**
+   * The command that resolves the refusal (wired end-to-end by ADR-0087 P2),
+   * present only when there is metadata to move FORWARD: the declared floor
+   * major is at or below the runtime's, or is not determinable. A package
+   * whose floor major is ABOVE the runtime's is ahead of it, and
+   * `migrate meta` cannot help (#26480): the member is absent and `message`
+   * names the two remedies that apply, upgrading the runtime or installing a
+   * build of the package for this runtime's protocol.
+   */
+  migrateCommand?: string;
   message: string;
 }
 
@@ -107,7 +115,8 @@ const PROTOCOL_INCOMPATIBLE_BRAND = Symbol.for('objectstack.metadata-core.protoc
  *
  * The manifest is well-formed, but it declares a range this runtime can never
  * satisfy, and the remedy is to change the body
- * (`objectstack migrate meta --from N`). That is 422, the status
+ * (`objectstack migrate meta --from N`, or for a package ahead of the runtime,
+ * a build of it for this protocol). That is 422, the status
  * {@link SchemaValidationError} maps to in this same package. It is NOT 409:
  * the error-code ledger keeps 409 for refusals that come from environment
  * state, where resubmitting the same body could succeed later. With no
@@ -163,7 +172,10 @@ export function isProtocolIncompatibleError(e: unknown): e is ProtocolIncompatib
 export interface ProtocolIncompatibleAnswer {
   status: ProtocolIncompatibleError['status'];
   code: ProtocolIncompatibleError['code'];
-  /** The error's own prose, unchanged. Its `Run:` command is `details.migrateCommand`. */
+  /**
+   * The error's own prose, unchanged. Its `Run:` command is
+   * `details.migrateCommand`, when that member is present.
+   */
   message: string;
   details: Pick<
     ProtocolIncompatibleDiagnostic,
@@ -182,7 +194,8 @@ export interface ProtocolIncompatibleAnswer {
  * shared resolver instead, the five fields survive only inside the prose.
  *
  * `details` is a CLOSED shape: exactly these five members of
- * {@link ProtocolIncompatibleDiagnostic}, named one by one. ⛔ It is not a
+ * {@link ProtocolIncompatibleDiagnostic}, named one by one, with
+ * `migrateCommand` left out, never `undefined`, when the diagnostic has none. ⛔ It is not a
  * spread of the diagnostic. `packageId` and `runtimeMajor` stay out (the first
  * is the id the caller sent, the second is derivable from `protocolVersion`),
  * `code` is the answer's own member (an envelope puts it in `error.code`, never
@@ -202,7 +215,7 @@ export function protocolIncompatibleAnswer(err: ProtocolIncompatibleError): Prot
       rangeSource: d.rangeSource,
       protocolVersion: d.protocolVersion,
       targetMajor: d.targetMajor,
-      migrateCommand: d.migrateCommand,
+      ...(d.migrateCommand !== undefined ? { migrateCommand: d.migrateCommand } : {}),
     },
   };
 }
@@ -367,7 +380,8 @@ function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null
  * its floor as the upgrade guidance reads it (`'^10'` → 10, `'>=15 <18'` → 15).
  * A `||` union targets its LOWEST alternative's, in whatever order the
  * alternatives are written: `'^16 || ^17'` and `'^17 || ^16'` are one range and
- * get one `migrate meta --from`.
+ * get one `migrate meta --from`. A floor above the runtime's major means the
+ * package is ahead of the runtime, and gets no `migrate meta` at all.
  */
 function declaredFloorMajor(range: string): number | null {
   let lowest: number | null = null;
@@ -438,14 +452,23 @@ export function checkProtocolCompat(
 
   const packageId = manifest.id ?? '<unknown>';
   const targetMajor = declaredFloorMajor(declared.range);
-  const migrateCommand =
-    targetMajor !== null
+  // [#26480] `migrate meta` replays metadata forward from an OLDER major. A
+  // floor above this runtime's major is a package built for a newer protocol:
+  // nothing here can migrate it, so the refusal names what can apply instead.
+  const ahead = targetMajor !== null && targetMajor > runtimeMajor;
+  const migrateCommand = ahead
+    ? undefined
+    : targetMajor !== null
       ? `objectstack migrate meta --from ${targetMajor}`
       : `objectstack migrate meta`;
+  const remedy = ahead
+    ? `The package is built for a newer protocol than this runtime implements. ` +
+      `Upgrade the runtime to protocol ${targetMajor}, or install a build of '${packageId}' for protocol ${runtimeMajor}`
+    : `Run: ${migrateCommand}`;
   const message =
     `package '${packageId}' targets protocol ${declared.range} ` +
     `(${declared.source}) but this runtime is protocol ${protocolVersion}. ` +
-    `This is a major-version break. Run: ${migrateCommand}`;
+    `This is a major-version break. ${remedy}`;
 
   return {
     status: 'incompatible',
@@ -461,7 +484,7 @@ export function checkProtocolCompat(
       protocolVersion,
       runtimeMajor,
       targetMajor,
-      migrateCommand,
+      ...(migrateCommand !== undefined ? { migrateCommand } : {}),
       message,
     },
   };

@@ -67,6 +67,7 @@ import {
     refuseUngrantedActivationWrite,
     refuseUngrantedActivationAuthoring,
     readActivationBody,
+    activationWriteContext,
     POSITION_ACTIVATION_SUBJECT,
     PERMISSION_SET_ACTIVATION_SUBJECT,
     SHARING_RULE_ACTIVATION_SUBJECT,
@@ -456,12 +457,17 @@ export async function handleCatalogActivationWrite(
         // one, and NO package when it does not — a position or permission set
         // the environment authored through the metadata door. That item is
         // switched exactly like a packaged one: the resolver keys the row by
-        // type and name, never by package.
-        await new ObjectStoreMetadataActivationStore(ql, type).setActive({
-            name: entry.name,
-            ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
-            active: enabled,
-        });
+        // type and name, never by package. The write runs for the caller,
+        // elevated, so the row and its audit row name the administrator who
+        // switched the item (`activationWriteContext`).
+        await new ObjectStoreMetadataActivationStore(ql, type).setActive(
+            {
+                name: entry.name,
+                ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
+                active: enabled,
+            },
+            { context: activationWriteContext(context) },
+        );
     } catch (err: unknown) {
         // A failed write must never read as a successful flip, and its code and
         // status must say the same thing (ADR-0112). The one shared rule

@@ -17,7 +17,7 @@ import {
 import { renderChildren } from '../../lib/utils';
 
 ComponentRegistry.register('resizable', 
-  ({ schema, className, ...props }: { schema: ResizableSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: ResizableSchema; className?: string; [key: string]: unknown }) => {
     const panels = Array.isArray(schema.panels) ? schema.panels : [];
     return (
       <ResizablePanelGroup

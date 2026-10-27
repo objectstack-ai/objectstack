@@ -33,6 +33,15 @@
  *    downstream as an explicit author choice and defeat that seeding
  *    (`ObjectGantt.viewmode.test.tsx` pins the wiring half of the same
  *    semantics).
+ *
+ * ## ⏱ objectstack#25923 — `viewMode` is pinned on the `gantt` BLOCK now
+ *
+ * `ComponentPropsMap['object-gantt']` refuses `viewMode` written flat on the
+ * node, so the flat member left this interface and its mirror (it lives on
+ * `plugin-gantt`'s package-local hand-off type, derived from `GanttConfig`).
+ * The one published spelling is `gantt.viewMode`, and the three properties
+ * above are pinned there: the block member is the spec's own schema, so the
+ * derivation holds by construction rather than by a parallel declaration.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -40,12 +49,10 @@ import { GanttConfigSchema as SpecGanttConfigSchema } from '@objectstack/spec/ui
 import { ObjectGanttSchema } from '../zod/objectql.zod.js';
 import type { ObjectGanttSchema as ObjectGanttSchemaTS, GanttConfig } from '../objectql.js';
 
-const MINIMAL = {
-  type: 'object-gantt',
-  objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
-} as const;
+const MINIMAL = { type: 'object-gantt', objectName: 'task' } as const;
+const BLOCK = { startDateField: 'start', endDateField: 'end', titleField: 'name' } as const;
+const withViewMode = (viewMode?: unknown) =>
+  ({ ...MINIMAL, gantt: viewMode === undefined ? BLOCK : { ...BLOCK, viewMode } });
 
 /** Unwrap ZodOptional/description wrappers down to the inner enum schema. */
 function unwrap(schema: any): any {
@@ -54,13 +61,14 @@ function unwrap(schema: any): any {
   return cur;
 }
 
-describe('ObjectGanttSchema.viewMode — derived from the spec, by reference', () => {
-  it('declares the key', () => {
-    expect(Object.keys(ObjectGanttSchema.shape)).toContain('viewMode');
+describe('ObjectGanttSchema gantt.viewMode — derived from the spec, by reference', () => {
+  it('declares the key on the block, and no longer flat (objectstack#25923)', () => {
+    expect(Object.keys(unwrap(ObjectGanttSchema.shape.gantt).shape)).toContain('viewMode');
+    expect(Object.keys(ObjectGanttSchema.shape)).not.toContain('viewMode');
   });
 
   it('its inner enum IS the spec enum object (reference identity, not a copy)', () => {
-    const local = unwrap(ObjectGanttSchema.shape.viewMode);
+    const local = unwrap(unwrap(ObjectGanttSchema.shape.gantt).shape.viewMode);
     const spec = unwrap(SpecGanttConfigSchema.shape.viewMode);
     expect(local).toBe(spec);
   });
@@ -69,38 +77,43 @@ describe('ObjectGanttSchema.viewMode — derived from the spec, by reference', (
     const members: string[] = unwrap(SpecGanttConfigSchema.shape.viewMode).options;
     expect(members.length).toBeGreaterThan(0);
     for (const m of members) {
-      const result = ObjectGanttSchema.safeParse({ ...MINIMAL, viewMode: m });
+      const result = ObjectGanttSchema.safeParse(withViewMode(m));
       expect(result.success).toBe(true);
     }
   });
 
   it('refuses an off-enum value on the viewMode path (declared-key validation under passthrough)', () => {
-    const result = ObjectGanttSchema.safeParse({ ...MINIMAL, viewMode: 'hour' });
+    const result = ObjectGanttSchema.safeParse(withViewMode('hour'));
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path.join('.') === 'viewMode');
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'gantt.viewMode');
     expect(issue).toBeTruthy();
     expect(issue!.code).toBe('invalid_value');
   });
 
   it('materialises NO default — an omitted viewMode stays absent after parse', () => {
-    const result = ObjectGanttSchema.safeParse(MINIMAL);
+    const result = ObjectGanttSchema.safeParse(withViewMode());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect('viewMode' in result.data).toBe(false);
+    expect('viewMode' in (result.data.gantt ?? {})).toBe(false);
   });
 });
 
-describe('ObjectGanttSchema (TS) viewMode — mirrors the spec type exactly', () => {
+type BlockViewMode = NonNullable<ObjectGanttSchemaTS['gantt']>['viewMode'];
+
+describe('ObjectGanttSchema (TS) gantt.viewMode — mirrors the spec type exactly', () => {
   it('is mutually assignable with the spec member (compile-time pin)', () => {
     // Accepts everything the spec type allows…
-    const widen = (v: GanttConfig['viewMode']): ObjectGanttSchemaTS['viewMode'] => v;
+    const widen = (v: GanttConfig['viewMode']): BlockViewMode => v;
     // …and nothing more (assignable back).
-    const narrow = (v: ObjectGanttSchemaTS['viewMode']): GanttConfig['viewMode'] => v;
+    const narrow = (v: BlockViewMode): GanttConfig['viewMode'] => v;
     expect(widen('quarter')).toBe('quarter');
     expect(narrow(undefined)).toBeUndefined();
     // @ts-expect-error — a non-member must be refused at compile time.
-    const _rejected: ObjectGanttSchemaTS['viewMode'] = 'hour';
+    const _rejected: BlockViewMode = 'hour';
     expect(_rejected).toBe('hour');
+    // @ts-expect-error — `viewMode` is no flat member since objectstack#25923
+    const flat: ObjectGanttSchemaTS = { ...MINIMAL, viewMode: 'day' };
+    expect(flat.type).toBe('object-gantt');
   });
 });

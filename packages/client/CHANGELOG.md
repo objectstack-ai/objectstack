@@ -1,5 +1,96 @@
 # @objectstack/client
 
+## 18.2.0
+
+### Patch Changes
+
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 6a2866a: feat(plugin-approvals,rest,client): a record-anchored approval lock read, `{ locked }` for every caller who can read the record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A member who could read and edit a record but was not on its approval was offered an edit the server then refused with `409 RECORD_LOCKED`. The lock's only carrier was the request row's `lock_record`, and that row is rightly not served to a non-participant unless the object turns on `approvalsVisibleToReaders`. The lock now has a carrier of its own.
+  
+  - **`@objectstack/spec`.** `IApprovalService` gains the optional member `getRecordLock(object, recordId, context)`, which answers `{ locked: boolean }`, or `null` when the caller cannot read the record. No exported schema or type is added.
+  - **`@objectstack/plugin-approvals`.** `ApprovalService.getRecordLock` reads the record as the caller. A record the caller cannot read answers `null`, the same answer as an id that does not exist. A caller with no read on the object is refused for every id, whether it exists or not. `locked` is `true` while a pending request's node has `lockRecord` other than `false`. The lock judgement is now one function, `nodeConfigLocksRecord` (not exported from the package), and the record-lock hook, the request row's `lock_record` and the new read all call it. Request content stays behind `approvalsVisibleToReaders`: the answer carries no request id, node, approvers or `pending` flag.
+  - **`@objectstack/rest`.** New route `GET /api/v1/approvals/records/:object/:recordId/lock`. It answers `{ success: true, data: { locked } }`. A `null` answers `404 RECORD_NOT_FOUND` with one body, whether the record is unreadable or missing. A service without the member answers `501`. The route's closed query-parameter set is empty, so any query parameter is refused with a `400`. The route is ledgered as `sdk`.
+  - **`@objectstack/client`.** `client.approvals.getRecordLock(object, recordId)` calls that route.
+- Updated dependencies [733b3c8]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

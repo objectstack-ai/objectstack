@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -32,9 +32,6 @@ development** (plugins, services, kernel hook / event handlers,
 ---
 
 ## `defineStack()` — The Core Configuration
-
-`objectstack.config.ts` is the single entry point for every project.
-It calls `defineStack()` to declare all metadata.
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Minimal Example.
 
@@ -52,7 +49,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
-an approval is authored as a flow with Approval nodes, and record
+an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
 A phantom key like `roles:` or `policies:` is **not** a silent
 no-op — the top level refuses it and the stack fails to load:
@@ -78,11 +75,9 @@ keeping straight:
   scheduled migration, so a key that only warns today is expected to be
   refused later.
 
-For the exact Zod shape — including which keys are optional and what types
-the collection items take — read
-`node_modules/@objectstack/spec/src/stack.zod.ts`
-(`ObjectStackDefinitionSchema`). Each collection's item shape lives in
-its own domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
+Exact shape: `ObjectStackDefinitionSchema` in
+`node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
+schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.
 
@@ -348,7 +343,7 @@ CLI: `os serve` / `os dev`
      ├── DispatcherPlugin
      └── AIServicePlugin (cloud / EE only — reverse-mounted by a cloud host; absent in the open framework per cloud ADR-0025)
   5. Runtime.start() → init + start all plugins
-  6. Server listens on the resolved port (see "Ports & networking" in Part 3)
+  6. Server listens on the resolved port
 ```
 
 **Port resolution** (both `os dev` and `os start` → `os serve`):
@@ -445,6 +440,27 @@ definition: never write it by hand, and never hand-write a raw
 | `ignore` | Insert if not exists, skip otherwise |
 | `replace` | ⚠️ **Data loss** — drops and re-inserts all records |
 
+### Demo accounts — `demoStaff` vs `devLogins`
+
+A seed deals records to people (`owner_id: 'Legal Counsel 1'`) but cannot
+create one: a `sys_user` row written through `data` lands as a directory row
+with no account, so nobody can sign in as it. Declare the people in
+`demoStaff`; `os dev` creates each account after the development admin,
+signing in with the seed password (`--admin-password`, default `admin123`) —
+an entry carries no `password`:
+
+```typescript
+demoStaff: [{ name: 'Legal Counsel 1', email: 'counsel1@example.com',
+  position: 'legal_counsel', permissionSets: ['contracts_editor'] }],
+```
+
+`name` is what a seed reference resolves by; `position` / `permissionSets`
+name only what this stack declares (a platform set such as
+`admin_full_access` is refused); `os build` drops the key and a non-dev boot
+creates nothing. `devLogins` creates and grants nothing — it only prints an
+existing account on the boot banner. Pick `demoStaff` whenever the demo
+needs an account to exist.
+
 ---
 
 ## CLI Commands
@@ -455,12 +471,12 @@ Cheat sheet for the bootstrap loop:
 ```bash
 npx create-objectstack my-app
 cd my-app && npm install
-os dev --ui          # dev server + Console at /_console/ (auto-hops port if taken)
+os dev --ui          # dev server + Console at /_console/
 os validate          # metadata cross-reference checks
 os compile           # produce dist/ artifact
 os migrate plan      # preview metadata↔DB schema drift (additive sync never alters existing columns)
 os migrate apply     # reconcile DB to metadata (loosening only; --allow-destructive for drops/tightenings)
-PORT=8080 os start   # production — pin the port explicitly (see Ports & networking)
+PORT=8080 os start   # production — pin the port explicitly
 ```
 
 ---

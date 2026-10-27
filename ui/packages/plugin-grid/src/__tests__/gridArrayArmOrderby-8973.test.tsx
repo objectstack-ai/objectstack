@@ -280,7 +280,9 @@ describe('object-grid — the arms this card deliberately does NOT move', () => 
     // names in its own error messages and it survives a field name containing
     // a space. Both shapes are accepted by `normalizeSortNodes`.
     // Rooted at this file, never at the cwd — see `REPO_ROOT` above.
-    const src = readFileSync(join(REPO_ROOT, 'packages/plugin-grid/src/ObjectGrid.tsx'), 'utf8');
+    const src = ['ObjectGrid.tsx', 'objectGridRowLoad.ts']
+      .map((file) => readFileSync(join(REPO_ROOT, 'packages/plugin-grid/src', file), 'utf8'))
+      .join('\n');
 
     // Instrument check FIRST, in both directions: a probe that silently read
     // the wrong file (or an empty one) would make every `toContain` below a

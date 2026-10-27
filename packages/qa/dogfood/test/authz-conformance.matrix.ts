@@ -24,17 +24,20 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (81 rows
-// / 18 families) and `packages/runtime/src/route-ledger.ts` (105 rows / 23
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (18
+// families) and `packages/runtime/src/route-ledger.ts` (23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
 // absent from here.
 //
-// [#17111] Those four figures are DERIVED, not hand-typed. The companion test
+// [#17111] Those two figures are DERIVED, not hand-typed. The companion test
 // parses THIS sentence and asserts each number against a scoped read of the
-// ledger the sentence names, so a row, family or domain arriving or leaving
-// reds CI here instead of rotting into a false present tense. That pin is the
+// ledger the sentence names, so a family or domain arriving or leaving reds CI
+// here instead of rotting into a false present tense. ⛔ Row counts are not
+// stated, on purpose (ruling 6433001130): a route added inside an existing
+// family or domain changes nothing this claim depends on, and a stated row
+// count made every such route edit this file or red `main`. That pin is the
 // only reason the present tense above is safe to write at all; an undated
 // hand-typed count in this position is what #17111 was filed about, and what
 // #16307/#16954 were filed about before it.

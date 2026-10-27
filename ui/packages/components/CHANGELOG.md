@@ -1,5 +1,232 @@
 # @object-ui/components
 
+## 18.2.0
+
+### Minor Changes
+
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+
+### Patch Changes
+
+- 80f267d: refactor(ui)!: the renderer runs `@objectstack/sdui-parser`, and `@object-ui/sdui-parser` is deleted (#25712)
+  
+  Clause-②: yes (narrowing: a `type-mismatch` or `member-type-mismatch` the html-tier compile used to grade `warning` is now an `error`, so a page that carried one now refuses to compile instead of rendering with the value dropped)
+  Metadata-protocol: none
+  
+  The renderer and the save gate each ran their own copy of the SDUI parser. The previous change under this card made `@objectstack/sdui-parser` the one body. This change moves every `@object-ui/*` package, the console and the examples onto it, and deletes `ui/packages/sdui-parser`. There is no forwarding release of `@object-ui/sdui-parser`: it leaves the fixed version group, and the 18.1 line on npm is its last.
+  
+  - **Dependencies.** Each package above now depends on `@objectstack/sdui-parser` where it depended on `@object-ui/sdui-parser`. The console's `gen-manifest.ts` moved from the deleted package to `ui/apps/console/scripts/`.
+  - **Severity, the one narrowing.** The renderer's copy graded a `type-mismatch` as an `error` only beside an `enum` arm, and as a `warning` otherwise. The kept rule grades every `type-mismatch` and `member-type-mismatch` an `error`, which is what the save gate already did. So an html-tier page whose attribute does not fit the declared type now shows the compile-error block naming the prop, where it rendered the block with that value dropped. Example: `<list-view columns='["name","amount"]' />` (a string where `columns` is declared `array`). A page the save gate accepted is not affected, because the save gate already refused it.
+  - **Body-dialect messages.** The retired `body` child-list key's `unknown-prop` message now ends `("body" is its retired spelling)`, and its `not-a-container` message drops the `(objectui#6771)` parenthetical.
+  
+  Migration: none for a page the save gate accepted. A page that relied on the warning has a value the declared type does not take: write it in the declared type, for example `columns={['name','amount']}`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the renderer's grading of a value that does not fit its declared type, which the save gate already refused, so no page saved through the gate changes verdict. The repair of a page written around the gate is the author's per diagnostic, which no ledger entry can derive. The other categories are closed on facts: no ADR-0087 id is named or touched (not registered or already-registered); the deleted `@object-ui/sdui-parser` stays published on npm at 18.1 and is deprecated there by the maintainer after 18.2, and no package in this change is unpublished (not unpublished); nothing exported by a package above is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- 326a559: fix(components): a refused submit moves focus to the first invalid field and no longer toasts the field list over the dialog's title
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A submit refused by field validation, on the client or by the server's `fields[]`, raised an error toast naming the fields ("Please check the highlighted fields: First name, Last name, Company…") on top of the message already written under each input. The toast cut its list after three names, and in a record create / edit dialog it was drawn over the title row.
+  - **Now.** The form raises no toast for a refusal that every field carries inline. It scrolls to the first invalid field in form order and focuses it, and first activates that field's tab when it is on a background tab. The message under each input is the whole report.
+  - **A field with nothing drawn to carry it.** When the server rejects a field that has no drawn input, for example one on a tab or section a `visibleWhen` predicate hides, the form shows the form-level banner and its toast with the server's sentence, the same path a rejection naming an unknown field already takes. The hidden tab is not activated.
+  - **Earlier outcomes retire.** A refusal on the client now takes down the previous attempt's banner and toast, and a clear-on-hide notice, as an attempt that passes validation already did. Before, the refusal toast replaced them under the form's outcome id.
+  - **`validation.formInvalid` removed.** The toast's sentence ("Please check the highlighted fields: {{fields}}") had no other reader, so it leaves the form's default map and all ten `@object-ui/i18n` locale packs. `validation.formInvalidJoiner` stays: the clear-on-hide notice, the faulted-`visibleWhen` refusal and the option-group hint still join field labels with it. A host bundle that overrides `validation.formInvalid` can drop the entry; nothing reads it.
+- c86c823: fix(i18n): the last English literals on the data table, the chart view, react pages, the References sheet and Flow Runs read the user's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Data table.** The hover "open record" affordance and the inline-edit row's cancel and save buttons are titled from `table.openRecord`, `table.cancelChanges` and `table.saveRow`.
+  - **Chart view.** A chart view's loading fallback reads the existing `chart.loading` row.
+  - **`kind:'react'` pages.** The capability notice, the empty-source refusal, the loading line and the two error titles read `reactPage.*`. Sentences with an inline code chip are one translated string, so each language decides where the chip sits.
+  - **References sheet (Studio).** The table's column headers read `engine.edit.refsColFromType`, `refsColFromName` and `refsColPath` from the Studio's own table, in English and Chinese.
+  - **Flow Runs.** When the client lacks the method a panel calls (`meta.getItems`, `automation.execute`, `automation.listRuns`), the panel keeps the method's name and words the diagnostic at render from `console.developer.flowRuns.clientMethodUnavailable`. A message the call threw is still shown as it came.
+  
+  All ten locale packs carry the new rows. With no i18n provider every surface still renders its English.
+- 0e7be7e: fix(react,components,app-shell): a delegated admin's out-of-scope save shows the server's reason instead of the fixed no-permission line
+  
+  Clause-②: yes (widening: `@object-ui/react` exports a new `delegationScopeMessage`)
+  Metadata-protocol: none
+  
+  When a delegated administrator saved something outside their own scope, the server answered `403 DELEGATION_SCOPE_VIOLATION` with the boundary that refused it (a business unit outside the delegated subtree, a permission set not in the scope's allowlist, a target user outside the subtree). The console read every 403 as a plain denial, so the toast and the in-form banner said only "You don't have permission to save this record."
+  
+  - **`@object-ui/react`.** New `delegationScopeMessage(err)`: the server's reason, without the `[Security] ` machine prefix, when the error's code (`code` or `details.code`) is `DELEGATION_SCOPE_VIOLATION`; `null` for everything else. It is read before `isPermissionError`, which still answers true for any 403.
+  - **`@object-ui/components`.** The record form's toast and banner show that reason. A producer-marked `userMessage` still comes first.
+  - **`@object-ui/app-shell`.** A flow run whose write node met the same refusal (`innerRefusal`) shows the same reason.
+  
+  Every other denial is unchanged: `PERMISSION_DENIED`, `FORBIDDEN`, a bare 403 and a row-level-security refusal still show the fixed localized line and never the server's text.
+  
+  What to do: nothing.
+- 6ea429d: chore(ui): every ui package whose `test` script calls `vitest` now declares `vitest` as a devDependency, so `pnpm --filter @object-ui/PKG test` runs from the repository root
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The package `test` scripts run `vitest run --root ../.. packages/PKG/`. A pnpm script resolves its binaries from the package's own `node_modules/.bin` and the workspace root's, and vitest was installed only under `ui/node_modules/.bin`, so 24 of the 41 ui packages with a `test` script failed with `vitest: not found` from both the repository root and `ui/`. Each of them now declares `vitest: ^4.1.10`, the range `ui/package.json` and the other 17 packages already declare; the lockfile resolves every new entry to the snapshot those packages already use, so no package gains a copy. Nothing a consumer installs changes: only the `devDependencies` field of the published `package.json` moves.
+- 0489214: fix(components)!: the filter builder's row takes the spec rule's value, so the authored group a `filter-builder` node carries reaches the builder as it is
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/components/src/custom/filter-builder.tsx#FilterBuilderRow) A published runtime TypeScript interface of a React component with no metadata surface: no Zod schema, no spec declaration and no stored representation, so `objectstack migrate meta` has nothing to rewrite; the affected party is a TypeScript consumer, reached by its own compiler. -->
+  
+  **BREAKING** type-surface change, compile-time only. `FilterBuilderRow` is exported from `@object-ui/components`. What the builder accepts widens, and what a reader of `row.value` may assume narrows: the member is now optional and admits `null`. Nothing changes at runtime for a reader: the builder already passed both through.
+  
+  `FilterBuilderRow.value` is now `ViewFilterRule['value']` from `@objectstack/spec/ui`, taken by reference, plus the builder's own list member `(string | number | boolean)[]`. Before, it was the builder's own `string | number | boolean | (string | number | boolean)[]`, and it was required. Measured against the spec's rule, that refused two shapes an authored row takes:
+  
+  - **Value omitted.** The spec's value is optional, because a value-less operator (`is_null`, `is_empty`, …) carries none. The builder's was required, so the authored `FilterGroup` from `@object-ui/types` was not assignable to the builder's group. The member is optional now.
+  - **Value `null`.** The spec admits it; the builder's member did not. It does now.
+  
+  The operator vocabulary needed no change: every spec operator id is a builder id.
+  
+  Both cases also fix a field switch. Switching the field of a row with no value used to convert the absent value: on a number column it threw on `.trim()`, and on a text column it came back as the string `"undefined"`. A row with no value, or a `null` one, now keeps it through a field switch.
+  
+  The `filter-builder` renderer now hands the authored `value` and `fields` to the builder with no cast. It declares `value` on its props, because a host that binds the node forwards the group it holds.
+  
+  **Migration.** Code that reads `row.value` from a `FilterBuilderRow` (a host's `onChange` handler, for instance) handles `undefined` and `null` before using the value, or narrows first with an unset check (`value === undefined || value === null || value === ''`). Code that only writes rows needs no change.
+- 57ab06b: fix(components)!: the filter builder's list value holds the spec list's entries, so an `equals true` row switched to In is a rule the spec accepts
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/components/src/custom/filter-builder.tsx#FilterBuilderRow) A published runtime TypeScript interface of a React component with no metadata surface: no Zod schema, no spec declaration and no stored representation, so `objectstack migrate meta` has nothing to rewrite; the affected party is a TypeScript consumer, reached by its own compiler. -->
+  
+  **BREAKING** type-surface change, compile-time only. `FilterBuilderRow` is exported from `@object-ui/components`. Its `value` is now exactly `ViewFilterRule['value']` from `@objectstack/spec/ui`: the builder's own wider list member, which also admitted boolean entries, is gone. A writer that put a boolean into a list value no longer compiles.
+  
+  The defect it fixes: in the filter builder, a row `equals true` on a select column switched to In emitted `value: [true]`, and `ViewFilterRuleSchema` refuses a boolean list entry, so the builder produced a rule the spec rejects. A boolean carried into a list or a range is now written as its string spelling, so the same switch emits `["true"]`. That is the conversion the builder already made for a boolean that reaches a text column, and every column that offers a list operator is one. The option whose value is `"true"` stays ticked, because the list controls compare entries as strings.
+  
+  `UserFilters` (`@object-ui/plugin-list`) hands a lookup chip's selection to `LookupValuePicker` the same way. An authored `defaultValues` entry `true` on a lookup filter field used to reach the query beside a picked id as a boolean; it now arrives as `"true"`, still drawn as a chip the user can remove.
+  
+  **Migration.** Code that writes a list into a `FilterBuilderRow` value writes strings and numbers only. Write a boolean entry as its string spelling, the way the builder does, or keep the boolean as a scalar under `equals`. Code that reads `row.value` needs no change: a list it reads already holds only strings and numbers.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [80f267d]
+- Updated dependencies [8faba89]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [934810c]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [9a0af4e]
+- Updated dependencies [c8cb510]
+- Updated dependencies [c7aa9cd]
+- Updated dependencies [326a559]
+- Updated dependencies [054652b]
+- Updated dependencies [326a559]
+- Updated dependencies [4f7e041]
+- Updated dependencies [326a559]
+- Updated dependencies [7bbc0b9]
+- Updated dependencies [cc378e9]
+- Updated dependencies [c86c823]
+- Updated dependencies [ef025fe]
+- Updated dependencies [326a559]
+- Updated dependencies [1bbb7bf]
+- Updated dependencies [e843b5b]
+- Updated dependencies [4f48d2b]
+- Updated dependencies [0b76a1f]
+- Updated dependencies [9494dd8]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [f00cbe3]
+- Updated dependencies [9f16f16]
+- Updated dependencies [b3ed6c8]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [0e7be7e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [6ea429d]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [48a9d9d]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+  - @object-ui/react@18.2.0
+  - @objectstack/sdui-parser@18.2.0
+  - @object-ui/i18n@18.2.0
+  - @object-ui/types@18.2.0
+  - @object-ui/core@18.2.0
+  - @object-ui/react-runtime@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

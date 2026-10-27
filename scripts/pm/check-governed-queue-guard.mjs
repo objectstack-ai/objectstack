@@ -4479,7 +4479,7 @@ export async function selfTest() {
       question?.body ?? '(no toolchain question step)',
     );
     const gate = "steps.toolchain.outputs.needed != 'false'";
-    const installChain = stepBodies.filter((s) => /setup-pnpm|pnpm store path|actions\/cache@|pnpm install\b/.test(s.body));
+    const installChain = stepBodies.filter((s) => /setup-pnpm|pnpm store path|actions\/cache(?:\/restore)?@|pnpm install\b/.test(s.body));
     assert(
       '⭐ every-install-step-is-gated-on-NOT-FALSE-so-a-skipped-or-failed-question-installs',
       installChain.length === 4 && installChain.every((s) => s.body.includes(`if: ${gate}`)) && !/outputs\.needed == 'true'/.test(wf),

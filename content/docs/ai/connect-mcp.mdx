@@ -314,7 +314,12 @@ drive this MCP server. Same word, different layer.
 - **OAuth scopes narrow the toolset.** Tokens carry `data:read`,
   `data:write`, and `actions:execute` scopes — tools outside the granted
   scopes are not even registered for that session. API-key and session
-  callers get the full set, still permission-checked per call.
+  callers get the full set, still permission-checked per call. A fourth
+  scope, `metadata:write`, admits the **authoring tools** a hosted
+  deployment may inject (build and change the app's metadata as drafts a
+  person publishes in the UI); it is served only to a token that carries it,
+  never to an API key or a session, and every authoring call is still checked
+  against the caller's own metadata permission.
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.

@@ -2,33 +2,55 @@
 
 /**
  * The `@mention` recipient gate: a mention notification reaches a mentioned
- * user only when that user can READ the record the comment is about.
+ * user only when that user can READ both the comment it previews and the
+ * record it links.
  *
  * The notification carries the comment's body preview and a deep link to the
- * record, so it is a copy of what the comment thread shows. The thread itself
- * is readable exactly when its record is (`comment-access-hooks.ts`); the bell
- * copy must not reach anyone the thread would not: not a user of another
- * organization under a walled posture, and not a member the record's own
- * sharing excludes.
+ * record, so it is a copy of what the comment thread shows, and the bell copy
+ * must not reach anyone the thread would not show that comment to. That is two
+ * reads, and neither answers the other:
+ *
+ *  - the RECORD, which the deep link opens: not a user of another organization
+ *    under a walled posture, and not a member the record's own sharing
+ *    excludes;
+ *  - the COMMENT, whose text the preview is. Reading the record does not imply
+ *    reading its comments: a comment is readable when the reader's grants
+ *    admit the comment object itself — its object-level CRUD, tenant wall and
+ *    row scope — AND its record is readable (the thread read gate,
+ *    `installCommentReadVisibility` in `comment-access-hooks.ts`). The
+ *    recipient's own read of the comment, by id, asks all of that at once.
+ *
+ * The record is asked first so that the withheld reason names the narrower
+ * fact; where the thread read gate is installed the comment read alone would
+ * withhold the same recipients, and the record read keeps the deep link's own
+ * question answered on an engine that has no seam to install that gate on.
  *
  * ⛔ Nothing here derives readability. Each mentioned user's envelope is built
  * by the resolver every request is built by (`resolveUserAuthzGrants`), their
  * organization claim is vetted by the rule a session's claim is vetted by
- * (`vetOrganizationClaim`), and the read is asked of the one evaluator every
- * parent-derived read gate asks (`resolveReadableParentIds`) — so the record's
- * tenant wall, OWD/sharing, RLS and object-level CRUD decide, exactly as they
- * decide when that user opens the deep link.
+ * (`vetOrganizationClaim`), and both reads are asked of the one evaluator every
+ * parent-derived read gate asks (`resolveReadableParentIds`) — the evaluator
+ * the comment-reaction create door asks of a comment, too. So the record's
+ * tenant wall, OWD/sharing, RLS and object-level CRUD decide the deep link,
+ * and the comment object's, with the thread gate, decide the preview, exactly
+ * as they decide when that user opens the record or lists its comments.
+ *
+ * The comment is read from inside the author's write: the mention writer runs
+ * on the comment's `afterInsert`, where the engine binds every read to the
+ * write's own unit of work. A read that cannot see the row withholds — the
+ * fail-closed direction.
  *
  * ⛔ Not a row filter on `sys_notification`: a recipient reads their OWN
  * notification, so no read-side rule on the inbox can tell a leaked copy from
- * a legitimate one. The decision belongs at the write, where the record is
- * known.
+ * a legitimate one. The decision belongs at the write, where the record and
+ * the comment are known.
  *
  * Fail-closed throughout: a mention that names no user, a comment with no
- * record behind it, a record that cannot be found, and a grant resolution
- * that fails all withhold the notification. Each withheld recipient is logged
- * once at `warn` with the user id (when there is one) and the reason — never
- * the comment text.
+ * record behind it, a comment with no id to read it by, a record that cannot
+ * be found, a grant resolution that fails, and a recipient whose own read of
+ * the record or of the comment does not return it all withhold the
+ * notification. Each withheld recipient is logged once at `warn` with the user
+ * id (when there is one) and the reason — never the comment text.
  */
 
 import {
@@ -38,7 +60,7 @@ import {
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 
-import { parseCommentThreadId } from './comment-access-hooks.js';
+import { COMMENT_OBJECT, parseCommentThreadId } from './comment-access-hooks.js';
 
 /** The engine reads this gate makes — system-context lookups and the caller-scoped probe. */
 export interface MentionRecipientGateEngine {
@@ -63,9 +85,11 @@ export type MentionWithheldReason =
   | 'not_a_user'
   | 'unknown_email'
   | 'no_source_record'
+  | 'no_comment_id'
   | 'source_record_missing'
   | 'grants_unavailable'
-  | 'cannot_read_source';
+  | 'cannot_read_source'
+  | 'cannot_read_thread';
 
 export interface MentionGateInput {
   /** The raw `mentions` entries, already parsed from the stored JSON. */
@@ -76,7 +100,12 @@ export interface MentionGateInput {
   actorId?: string | null;
   /** The organization the comment was written in — the fallback when the record carries none. */
   organizationId?: string | null;
-  /** For the withheld-recipient log line. */
+  /**
+   * The comment's id: each recipient's own read of the comment is asked by it,
+   * and the withheld-recipient log line names it. Absent → nobody is notified
+   * (`no_comment_id`): a comment that cannot be read back cannot be shown to
+   * be readable.
+   */
   commentId?: string | null;
 }
 
@@ -87,7 +116,8 @@ const NON_USER_PREFIXES = ['role:', 'team:', 'owner_of:'];
 
 /**
  * The mentioned users who may be notified about this comment: each resolved
- * to a user id, minus the author, minus everyone who cannot read the record.
+ * to a user id, minus the author, minus everyone who cannot read the record,
+ * minus everyone who cannot read the comment itself.
  */
 export async function admitMentionRecipients(
   deps: MentionRecipientGateDeps,
@@ -122,6 +152,11 @@ export async function admitMentionRecipients(
     for (const uid of candidates) withhold('no_source_record', uid);
     return [];
   }
+  const commentId = typeof input.commentId === 'string' && input.commentId ? input.commentId : undefined;
+  if (!commentId) {
+    for (const uid of candidates) withhold('no_comment_id', uid);
+    return [];
+  }
 
   let recordOrganization: string | undefined;
   try {
@@ -150,22 +185,35 @@ export async function admitMentionRecipients(
   const posture = deps.getTenancyPosture?.();
   const admitted: string[] = [];
   for (const uid of candidates) {
-    let readable = false;
+    let verdict: 'admitted' | MentionWithheldReason;
     try {
       const context = await contextForMentionedUser(deps.engine, uid, claimedOrganization, posture);
-      readable = !!(
-        await resolveReadableParentIds(deps.engine, context, new Map([[target.object, new Set([target.recordId])]]))
-      )
-        .get(target.object)
-        ?.has(target.recordId);
+      if (!(await readableIn(deps.engine, context, target.object, target.recordId))) verdict = 'cannot_read_source';
+      else if (!(await readableIn(deps.engine, context, COMMENT_OBJECT, commentId))) verdict = 'cannot_read_thread';
+      else verdict = 'admitted';
     } catch {
       withhold('grants_unavailable', uid);
       continue;
     }
-    if (readable) admitted.push(uid);
-    else withhold('cannot_read_source', uid);
+    if (verdict === 'admitted') admitted.push(uid);
+    else withhold(verdict, uid);
   }
   return admitted;
+}
+
+/**
+ * Does `context`'s own read of `object` / `id` return the row? Asked of
+ * {@link resolveReadableParentIds}, the one readability evaluator — a refused
+ * or failing read is "not readable".
+ */
+async function readableIn(
+  engine: MentionRecipientGateEngine,
+  context: Record<string, unknown>,
+  object: string,
+  id: string,
+): Promise<boolean> {
+  const readable = await resolveReadableParentIds(engine, context, new Map([[object, new Set([id])]]));
+  return readable.get(object)?.has(id) === true;
 }
 
 /**

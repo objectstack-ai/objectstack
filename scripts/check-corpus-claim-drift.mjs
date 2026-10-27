@@ -536,12 +536,78 @@ function grewMessage(file, rule, allowed, count) {
   );
 }
 
-/** The improvement verdict. Ratcheting DOWN is squarely the author's job. */
+/**
+ * The improvement REPORT. Ratcheting DOWN is squarely the author's job, and since
+ * #26444 it is not a failure either: a decrease passes and this row is printed
+ * beside the verdict, naming the headroom the stale count leaves until `--update`.
+ */
 function improvedMessage(file, rule, allowed, count) {
   return (
     `${file}: claim sites beside ${rule.subject} improved ${allowed} → ${count} (rule `
-    + `"${rule.id}") — ratchet DOWN: run \`node scripts/check-corpus-claim-drift.mjs --update\` `
-    + 'and commit the baseline.'
+    + `"${rule.id}"). Passing; until \`node scripts/check-corpus-claim-drift.mjs --update\` `
+    + `records it, ${allowed} stays this file's ceiling.`
+  );
+}
+
+/**
+ * The comparison, as a pure function of the ledger and the scan, so the
+ * self-test can drive it in both directions (#26444). ONE-SIDED: a NEW claim site
+ * or a grown count is an error; a fallen count (a vanished file included) is a
+ * REPORT that leaves the verdict green. A ledger row naming a rule VOCABULARY no
+ * longer holds stays an error — that is an unfinished retirement, not a decrease.
+ */
+function ratchetVerdict(baseline, current, byId) {
+  const errors = [];
+  const down = [];
+  for (const [file, perRule] of Object.entries(current)) {
+    for (const [ruleId, n] of Object.entries(perRule)) {
+      const allowed = baseline[file]?.[ruleId];
+      const rule = byId.get(ruleId);
+      if (allowed === undefined) errors.push(newClaimMessage(file, rule, n));
+      else if (n > allowed) errors.push(grewMessage(file, rule, allowed, n));
+    }
+  }
+  /* The improvement direction. A ledger that only ever shrinks has to be TOLD
+   * when the tree shrank, or the debt it reports is the debt of some earlier
+   * tree — so it is reported on every run, and it passes. */
+  for (const [file, perRule] of Object.entries(baseline)) {
+    for (const [ruleId, allowed] of Object.entries(perRule)) {
+      const rule = byId.get(ruleId);
+      if (!rule) {
+        errors.push(`${BASELINE_PATH}: entry ${file} names rule "${ruleId}", which VOCABULARY no `
+          + 'longer holds. Retiring a row is a deliberate edit; finish it by running '
+          + '`node scripts/check-corpus-claim-drift.mjs --update` and committing the baseline.');
+        continue;
+      }
+      const n = current[file]?.[ruleId] ?? 0;
+      if (n < allowed) down.push(improvedMessage(file, rule, allowed, n));
+    }
+  }
+  return { errors, down };
+}
+
+/**
+ * The dead-scan refusal the one-sided ratchet needs (#26444): baselined files
+ * still ON DISK that this run did not read, sorted. While the ratchet was
+ * two-sided, a scan that lost part of its population dropped those files out of
+ * `current` and the DOWN direction redded; now that drop would be a passing
+ * report. A deleted page is not on disk and a swept page was read, so both
+ * still pass. (A scan that read NOTHING is also caught by the unreachable-row
+ * refusal; this one covers the partial case it cannot see.) `exists` is
+ * injected for the self-test.
+ */
+function unreadBaselined(baseline, read, exists = existsSync) {
+  return Object.keys(baseline).filter((file) => exists(file) && !read.has(file)).sort();
+}
+
+function unreadBaselinedMessage(unread) {
+  return (
+    `check-corpus-claim-drift: ${unread.length} baselined file(s) are still on disk but this run `
+    + `did not read them — ${unread.join(', ')}. REFUSING to reach a verdict. The scan lost part `
+    + 'of its population (a root emptied, a skip widened, or the walk broke), and since the '
+    + 'ratchet went one-sided (#26444) a file that drops out of the scan would otherwise pass as '
+    + 'a decrease. If the narrowing is deliberate, '
+    + '`node scripts/check-corpus-claim-drift.mjs --update` records it.'
   );
 }
 
@@ -657,11 +723,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A missing ROOT is REFUSED, per root (#9932)': 4,
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
   'At the PROGRAM level': 10,
+  'The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 7,
+  'A baselined file the scan did not READ is REFUSED (#26444)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1232,6 +1300,49 @@ function selfTest() {
   expect('every verdict TEACHES the truth rather than only naming a banned spelling',
     [newClaim, grew].every((m) => m.includes('HAS A VALUE') && m.includes(RULE.refs)));
 
+  // ── The ratchet is ONE-SIDED: a decrease passes and is reported (#26444) ──
+  battery('The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)');
+  {
+    const byId = new Map([[RULE.id, RULE]]);
+    const ledger = { 'content/docs/a.mdx': { [RULE.id]: 2 }, 'content/docs/b.mdx': { [RULE.id]: 1 } };
+    const same = ratchetVerdict(ledger, structuredClone(ledger), byId);
+    expect('#26444 — an unchanged tree has no error and no report',
+      same.errors.length === 0 && same.down.length === 0);
+    const fell = ratchetVerdict(ledger, { 'content/docs/a.mdx': { [RULE.id]: 1 }, 'content/docs/b.mdx': { [RULE.id]: 1 } }, byId);
+    expect('#26444 — a fallen count PASSES (no error) and is reported once',
+      fell.errors.length === 0 && fell.down.length === 1);
+    const gone = ratchetVerdict(ledger, { 'content/docs/a.mdx': { [RULE.id]: 2 } }, byId);
+    expect('#26444 — a vanished baselined file PASSES (no error) and is reported once',
+      gone.errors.length === 0 && gone.down.length === 1);
+    const grew = ratchetVerdict(ledger, { 'content/docs/a.mdx': { [RULE.id]: 3 }, 'content/docs/b.mdx': { [RULE.id]: 1 } }, byId);
+    expect('#26444 — a grown count still FAILS', grew.errors.length === 1 && grew.down.length === 0);
+    const fresh = ratchetVerdict(ledger, { ...structuredClone(ledger), 'content/docs/c.mdx': { [RULE.id]: 1 } }, byId);
+    expect('#26444 — a NEW claim site still FAILS', fresh.errors.length === 1);
+    const retired = ratchetVerdict({ 'content/docs/a.mdx': { 'no-such-row': 1 } }, {}, byId);
+    expect('#26444 — a ledger row naming a retired rule is still an ERROR, not a decrease',
+      retired.errors.length === 1 && retired.down.length === 0);
+    expect('#26444 — the improved report names the old count as the ceiling it leaves until --update',
+      improvedMessage('content/docs/a.mdx', RULE, 4, 2).includes('4 stays'));
+  }
+
+  // ── A baselined file the scan did not READ is REFUSED (#26444) ──────────
+  battery('A baselined file the scan did not READ is REFUSED (#26444)');
+  {
+    const ledger = { 'content/docs/a.mdx': { [RULE.id]: 1 }, 'skills/b.md': { [RULE.id]: 1 } };
+    const onDisk = () => true;
+    expect('#26444 — an EMPTY population with every ledgered page still on disk refuses every one',
+      unreadBaselined(ledger, new Set(), onDisk).length === 2);
+    expect('#26444 — a partial scan refuses only the pages it did not read',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), onDisk).join(',') === 'skills/b.md');
+    expect('#26444 — a DELETED page is not refused (it is a decrease, and decreases pass)',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), (f) => f !== 'skills/b.md').length === 0);
+    expect('#26444 — a page that was read is not refused, whatever its count now',
+      unreadBaselined(ledger, new Set(Object.keys(ledger)), onDisk).length === 0);
+    expect('#26444 — the refusal names the unread page and the --update remedy',
+      unreadBaselinedMessage(['skills/b.md']).includes('skills/b.md')
+        && unreadBaselinedMessage(['skills/b.md']).includes('--update'));
+  }
+
   // ── A missing ROOT is REFUSED, per root (#9932) ───────────────────────────
   battery('A missing ROOT is REFUSED, per root (#9932)');
   const PRESENT_ROOT = 'alpha/one';
@@ -1545,30 +1656,17 @@ const baseline = existsSync(BASELINE_PATH)
   : {};
 const byId = new Map(VOCABULARY.map((r) => [r.id, r]));
 
-const errors = [];
-for (const [file, perRule] of Object.entries(current)) {
-  for (const [ruleId, n] of Object.entries(perRule)) {
-    const allowed = baseline[file]?.[ruleId];
-    const rule = byId.get(ruleId);
-    if (allowed === undefined) errors.push(newClaimMessage(file, rule, n));
-    else if (n > allowed) errors.push(grewMessage(file, rule, allowed, n));
-  }
+const unread = unreadBaselined(baseline, new Set(corpus.map((f) => f.rel)));
+if (unread.length) {
+  console.error(unreadBaselinedMessage(unread));
+  process.exit(1);
 }
-/* The improvement direction. A ledger that only ever shrinks has to be TOLD
- * when the tree shrank, or the debt it reports is the debt of some earlier
- * tree. */
-for (const [file, perRule] of Object.entries(baseline)) {
-  for (const [ruleId, allowed] of Object.entries(perRule)) {
-    const rule = byId.get(ruleId);
-    if (!rule) {
-      errors.push(`${BASELINE_PATH}: entry ${file} names rule "${ruleId}", which VOCABULARY no `
-        + 'longer holds. Retiring a row is a deliberate edit; finish it by running '
-        + '`node scripts/check-corpus-claim-drift.mjs --update` and committing the baseline.');
-      continue;
-    }
-    const n = current[file]?.[ruleId] ?? 0;
-    if (n < allowed) errors.push(improvedMessage(file, rule, allowed, n));
-  }
+
+const { errors, down } = ratchetVerdict(baseline, current, byId);
+if (down.length) {
+  console.log(`check-corpus-claim-drift: ${down.length} baselined count(s) improved (passing, reported)\n`);
+  for (const d of down) console.log(`  • ${d}`);
+  console.log('');
 }
 
 if (errors.length) {

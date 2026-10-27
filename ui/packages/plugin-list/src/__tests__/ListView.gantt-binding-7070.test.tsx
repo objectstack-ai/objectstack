@@ -105,8 +105,18 @@ async function ganttProps(schema: Record<string, any>) {
     </SchemaRendererProvider>,
   );
   await waitFor(() => expect(captured.length).toBeGreaterThan(0));
-  return captured[captured.length - 1].schema;
+  // objectstack#25923 — the binding goes out as the node's own `gantt` block,
+  // never flat (the spec refuses every `GanttConfig` key flat on
+  // `object-gantt`). The rows below read the block; this guard reds if a flat
+  // spelling comes back.
+  const node = captured[captured.length - 1].schema;
+  for (const key of GANTT_FLAT_PROBES) expect(node, `flat ${key} on the node`).not.toHaveProperty(key);
+  return node.gantt ?? {};
 }
+
+const GANTT_FLAT_PROBES = ['startDateField', 'endDateField', 'titleField', 'progressField', 'dependenciesField', 'colorField'] as const;
+/** The declared axis. The block is handed on only once BOTH dates are declared (objectstack#25923). */
+const AXIS = { startDateField: 'start_date', endDateField: 'end_date' } as const;
 
 const queryViewOption = (name: string) =>
   screen.queryByRole('tab', { name }) ?? screen.queryByRole('button', { name });
@@ -154,12 +164,24 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     //
     // The DECLARED half of the class predicate is asserted in the same breath:
     // `progressField` still arrives verbatim.
-    const props = await ganttProps({ ...BASE, gantt: { progressField: 'pct' } });
-    expect(props.startDateField).toBeUndefined();
-    expect(props.endDateField).toBeUndefined();
+    //
+    // objectstack#25923: the block is handed on only with its declared axis, so
+    // the axis is declared here; the axis-less case is the row below.
+    const props = await ganttProps({ ...BASE, gantt: { ...AXIS, progressField: 'pct' } });
+    expect(props.startDateField).toBe('start_date');
+    expect(props.endDateField).toBe('end_date');
     expect(props.progressField).toBe('pct');
     expect(props.dependenciesField).toBeUndefined();
     expect('dependenciesField' in props).toBe(false);
+  });
+
+  it('hands NO block when only non-axis keys are declared — no date binding is invented (objectstack#25923)', async () => {
+    // The renderer's flat branch asked for both dates before it drew; the block
+    // is held back under the same condition, so this view still reaches the
+    // renderer's "configuration required" screen rather than a refusal of a
+    // half-made block.
+    const node = await ganttProps({ ...BASE, gantt: { progressField: 'pct' } });
+    expect(node).toEqual({});
   });
 
   it('OMITS both non-axis keys for a gantt view that declares no config (objectui#7499)', async () => {
@@ -180,7 +202,7 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     // The control that gives the two assertions above their meaning: this
     // harness CAN see a `dependenciesField` on the captured props, so reading
     // `undefined` there is a measurement and not a spy that never receives one.
-    const props = await ganttProps({ ...BASE, gantt: { dependenciesField: 'preds', progressField: 'pct' } });
+    const props = await ganttProps({ ...BASE, gantt: { ...AXIS, dependenciesField: 'preds', progressField: 'pct' } });
     expect(props.dependenciesField).toBe('preds');
     expect(props.progressField).toBe('pct');
   });
@@ -190,7 +212,7 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     // legs. Deleting them must not cost the `options.gantt` leg its pass-through.
     const props = await ganttProps({
       ...BASE,
-      options: { gantt: { progressField: 'percent_done', dependenciesField: 'depends_on' } },
+      options: { gantt: { ...AXIS, progressField: 'percent_done', dependenciesField: 'depends_on' } },
     });
     expect(props.progressField).toBe('percent_done');
     expect(props.dependenciesField).toBe('depends_on');
@@ -218,10 +240,17 @@ describe('ListView gantt branch — only ever restates a DECLARED binding (objec
     expect(props.colorField).toBe('status');
   });
 
-  it('CONTROL: a partially declared axis keeps its declared half and only that', async () => {
-    const props = await ganttProps({ ...BASE, gantt: { startDateField: 'start_date' } });
-    expect(props.startDateField).toBe('start_date');
-    expect(props.endDateField).toBeUndefined();
+  it('CONTROL: a partially declared axis hands no block, and the full axis floors `titleField` (objectstack#25923)', async () => {
+    // Before objectstack#25923 the declared half went out flat, and the
+    // renderer's flat branch, needing both dates, refused it. The block is held
+    // back under that same condition, so the outcome on screen is unchanged.
+    expect(await ganttProps({ ...BASE, gantt: { startDateField: 'start_date' } })).toEqual({});
+    cleanup();
+    captured = [];
+    // …and with both dates the block carries the flat branch's own `'name'`
+    // floor, which the spec's block (requiring `titleField`) cannot leave out.
+    const props = await ganttProps({ ...BASE, gantt: { ...AXIS } });
+    expect(props).toEqual({ ...AXIS, titleField: 'name' });
   });
 });
 

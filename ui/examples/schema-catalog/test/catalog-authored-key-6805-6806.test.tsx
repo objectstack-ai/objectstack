@@ -117,6 +117,7 @@ import { render } from '@testing-library/react';
 import '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { allExamples } from '../src/index.js';
+import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
 type Json = Record<string, unknown>;
 
@@ -150,7 +151,8 @@ const RENDERERS = [
     readKeys: ['type', 'orientation', 'height', 'width', 'className', 'children'],
     contentKey: 'children',
     issue: 'objectui#6805',
-    minNodes: 7,
+    // About two thirds of the 7 measured on objectstack 6a7c0fe3.
+    minNodes: 5,
   },
   {
     type: 'badge',
@@ -161,7 +163,8 @@ const RENDERERS = [
     readKeys: ['type', 'label', 'variant', 'className', 'body'],
     contentKey: 'label',
     issue: 'objectui#6806',
-    minNodes: 40,
+    // About two thirds of the 40 measured on objectstack 6a7c0fe3.
+    minNodes: 27,
   },
 ] as const;
 
@@ -256,8 +259,9 @@ const nodesOf = (type: string): Located[] =>
 describe('catalog corpus: every node authors keys ITS renderer reads (objectui#6805 + objectui#6806)', () => {
   it('the walk is not vacuous — a broken collector would pass every case below', () => {
     // Floors, not equalities: catalog growth must not fail this file, only a
-    // walk that stopped working.
-    expect(entries.length).toBeGreaterThanOrEqual(431);
+    // walk that stopped working — and at about two thirds of the measured
+    // counts, so deleting an entry does not fail it either.
+    expect(entries.length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
     for (const renderer of RENDERERS) {
       expect(nodesOf(renderer.type).length).toBeGreaterThanOrEqual(renderer.minNodes);
     }

@@ -26,7 +26,14 @@ import {
   LazyIcon,
 } from '@object-ui/components';
 import { ChevronDown, ChevronRight, Copy, Check, Eye, EyeOff, Pencil } from 'lucide-react';
-import { SchemaRenderer, toRenderableSchema, useInlineEdit, usePrintPage, usePredicateScope } from '@object-ui/react';
+import {
+  SchemaRenderer,
+  toRenderableSchema,
+  useInlineEdit,
+  usePrintPage,
+  usePredicateScope,
+  useRecordPagePreferences,
+} from '@object-ui/react';
 import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -194,7 +201,27 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const isCollapsed = !isPrintPage && collapsedState;
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState<number | undefined>(undefined);
-  const [showEmptyOverride, setShowEmptyOverride] = React.useState(false);
+  // objectstack#25883 — "Show N empty fields" is the reader's choice for the
+  // whole object, not for this one section: under a host's record-page
+  // preference store it is read from, and written to, that store's entry for
+  // `objectName`, so it holds for every section of the page, for the next
+  // record of the object and after a reload. With no store (no host, no
+  // signed-in user) or no object name, it stays this section's own state,
+  // forgotten on unmount, as before.
+  const recordPagePreferences = useRecordPagePreferences();
+  const [localShowEmpty, setLocalShowEmpty] = React.useState(false);
+  const rememberedShowEmpty =
+    recordPagePreferences && objectName
+      ? {
+          shown: recordPagePreferences.get(objectName).showEmptyFields === true,
+          set: (shown: boolean) => recordPagePreferences.update(objectName, { showEmptyFields: shown }),
+        }
+      : null;
+  const showEmptyOverride = rememberedShowEmpty ? rememberedShowEmpty.shown : localShowEmpty;
+  const toggleShowEmpty = () => {
+    if (rememberedShowEmpty) rememberedShowEmpty.set(!rememberedShowEmpty.shown);
+    else setLocalShowEmpty((s) => !s);
+  };
   const { t } = useDetailTranslation();
   // The word a read-only boolean row is drawn with (objectui#12933): the same
   // `common.yes` / `common.no` pair every read-only boolean face reads
@@ -390,8 +417,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const foldAllEmptySection =
     allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
 
+  // The authored all-empty hide is not the reader's to undo: it applies
+  // whatever the reader's "show empty fields" choice is, now that the choice is
+  // one per object and reaches sections that never drew the toggle
+  // (objectstack#25883).
   const hideEmptyEffective =
-    !showEmptyOverride && (shouldAutoHideEmpty || hideAllEmptySection || foldAllEmptySection);
+    hideAllEmptySection || (!showEmptyOverride && (shouldAutoHideEmpty || foldAllEmptySection));
 
   // Filter out empty fields when the auto-hide heuristic kicked in, when an
   // all-empty section is folded, or when one is hiding itself (its early
@@ -747,7 +778,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    // A real Tab stop, so it is revealed on keyboard focus as
+                    // well as on hover — itself, or anything in its field
+                    // (objectstack#25883). The Button's own ring marks it.
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
                     aria-label={t('detail.editInlineHint')}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -769,7 +803,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    // A real Tab stop, so it is revealed on keyboard focus as
+                    // well as on hover, like the pencil above (objectstack#26329).
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
                     // objectui#12625 — an icon-only button; the tooltip is
                     // closed at rest, so without this it has no name.
                     aria-label={t('detail.copyToClipboard')}
@@ -865,7 +901,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setShowEmptyOverride((s) => !s)}
+            onClick={toggleShowEmpty}
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             {showEmptyOverride ? (

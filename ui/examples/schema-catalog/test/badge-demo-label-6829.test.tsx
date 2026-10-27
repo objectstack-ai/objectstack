@@ -119,6 +119,7 @@ import { render } from '@testing-library/react';
 import '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { allExamples, getExample } from '../src/index.js';
+import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
 type Json = Record<string, unknown>;
 
@@ -245,10 +246,12 @@ const containers = entries.flatMap((entry) =>
 describe('catalog corpus: every `badge` node draws its authored `label` (objectui#6829 arm A)', () => {
   it('the walk is not vacuous — a broken collector would pass every case below', () => {
     // Floors, not equalities: catalog growth must not fail this file, only a
-    // walk that stopped working.
-    expect(entries.length).toBeGreaterThanOrEqual(431);
-    expect(badges.length).toBeGreaterThanOrEqual(40);
-    expect(new Set(badges.map((b) => b.where.split('/')[0])).size).toBeGreaterThanOrEqual(12);
+    // walk that stopped working. About two thirds of the counts measured on
+    // objectstack 6a7c0fe3 (40 badges in 12 categories), so deleting an entry
+    // does not fail it either.
+    expect(entries.length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
+    expect(badges.length).toBeGreaterThanOrEqual(27);
+    expect(new Set(badges.map((b) => b.where.split('/')[0])).size).toBeGreaterThanOrEqual(8);
     // …and it sees the seven nodes this card is about, by location.
     expect(badges.map((b) => b.where)).toEqual(expect.arrayContaining(REAUTHORED_NODES));
   });

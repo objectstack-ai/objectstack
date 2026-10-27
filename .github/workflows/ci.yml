@@ -546,30 +546,11 @@ jobs:
           # the PR's merge base, the queue's base_sha or the push's before sha.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
       # Restore only: the `test` shards save this key.
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          save-store: 'false'
 
       # Its own self-test, where it runs (check:self-test-wired). Milliseconds.
       # A red here fails this job before it publishes a plan, so the matrix
@@ -794,26 +775,8 @@ jobs:
           # Full history so `turbo --affected` can diff against the PR base.
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Restore-only on PRs: PR-side saves (~5 turbo entries per push) churned
       # the repo's 10 GB Actions cache pool and evicted the main-branch seeds —
@@ -833,9 +796,6 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # PRs and merge-queue builds: only test packages affected by the diff —
       # against the PR base on pull_request, against the group's own
@@ -2077,26 +2037,8 @@ jobs:
           docker exec ${{ job.services.mysql.id }} mysql -uroot -proot -e "SET GLOBAL time_zone = '+08:00'"
           docker exec ${{ job.services.mysql.id }} mysql -uroot -proot -N -e "SELECT @@global.time_zone"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Restore-only (same policy as every other job); falls back to the Build
       # Core namespace because that job builds every package (a superset of the
@@ -2112,9 +2054,6 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.job }}-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Turbo remote cache (#22077), on all four of this job's build steps: the
       # four TURBO_* lines are Build Core's, verbatim, and Build Core's "Turbo
@@ -2376,26 +2315,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Shard-scoped key: the turbo test hash differs per shard (the task-declared
       # env `OS_TEST_SHARD` is part of the task hash). Restore-only on PRs — see the Restore
@@ -2413,9 +2334,6 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # ⛔ THE DOGFOOD PACKAGE'S DEPENDENCY CLOSURE IS BUILT HERE, IN A RUN
       # THAT CARRIES NO PASSTHROUGH. (#20820: the next step no longer needs this
@@ -2612,26 +2530,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Restore-only, with no save step at all: the
       # job's only build is the CLI closure, and the build-core fallbacks are
@@ -2647,9 +2547,6 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.job }}-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Build the CLI plus BOTH example apps' full dependency closures (the
       # `pkg...` filter form). When this pass rode dogfood shard 1 the whole
@@ -2820,26 +2717,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       # Restore-only on PRs: PR-side saves (~5 turbo entries per push) churned
       # the repo's 10 GB Actions cache pool and evicted the main-branch seeds —
@@ -2854,9 +2733,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # 67 package build commands end with `node …/scripts/check-dts-emitted.mjs`,
       # so the `pnpm build` below runs that checker on every package it builds,
@@ -3127,27 +3003,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
-      
       - name: Setup Next.js cache
         uses: actions/cache@v6
         with:
@@ -3155,9 +3013,6 @@ jobs:
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('apps/docs/**.[jt]s', 'apps/docs/**.[jt]sx', 'content/**/*.mdx') }}
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # ── This gate builds what SHIPS, not a hand-copied lookalike (#10642) ──
       #
@@ -3285,8 +3140,11 @@ jobs:
   # `ui/scripts/__tests__/turbo-cache-save-bound.test.ts` pins all of it.
   #
   # The pnpm store is RESTORED by every ui job and SAVED by `ui-deps` alone, on
-  # a miss of its exact key: twenty jobs racing to upload one store under one
-  # key reserve it once and fail nineteen times.
+  # a miss of its exact key and on `push` and `schedule` runs only: twenty jobs
+  # racing to upload one store under one key reserve it once and fail nineteen
+  # times. These five jobs keep the setup steps spelled out instead of calling
+  # `.github/actions/setup-workspace`, because pins under `ui/scripts/__tests__/`
+  # read those steps by name and by text.
 
   # ── Build UI Deps: the seven packages, built once per run (#25869) ───────
   # Each ui job used to build the seven @objectstack packages itself. Measured
@@ -3343,7 +3201,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm
@@ -3438,8 +3296,13 @@ jobs:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
 
+      # On `push` and `schedule` only, the rule `.github/actions/setup-workspace`
+      # holds for every other job: a pull request's or queue entry's store is
+      # restorable only from that ref and evicts `main`'s seeds from the pool.
       - name: Save pnpm cache
-        if: steps.pnpm-cache.outputs.cache-hit != 'true'
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'schedule')
+          && steps.pnpm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         timeout-minutes: 5
         continue-on-error: true
@@ -3474,7 +3337,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm
@@ -3732,7 +3595,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm
@@ -3859,6 +3722,74 @@ jobs:
             pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
           fi
 
+  test-ui-gate:
+    # Stable required-check name for the sharded Test UI matrix (#26460, ruling
+    # A, comment 6435318516), in test-gate's shape and for test-gate's reason
+    # (#3622): a matrix publishes only `Test UI (k/16)`, so the bare `Test UI`
+    # context the ruleset requires can come from nothing but this job, and the
+    # shard count stays free to move without a settings edit. Until this job,
+    # none of the 16 shards was required and the queue landed PRs whose Test UI
+    # was red (#26419 → #26421).
+    #
+    # `name:` and `if: always()` are both load-bearing, as on test-gate. The
+    # name IS the required context (`check:required-contexts` pins the
+    # literal), and a gate that skips because a dependency failed publishes no
+    # context at all, which leaves the PR permanently pending (#3622). ⛔ Never
+    # `if: !cancelled()` here.
+    #
+    # The verdict reads the matrix rollup `needs.test-ui.result`, and only
+    # `success` passes, with one exception: `skipped`, when `filter` concluded
+    # `success` AND said the diff reaches no ui path (the shards' own `if:`).
+    # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
+    # queue build or PR that touches no ui path read green here the way Lint
+    # UI and Build & E2E UI read `skipped` there. Everything else is red:
+    # `failure`; `cancelled`, which is also what a shard killed by its own
+    # `timeout-minutes` reads (on a superseded push this paints the OLD sha
+    # red, which no required check reads); a `skipped` that `filter` does not
+    # explain; and any lifecycle value such as the `abandoned` test-gate met
+    # (run 31120902911). Unlike test-gate it counts no shard credentials: the
+    # Test UI shards publish none, and adding them is a change to `test-ui`,
+    # which is the ui lane's job.
+    name: Test UI
+    needs: [test-ui, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # `check:aggregator-roster` holds this equal to `needs:` in both
+    # directions. `filter` is the #4928 input, not a lane.
+    env:
+      OS_AGGREGATOR_MEMBERS: test-ui
+      OS_AGGREGATOR_NON_MEMBERS: filter
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify Test UI shard results
+        env:
+          OS_TEST_UI_RESULT: ${{ needs['test-ui'].result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
+          OS_UI: ${{ needs.filter.outputs.ui }}
+        run: |
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI')."
+          case "$OS_TEST_UI_RESULT" in
+            success)
+              echo "✓ Test UI: every shard concluded success."
+              ;;
+            skipped)
+              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || [ "$OS_UI" = 'false' ]; }; then
+                echo "✓ Test UI: the shards were skipped because filter found no ui path in this diff."
+              else
+                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path (#4928)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error title=Test UI::the Test UI shards concluded '$OS_TEST_UI_RESULT', not success. Read the red 'Test UI (k/16)' check-runs on this sha for the failing test; a shard killed by its timeout reads 'cancelled'."
+              exit 1
+              ;;
+          esac
+
   # ── Lint UI and Build & E2E UI: the ceilings (#25869 row F13) ──────────
   # objectui's rule (its lint.yml `Lint` ceiling): the smallest round number
   # that is both >= 3x the slowest successful run and >= that run + 15 min, so
@@ -3903,7 +3834,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm
@@ -4225,7 +4156,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm

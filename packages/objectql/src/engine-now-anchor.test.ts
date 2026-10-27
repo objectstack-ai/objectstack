@@ -256,4 +256,62 @@ describe('[#25808] the now-anchored comparand on the engine', () => {
       expect(err.message).toContain('now-anchored');
     });
   });
+
+  describe('[#26413] an undeclared key on the anchor gets one answer at every door', () => {
+    const EXTRA = { $now: true, addDays: -30, subDays: 7 };
+    const CLEAN = { $now: true, addDays: -30 };
+
+    const refusedWithKey = (err: Wire) => {
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('undeclared key "subDays"');
+      expect(err.message).toContain('the anchor takes $now and addDays only');
+    };
+
+    it('`find()` object-form `where`: refused before any driver runs; the clean anchor runs', async () => {
+      seen.length = 0;
+      refusedWithKey(await refusalOf(() => engine.find('ticket', { where: { opened_at: { $lt: EXTRA } } })));
+      expect(seen).toHaveLength(0);
+      await engine.find('ticket', { where: { opened_at: { $lt: CLEAN } } });
+      expect(seen).toHaveLength(1);
+    });
+
+    it('`find()` array-form `where`: refused the same way', async () => {
+      seen.length = 0;
+      refusedWithKey(await refusalOf(() => engine.find('ticket', { where: [['opened_at', '<', EXTRA]] } as never)));
+      expect(seen).toHaveLength(0);
+      await engine.find('ticket', { where: [['opened_at', '<', CLEAN]] } as never);
+      expect(seen).toHaveLength(1);
+    });
+
+    it('`aggregate()` `where`: refused the same way', async () => {
+      refusedWithKey(await refusalOf(() => engine.aggregate('ticket', {
+        where: { opened_at: { $lt: EXTRA } },
+        aggregations: [{ function: 'count', alias: 'n' }],
+      })));
+      await expect(engine.aggregate('ticket', {
+        where: { opened_at: { $lt: CLEAN } },
+        aggregations: [{ function: 'count', alias: 'n' }],
+      })).resolves.toBeDefined();
+    });
+
+    it('`aggregations[i].filter`: refused the same way', async () => {
+      refusedWithKey(await refusalOf(() => engine.aggregate('ticket', {
+        aggregations: [{ function: 'count', alias: 'x', filter: { opened_at: { $lt: EXTRA } } }],
+      })));
+      await expect(engine.aggregate('ticket', {
+        aggregations: [{ function: 'count', alias: 'x', filter: { opened_at: { $lt: CLEAN } } }],
+      })).resolves.toBeDefined();
+    });
+
+    it('`having`: refused the same way', async () => {
+      const grouped = (anchor: unknown) => engine.aggregate('ticket', {
+        groupBy: ['region'],
+        aggregations: [{ function: 'min', field: 'opened_at', alias: 'first_opened' }],
+        having: { first_opened: { $lt: anchor } } as never,
+      });
+      refusedWithKey(await refusalOf(() => grouped(EXTRA)));
+      await expect(grouped(CLEAN)).resolves.toBeDefined();
+    });
+  });
 });

@@ -76,8 +76,33 @@ export function parseStoredDockExpanded(raw: string | null): boolean | null {
   return null;
 }
 
-/** Read a stored expanded flag; unset OR storage failure (private mode) → `fallback`. */
+/**
+ * objectstack#26470 — true when this console renders inside another page's frame, e.g.
+ * the ADR-0037 Live Canvas, which iframes the full console (draft preview or
+ * the materialized app) beside the chat. A same-origin frame shares the tab's
+ * sessionStorage, so without this the frame would read the host's expanded
+ * flag and mount a second assistant dock next to the host's own.
+ *
+ * Judged on the frame itself, not on `?preview=draft`: the canvas drops that
+ * flag once the app is materialized, and a top-level preview tab is an
+ * ordinary console page that keeps its dock. A parent that refuses access
+ * (cross-origin) still means framed.
+ */
+export function isFramedConsole(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Read a stored expanded flag; unset OR storage failure (private mode) →
+ * `fallback`. Inside a frame ({@link isFramedConsole}) the stored flag belongs
+ * to the host page, so the frame's dock starts from `fallback` too.
+ */
 export function readStoredDockExpanded(key: string, fallback: boolean): boolean {
+  if (isFramedConsole()) return fallback;
   try {
     const parsed = parseStoredDockExpanded(window.sessionStorage.getItem(key));
     return parsed === null ? fallback : parsed;
@@ -89,9 +114,12 @@ export function readStoredDockExpanded(key: string, fallback: boolean): boolean 
 /**
  * Persist an expanded flag as `'1'` / `'0'` (never a remove) — see
  * {@link parseStoredDockExpanded} for why collapse must be stored explicitly.
- * Storage failures are swallowed.
+ * Storage failures are swallowed. A no-op inside a frame
+ * ({@link isFramedConsole}): the frame's dock keeps its state in memory and
+ * never touches the host page's flag.
  */
 export function writeStoredDockExpanded(key: string, expanded: boolean): void {
+  if (isFramedConsole()) return;
   try {
     window.sessionStorage.setItem(key, expanded ? '1' : '0');
   } catch {

@@ -6,15 +6,15 @@
  * routing tree behind a config object. In practice every real project wants to
  * edit the routes directly (add /billing, tweak AuthGuard behaviour, reorder
  * providers), so we now export the pieces and let consumers write ~40 lines of
- * JSX in App.tsx. See examples/console-starter/src/App.tsx for a minimal example,
- * apps/console/src/App.tsx for one with custom system routes + CreateApp.
+ * JSX in App.tsx. See apps/console/src/App.tsx, with custom system routes +
+ * CreateApp.
  */
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { AuthGuard, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { SchemaRendererProvider, ActionProvider, NotificationProvider } from '@object-ui/react';
+import { SchemaRendererProvider, ActionProvider, NotificationProvider, HostMapStyleProvider } from '@object-ui/react';
 import { NotificationAlerts, NotificationSnackbar } from '@object-ui/components';
 import { presentNotificationToast } from '../chrome/notificationToast.js';
 import { useActionModal } from '../hooks/useActionModal.js';
@@ -39,12 +39,17 @@ import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvide
 import {
   UserStateAdaptersProvider,
   useAttachListStateFamily,
+  useAttachRecordStateFamily,
   useAttachUserStateAdapters,
 } from '../context/UserStateAdapters.js';
 import {
   LIST_PREFERENCE_PREFIX,
   ListPreferencesProvider,
 } from '../context/ListPreferencesProvider.js';
+import {
+  RECORD_PREFERENCE_PREFIX,
+  RecordPreferencesProvider,
+} from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
@@ -54,6 +59,7 @@ import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
 import { ImpersonationBanner } from '../layout/ImpersonationBanner.js';
 import { ReadRateBanner } from '../layout/ReadRateBanner.js';
 import { StorageUsageBanner } from '../layout/StorageUsageBanner.js';
+import { getRuntimeConfig } from '../runtime-config.js';
 
 // The console's every pre-React / pre-auth gate (Suspense fallback, adapter
 // not ready, org/auth loading) renders this. It used to be a bare, unbranded
@@ -162,7 +168,15 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
        console route and several arrive through `ComponentRegistry`, where no
        prop could be passed. */
     <HostNavigationBridge>
-      <ConsoleShellProviders>{children}</ConsoleShellProviders>
+      {/* objectstack#26163 — the deployment's default map style (the
+          operator's `OS_CONSOLE_MAP_STYLE_URL`, served as runtime-config
+          `mapStyleUrl`), for a map view that declares no style of its own.
+          The map arrives through `ComponentRegistry`, lazily, so a context is
+          the only way to reach it; absent, the map keeps the demo style.
+          `initRuntimeConfig()` settles before the console's first render. */}
+      <HostMapStyleProvider styleUrl={getRuntimeConfig().mapStyleUrl}>
+        <ConsoleShellProviders>{children}</ConsoleShellProviders>
+      </HostMapStyleProvider>
     </HostNavigationBridge>
   );
 }
@@ -185,36 +199,38 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
                   <ListPreferencesProvider>
-                    {/* objectui#4467 — the impersonation indicator. Above the
-                        routes, so it is chrome for EVERY console page (home has
-                        its own layout and would otherwise carry no indicator),
-                        and in flow rather than overlaid, so it never covers the
-                        header it warns about. Renders null on every ordinary
-                        session. */}
-                    <ImpersonationBanner />
-                    {/* objectui#9954 — the environment admin's read-rate report.
-                        Beside the impersonation indicator for the same reason it
-                        is here: chrome for EVERY console page, including `/home`,
-                        which has its own layout and would otherwise carry no
-                        report. Renders null unless the control plane's verdict is
-                        `anomalous`, so an ordinary session and an unmeasured
-                        environment both see nothing — and a non-admin session
-                        never even issues the request, nor does any session on a
-                        runtime whose config does not serve `storageUsage`
-                        (objectui#11002). */}
-                    <ReadRateBanner />
-                    {/* objectui#10439 — the environment admin's storage-capacity
-                        banner, beside the read-rate report and behind the same
-                        two gates (the admin, and the runtime serving
-                        `storageUsage`); the two read one `/usage/storage` response.
-                        Renders null unless the runtime's own verdict says `warn`
-                        (80% and up) or `blocked` (uploads and imports refused). */}
-                    <StorageUsageBanner />
-                    <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
-                    {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
-                    <RemediationOverlay />
-                    <NotificationSnackbar />
-                    <NotificationAlerts />
+                    <RecordPreferencesProvider>
+                      {/* objectui#4467 — the impersonation indicator. Above the
+                          routes, so it is chrome for EVERY console page (home has
+                          its own layout and would otherwise carry no indicator),
+                          and in flow rather than overlaid, so it never covers the
+                          header it warns about. Renders null on every ordinary
+                          session. */}
+                      <ImpersonationBanner />
+                      {/* objectui#9954 — the environment admin's read-rate report.
+                          Beside the impersonation indicator for the same reason it
+                          is here: chrome for EVERY console page, including `/home`,
+                          which has its own layout and would otherwise carry no
+                          report. Renders null unless the control plane's verdict is
+                          `anomalous`, so an ordinary session and an unmeasured
+                          environment both see nothing — and a non-admin session
+                          never even issues the request, nor does any session on a
+                          runtime whose config does not serve `storageUsage`
+                          (objectui#11002). */}
+                      <ReadRateBanner />
+                      {/* objectui#10439 — the environment admin's storage-capacity
+                          banner, beside the read-rate report and behind the same
+                          two gates (the admin, and the runtime serving
+                          `storageUsage`); the two read one `/usage/storage` response.
+                          Renders null unless the runtime's own verdict says `warn`
+                          (80% and up) or `blocked` (uploads and imports refused). */}
+                      <StorageUsageBanner />
+                      <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
+                      {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
+                      <RemediationOverlay />
+                      <NotificationSnackbar />
+                      <NotificationAlerts />
+                    </RecordPreferencesProvider>
                   </ListPreferencesProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
@@ -341,6 +357,7 @@ function UserStateBridge() {
   const dataSource = useAdapter();
   const attach = useAttachUserStateAdapters();
   const attachListState = useAttachListStateFamily();
+  const attachRecordState = useAttachRecordStateFamily();
 
   useEffect(() => {
     if (!user?.id || !dataSource) {
@@ -348,6 +365,7 @@ function UserStateBridge() {
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attachListState(null);
+      attachRecordState(null);
       return;
     }
     const favorites = createObjectStackUserStateAdapter({
@@ -375,14 +393,23 @@ function UserStateBridge() {
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
+    // objectstack#25883 — every object's record-page state, `ui.record.<object>`
+    // ("show empty fields"): a second key family in the same one read.
+    const recordState = createObjectStackUserPreferenceFamily({
+      dataSource,
+      userId: user.id,
+      prefix: RECORD_PREFERENCE_PREFIX,
+    });
     attachListState(listState);
+    attachRecordState(recordState);
     return () => {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attachListState(null);
+      attachRecordState(null);
     };
-  }, [user?.id, dataSource, attach, attachListState]);
+  }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
 
   return null;
 }

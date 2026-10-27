@@ -344,7 +344,7 @@ const securityFor = (caller: Caller) => ({
         holderCount: caller.holdings.length > 0 ? (position === 'sales_rep' ? 2 : 1) : null,
         permissionSets: position === 'sales_rep'
             ? [{ name: 'crm_sales_user', via: 'definition' }]
-            : [{ name: 'sales_manager', via: 'name' }],
+            : [{ name: 'forecasting', via: 'definition' }],
     })),
 });
 
@@ -676,7 +676,7 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         const described = (await read('/meta/position', { include: 'grants' })).items;
         expect(described?.map((p: any) => [p.name, p._holderCount, p._grantedPermissionSets])).toEqual([
             ['sales_rep', 2, [{ name: 'crm_sales_user', via: 'definition' }]],
-            ['sales_manager', 1, [{ name: 'sales_manager', via: 'name' }]],
+            ['sales_manager', 1, [{ name: 'forecasting', via: 'definition' }]],
         ]);
         expect(text(await read('/meta/positions'))).not.toContain('_holderCount');
         expect((await bootRest('non-holder').read('/meta/position', { include: 'grants' })).items?.[0]?._holderCount).toBeNull();

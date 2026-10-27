@@ -38,22 +38,31 @@
  * designer renders inside the console shell, so a `...` here lands on the same
  * screen as a `…` from the packs.
  *
- * ## The same posture, recorded on the i18n conventions side (objectui#4662)
+ * ## Moving into `@object-ui/i18n` (objectstack#25922)
  *
- * Everything above is this file's own account of why it exists.
- * `packages/i18n/README.md`, section "Scope — the `engine.*` carve-out", states
- * it from the pack system's end, where a reader looking for the translation
- * conventions finds it, and adds the two facts this header does not spell out:
- * only `en` and `zh` are covered, so the other eight shipped locales render
- * English on these screens; and the i18n gates cannot see it by construction
- * (key parity compares pack against pack, and `scripts/check-i18n-call-site-keys.mjs`
- * skips this module by declaration). It also carries the condition for
- * reopening the question, which is deliberately narrow: a stated demand for an
- * admin console in a language other than `en` or `zh` — not a general wish for
- * broader locale coverage. Keep the two records in step when either moves.
+ * The maintainer's ruling 6431032267 (Q2 = A, kept by the re-ruling
+ * 6431234244) reopened the objectui#4662 carve-out: this table becomes the
+ * `studio` namespace of `@object-ui/i18n` (`packages/i18n/src/namespaces/studio/`),
+ * one lazy namespace carrying the existing `en` and `zh` text, every other
+ * language falling back to `en`. It moves in slices. Until the last one, a key
+ * lives either here or there, never both, and every lookup below asks this
+ * table first and the namespace second (`lookupString`), so no call site
+ * changes. `packages/i18n/README.md`, section "Scope — the Studio designer
+ * strings", is the conventions-side record; keep the two in step.
+ *
+ * What has not changed for the keys still here: only `en` and `zh` exist, so
+ * the other eight shipped locales render English on these screens, and the
+ * pack gates do not read this module (`scripts/check-i18n-call-site-keys.mjs`
+ * skips it by declaration). `check:i18n-designer-parity` reads both homes.
  */
 
 import { useObjectTranslation } from '@object-ui/i18n';
+// The designer strings' new home. Its `en` catalogue is resident; its other
+// catalogues are fetched on demand, and `useMetadataLocale()` re-renders its
+// caller when one lands. ⚠️ `ui/scripts/check-i18n-dead-keys.mjs` reads the
+// namespace's catalogues as part of this table BECAUSE this module imports it:
+// drop the import and the gates stop reading them.
+import { studioString, useStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 // Type-only (erased at build): the overlay-scope and lock-state label tables
 // below are keyed by their producer's own union rather than by hand — see
 // `LAYER_SCOPE_ZH` and `LOCK_STATE_ZH`.
@@ -252,9 +261,6 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': 'Permission sets',
   'engine.position.holders.unknown': 'The server did not count the holders for you (no active organization, or no read on position assignments).',
   'engine.position.grants.none': 'None',
-  'engine.position.grants.byName': '(by name)',
-  'engine.position.grants.byNameHint':
-    'Granted because this permission set has the same name as the position. The position does not list it, but holders get it.',
   // objectstack#26187 — the Setup position page's read-only previews of the
   // permission sets the position names (`PositionPermissionSetsSection.tsx`).
   'engine.position.sets.title': 'Permission sets',
@@ -2564,460 +2570,6 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.quickfind.indexing': 'Indexing items across',
   'engine.quickfind.noMatches': 'No matches.',
   'engine.breadcrumb.allTypes': 'All Metadata Types',
-  // Permission matrix
-  'perm.action.create': 'Create',
-  'perm.action.read': 'Read',
-  'perm.action.edit': 'Edit',
-  'perm.action.delete': 'Delete',
-  'perm.action.transfer': 'Transfer ownership',
-  'perm.action.viewAll': 'View All Records (bypass sharing)',
-  'perm.action.modifyAll': 'Modify All Records (bypass sharing)',
-  'perm.col.object': 'Object',
-  'perm.col.bulk': 'Bulk',
-  'perm.posture.private': 'Private',
-  'perm.posture.private.tip': 'Secure-by-default object (access.default = private): a permission set’s “*” wildcard grant does NOT cover it. Access needs an explicit grant on this object (or View/Modify All Records). Grants you edit here apply normally.',
-  'perm.owd.tip': 'Org-wide default (sharingModel): the record-level visibility baseline for internal users, applied before positions and sharing rules. Object CRUD here gates the operation; the OWD decides which records it reaches (own vs org-wide).',
-  'perm.owd.defaultPrivate': 'Private (default)',
-  'perm.owd.editLink': 'Edit in the package’s Record Sharing Baseline (OWD) overview',
-  'perm.owd.private': 'Private',
-  'perm.owd.public_read': 'Public read',
-  'perm.owd.public_read_write': 'Public read/write',
-  'perm.owd.controlled_by_parent': 'By parent',
-  'perm.bulk.read': 'R',
-  'perm.bulk.crud': 'CRUD',
-  'perm.bulk.all': 'All',
-  'perm.bulk.none': 'None',
-  // objectstack#26187 — the record-scope pickers (ADR-0057 D1 access depth).
-  'perm.scope.unset': 'Not set',
-  'perm.scope.value.own': 'Own',
-  'perm.scope.value.own_and_reports': 'Own and reports',
-  'perm.scope.value.unit': 'My unit',
-  'perm.scope.value.unit_and_below': 'My unit and below',
-  'perm.scope.value.org': 'Whole org',
-  'perm.scope.hierarchyHint': 'requires enterprise; otherwise owner-only',
-  'perm.scope.readTip': 'Read scope: which records this set’s read reaches, by where the user sits in the org.',
-  'perm.scope.writeTip': 'Write scope: which records this set’s edit and delete reach, by where the user sits in the org.',
-  'perm.scope.lockedByViewAll': 'View All Records already grants org-wide read, so no read scope applies. Untick View All to set one.',
-  'perm.scope.lockedByModifyAll': 'Modify All Records already grants org-wide read and write, so no scope applies. Untick Modify All to set one.',
-  'perm.filter.placeholder': 'Filter objects…',
-  'perm.filter.onlyGranted': 'Only granted',
-  'perm.filter.empty': 'No objects match the filter.',
-  'perm.field.name': 'Name',
-  'perm.field.label': 'Label',
-  'perm.basics.editHint': 'Edit name / label',
-  'perm.cap.none': 'No system capabilities',
-  'perm.cap.add': 'Add capability',
-  'perm.badge.package': 'Package',
-  'perm.badge.custom': 'Custom',
-  'perm.badge.default': 'Default for new users',
-  'perm.field.loading': 'Loading fields…',
-  'perm.field.empty': 'No fields registered for this object.',
-  'perm.field.filter': 'Filter fields…',
-  'perm.field.filterEmpty': 'No fields match the filter.',
-  'perm.field.bulk.readable': 'Read all',
-  'perm.field.bulk.writable': 'Write all',
-  'perm.field.bulk.clear': 'Clear',
-  'perm.field.col.name': 'Field',
-  'perm.field.read': 'Read',
-  'perm.field.edit': 'Edit',
-  'perm.field.when': 'When (edit)',
-  'perm.field.when.label': 'WHEN (edit vote — row condition)',
-  'perm.field.when.add': 'Add condition',
-  'perm.field.when.edit': 'Edit condition',
-  'perm.field.when.readOff': 'A row condition needs Read on.',
-  'perm.field.when.tip':
-    'Row condition on the Edit vote, in the CEL of row-level security USING. On a row it matches the entry votes as declared; on any other row the entry is absent, as if this set had not declared the field. Switching Read off clears it.',
-  'perm.stat.objects': 'Objects granted',
-  'perm.stat.fields': 'Fields granted',
-  'perm.stat.objectsGranted': 'Objects granted',
-  'perm.stat.fieldOverrides': 'Field overrides',
-  'perm.stat.objectsSuffix': 'objects',
-  'perm.subtitle.set': 'Permission set',
-  'perm.field.systemCapabilities': 'System Capabilities',
-  'perm.field.systemCapabilitiesHelp':
-    'Platform / org capabilities granted to holders of this set (e.g. Studio access, user management). Designed here; Setup shows them read-only.',
-  'perm.rls.title': 'Row-Level Security',
-  'perm.rls.help': 'Row filters (CEL predicates) scoping which records holders may read/change.',
-  'perm.rls.name': 'Policy name',
-  'perm.rls.object': 'Object (* = all)',
-  'perm.rls.enabled': 'Enabled',
-  'perm.rls.using': 'USING (read filter)',
-  'perm.rls.check': 'CHECK (write filter)',
-  'perm.rls.checkPlaceholder': 'optional — defaults to USING',
-  'perm.rls.empty': 'No row-level policies.',
-  'perm.rls.add': 'Add policy',
-  'perm.rls.remove': 'Remove policy',
-  'perm.rls.nameNeeded': 'Give the policy a name to save it.',
-  'perm.rls.nameRefused': 'Not saved. Policy name, on row {row}: {problem}',
-  // CEL authoring safety for RLS predicates (objectui#2413).
-  'perm.cel.valid': 'Valid CEL',
-  'perm.cel.suggestions': 'Field and scope suggestions',
-  'perm.cel.type': 'Result type:',
-  'perm.cel.type.number': 'Number',
-  'perm.cel.type.text': 'Text',
-  'perm.cel.type.boolean': 'Boolean',
-  'perm.cel.type.date': 'Date',
-  'perm.cel.type.unknown': 'Unknown',
-  'perm.cel.type.unknownHint':
-    'the engine cannot prove a single type. Wrap operands in double() / int() / string() to pin it — only proven-Number formulas are offered as dataset measures.',
-  'perm.cel.saveBlocked': 'Fix the CEL syntax errors before saving.',
-  // The editor's inspector-blocked Save title (objectui#6900, ruling 5831744213):
-  // that channel carries more than CEL faults, so its copy names no one kind.
-  'perm.inspector.saveBlocked': 'Fix the issues shown in the inspector before saving.',
-  'perm.cel.test.title': 'Test policy',
-  'perm.cel.test.help':
-    'Dry-run this predicate against a sample record and acting user — the same CEL engine the server uses — to see whether the row is allowed or denied before you save.',
-  'perm.cel.test.run': 'Test',
-  'perm.cel.test.clause': 'Clause',
-  'perm.cel.test.noPredicate': 'Add a USING or CHECK predicate first, then test it.',
-  'perm.cel.test.record': 'Sample record',
-  'perm.cel.test.user': 'Acting user',
-  'perm.cel.test.allow': 'Allowed',
-  'perm.cel.test.allowHint': 'The record is in scope — the holder may access it.',
-  'perm.cel.test.deny': 'Denied',
-  'perm.cel.test.denyHint': 'The record is out of scope — it is excluded for the holder.',
-  'perm.cel.test.nonBool': 'Non-boolean result',
-  'perm.cel.test.nonBoolHint': 'a row filter should evaluate to true or false.',
-  'perm.cel.test.error': 'Evaluation error',
-  'perm.cel.test.unavailable': 'CEL engine unavailable',
-  'perm.cel.test.unavailableHint': 'The in-browser CEL engine could not be loaded.',
-  'perm.tabs.title': 'Tab Visibility',
-  'perm.tabs.help': 'Per-tab visibility for holders of this set.',
-  'perm.tabs.empty': 'No tab overrides.',
-  'perm.tabs.add': 'Add tab',
-  'perm.tabs.remove': 'Remove tab',
-  'perm.tabs.vis.visible': 'Visible',
-  'perm.tabs.vis.hidden': 'Hidden',
-  'perm.tabs.vis.default_on': 'Default on',
-  'perm.tabs.vis.default_off': 'Default off',
-  'perm.admin.title': 'Delegated Admin Scope',
-  'perm.admin.help':
-    'Lets holders administer a business-unit subtree (assign users) without full admin.',
-  'perm.admin.businessUnit': 'Business unit',
-  // The dependent controls' disabled reason (objectui#9464): `businessUnit` is
-  // the one key the framework's admin-scope shape requires, so a scope written
-  // before one is named is refused wholesale when the record is saved.
-  'perm.admin.businessUnitRequired':
-    'Name a business unit first — a scope without one is refused when the record is saved.',
-  'perm.admin.includeSubtree': 'Include subtree',
-  'perm.admin.manageAssignments': 'Manage assignments',
-  'perm.admin.assignableSets': 'Assignable permission sets',
-  'perm.admin.noSets': 'No permission sets loaded.',
-  // The grants a scope's holder needs beside the scope itself before they can
-  // act on it: enter Setup, pick people and units, write the assignment rows.
-  'perm.admin.companions.title': 'What a delegate also needs',
-  'perm.admin.companions.help':
-    'The scope says what its holders may administer; it does not let them in. A delegate also needs to enter Setup, to read people and business units so the lookups can pick them, and to create, read, edit and delete position assignments. These grants may sit on this set or on another set the delegate holds.',
-  'perm.admin.companions.setupAccess': 'Enter Setup',
-  'perm.admin.companions.read': 'Read',
-  'perm.admin.companions.crud': 'Create, read, edit and delete',
-  'perm.admin.companions.granted': 'On this set',
-  'perm.admin.companions.missing': 'Not on this set',
-  'perm.admin.companions.grant': 'Grant the missing ones',
-  'perm.admin.companions.packageNote':
-    'Under a package, grant these on an environment permission set in Setup, one the delegate holds: this editor saves only the package’s own objects.',
-  'perm.loading': 'Loading permission set {name}…',
-  // objectui#9420 — the package door refuses rather than PUTs when the
-  // save-time layered re-read REJECTS: without it the merge base falls back
-  // to the already-sliced draft and the write deletes every other package's
-  // permission rows with a 200. Worded as a refusal plus the retry, because
-  // nothing was written and retrying is the whole remedy.
-  'perm.save.rereadFailed':
-    'Save cancelled: the current permission set could not be re-read, so rows contributed by other packages cannot be preserved. Nothing was saved — please try again.',
-  // objectui#9484 — the ENVIRONMENT door's re-read runs AFTER the write, so
-  // its rejection is not a failed save and must not be worded like one. It
-  // opens with the outcome that is certain ("Saved."), then says exactly what
-  // is degraded: the matrix on screen is the accepted body, not a fresh read.
-  // Deliberately shares no wording with `perm.save.rereadFailed` above — that
-  // one cancels a save, this one confirms one, and a permission surface cannot
-  // afford the two reading alike.
-  'perm.save.rereadStale':
-    'Saved. The follow-up read that refreshes this view did not answer, so the matrix below shows what was just saved rather than the server\'s copy. Reopen this permission set to confirm.',
-  // objectui#4446 — names the gate that actually tripped. The old wording
-  // ("OS_METADATA_WRITABLE not enabled") blamed a deployment env var for a
-  // per-type registry declaration, and had no reachable honest case: the env
-  // var FLIPS `allowEnvironmentOverlay` to true, so whenever it is on for this type
-  // the surface is writable and this badge never renders.
-  'perm.readOnly': 'Read-only (this metadata type has no runtime write channel)',
-  'perm.readOnly.hint':
-    'The metadata-type registry declares both allowEnvironmentOverlay and allowRuntimeCreate false for this type, so the platform accepts no runtime write for it. Edit the source artifact and redeploy, or ask an operator for the documented OS_METADATA_WRITABLE escape hatch, which opens only the sets no package ships, never a set a package ships.',
-  // objectui#12183 — the WALL, a third reason: under `isolated` / `group` the
-  // security catalog is the platform operator's, and the doors refuse a
-  // tenant's write of a set whatever it holds. Its hint is the catalog's own
-  // walled sentence, `engine.catalog.readOnly.walled`.
-  'perm.readOnly.walled': 'Read-only (the platform operator defines this catalog)',
-  // objectui#13011 — the CALLER, a fourth reason: the type is open and this
-  // caller lacks `manage_metadata`. Naming the type tier there was false. Its
-  // hint is the capability banner's own sentence, `engine.edit.capabilityReadOnly`.
-  'perm.readOnly.capability': 'Read-only (requires the `manage_metadata` capability)',
-  // objectui#4518 — the ARTIFACT tier, the server's SECOND refusal. Distinct
-  // from `perm.readOnly` above on purpose: the TYPE does have a runtime write
-  // channel here (a brand-new set authored on this screen saves fine), so
-  // blaming the type would be the mirror-image lie. What is locked is THIS set,
-  // because a code package ships it and overwriting a packaged item is an
-  // overlay — which `permission` has not opted into.
-  'perm.readOnly.artifact': 'Read-only (this set is provided by a code package)',
-  // objectui#5987 — the ruled path comes FIRST (maintainer ruling of
-  // 2026-08-24, objectstack `e170b0ae5`: lock the base, clone to customize). The remedies that
-  // used to lead ("edit the source artifact and redeploy", a new runtime set)
-  // stay, as the secondary routes they are.
-  // objectui#12141 — the operator hatch is no longer one of them. ADR-0131 D6
-  // seals what a managed package ships: `OS_METADATA_WRITABLE` opens a type's
-  // items that no package ships, and no door admits a write onto a packaged
-  // set on it. The hint names the hatch only to say so, as the server's own
-  // refusal sentence does.
-  'perm.readOnly.artifact.hint':
-    'A code package ships this permission set, so it is locked here: an environment-scope edit would overlay a packaged item, and the metadata-type registry declares allowEnvironmentOverlay false for permission (ADR-0131 D6 forbids an environment overlay of a packaged set: silent privilege drift). The server refuses the write with 403 not_overridable. Clone to customize: the copy is an ordinary permission set authored in this system, under a new name, that you edit here, and upgrades keep flowing to this base. Other routes: edit the source artifact and redeploy, or create a new runtime set. The OS_METADATA_WRITABLE escape hatch does not open a set a package ships (ADR-0131 D6).',
-  // objectui#5987 — "Clone to customize", the locked editor's primary action.
-  // objectui#7611 — it asks for a new name and label (`PermissionSetCloneDialog.tsx`)
-  // and calls the server's clone door (`permission-set-clone.ts`), which copies
-  // the whole definition; never a hand-rolled copy.
-  'perm.clone.action': 'Clone to customize',
-  'perm.clone.hint':
-    'Copies this set under a new name you choose. The copy is an ordinary permission set authored in this system, editable here, and upgrades keep flowing to the package-provided base.',
-  'perm.clone.guidance':
-    'Locked: a code package provides this permission set, so it cannot be edited in place here (upgrades keep flowing to it). Clone to customize — the copy is an ordinary permission set authored in this system, editable here.',
-  'perm.clone.dialogTitle': 'Clone permission set',
-  'perm.clone.dialogBody':
-    'Copies {name} under a new machine name and label. The server decides what the copy carries, and says what it left out.',
-  'perm.clone.name': 'New machine name',
-  'perm.clone.label': 'New label',
-  'perm.clone.confirm': 'Create copy',
-  // Used only when the server's refusal carries no message of its own; its
-  // message is otherwise shown as sent.
-  'perm.clone.failedHttp': 'Could not clone this permission set (HTTP {status}).',
-  'perm.clone.failed': 'Could not clone this permission set.',
-  'perm.clone.noName':
-    'The clone was created, but the server\'s answer did not name it. Open it from the permission-set list.',
-  // Embedded hosts have no route to navigate to, so the clone is announced.
-  'perm.clone.done': 'Cloned as {name}. Open it from the permission-set list to edit.',
-  // A save that still reached the server and was refused as a packaged set:
-  // the same guidance as the lock, keyed on the refusal's code (never its
-  // prose), instead of the transport's generic message.
-  'perm.save.locked':
-    'Save refused (403 not_overridable): a code package provides this permission set, so the server does not accept an in-place edit. Clone to customize instead — the copy is an ordinary permission set authored in this system, and upgrades keep flowing to this base.',
-  // Designer wrapper
-  'designer.unsavedChanges': 'Unsaved changes',
-  'designer.editingOverlay': 'Editing overlay',
-  'designer.codeBaseline': 'Code baseline',
-  // Object form-designer canvas
-  'designer.canvas.nameToStart': 'Name the object in the Properties panel to start designing fields.',
-  'designer.canvas.noFields': 'No fields yet',
-  'designer.canvas.noFieldsHint':
-    'Add a field to start designing the form. Click any field to edit its properties on the right.',
-  'designer.canvas.addField': 'Add field',
-  'designer.canvas.addSection': 'Add section',
-  'designer.canvas.addFieldToSection': 'Add field to this section',
-  'designer.canvas.searchFieldType': 'Search field type…',
-  'designer.canvas.noMatchingTypes': 'No matching types.',
-  'designer.canvas.ungrouped': 'Ungrouped',
-  'designer.canvas.emptySection': 'Empty section',
-  'designer.canvas.dropHint': 'Drag fields here, or add one below',
-  'designer.canvas.dropToAssign': 'drop to assign',
-  'designer.canvas.collapseAll': 'Collapse all',
-  'designer.canvas.expandAll': 'Expand all',
-  'designer.canvas.fields': 'fields',
-  'designer.canvas.required': 'required',
-  'designer.canvas.sections': 'sections',
-  'designer.canvas.collapseSection': 'Collapse section',
-  'designer.canvas.expandSection': 'Expand section',
-  'designer.canvas.moveSectionUp': 'Move section up',
-  'designer.canvas.moveSectionDown': 'Move section down',
-  'designer.canvas.removeSection': 'Remove section',
-  'designer.canvas.removeSectionHint': 'Remove section (fields move to Ungrouped)',
-  'designer.canvas.renameHint': 'Double-click to rename',
-  'designer.canvas.sectionN': 'Section {n}',
-  // Field stubs (disabled runtime-preview placeholders)
-  'designer.stub.pickDate': 'Pick a date…',
-  'designer.stub.off': 'Off',
-  'designer.stub.select': 'Select…',
-  'designer.stub.pickMulti': 'Pick one or more…',
-  'designer.stub.uploadImage': 'Upload image',
-  'designer.stub.uploadAvatar': 'Upload avatar',
-  'designer.stub.upload': 'Upload {type}',
-  'designer.stub.qrcode': 'QR code',
-  'designer.stub.computed': 'Computed value',
-  'designer.stub.composite': 'Composite — nested sub-fields edit in the inspector.',
-  'designer.stub.repeater': 'Repeater — repeating row group.',
-  'designer.stub.searchRef': 'Search {ref}…',
-  'designer.stub.chooseRelated': 'Choose related object…',
-  'designer.stub.latLng': 'Lat, lng',
-  // objectui#10862, slice 4 — the address stub's three-line placeholder.
-  'designer.stub.address': 'Street\nCity, State ZIP\nCountry',
-  // Field inspector
-  'designer.field.kind': 'Field',
-  'designer.field.close': 'Close',
-  'designer.field.missing': 'This field no longer exists in the draft.',
-  'designer.field.remove': 'Remove “{label}”',
-  'designer.field.section.basic': 'Basic',
-  'designer.field.section.advanced': 'Advanced',
-  'designer.field.section.options': '{type} options',
-  'designer.field.apiName': 'API name',
-  'designer.field.label': 'Label',
-  // objectui#11782 — under the Label input: the label a translation shows instead.
-  'designer.field.labelTranslated': 'Shown as “{label}” in {language}: the app’s translation bundle overrides this label.',
-  'designer.field.type': 'Type',
-  'designer.field.required': 'Required',
-  'designer.field.requiredCbpMaster':
-    'Required is locked on: this object is controlled by parent, and it derives its master from this master-detail field, which must be required.',
-  'designer.field.unique': 'Unique',
-  'designer.field.description': 'Description',
-  'designer.field.readonly': 'Read-only',
-  'designer.field.hidden': 'Hidden',
-  'designer.field.externalId': 'External ID',
-  'designer.field.trackHistory': 'Track history',
-  'designer.field.placeholder': 'Placeholder',
-  'designer.field.group': 'Group',
-  'designer.field.noGroup': '— No group —',
-  'designer.field.picklistValues': 'Picklist values',
-  'designer.field.noValues': 'No values yet.',
-  // objectui#10202 — "use picklist": the field names a shared picklist instead of its own options.
-  'designer.field.optionSource': 'Options from',
-  'designer.field.optionSourceInline': "This field's own options",
-  'designer.field.picklistBound':
-    'Options come from the picklist “{picklist}”. A field bound to a picklist has no options of its own: to offer another value, add it to the picklist in its package.',
-  'designer.field.picklistOwnValues':
-    'These are the picklist’s own values. Values other packages add to it are offered too.',
-  'designer.field.optMalformed': 'This option cannot be edited here',
-  'designer.field.optMalformed.notAnObject': 'It is not an option object.',
-  'designer.field.optMalformed.valueNotText': 'Its `value` is missing or is not text.',
-  'designer.field.optMalformed.valueEmpty': 'Its `value` is empty.',
-  'designer.field.optMalformed.labelNotText': 'Its `label` is not text.',
-  'designer.field.optMalformed.colorNotText': 'Its `color` is not text.',
-  'designer.field.optMalformedHint': 'It is kept exactly as authored. Repair it in the JSON source, or remove it here.',
-  'designer.field.addValue': 'Add value',
-  'designer.field.optValue': 'value',
-  'designer.field.optLabel': 'Label',
-  'designer.field.optColor': 'Color',
-  'designer.field.moveUp': 'Move up',
-  'designer.field.moveDown': 'Move down',
-  'designer.field.removeValue': 'Remove',
-  // objectui#11786 — the inline hint under the input that holds the save: the
-  // object write guard refuses this field until it is filled in.
-  'designer.field.hint.addOption': 'Add at least one option. Changes are saved once the field has one.',
-  'designer.field.hint.pickTarget': 'Pick the object to link to. Changes are saved once the field has one.',
-  'designer.field.relatedObject': 'Related object',
-  'designer.field.objectNamePlaceholder': 'object_name',
-  // Lookup "Picker config" advanced sub-panel
-  'designer.field.lookup.pickerConfig': 'Picker config',
-  'designer.field.lookup.displayField': 'Display field',
-  'designer.field.lookup.descriptionField': 'Description field',
-  'designer.field.lookup.selectField': 'Select a field…',
-  'designer.field.lookup.setTargetFirst': 'Set the target object first',
-  'designer.field.lookup.searchFields': 'Search fields…',
-  'designer.field.lookup.selectableRecords': 'Selectable records',
-  'designer.field.lookup.addFilter': 'Add filter',
-  'designer.field.lookup.noFilter': 'No filter — every {ref} record is selectable.',
-  'designer.field.lookup.filterN': 'Filter {n}',
-  'designer.field.lookup.removeFilter': 'Remove filter',
-  'designer.field.lookup.filterField': 'Field',
-  'designer.field.lookup.filterOperator': 'Operator',
-  'designer.field.lookup.filterValue': 'Value',
-  'designer.field.lookup.dependsOn': 'Depends on (same-record fields)',
-  'designer.field.lookup.addDependsOn': 'Add a field this lookup depends on…',
-  'designer.field.lookup.searchHostFields': "Search this object's fields…",
-  'designer.field.lookup.pageSize': 'Picker page size',
-  'designer.field.lookup.allowCreate': 'Allow quick-create',
-  'designer.field.formula': 'Formula (CEL)',
-  // Roll-up summary (summaryOperations)
-  'designer.field.summary.object': 'Child object',
-  'designer.field.summary.function': 'Aggregation',
-  'designer.field.summary.fn.count': 'Count — child records',
-  'designer.field.summary.fn.sum': 'Sum',
-  'designer.field.summary.fn.min': 'Min',
-  'designer.field.summary.fn.max': 'Max',
-  'designer.field.summary.fn.avg': 'Average',
-  'designer.field.summary.field': 'Child field to aggregate',
-  'designer.field.summary.relationshipField': 'Child relationship field (optional)',
-  'designer.field.summary.setObjectFirst': 'Set the child object first',
-  'designer.field.summary.countFieldHint': 'Ignored for count, but still required — pick any child field.',
-  'designer.field.summary.filterSection': 'Filter (rows to aggregate)',
-  'designer.field.summary.addFilter': 'Add condition',
-  'designer.field.summary.noFilter': 'No filter — every child row is aggregated.',
-  'designer.field.summary.filterHint':
-    'Only child rows matching ALL conditions are aggregated — this is how one child object can feed several different totals (e.g. an approved-only sum vs the grand total).',
-  'designer.field.summary.filterAdvanced':
-    'This filter uses an advanced shape (OR / nested logic) that the row editor can’t show. Edit it as raw metadata to preserve it.',
-  'designer.field.summary.hint':
-    'Recomputed automatically when child records are created, updated, or deleted. The relationship field is auto-detected when the child has exactly one relation back to this object.',
-  'designer.field.precision': 'Precision',
-  'designer.field.scale': 'Scale',
-  'designer.field.min': 'Min',
-  'designer.field.max': 'Max',
-  'designer.field.maxLength': 'Max length',
-  // objectui#7597 — the `valueDomain` select on a text field. The three member
-  // labels are NOT here: they are read from the spec's own describe() prose.
-  'designer.field.valueDomain': 'Value domain',
-  'designer.field.valueDomainNone': '— None —',
-  // Object basics (no-selection default inspector)
-  'designer.object.kind': 'Object',
-  'designer.object.section.basic': 'Basic info',
-  'designer.object.section.basicHint': 'Identity, display names & classification',
-  'designer.object.name': 'Name',
-  'designer.object.nameHint': 'snake_case unique identifier (cannot change after create)',
-  'designer.object.namePlaceholder': 'account',
-  'designer.object.label': 'Label',
-  'designer.object.labelPlaceholder': 'e.g. Account',
-  'designer.object.pluralLabel': 'Plural label',
-  'designer.object.pluralPlaceholder': 'e.g. Accounts',
-  'designer.object.icon': 'Icon',
-  'designer.object.description': 'Description',
-  'designer.object.descriptionPlaceholder': 'What this object represents',
-  // Access controls (ADR-0066 D2/D3/④/⑤)
-  'designer.object.section.access': 'Access',
-  'designer.object.section.accessHint': 'Exposure posture and capability requirements. Enforced server-side by the security engine.',
-  'designer.object.posture': 'Exposure posture',
-  'designer.object.posture.public': 'Public — covered by wildcard grants (default)',
-  'designer.object.posture.private': 'Private — needs an explicit grant',
-  'designer.object.posture.publicHint': 'Covered by a permission set’s “*” wildcard grant — the platform default for business objects.',
-  'designer.object.posture.privateHint': 'Not covered by “*” wildcard grants: only an explicit grant on this object (or View/Modify All Records) reaches it. Make sure some permission set grants this object before publishing, or nobody but platform admins can use it.',
-  'designer.object.reqPerms': 'Required capabilities',
-  'designer.object.reqPerms.hint': 'AND-gate: callers must hold every listed capability IN ADDITION to their CRUD grants. Comma-separated capability names (e.g. manage_platform_settings). A name no permission set grants fails closed at runtime.',
-  'designer.object.reqPerms.mode.all': 'All operations',
-  'designer.object.reqPerms.mode.perOp': 'Per operation',
-  'designer.object.reqPerms.placeholder': 'e.g. manage_billing',
-  'designer.object.reqPerms.op.read': 'Read',
-  'designer.object.reqPerms.op.create': 'Create',
-  'designer.object.reqPerms.op.update': 'Update',
-  'designer.object.reqPerms.op.delete': 'Delete',
-  // Field ergonomics (Tier 2)
-  'designer.field.defaultValue': 'Default value',
-  'designer.field.defaultNone': '— None —',
-  'designer.field.true': 'True',
-  'designer.field.false': 'False',
-  'designer.field.duplicate': 'Duplicate field',
-  'designer.field.copySuffix': ' copy',
-  // Field power props (Tier 2 — conditional & validation)
-  'designer.field.helpText': 'Help text',
-  'designer.field.helpTextPlaceholder': 'Shown below the field on the form',
-  'designer.field.minLength': 'Min length',
-  'designer.field.conditionalRules': 'Conditional rules (CEL)',
-  'designer.field.visibleWhen': 'Visible when',
-  'designer.field.readonlyWhen': 'Read-only when',
-  'designer.field.requiredWhen': 'Required when',
-  'designer.field.conditionalRulesHint':
-    'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
-  // Bulk multi-select (Tier 2)
-  'designer.canvas.bulkSelected': '{n} selected',
-  'designer.canvas.bulkMoveTo': 'Move to section',
-  'designer.canvas.bulkDelete': 'Delete',
-  'designer.canvas.bulkClear': 'Clear',
-  'designer.canvas.bulkHint': 'Ctrl/⌘-click or Shift-click to select multiple fields.',
-  // Review / diff mode (Tier 3 — AI-draft review)
-  'designer.canvas.reviewChanges': 'Review changes',
-  'designer.canvas.reviewExit': 'Exit review',
-  'designer.canvas.reviewVsPublished': 'vs last published',
-  'designer.canvas.diffAdded': 'Added',
-  'designer.canvas.diffChanged': 'Changed',
-  'designer.canvas.diffRemoved': 'Removed',
-  'designer.canvas.diffChangedKeys': 'Changed: {keys}',
-  // ADR-0033 Phase B — generic draft review/diff (host level)
-  'designer.draftReview.title': 'Review changes',
-  'designer.draftReview.badge': '{n} pending',
-  'designer.draftReview.empty': 'No changes vs the published version.',
-  // AI assistant entry points
-  'designer.canvas.askAi': 'Ask AI',
-  'designer.canvas.askAiGenerate': 'Generate fields with AI',
 
   // ── StudioDesignSurface (ADR-0080 WYSIWYG design surface) ──────────────
   // Shared chrome
@@ -4083,8 +3635,6 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': '权限集',
   'engine.position.holders.unknown': '服务器未为你统计持有人数（没有当前组织，或无权读取岗位分配）。',
   'engine.position.grants.none': '无',
-  'engine.position.grants.byName': '（同名）',
-  'engine.position.grants.byNameHint': '因与岗位同名而授予。岗位定义未列出它，但持有人会获得它。',
   'engine.position.sets.title': '权限集',
   'engine.position.sets.hint': '此岗位列出的每个权限集授予的权限，按列出顺序显示。打开权限集可修改它。',
   'engine.position.sets.empty': '此岗位未列出任何权限集。',
@@ -6219,404 +5769,6 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.quickfind.indexing': '正在索引所有类型，共',
   'engine.quickfind.noMatches': '没有匹配项。',
   'engine.breadcrumb.allTypes': '元数据',
-  // Permission matrix
-  'perm.action.create': '创建',
-  'perm.action.read': '读取',
-  'perm.action.edit': '编辑',
-  'perm.action.delete': '删除',
-  'perm.action.transfer': '转移所有者',
-  'perm.action.viewAll': '查看所有记录（绕过共享规则）',
-  'perm.action.modifyAll': '修改所有记录（绕过共享规则）',
-  'perm.col.object': '对象',
-  'perm.col.bulk': '批量',
-  'perm.posture.private': '私有',
-  'perm.posture.private.tip': '默认安全对象（access.default = private）：权限集的 “*” 通配授权不覆盖它，访问需要对此对象的显式授权（或查看/修改所有记录）。在此编辑的显式授权正常生效。',
-  'perm.owd.tip': '组织级默认（sharingModel）：内部用户的记录级可见性基线，先于岗位与共享规则生效。此处的对象 CRUD 决定能否执行操作，OWD 决定操作触达哪些记录（自己的还是全组织的）。',
-  'perm.owd.defaultPrivate': 'Private（默认）',
-  'perm.owd.editLink': '在本包的“记录共享基线（OWD）”总览中编辑',
-  'perm.owd.private': 'Private 私有',
-  'perm.owd.public_read': 'Public read 公共只读',
-  'perm.owd.public_read_write': 'Public read/write 公共读写',
-  'perm.owd.controlled_by_parent': '受父级控制',
-  'perm.bulk.read': '读',
-  'perm.bulk.crud': '增改删',
-  'perm.bulk.all': '全选',
-  'perm.bulk.none': '清空',
-  // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
-  'perm.scope.unset': '未设置',
-  'perm.scope.value.own': '本人',
-  'perm.scope.value.own_and_reports': '本人及下属',
-  'perm.scope.value.unit': '本部门',
-  'perm.scope.value.unit_and_below': '本部门及下级',
-  'perm.scope.value.org': '全组织',
-  'perm.scope.hierarchyHint': '需要企业版；否则仅限本人',
-  'perm.scope.readTip': '读取范围：本权限集的读取按用户在组织中的位置覆盖哪些记录。',
-  'perm.scope.writeTip': '写入范围：本权限集的编辑与删除按用户在组织中的位置覆盖哪些记录。',
-  'perm.scope.lockedByViewAll': '“查看所有记录”已授予全组织读取，读取范围不再适用。取消勾选“查看所有记录”后可设置。',
-  'perm.scope.lockedByModifyAll': '“修改所有记录”已授予全组织读写，范围不再适用。取消勾选“修改所有记录”后可设置。',
-  'perm.filter.placeholder': '筛选对象…',
-  'perm.filter.onlyGranted': '只看已授权',
-  'perm.filter.empty': '没有匹配的对象。',
-  'perm.field.name': '名称',
-  'perm.field.label': '标签',
-  'perm.basics.editHint': '编辑名称 / 标签',
-  'perm.cap.none': '无附加系统能力',
-  'perm.cap.add': '添加能力',
-  'perm.badge.package': '包内置',
-  'perm.badge.custom': '自定义',
-  'perm.badge.default': '新用户默认',
-  'perm.field.loading': '加载字段中…',
-  'perm.field.empty': '该对象未注册字段。',
-  'perm.field.filter': '筛选字段…',
-  'perm.field.filterEmpty': '没有匹配的字段。',
-  'perm.field.bulk.readable': '全部可读',
-  'perm.field.bulk.writable': '全部可写',
-  'perm.field.bulk.clear': '清空',
-  'perm.field.col.name': '字段',
-  'perm.field.read': '读',
-  'perm.field.edit': '改',
-  'perm.field.when': '条件(改)',
-  'perm.field.when.label': 'WHEN(编辑投票 — 行条件)',
-  'perm.field.when.add': '添加条件',
-  'perm.field.when.edit': '编辑条件',
-  'perm.field.when.readOff': '行条件需要先开启“读”。',
-  'perm.field.when.tip':
-    '编辑投票的行条件,使用与行级安全 USING 相同的 CEL。匹配的行上该条目按声明投票;其他行上该条目不存在,如同本权限集未声明该字段。关闭“读”会清除条件。',
-  'perm.stat.objects': '已授权对象',
-  'perm.stat.fields': '已授权字段',
-  'perm.stat.objectsGranted': '已授权对象',
-  'perm.stat.fieldOverrides': '字段覆盖',
-  'perm.stat.objectsSuffix': '个对象',
-  'perm.subtitle.set': '权限集',
-  'perm.field.systemCapabilities': '系统能力',
-  'perm.field.systemCapabilitiesHelp':
-    '授予此权限集持有者的平台/组织能力(如 Studio 访问、用户管理)。在此设计,Setup 中只读展示。',
-  'perm.rls.title': '行级安全',
-  'perm.rls.help': 'CEL 行过滤条件,限定持有者可读取/修改的记录范围。',
-  'perm.rls.name': '策略名称',
-  'perm.rls.object': '对象(* = 全部)',
-  'perm.rls.enabled': '启用',
-  'perm.rls.using': 'USING(读取过滤)',
-  'perm.rls.check': 'CHECK(写入过滤)',
-  'perm.rls.checkPlaceholder': '可选 — 默认同 USING',
-  'perm.rls.empty': '暂无行级策略。',
-  'perm.rls.add': '新增策略',
-  'perm.rls.remove': '移除策略',
-  'perm.rls.nameNeeded': '为策略填写名称后即可保存。',
-  'perm.rls.nameRefused': '未保存。第 {row} 行的策略名称：{problem}',
-  // 行级安全 CEL 编写安全 (objectui#2413)。
-  'perm.cel.valid': 'CEL 有效',
-  'perm.cel.suggestions': '字段与作用域建议',
-  'perm.cel.type': '返回类型:',
-  'perm.cel.type.number': '数字',
-  'perm.cel.type.text': '文本',
-  'perm.cel.type.boolean': '布尔',
-  'perm.cel.type.date': '日期',
-  'perm.cel.type.unknown': '未知',
-  'perm.cel.type.unknownHint':
-    '引擎无法证明唯一类型。用 double() / int() / string() 包裹操作数以固定类型——只有可证明为数字的公式才能作为数据集度量。',
-  'perm.cel.saveBlocked': '请先修复 CEL 语法错误再保存。',
-  // objectui#6900 — 见英文表同名条目。
-  'perm.inspector.saveBlocked': '请先修复检查器中列出的问题再保存。',
-  'perm.cel.test.title': '测试策略',
-  'perm.cel.test.help': '用示例记录与操作用户对该条件进行试运行(与服务端同一 CEL 引擎),在保存前查看该行是允许还是拒绝。',
-  'perm.cel.test.run': '测试',
-  'perm.cel.test.clause': '子句',
-  'perm.cel.test.noPredicate': '请先填写 USING 或 CHECK 条件,再进行测试。',
-  'perm.cel.test.record': '示例记录',
-  'perm.cel.test.user': '操作用户',
-  'perm.cel.test.allow': '允许',
-  'perm.cel.test.allowHint': '记录在范围内 —— 持有者可访问。',
-  'perm.cel.test.deny': '拒绝',
-  'perm.cel.test.denyHint': '记录不在范围内 —— 对持有者不可见。',
-  'perm.cel.test.nonBool': '非布尔结果',
-  'perm.cel.test.nonBoolHint': '行过滤条件应返回 true 或 false。',
-  'perm.cel.test.error': '求值错误',
-  'perm.cel.test.unavailable': 'CEL 引擎不可用',
-  'perm.cel.test.unavailableHint': '浏览器内 CEL 引擎加载失败。',
-  'perm.tabs.title': '标签页可见性',
-  'perm.tabs.help': '为此权限集持有者设置各标签页的可见性。',
-  'perm.tabs.empty': '暂无标签页覆盖。',
-  'perm.tabs.add': '新增标签页',
-  'perm.tabs.remove': '移除标签页',
-  'perm.tabs.vis.visible': '可见',
-  'perm.tabs.vis.hidden': '隐藏',
-  'perm.tabs.vis.default_on': '默认开启',
-  'perm.tabs.vis.default_off': '默认关闭',
-  'perm.admin.title': '委派管理范围',
-  'perm.admin.help': '允许持有者管理某业务单元子树(分配用户),无需完全管理员权限。',
-  'perm.admin.businessUnit': '业务单元',
-  // objectui#9464 — 见 EN 表同键注释。
-  'perm.admin.businessUnitRequired':
-    '请先填写业务单元 — 没有业务单元的范围在保存记录时会被拒绝。',
-  'perm.admin.includeSubtree': '包含子树',
-  'perm.admin.manageAssignments': '管理分配',
-  'perm.admin.assignableSets': '可分配权限集',
-  'perm.admin.noSets': '未加载权限集。',
-  'perm.admin.companions.title': '委派管理员还需要的授权',
-  'perm.admin.companions.help':
-    '范围只规定持有者可以管理什么，并不能让其进入。委派管理员还需要：进入 Setup，读取人员与业务单元（供查找字段选择），以及对职位分配的创建、读取、编辑和删除。这些授权可以放在本权限集上，也可以放在委派管理员持有的其他权限集上。',
-  'perm.admin.companions.setupAccess': '进入 Setup',
-  'perm.admin.companions.read': '读取',
-  'perm.admin.companions.crud': '创建、读取、编辑和删除',
-  'perm.admin.companions.granted': '本权限集已授予',
-  'perm.admin.companions.missing': '本权限集未授予',
-  'perm.admin.companions.grant': '授予缺少的项',
-  'perm.admin.companions.packageNote':
-    '在包中时，请在 Setup 中把这些授权放到委派管理员持有的环境权限集上：此编辑器只保存本包自己的对象。',
-  'perm.loading': '加载权限集 {name}…',
-  // objectui#9420 — 见 EN 表同键注释。
-  'perm.save.rereadFailed':
-    '保存已取消：无法重新读取当前权限集，其他包贡献的权限行将无法保留。本次未写入任何内容，请重试。',
-  // objectui#9484 — 见 EN 表同键注释。
-  'perm.save.rereadStale':
-    '已保存。用于刷新此视图的后续读取没有返回，因此下方矩阵显示的是刚刚保存的内容，而不是服务端的副本。请重新打开该权限集以确认。',
-  // objectui#4446 — 见 EN 表同键注释：旧文案把「每类型注册表声明」说成「部署环境变量未启用」。
-  'perm.readOnly': '只读（该元数据类型没有运行时写入通道）',
-  'perm.readOnly.hint':
-    '元数据类型注册表对该类型声明 allowEnvironmentOverlay 与 allowRuntimeCreate 均为 false，平台不接受它的任何运行时写入。请修改源工件后重新部署，或由运维启用有文档记载的 OS_METADATA_WRITABLE 逃生阀；它只会开放不由任何包提供的权限集，永远不会开放由包提供的权限集。',
-  // objectui#4518 —见 EN 表同键注释：这是服务端的第二道闸门（artifact 层），
-  // 与上面的「类型没有写入通道」是两回事：该类型有运行时写入通道，被锁的是「这一个」
-  // 由代码包提供的权限集。
-  'perm.readOnly.walled': '只读（此目录由平台运营方定义）',
-  // objectui#13011 — 见 EN 表同键注释。
-  'perm.readOnly.capability': '只读（需要 `manage_metadata` 能力）',
-  'perm.readOnly.artifact': '只读（该权限集由代码包提供）',
-  // objectui#5987 — 见 EN 表同键注释：裁定的路径（克隆后自定义）放在最前。
-  'perm.readOnly.artifact.hint':
-    '该权限集由代码包提供，因此在此处被锁定：在环境作用域下编辑它属于覆盖（overlay）已打包的条目，而元数据类型注册表对 permission 声明 allowEnvironmentOverlay 为 false（ADR-0131 D6 禁止对已打包权限集做环境覆盖：会造成权限静默漂移）。服务端会以 403 not_overridable 拒绝该写入。请「克隆后自定义」：副本以新名称保存为本系统中创作的普通权限集、可在此编辑，升级会继续流向这个基线。其他途径：修改源工件后重新部署，或新建一个运行时权限集。OS_METADATA_WRITABLE 逃生阀不会开放由包提供的权限集（ADR-0131 D6）。',
-  // objectui#5987 — 见 EN 表同键注释。
-  'perm.clone.action': '克隆后自定义',
-  'perm.clone.hint':
-    '以你指定的新名称复制该权限集。副本是本系统中创作的普通权限集，可在此编辑，升级会继续流向由包提供的基线。',
-  'perm.clone.guidance':
-    '已锁定：该权限集由代码包提供，不能在此处原地编辑（升级会继续流向它）。请「克隆后自定义」—— 副本是本系统中创作的普通权限集，可在此编辑。',
-  'perm.clone.dialogTitle': '克隆权限集',
-  'perm.clone.dialogBody': '以新的机器名和显示名复制 {name}。副本携带哪些内容由服务端决定，未复制的部分会由服务端说明。',
-  'perm.clone.name': '新的机器名',
-  'perm.clone.label': '新的显示名',
-  'perm.clone.confirm': '创建副本',
-  'perm.clone.failedHttp': '无法克隆该权限集（HTTP {status}）。',
-  'perm.clone.failed': '无法克隆该权限集。',
-  'perm.clone.noName': '克隆已创建，但服务端的响应未给出其名称。请从权限集列表中打开它。',
-  'perm.clone.done': '已克隆为 {name}。请从权限集列表中打开它进行编辑。',
-  'perm.save.locked':
-    '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改为「克隆后自定义」—— 副本是本系统中创作的普通权限集，升级会继续流向这个基线。',
-  // Designer wrapper
-  'designer.unsavedChanges': '未保存的修改',
-  'designer.editingOverlay': '编辑覆盖层',
-  'designer.codeBaseline': '代码基线',
-  // Object form-designer canvas
-  'designer.canvas.nameToStart': '在右侧属性面板中为对象命名，即可开始设计字段。',
-  'designer.canvas.noFields': '尚无字段',
-  'designer.canvas.noFieldsHint': '添加字段以开始设计表单。点击任意字段可在右侧编辑其属性。',
-  'designer.canvas.addField': '添加字段',
-  'designer.canvas.addSection': '添加分组',
-  'designer.canvas.addFieldToSection': '向此分组添加字段',
-  'designer.canvas.searchFieldType': '搜索字段类型…',
-  'designer.canvas.noMatchingTypes': '没有匹配的类型。',
-  'designer.canvas.ungrouped': '未分组',
-  'designer.canvas.emptySection': '空分组',
-  'designer.canvas.dropHint': '将字段拖到此处，或在下方添加',
-  'designer.canvas.dropToAssign': '拖放以归入此分组',
-  'designer.canvas.collapseAll': '全部折叠',
-  'designer.canvas.expandAll': '全部展开',
-  'designer.canvas.fields': '个字段',
-  'designer.canvas.required': '个必填',
-  'designer.canvas.sections': '个分组',
-  'designer.canvas.collapseSection': '折叠分组',
-  'designer.canvas.expandSection': '展开分组',
-  'designer.canvas.moveSectionUp': '上移分组',
-  'designer.canvas.moveSectionDown': '下移分组',
-  'designer.canvas.removeSection': '删除分组',
-  'designer.canvas.removeSectionHint': '删除分组（字段移至未分组）',
-  'designer.canvas.renameHint': '双击重命名',
-  'designer.canvas.sectionN': '分组 {n}',
-  // Field stubs (disabled runtime-preview placeholders)
-  'designer.stub.pickDate': '选择日期…',
-  'designer.stub.off': '关闭',
-  'designer.stub.select': '请选择…',
-  'designer.stub.pickMulti': '选择一项或多项…',
-  'designer.stub.uploadImage': '上传图片',
-  'designer.stub.uploadAvatar': '上传头像',
-  'designer.stub.upload': '上传{type}',
-  'designer.stub.qrcode': '二维码',
-  'designer.stub.computed': '计算值',
-  'designer.stub.composite': '复合字段 — 子字段在右侧属性面板中编辑。',
-  'designer.stub.repeater': '重复字段 — 可重复的行分组。',
-  'designer.stub.searchRef': '搜索 {ref}…',
-  'designer.stub.chooseRelated': '选择关联对象…',
-  'designer.stub.latLng': '经纬度',
-  // objectui#10862, slice 4.
-  'designer.stub.address': '街道地址\n城市，省 / 州 邮政编码\n国家 / 地区',
-  // Field inspector
-  'designer.field.kind': '字段',
-  'designer.field.close': '关闭',
-  'designer.field.missing': '该字段已不在草稿中。',
-  'designer.field.remove': '删除“{label}”',
-  'designer.field.section.basic': '基础',
-  'designer.field.section.advanced': '高级',
-  'designer.field.section.options': '{type} 选项',
-  'designer.field.apiName': 'API 名称',
-  'designer.field.label': '显示名',
-  // objectui#11782.
-  'designer.field.labelTranslated': '在 {language} 中显示为“{label}”：应用的翻译包覆盖了此显示名。',
-  'designer.field.type': '类型',
-  'designer.field.required': '必填',
-  'designer.field.requiredCbpMaster':
-    '必填已锁定:该对象受父级控制,其主记录由这个主从字段推导,该字段必须必填。',
-  'designer.field.unique': '唯一',
-  'designer.field.description': '描述',
-  'designer.field.readonly': '只读',
-  'designer.field.hidden': '隐藏',
-  'designer.field.externalId': '外部 ID',
-  'designer.field.trackHistory': '记录历史',
-  'designer.field.placeholder': '占位符',
-  'designer.field.group': '分组',
-  'designer.field.noGroup': '— 无分组 —',
-  'designer.field.picklistValues': '选项值',
-  'designer.field.noValues': '暂无选项值。',
-  // objectui#10202 — "use picklist" (zh): the field names a shared picklist instead of its own options.
-  'designer.field.optionSource': '选项来源',
-  'designer.field.optionSourceInline': '本字段自己的选项',
-  'designer.field.picklistBound':
-    '选项来自选项列表「{picklist}」。绑定了选项列表的字段没有自己的选项：要增加取值，请在选项列表所属的软件包里添加。',
-  'designer.field.picklistOwnValues': '以上是选项列表自身的取值；其他软件包为它追加的取值同样可选。',
-  'designer.field.optMalformed': '此选项无法在这里编辑',
-  'designer.field.optMalformed.notAnObject': '它不是一个选项对象。',
-  'designer.field.optMalformed.valueNotText': '它的 `value` 缺失或不是文本。',
-  'designer.field.optMalformed.valueEmpty': '它的 `value` 为空。',
-  'designer.field.optMalformed.labelNotText': '它的 `label` 不是文本。',
-  'designer.field.optMalformed.colorNotText': '它的 `color` 不是文本。',
-  'designer.field.optMalformedHint': '它按原样保留。请在 JSON 源码中修复,或在此处删除。',
-  'designer.field.addValue': '添加选项',
-  'designer.field.optValue': '值',
-  'designer.field.optLabel': '显示名',
-  'designer.field.optColor': '颜色',
-  'designer.field.moveUp': '上移',
-  'designer.field.moveDown': '下移',
-  'designer.field.removeValue': '删除',
-  'designer.field.hint.addOption': '请至少添加一个选项。字段有选项后才会保存更改。',
-  'designer.field.hint.pickTarget': '请选择要关联的对象。选定后才会保存更改。',
-  'designer.field.relatedObject': '关联对象',
-  'designer.field.objectNamePlaceholder': 'object_name',
-  // Lookup "Picker config" advanced sub-panel
-  'designer.field.lookup.pickerConfig': '选择器配置',
-  'designer.field.lookup.displayField': '显示字段',
-  'designer.field.lookup.descriptionField': '描述字段',
-  'designer.field.lookup.selectField': '选择字段…',
-  'designer.field.lookup.setTargetFirst': '请先设置目标对象',
-  'designer.field.lookup.searchFields': '搜索字段…',
-  'designer.field.lookup.selectableRecords': '可选记录范围',
-  'designer.field.lookup.addFilter': '添加筛选条件',
-  'designer.field.lookup.noFilter': '未设筛选 — 所有 {ref} 记录均可选。',
-  'designer.field.lookup.filterN': '筛选条件 {n}',
-  'designer.field.lookup.removeFilter': '移除筛选条件',
-  'designer.field.lookup.filterField': '字段',
-  'designer.field.lookup.filterOperator': '运算符',
-  'designer.field.lookup.filterValue': '值',
-  'designer.field.lookup.dependsOn': '依赖字段（同记录字段）',
-  'designer.field.lookup.addDependsOn': '添加该查找依赖的字段…',
-  'designer.field.lookup.searchHostFields': '搜索本对象的字段…',
-  'designer.field.lookup.pageSize': '选择器分页大小',
-  'designer.field.lookup.allowCreate': '允许快速创建',
-  'designer.field.formula': '公式 (CEL)',
-  // 汇总字段(summaryOperations)
-  'designer.field.summary.object': '子对象',
-  'designer.field.summary.function': '汇总方式',
-  'designer.field.summary.fn.count': '计数(子记录数)',
-  'designer.field.summary.fn.sum': '求和',
-  'designer.field.summary.fn.min': '最小值',
-  'designer.field.summary.fn.max': '最大值',
-  'designer.field.summary.fn.avg': '平均值',
-  'designer.field.summary.field': '汇总的子字段',
-  'designer.field.summary.relationshipField': '子关系字段(可选)',
-  'designer.field.summary.setObjectFirst': '请先选择子对象',
-  'designer.field.summary.countFieldHint': '计数时不参与计算,但规范要求必填——任选一个子字段即可。',
-  'designer.field.summary.filterSection': '筛选(参与汇总的子记录)',
-  'designer.field.summary.addFilter': '添加条件',
-  'designer.field.summary.noFilter': '未设筛选 — 所有子记录都参与汇总。',
-  'designer.field.summary.filterHint':
-    '仅满足全部条件的子记录参与汇总——这样同一个子对象就能生成多个不同的汇总值(例如“仅已批准金额”与“总金额”)。',
-  'designer.field.summary.filterAdvanced':
-    '该筛选使用了行编辑器无法展示的高级结构(OR / 嵌套逻辑)。请直接编辑元数据以保留它。',
-  'designer.field.summary.hint':
-    '子记录新增、更新或删除时自动重新计算;子对象只有一个指向本对象的关系字段时可自动识别,无需填写。',
-  'designer.field.precision': '精度',
-  'designer.field.scale': '小数位',
-  'designer.field.min': '最小值',
-  'designer.field.max': '最大值',
-  'designer.field.maxLength': '最大长度',
-  'designer.field.valueDomain': '值域',
-  'designer.field.valueDomainNone': '— 无 —',
-  // Object basics (no-selection default inspector)
-  'designer.object.kind': '对象',
-  'designer.object.section.basic': '基础信息',
-  'designer.object.section.basicHint': '标识、显示名与分类',
-  'designer.object.name': '名称',
-  'designer.object.nameHint': 'snake_case 唯一标识符（创建后不可修改）',
-  'designer.object.namePlaceholder': 'account',
-  'designer.object.label': '显示名',
-  'designer.object.labelPlaceholder': '如：客户',
-  'designer.object.pluralLabel': '复数显示名',
-  'designer.object.pluralPlaceholder': '如：客户列表',
-  'designer.object.icon': '图标',
-  'designer.object.description': '描述',
-  'designer.object.descriptionPlaceholder': '该对象代表什么',
-  // Access controls (ADR-0066 D2/D3/④/⑤)
-  'designer.object.section.access': '访问控制',
-  'designer.object.section.accessHint': '暴露姿态与能力要求，由安全引擎在服务端强制。',
-  'designer.object.posture': '暴露姿态',
-  'designer.object.posture.public': '公开 — 被通配授权覆盖（默认）',
-  'designer.object.posture.private': '私有 — 需要显式授权',
-  'designer.object.posture.publicHint': '被权限集的 “*” 通配授权覆盖 —— 业务对象的平台默认。',
-  'designer.object.posture.privateHint': '不被 “*” 通配授权覆盖：只有对此对象的显式授权（或查看/修改所有记录）才能访问。发布前请确认已有权限集授权此对象，否则除平台管理员外无人可用。',
-  'designer.object.reqPerms': '必需能力',
-  'designer.object.reqPerms.hint': 'AND 门：调用者除 CRUD 授权外，还必须持有列出的每个能力。逗号分隔的能力名（如 manage_platform_settings）。没有任何权限集授予的能力名在运行时会安全拒绝。',
-  'designer.object.reqPerms.mode.all': '全部操作',
-  'designer.object.reqPerms.mode.perOp': '按操作',
-  'designer.object.reqPerms.placeholder': '如 manage_billing',
-  'designer.object.reqPerms.op.read': '读取',
-  'designer.object.reqPerms.op.create': '创建',
-  'designer.object.reqPerms.op.update': '更新',
-  'designer.object.reqPerms.op.delete': '删除',
-  // Field ergonomics (Tier 2)
-  'designer.field.defaultValue': '默认值',
-  'designer.field.defaultNone': '— 无 —',
-  'designer.field.true': '是',
-  'designer.field.false': '否',
-  'designer.field.duplicate': '复制字段',
-  'designer.field.copySuffix': ' 副本',
-  // Field power props (Tier 2 — conditional & validation)
-  'designer.field.helpText': '帮助文本',
-  'designer.field.helpTextPlaceholder': '显示在表单字段下方',
-  'designer.field.minLength': '最小长度',
-  'designer.field.conditionalRules': '条件规则 (CEL)',
-  'designer.field.visibleWhen': '可见条件',
-  'designer.field.readonlyWhen': '只读条件',
-  'designer.field.requiredWhen': '必填条件',
-  'designer.field.conditionalRulesHint':
-    '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
-  // Bulk multi-select (Tier 2)
-  'designer.canvas.bulkSelected': '已选 {n} 项',
-  'designer.canvas.bulkMoveTo': '移至分组',
-  'designer.canvas.bulkDelete': '删除',
-  'designer.canvas.bulkClear': '取消选择',
-  'designer.canvas.bulkHint': '按住 Ctrl/⌘ 单击或 Shift 单击可多选字段。',
-  // Review / diff mode (Tier 3 — AI-draft review)
-  'designer.canvas.reviewChanges': '查看变更',
-  'designer.canvas.reviewExit': '退出查看',
-  'designer.canvas.reviewVsPublished': '对比已发布版本',
-  'designer.canvas.diffAdded': '新增',
-  'designer.canvas.diffChanged': '修改',
-  'designer.canvas.diffRemoved': '删除',
-  'designer.canvas.diffChangedKeys': '变更：{keys}',
-  'designer.draftReview.title': '查看变更',
-  'designer.draftReview.badge': '{n} 项待审',
-  'designer.draftReview.empty': '与已发布版本相比没有变更。',
-  // AI assistant entry points
-  'designer.canvas.askAi': '问 AI',
-  'designer.canvas.askAiGenerate': '用 AI 生成字段',
 
   // ── StudioDesignSurface (ADR-0080 WYSIWYG design surface) ──────────────
   // Shared chrome
@@ -7797,6 +6949,21 @@ function pickTable(
   return { types: TYPE_LABELS_EN, domains: DOMAIN_LABELS_EN, strings: ENGINE_STRINGS_EN };
 }
 
+/**
+ * The value of one designer string: this module's own table for the locale
+ * first, then the `studio` namespace in `@object-ui/i18n`, which the table is
+ * moving into slice by slice (objectstack#25922, ruling 6431032267 Q2 = A).
+ * A key lives in exactly one of the two homes — `check:i18n-designer-parity`
+ * fails on a key in both — so the order decides nothing but cost.
+ *
+ * The namespace answers a language it has no catalogue for, and a catalogue
+ * still being fetched, from its `en` catalogue; this table keeps its own
+ * behaviour for the keys it still holds (a key its zh half lacks echoes back).
+ */
+function lookupString(key: string, locale: SupportedLocale | string | undefined): string | undefined {
+  return pickTable(locale).strings[key] ?? studioString(key, locale);
+}
+
 export function translateMetadataType(
   type: string,
   locale?: SupportedLocale | string,
@@ -7834,7 +7001,7 @@ export function translateNodeLabel(
   locale?: SupportedLocale | string,
   fallback?: string,
 ): string {
-  const localized = pickTable(locale).strings[`engine.flowNode.${type}.label`];
+  const localized = lookupString(`engine.flowNode.${type}.label`, locale);
   if (localized) return localized;
   return fallback ?? type;
 }
@@ -7845,7 +7012,7 @@ export function translateNodeHint(
   locale?: SupportedLocale | string,
   fallback?: string,
 ): string | undefined {
-  const localized = pickTable(locale).strings[`engine.flowNode.${type}.hint`];
+  const localized = lookupString(`engine.flowNode.${type}.hint`, locale);
   if (localized) return localized;
   return fallback;
 }
@@ -8010,12 +7177,12 @@ export function translateEnumOption(
   if (!isZhLocale(locale)) return value;
   const kind = ENUM_FIELD_TO_META[fieldName];
   if (kind && FLOW_META_ZH[kind]?.[value]) return FLOW_META_ZH[kind][value];
-  const direct = pickTable(locale).strings[`engine.enum.${fieldName}.${value}`];
+  const direct = lookupString(`engine.enum.${fieldName}.${value}`, locale);
   if (direct) return direct;
   // A `type` field can also hold a flow-NODE type (the node sub-form's type
   // picker) — reuse the node label table so create_record → 创建记录 etc.
   if (fieldName === 'type') {
-    const nodeLabel = pickTable(locale).strings[`engine.flowNode.${value}.label`];
+    const nodeLabel = lookupString(`engine.flowNode.${value}.label`, locale);
     if (nodeLabel) return nodeLabel;
   }
   return value;
@@ -8080,7 +7247,7 @@ export function translateSchemaFieldHelp(
 }
 
 export function t(key: string, locale?: SupportedLocale | string): string {
-  return pickTable(locale).strings[key] ?? key;
+  return lookupString(key, locale) ?? key;
 }
 
 /**
@@ -8104,7 +7271,7 @@ export function tOptional(
   key: string,
   locale?: SupportedLocale | string,
 ): string | undefined {
-  return pickTable(locale).strings[key];
+  return lookupString(key, locale);
 }
 
 /**
@@ -8192,5 +7359,10 @@ export function detectLocale(): SupportedLocale {
  */
 export function useMetadataLocale(): SupportedLocale {
   const { language } = useObjectTranslation();
-  return /^zh/i.test(language) ? 'zh-CN' : 'en-US';
+  const locale: SupportedLocale = /^zh/i.test(language) ? 'zh-CN' : 'en-US';
+  // Starts the fetch of the `studio` namespace catalogue this locale reads and
+  // re-renders the caller when it lands, so a moved key does not stay on the
+  // `en` answer the first render gave.
+  useStudioCatalogue(locale);
+  return locale;
 }

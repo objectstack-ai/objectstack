@@ -319,6 +319,20 @@ export interface AppShellRuntimeConfig {
    * `singleEnvironment`: a later payload without it withdraws it.
    */
   hideSingleAppSwitcher?: boolean;
+  /**
+   * The deployment's default map style (objectstack#26163): the operator's
+   * `OS_CONSOLE_MAP_STYLE_URL`, served by `RuntimeConfigPlugin` as the
+   * top-level `mapStyleUrl` (objectstack#26001) and absent when the operator
+   * set none. A map view with no style of its own draws it before the public
+   * demo style; `ConsoleShell` hands it to the map renderer through
+   * `HostMapStyleProvider` from `@object-ui/react`.
+   *
+   * Re-derived from each payload in full, like `hideSingleAppSwitcher`: a
+   * later payload without the key withdraws it. Only a non-empty string is
+   * taken; the producer already refuses to boot on a value that is not an
+   * absolute `https:` URL, so nothing is re-validated here.
+   */
+  mapStyleUrl?: string;
 }
 
 const defaults: AppShellRuntimeConfig = {
@@ -441,6 +455,12 @@ export async function initRuntimeConfig(baseUrl: string = ''): Promise<void> {
       // objectui#12913 — a host's request, so only a real `true` turns it on;
       // `'true'`, `1` and an absent key all keep the switcher.
       hideSingleAppSwitcher: body.hideSingleAppSwitcher === true,
+      // objectstack#26163 — the operator's map style, or none. Absent, empty
+      // and non-string all withdraw it, so the map falls back to the demo style.
+      mapStyleUrl:
+        typeof body.mapStyleUrl === 'string' && body.mapStyleUrl.trim()
+          ? body.mapStyleUrl.trim()
+          : undefined,
       defaultOrgId: body.defaultOrgId ?? current.defaultOrgId ?? null,
       defaultEnvironmentId: body.defaultEnvironmentId ?? current.defaultEnvironmentId ?? null,
       features: body.features

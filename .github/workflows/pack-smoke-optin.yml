@@ -118,25 +118,8 @@ jobs:
       - name: Checkout the merge preview
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
 
       - name: Setup turbo cache
         uses: actions/cache@v6
@@ -146,9 +129,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-
             ${{ runner.os }}-turbo-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # The driver's own prerequisite, asserted by the script itself: pack mode
       # fails fast unless packages/cli/dist and the create-objectstack bin exist.

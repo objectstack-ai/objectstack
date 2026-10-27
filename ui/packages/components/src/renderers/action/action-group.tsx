@@ -42,6 +42,7 @@ import {
   menuItemReasonAria,
   useDisabledReason,
 } from './disabled-reason';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // No group-level `name` (objectui#11168): nothing renders, forwards or keys on
 // it, and `@objectstack/spec` refuses it on this block, so the registration
@@ -275,7 +276,7 @@ DropdownActionItem.displayName = 'DropdownActionItem';
 // host-EVALUATED enablement verdict, declared rather than left to the index
 // signature, as `ActionButtonRendererProps` declares it (objectui#9131).
 const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: ActionGroupSchema; className?: string; disabled?: boolean; [key: string]: unknown } & RendererHostProps, ref) => {
     const {
       'data-obj-id': dataObjId,
       'data-obj-type': dataObjType,
