@@ -24,6 +24,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
+// The chip's tooltip row (`designer.field.apiName`) lives in `@object-ui/i18n`'s
+// `studio` namespace, whose `zh` catalogue is fetched on demand. Resident before
+// any case, so the zh tooltip is read after the catalogue lands, never racing it
+// (objectstack#26692).
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const PKG = 'com.acme.app';
 const API_NAME = 'nightly_digest';

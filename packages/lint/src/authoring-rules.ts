@@ -152,6 +152,7 @@ import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
+import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -2452,6 +2453,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
     run: (stack) => validateEmailTemplateHolePlacements(stack),
+  },
+  // Every hole of an email template's three faces is within the mail hole
+  // grammar — `@objectstack/formula`'s `judgeMailHoleGrammar`, the grammar the
+  // mail renderer parses with. A hole that chains a second formatter is
+  // refused, naming the one-formatter rule and the "branch in the caller"
+  // remedy (the renderer printed `0 | number:2`); a `currency` argument that
+  // is not a literal ISO 4217 code is refused, naming the literal-only rule
+  // (the renderer printed the amount in USD). Gating: no reading of such a
+  // hole renders as its author wrote it.
+  //
+  // Runtime publish gate: the same door and shape as the placement rule above
+  // — each written template is judged on its own, so the door's verdict and
+  // the whole-stack verdict are one value. A stored template is judged at its
+  // next publish, and until then the renderer refuses the hole at send
+  // (`TEMPLATE_INVALID`). MEASURED first: no shipped template, example or
+  // fixture in this repository writes a hole it refuses.
+  {
+    name: 'validateEmailTemplateHoleGrammar',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-hole-grammar.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateHoleGrammar(stack),
   },
 ];
 

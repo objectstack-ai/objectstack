@@ -156,6 +156,7 @@ import {
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
     QueryPageWindowParamSchema,
+    QueryTransportParamsSchema,
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
@@ -4617,6 +4618,73 @@ function pageWindowValue(value: unknown, param: string): number {
     );
     err.status = 400;
     err.code = 'INVALID_REQUEST';
+    err.param = param;
+    throw err;
+}
+
+/**
+ * A refused query value as the refusal quotes it: JSON, so a blank or
+ * whitespace-only value is visible, and bounded, so a long one cannot bury
+ * the sentence around it.
+ */
+function quotedQueryValue(value: unknown): string {
+    // `String` for a number: `JSON.stringify(Infinity)` is `null`.
+    const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
+    return shown.length > 64 ? `${shown.slice(0, 64)}…` : shown;
+}
+
+/**
+ * [#26644] A projection (`fields`, spelled `$select` / `select` on the wire) as
+ * the list of field names the engine reads, or a refusal naming the parameter
+ * the caller wrote.
+ *
+ * A comma string is split and trimmed as it always was; what is refused is a
+ * value that names NO field — a blank or comma-only string, or an empty array.
+ * It used to become `[]`, which `assertProjectionFieldsExist` has nothing to
+ * check in and every driver serves as no projection: every column, under a
+ * 200. Absent means "every column"; an empty projection asks for none, so
+ * reading it as absent is the widening {@link pageWindowValue} refuses on the
+ * row axis (a blank `$top`), here on the column axis.
+ *
+ * One rule for both routes that read a projection: the list's `findData` and
+ * the by-id `getData`.
+ */
+function projectionFieldsValue(value: string | readonly unknown[], param: string): unknown[] {
+    const fields = typeof value === 'string'
+        ? value.split(',').map((s) => s.trim()).filter(Boolean)
+        : [...value];
+    if (fields.length > 0) return fields;
+    const err: any = new Error(
+        `Query parameter '${param}' names no field; got ${quotedQueryValue(value)}. The query was not run: `
+        + 'an empty projection was read as no projection, which answers every column. Name at least one '
+        + 'field, or leave the parameter out to read every column.',
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
+    err.param = param;
+    throw err;
+}
+
+/**
+ * [#26644] The response's total-count flag (`count`, spelled `$count` on the
+ * wire) as the boolean `findData` reads its opt-out from, or a refusal naming
+ * the parameter the caller wrote.
+ *
+ * The accept set is the spec's `QueryTransportParamsSchema.count`, parsed here
+ * rather than restated: the boolean, or the two strings a querystring carries
+ * it as (`null` is absent). Any other value used to stay as it was, so the
+ * `options.count === false` opt-out read it as "count anyway" — `?$count=maybe`
+ * reported a `total` exactly like `?$count=true`.
+ */
+function countFlagValue(value: unknown, param: string): boolean | null | undefined {
+    const flag = QueryTransportParamsSchema.shape.count.safeParse(value);
+    if (flag.success) return typeof flag.data === 'string' ? flag.data === 'true' : flag.data;
+    const err: any = new Error(
+        `Query parameter '${param}' must be true or false; got ${quotedQueryValue(value)}. The query was not `
+        + 'run: any other value was read as absent, which counts and reports a total.',
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
     err.param = param;
     throw err;
 }
@@ -12936,10 +13004,14 @@ export class ObjectStackProtocolImplementation implements
         // querystring param arrives as a bare string — `?fields=name` or the
         // folded `?select=` / `$select` spellings — which drivers' `.map()`
         // calls over `query.fields` would otherwise throw on.
+        //
+        // [#26644] …and a value naming no field is refused rather than becoming
+        // `[]`, which every driver serves as no projection at all (see
+        // {@link projectionFieldsValue}).
         const projectionKey = slotParam('fields');
-        if (typeof options.fields === 'string') {
-            options.fields = options.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
-        } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
+        if (typeof options.fields === 'string' || Array.isArray(options.fields)) {
+            options.fields = projectionFieldsValue(options.fields, projectionKey);
+        } else if (options.fields !== undefined) {
             delete options.fields;
         }
         // [#4226] Unknown projection columns are refused rather than dropped —
@@ -13113,11 +13185,12 @@ export class ObjectStackProtocolImplementation implements
         );
         if (narrowedSearchFields) options.searchFields = narrowedSearchFields;
 
-        // Boolean fields
-        for (const key of ['distinct', 'count']) {
-            if (options[key] === 'true') options[key] = true;
-            else if (options[key] === 'false') options[key] = false;
-        }
+        // Boolean fields. [#26644] `count` is CHECKED, not merely lowered: a
+        // value that is neither true nor false is refused rather than left to
+        // read as "count anyway" below (see {@link countFlagValue}).
+        if (options.distinct === 'true') options.distinct = true;
+        else if (options.distinct === 'false') options.distinct = false;
+        if (options.count != null) options.count = countFlagValue(options.count, slotParam('count'));
 
         // [#2926 ⑩] Every supported OData-style `$` alias has been consumed and
         // deleted above ($top/$skip/$orderby/$select/$count/$search/
@@ -13511,9 +13584,13 @@ export class ObjectStackProtocolImplementation implements
         // widened projection would recreate, one route over, the very split
         // ("two routes, opposite answers for one input") this issue was filed
         // about.
-        if (request.select) {
-            queryOptions.fields = typeof request.select === 'string'
-                ? request.select.split(',').map((s: string) => s.trim()).filter(Boolean)
+        //
+        // [#26644] …including the empty projection: a blank `?select=` was
+        // falsy and skipped, a comma-only one became `[]` — both answered every
+        // column. Asked on any value present, as the list path asks it.
+        if (request.select != null) {
+            queryOptions.fields = typeof request.select === 'string' || Array.isArray(request.select)
+                ? projectionFieldsValue(request.select, 'select')
                 : request.select;
             this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
         }

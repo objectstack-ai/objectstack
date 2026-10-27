@@ -362,6 +362,20 @@ describe('email channel', () => {
             expect(ch.classifyError?.(r.error)).toBe('permanent');
         });
 
+        it('grades TEMPLATE_INVALID permanent — a template whose hole the mail grammar refuses fails every attempt until republished', async () => {
+            const email = fakeTemplateEmail(new Error("TEMPLATE_INVALID: email template crm.large_deal_won (locale=en-US): the hole {{ amount | currency:currency_code }} gives the currency formatter the argument 'currency_code', which is not an ISO 4217 currency code"));
+            const data = fakeData({ users: { user_1: 'ada@example.com' } });
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            const r = await ch.send(silentCtx(), templateDelivery({ template: 'crm.large_deal_won' }));
+            expect(r.ok).toBe(false);
+            expect(r.error).toMatch(/^TEMPLATE_INVALID: /);
+            expect(ch.classifyError?.(r.error)).toBe('permanent');
+        });
+
         it("a sendTemplate result of status:'failed' (transport failure) reports ok:false and stays retryable", async () => {
             const email = fakeTemplateEmail({ id: 'row', status: 'failed', error: 'smtp down' });
             const data = fakeData({ users: { user_1: 'ada@example.com' } });

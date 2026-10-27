@@ -782,6 +782,11 @@
       "pinned": 3
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.empty-projection-unknown-count.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
       "verb": "findOne",
       "pinned": 1
