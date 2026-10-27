@@ -67,8 +67,8 @@ import {
   useAction,
 } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { SchemaElement } from '@objectstack/sdui-parser';
 import { buttonVariants } from '../../../ui/button';
 // Module-scope side-effect imports: the registry must hold both renderers when
 // `SchemaRenderer` resolves the type, and the light `dom` project does not load

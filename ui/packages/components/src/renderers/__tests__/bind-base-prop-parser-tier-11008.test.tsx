@@ -11,7 +11,7 @@
  * (objectui#11008).
  *
  * `BaseSchema` declares both keys for every node. Until objectui#11008,
- * `validateTree` (`@object-ui/sdui-parser`) did not count either among its base
+ * `validateTree` (`@objectstack/sdui-parser`) did not count either among its base
  * props and no registration declares either as an input, so the undeclared-key
  * branch answered every authored one with `unknown-prop` — on `list` and
  * `tree-view` too, whose renderers read `bind` through `useDataScope`, and on
@@ -35,8 +35,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { ComponentRegistry } from '@object-ui/core';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
-import type { Diagnostic, SchemaElement } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
+import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // §测试纪律 — an unbounded module load must not be billed to a bounded window).

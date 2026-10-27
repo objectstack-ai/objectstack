@@ -1458,8 +1458,11 @@ export const TOP_LEVEL_DIRECTORIES_AWAITING_IMPORT = Object.freeze({});
  * Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected.
  * `vitest.preset.mts` is the shared vitest preset the package configs re-export by
  * relative import; it is the `test` task's input so an edit to it reruns their suites.
+ * `tsconfig.base.json` is `@objectstack/cli#test`'s: the in-repo scaffold test copies
+ * it into its sandbox. It is a turbo `globalDependencies` entry too, which this gate
+ * does not read, so the task declares it as well.
  */
-export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json', 'vitest.preset.mts']);
+export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json', 'tsconfig.base.json', 'vitest.preset.mts']);
 
 /** `.` is the only regex metacharacter these names carry today; escape the class anyway. */
 const TOP_LEVEL_ALTERNATION = RECOGNISED_TOP_LEVEL_DIRECTORIES

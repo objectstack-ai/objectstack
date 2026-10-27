@@ -35,7 +35,6 @@
 "@object-ui/providers": minor
 "@object-ui/react": minor
 "@object-ui/react-runtime": minor
-"@object-ui/sdui-parser": minor
 "@object-ui/types": minor
 ---
 

@@ -21,9 +21,11 @@
  *   approver on the slate it opened on — a named user and every holder of a
  *   staffed position alike — through the same `notify()` ingress and payload
  *   shape as `approval.reminder`;
- * - [#23556] the body names the record by its object's label and its id, and
- *   [#23594] carries no title, even for a record whose title resolves — not
- *   the live record's and not the submit snapshot's;
+ * - [#23556] the body names the record by its object's label, and [#26181]
+ *   by the title the inbox serves its recipient — the live record's, never
+ *   the submit snapshot's (with no field-visibility source composed, every
+ *   recipient is served it; `notification-subject-title-per-recipient` pins
+ *   the narrowing);
  * - a person the slate lists twice is one person, and a `type:value` slot
  *   literal (an unstaffed position) names no one;
  * - the control: a step whose approvers resolve to nobody notifies no one,
@@ -192,13 +194,13 @@ describe('opening an approval step tells each resolved approver, once (approval.
 
     // One message per person, each addressed to that person alone, in the
     // reminder's shape: the request as its source, the inbox deep-linked to
-    // it, the submitter as the actor. [#23556] The body names the record by
-    // its object's label and its id, never `crm_deal/D_ladder`.
+    // it, the submitter as the actor. [#23556 / #26181] The body names the
+    // record by its object's label and its title, never `crm_deal/D_ladder`.
     for (const e of requested(row.id)) {
       expect(e.audience).toHaveLength(1);
       expect(e.payload).toEqual({
         title: 'Approval requested',
-        body: `A decision on Deal D_ladder is waiting on you.`,
+        body: `A decision on Deal ladder is waiting on you.`,
         actionUrl: `/system/approvals?request=${encodeURIComponent(row.id)}`,
       });
       expect(e.source).toEqual({ object: 'sys_approval_request', id: row.id });
@@ -207,12 +209,12 @@ describe('opening an approval step tells each resolved approver, once (approval.
     expect(new Set(requested(row.id).map((e) => e.dedupKey)).size).toBe(3);
   });
 
-  it('[#23594] a record whose title resolves is still named by label and id — no title reaches the body', async () => {
+  it('[#26181] a record whose title resolves is named by the title the inbox serves its recipient, never the snapshot\'s', async () => {
     // The inbox narrows the subject title by its reader's field-level security
-    // (#23594), but a notification has no reader to narrow for, and its text is
-    // stored and may be e-mailed, so the body withholds the title from EVERY
-    // source: the live record's and the submit snapshot's (which differ here,
-    // so either leak is told apart).
+    // (#23594), and a notification is rendered for one recipient, so its body
+    // names the record by the title that recipient is served: the live
+    // record's, never the submit snapshot's (which differ here, so the source
+    // is told apart).
     const LIVE_TITLE = 'Acme renewal';
     const SNAPSHOT_TITLE = 'Snapshot-only title';
     await engine.insert('crm_deal', { id: 'D_titled', title: LIVE_TITLE }, { context: SYSTEM } as any);
@@ -221,16 +223,15 @@ describe('opening an approval step tells each resolved approver, once (approval.
       config: { approvers: [{ type: 'user', value: 'u_alice' }], behavior: 'first_response' } as any,
       submitterId: 'u_sub', record: { id: 'D_titled', title: SNAPSHOT_TITLE },
     }, asUser('u_sub'));
-    // The scene: both titles really are there to leak — the inbox resolves the
-    // live one for this very recipient, and the snapshot carries its own.
+    // The scene: both titles are there — the inbox resolves the live one for
+    // this very recipient, and the snapshot carries its own.
     const [listed] = await svc.listRequests({ approverId: 'u_alice', recordId: 'D_titled' }, asUser('u_alice'));
     expect(listed?.record_title).toBe(LIVE_TITLE);
     expect(row.payload).toMatchObject({ title: SNAPSHOT_TITLE });
 
     const [message] = requested(row.id);
     expect(message?.audience).toEqual(['u_alice']);
-    expect(message?.payload?.body).toBe('A decision on Deal D_titled is waiting on you.');
-    expect(String(message?.payload?.body)).not.toContain(LIVE_TITLE);
+    expect(message?.payload?.body).toBe(`A decision on Deal ${LIVE_TITLE} is waiting on you.`);
     expect(String(message?.payload?.body)).not.toContain(SNAPSHOT_TITLE);
   });
 

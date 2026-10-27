@@ -60,6 +60,26 @@
         "must_contain": ["type: 'wizard'", "inlineEdit", "formViews", "master_detail"],
         "must_not_contain": ["type: 'screen'"]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Group the opportunity list by stage in pipeline order, and the forecast list by period_label, newest first (period_start is a date).",
+      "expected_output": "`grouping: { fields: [{ field: 'stage' }] }`: a select keeps its option order, and `orderBy` refuses a select. Forecast: `{ field: 'period_label', orderBy: 'period_start', order: 'desc' }`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["grouping", "orderBy: 'period_start'"],
+        "must_not_contain": ["orderBy: 'stage'"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Make the Reassign Lead toast read 'Lead NAME reassigned'; after Convert's lead_conversion flow completes, open the opportunity it created.",
+      "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (`${record.name}` fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["{{", "onSuccess", "result.output"],
+        "must_not_contain": ["${record.name}"]
+      }
     }
   ]
 }

@@ -56,7 +56,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ComponentRegistry } from '@object-ui/core';
-import { compile, manifestFromConfigs } from '@object-ui/sdui-parser';
+import { compile, manifestFromConfigs } from '@objectstack/sdui-parser';
 
 import { registerLayout, type MobileNavMode } from '../index';
 

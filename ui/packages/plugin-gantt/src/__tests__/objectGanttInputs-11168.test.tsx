@@ -43,7 +43,7 @@ import {
   SchemaRendererProvider,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));

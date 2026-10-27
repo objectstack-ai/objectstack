@@ -73,8 +73,10 @@ import {
   omitInternalFieldsFromWriteResponse,
   resolveReadableParentIds,
   resolveUserAuthzGrants,
+  vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -121,6 +123,7 @@ import {
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
 import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
@@ -410,6 +413,26 @@ function approvalNotice(text: ApprovalNotificationText): {
     keyedText: text.keyedText,
   };
 }
+
+/**
+ * [#26181] What an approval notification says, as `notify()` takes it:
+ *
+ *  - a notice that names no record (a person's own words under a keyed
+ *    headline) — its {@link approvalNotice} as built;
+ *  - a notice about a record — the record (`about`) and the sentence built
+ *    around the name each recipient reads for it (`text`). The name is the
+ *    recipient's to read (ruling A′): the record's title as they may read it,
+ *    else its id ({@link ApprovalService.subjectNamesFor}), so the sentence is
+ *    built once per name, never once for everyone.
+ */
+type ApprovalNoticeInput =
+  | (ReturnType<typeof approvalNotice> & { readonly about?: never; readonly text?: never })
+  | {
+    readonly about: { readonly object: string; readonly recordId: string };
+    readonly text: (subject: ApprovalSubjectParams) => ApprovalNotificationText;
+    readonly payload?: never;
+    readonly keyedText?: never;
+  };
 
 /** Minimum time between submitter reminders on one request. */
 export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
@@ -1597,10 +1620,21 @@ export class ApprovalService implements IApprovalService {
    * registration, and the audit writer memoizes the same way.
    */
   private readonly recordOrgResolver: RecordOrganizationResolver;
+  /**
+   * [#26180] The records a pending approver may read: memoized per execution
+   * context and engine write epoch ({@link ApprovalService.pendingApproverReadGrants}).
+   */
+  private readonly pendingApproverReads: PendingApproverReadGrantSource;
 
   constructor(opts: ApprovalServiceOptions) {
     this.engine = opts.engine;
     this.recordOrgResolver = createRecordOrganizationResolver(opts.engine);
+    this.pendingApproverReads = new PendingApproverReadGrantSource({
+      engine: opts.engine,
+      isOverrideActor: (context, organizationId) => this.isOverrideActor(context, organizationId),
+      accountEmail: (userId) => this.callerAccountEmail(userId),
+      logger: opts.logger,
+    });
     this.clock = opts.clock ?? { now: () => new Date() };
     this.logger = opts.logger;
     this.automation = opts.automation;
@@ -1661,6 +1695,24 @@ export class ApprovalService implements IApprovalService {
         return this.visibleRequestIds(context, tenantOrg, anchor);
       },
     });
+  }
+
+  /**
+   * [#26180 · ruling 6429330267, letter A] The records of `object` the caller
+   * may READ because a pending approval step waits on them: record id → the
+   * pending request ids that grant it.
+   *
+   * While a request is pending, each resolved person on its current step's
+   * slate (the caller's user id or account email in a slot) and the override
+   * holder ({@link ApprovalService.isOverrideActor}) may read the one record
+   * it is about. Derived from the slate this service resolved, never declared;
+   * fenced to the caller's active organization; ends when the step resolves.
+   * plugin-sharing ORs the ids into its read filter and names the requests in
+   * `explain`. Rejects when a read fails, so the consumer can fail closed.
+   * The rules and the cost live in `pending-approver-read-grant.ts`.
+   */
+  async pendingApproverReadGrants(object: string, context: ExecutionContext): Promise<PendingApproverReadGrants> {
+    return this.pendingApproverReads.forObject(object, context);
   }
 
   /** Attach (or replace) the ADR-0105 D9 posture provider. */
@@ -1807,7 +1859,6 @@ export class ApprovalService implements IApprovalService {
   private async notify(input: {
     topic: string;
     audience: string[];
-    payload: ApprovalNotificationPayload;
     /**
      * [#23284] The organization of the request the notification is about —
      * the request row's own `organization_id` (`requestOrg` while the request
@@ -1819,48 +1870,70 @@ export class ApprovalService implements IApprovalService {
      * approver acting from another organization does not move the request.
      */
     organizationId: string | null | undefined;
-    /**
-     * [#24978] The text as catalog keys, from {@link approvalNotificationText}
-     * — the same call that builds `payload.title` / `payload.body`, so the
-     * literal and its keys cannot name two different sentences. REQUIRED, so
-     * no call site can send an approval notification that only ever reads in
-     * English.
-     */
-    keyedText: ApprovalKeyedText;
     dedupKey?: string;
     source?: { object: string; id: string };
     actorContext?: ExecutionContext;
-  }): Promise<number> {
-    const { actorContext, organizationId, ...event } = input;
+  } & ApprovalNoticeInput): Promise<number> {
+    // [#24978] The text is REQUIRED in one of its two shapes, each carrying the
+    // catalog keys beside the literal (`approvalNotificationText` builds both),
+    // so no call site can send an approval notification that only ever reads
+    // in English.
+    const { actorContext, organizationId, about, text, payload: built, keyedText, ...event } = input;
     const organization =
       organizationId != null && String(organizationId) !== '' ? String(organizationId) : undefined;
     const audience = event.audience.filter(a => a && !a.includes(':'));
     if (!this.messaging || !audience.length) return 0;
     const person = actorContext ? recordedActor(actorContext) : null;
-    // Deep-link the inbox (#2678 P1.5): a notification about one request should
-    // land on that request, not the bare inbox. Rewritten centrally so every
-    // call site — and any future one — inherits it; the query param is read by
-    // the console inbox to auto-open the drawer.
-    let payload = event.payload;
-    if (
-      payload.actionUrl === '/system/approvals'
-      && event.source?.object === 'sys_approval_request'
-      && event.source.id
-    ) {
-      payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
+    // [#26181] A notice about a record goes out once per NAME its recipients
+    // read for it: the recipients who read the same name share one emit, and a
+    // recipient never receives a text built around another recipient's title.
+    const parts: Array<{ audience: string[]; payload: ApprovalNotificationPayload; keyedText: ApprovalKeyedText }> = [];
+    if (about && text) {
+      const names = await this.subjectNamesFor(about, audience, organization);
+      const byName = new Map<string, string[]>();
+      for (const recipient of audience) {
+        const name = names.get(recipient) ?? about.recordId;
+        byName.set(name, [...(byName.get(name) ?? []), recipient]);
+      }
+      const label = this.objectLabelOf(about.object);
+      for (const [name, recipients] of byName) {
+        parts.push({ audience: recipients, ...approvalNotice(text(subjectParams(about.object, label, name))) });
+      }
+    } else if (built && keyedText) {
+      parts.push({ audience, payload: built, keyedText });
     }
-    try {
-      await this.messaging.emit({
-        severity: 'info', ...event, payload, audience, ...(person ? { actorId: person } : {}),
-        ...(organization ? { organizationId: organization } : {}),
-      });
-      return audience.length;
-    } catch (err: any) {
-      this.logger?.warn?.('[approvals] notification failed', {
-        topic: event.topic, error: err?.message ?? String(err),
-      });
-      return 0;
+    let notified = 0;
+    for (const part of parts) {
+      // Deep-link the inbox (#2678 P1.5): a notification about one request should
+      // land on that request, not the bare inbox. Rewritten centrally so every
+      // call site — and any future one — inherits it; the query param is read by
+      // the console inbox to auto-open the drawer.
+      let payload = part.payload;
+      if (
+        payload.actionUrl === '/system/approvals'
+        && event.source?.object === 'sys_approval_request'
+        && event.source.id
+      ) {
+        payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
+      }
+      // A dedup key names ONE event: a notice split per name keys each part by
+      // its first recipient, so messaging never folds one part into another.
+      const dedupKey = event.dedupKey && parts.length > 1 ? `${event.dedupKey}-${part.audience[0]}` : event.dedupKey;
+      try {
+        await this.messaging.emit({
+          severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
+          ...(dedupKey ? { dedupKey } : {}),
+          ...(person ? { actorId: person } : {}),
+          ...(organization ? { organizationId: organization } : {}),
+        });
+        notified += part.audience.length;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] notification failed', {
+          topic: event.topic, error: err?.message ?? String(err),
+        });
+      }
     }
+    return notified;
   }
 
   /** Load a request row and assert it is still pending. */
@@ -4010,6 +4083,8 @@ export class ApprovalService implements IApprovalService {
     // `reassign` hand-off's shape), not frozen into an audit row.
     const oooNames = await this.resolveUserNames(substitutions.flatMap((sub) => [sub.from, sub.to]));
     const oooPerson = (userId: string): string => oooNames.get(userId) || userId;
+    // [#26181] The record each body names is the recipient's to read (`notify()`).
+    const subjectRecord = { object: input.object, recordId: input.recordId };
     for (const sub of substitutions) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
@@ -4018,21 +4093,17 @@ export class ApprovalService implements IApprovalService {
         comment: `${sub.from} → ${sub.to}${sub.reason ? ` — ${sub.reason}` : ''}`,
         created_at: now,
       }), { context: SYSTEM_CTX });
-      const covering = approvalNotificationText({
-        title: 'approvalOooSubstitutedTitle', body: 'approvalOooSubstitutedBody',
-        params: { ...this.nameSubjectRecord(input.object, input.recordId), person: oooPerson(sub.from) },
-      });
       await this.notify({
         topic: 'approval.ooo_substituted',
         organizationId: requestOrg,
         audience: [sub.to],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-${id}-${sub.to}`,
-        ...approvalNotice(covering),
-      });
-      const skipped = approvalNotificationText({
-        title: 'approvalOooSkippedTitle', body: 'approvalOooSkippedBody',
-        params: { ...this.nameSubjectRecord(input.object, input.recordId), person: oooPerson(sub.to) },
+        about: subjectRecord,
+        text: (subject) => approvalNotificationText({
+          title: 'approvalOooSubstitutedTitle', body: 'approvalOooSubstitutedBody',
+          params: { ...subject, person: oooPerson(sub.from) },
+        }),
       });
       await this.notify({
         topic: 'approval.ooo_skipped',
@@ -4040,7 +4111,11 @@ export class ApprovalService implements IApprovalService {
         audience: [sub.from],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
-        ...approvalNotice(skipped),
+        about: subjectRecord,
+        text: (subject) => approvalNotificationText({
+          title: 'approvalOooSkippedTitle', body: 'approvalOooSkippedBody',
+          params: { ...subject, person: oooPerson(sub.to) },
+        }),
       });
     }
 
@@ -4088,18 +4163,15 @@ export class ApprovalService implements IApprovalService {
     // No one-tap decision links: a notification payload is stored, and a raw
     // ADR-0043 token in it is a usable link at rest (`ApprovalNotificationPayload`).
     //
-    // [#23556] The body names the record by its object's label and its id —
-    // `Deal D_123`, never `crm_deal/D_123` — so a grouped bell entry tells its
-    // reader which kind of record is waiting. One name for every recipient.
+    // [#23556] The body names the record by its object's label — never
+    // `crm_deal/...` — so a grouped bell entry tells its reader which kind of
+    // record is waiting; [#26181] and by its title as each approver may read
+    // it, else its id (`notify()`).
     const toldByOoo = new Set(substitutions.map((sub) => sub.to));
     const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
     //
     // [#24978] And it rides as catalog keys beside that literal, so each
     // approver reads it in their own language, rendered at delivery.
-    const requested = approvalNotificationText({
-      title: 'approvalRequestedTitle', body: 'approvalRequestedBody',
-      params: this.nameSubjectRecord(input.object, input.recordId),
-    });
     for (const approver of openedOn) {
       await this.notify({
         topic: 'approval.requested',
@@ -4108,7 +4180,10 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-requested-${id}-${approver}`,
-        ...approvalNotice(requested),
+        about: { object: input.object, recordId: input.recordId },
+        text: (subject) => approvalNotificationText({
+          title: 'approvalRequestedTitle', body: 'approvalRequestedBody', params: subject,
+        }),
       });
     }
 
@@ -4813,7 +4888,7 @@ export class ApprovalService implements IApprovalService {
    * outcome and keep the other.
    *
    * The shape is the sibling notices': addressed to the request's own
-   * `submitter_id`, the record named by {@link ApprovalService.nameSubjectRecord}
+   * `submitter_id`, the record named by {@link ApprovalService.subjectNamesFor}
    * (#23556), a non-empty body (#21847), deep-linked to the request by
    * `notify()`, the decider as the actor. The body is one English sentence,
    * like every approval notification — none of them reads the caller's locale;
@@ -4856,24 +4931,23 @@ export class ApprovalService implements IApprovalService {
       if (nextStepOpened) return;
     }
     const approved = decision === 'approve';
-    const subject = this.nameSubjectRecord(request.object_name, request.record_id);
     const note = comment?.trim();
     // [#24978] The decider's comment, when there is one, rides under the
     // sentence as written — a hole of its own, never translated.
-    const outcome = approvalNotificationText({
-      title: approved ? 'approvalApprovedTitle' : 'approvalRejectedTitle',
-      body: note
-        ? (approved ? 'approvalApprovedWithCommentBody' : 'approvalRejectedWithCommentBody')
-        : (approved ? 'approvalApprovedBody' : 'approvalRejectedBody'),
-      params: note ? { ...subject, comment: note } : subject,
-    });
     await this.notify({
       topic: approved ? 'approval.approved' : 'approval.rejected',
       organizationId: request.organization_id,
       audience: [submitter],
       actorContext: context,
       source: { object: 'sys_approval_request', id: request.id },
-      ...approvalNotice(outcome),
+      about: { object: request.object_name, recordId: request.record_id },
+      text: (subject) => approvalNotificationText({
+        title: approved ? 'approvalApprovedTitle' : 'approvalRejectedTitle',
+        body: note
+          ? (approved ? 'approvalApprovedWithCommentBody' : 'approvalRejectedWithCommentBody')
+          : (approved ? 'approvalApprovedBody' : 'approvalRejectedBody'),
+        params: note ? { ...subject, comment: note } : subject,
+      }),
     });
   }
 
@@ -5296,7 +5370,7 @@ export class ApprovalService implements IApprovalService {
     const now = this.clock.now().toISOString();
     const maxRevisions = typeof (config as any).maxRevisions === 'number' ? (config as any).maxRevisions : 3;
     // [#23978] Both sentences below name the record the way every approval notification does.
-    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
+    const about = { object: String(raw.object_name), recordId: String(raw.record_id) };
     let priorSendBacks = 0;
     if (runId && nodeId) {
       const siblings = await this.engine.find('sys_approval_request', {
@@ -5348,17 +5422,17 @@ export class ApprovalService implements IApprovalService {
         resumeError = outcome.resumeError;
       }
       if (raw.submitter_id) {
-        const autoRejected = approvalNotificationText({
-          title: 'approvalAutoRejectedTitle', body: 'approvalAutoRejectedBody',
-          params: { ...subject, limit: String(maxRevisions) },
-        });
         await this.notify({
           topic: 'approval.returned',
           organizationId: raw.organization_id,
           audience: [String(raw.submitter_id)],
           actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
-          ...approvalNotice(autoRejected),
+          about,
+          text: (subject) => approvalNotificationText({
+            title: 'approvalAutoRejectedTitle', body: 'approvalAutoRejectedBody',
+            params: { ...subject, limit: String(maxRevisions) },
+          }),
         });
       }
       const fresh = await this.readBackRequest(requestId, context);
@@ -5394,16 +5468,21 @@ export class ApprovalService implements IApprovalService {
     if (raw.submitter_id) {
       // [#24978] The approver's own words, when they wrote some, are the body
       // as written; only the headline is keyed then.
-      const sentBack = input.comment?.trim()
-        ? approvalNotificationText({ title: 'approvalReturnedTitle', literalBody: input.comment.trim() })
-        : approvalNotificationText({ title: 'approvalReturnedTitle', body: 'approvalReturnedBody', params: subject });
+      const note = input.comment?.trim();
       await this.notify({
         topic: 'approval.returned',
         organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
-        ...approvalNotice(sentBack),
+        ...(note
+          ? approvalNotice(approvalNotificationText({ title: 'approvalReturnedTitle', literalBody: note }))
+          : {
+            about,
+            text: (subject: ApprovalSubjectParams) => approvalNotificationText({
+              title: 'approvalReturnedTitle', body: 'approvalReturnedBody', params: subject,
+            }),
+          }),
       });
     }
 
@@ -5659,10 +5738,6 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, next, raw.organization_id ?? null, now);
 
-    const handedOver = approvalNotificationText({
-      title: 'approvalReassignedTitle', body: 'approvalReassignedBody',
-      params: this.nameSubjectRecord(raw.object_name, raw.record_id),
-    });
     await this.notify({
       topic: 'approval.reassigned',
       organizationId: raw.organization_id,
@@ -5670,7 +5745,10 @@ export class ApprovalService implements IApprovalService {
       actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       dedupKey: `approval-reassign-${requestId}-${to}`,
-      ...approvalNotice(handedOver),
+      about: { object: String(raw.object_name), recordId: String(raw.record_id) },
+      text: (subject) => approvalNotificationText({
+        title: 'approvalReassignedTitle', body: 'approvalReassignedBody', params: subject,
+      }),
     });
 
     const fresh = await this.readBackRequest(requestId, context);
@@ -5813,7 +5891,7 @@ export class ApprovalService implements IApprovalService {
     // concrete identity (a user id / an email) gets its own reminder;
     // `position:*`-style literals go to the shared nudge below, which
     // `notify()` drops — a slot address names no one.
-    // [#23978] One name for every recipient, the form `approval.requested` uses.
+    // [#23978 / #26181] The record named as `approval.requested` names it.
     //
     // ⛔ [#24564] No one-tap decision link (ADR-0043) rides a reminder.
     // Messaging stores the payload it is handed (`ApprovalNotificationPayload`),
@@ -5832,10 +5910,12 @@ export class ApprovalService implements IApprovalService {
     // reminders handed over: one per distinct address. A user id and the same
     // account's email are two addresses here, exactly as at the opening — two
     // slots the person takes separately, and two reminders delivered.
-    const reminder = approvalNotificationText({
-      title: 'approvalReminderTitle', body: 'approvalReminderBody',
-      params: this.nameSubjectRecord(raw.object_name, raw.record_id),
-    });
+    const reminder = {
+      about: { object: String(raw.object_name), recordId: String(raw.record_id) },
+      text: (subject: ApprovalSubjectParams) => approvalNotificationText({
+        title: 'approvalReminderTitle', body: 'approvalReminderBody', params: subject,
+      }),
+    };
     let notified = 0;
     const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
@@ -5847,7 +5927,7 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
-        ...approvalNotice(reminder),
+        ...reminder,
       });
     }
     if (literals.length) {
@@ -5858,7 +5938,7 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
-        ...approvalNotice(reminder),
+        ...reminder,
       });
     }
 
@@ -7171,7 +7251,7 @@ export class ApprovalService implements IApprovalService {
     const now = this.clock.now().toISOString();
     const pending = csvSplit(raw.pending_approvers);
     // [#23978] Every escalation sentence names the record the way every approval notification does.
-    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
+    const about = { object: String(raw.object_name), recordId: String(raw.record_id) };
 
     // `escalateTo` is a position machine name or a user id (same contract as
     // the `position` ApproverType, ADR-0090 D3). Position holders win; an
@@ -7245,9 +7325,10 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: escalatees,
         source: { object: 'sys_approval_request', id: raw.id },
-        ...approvalNotice(approvalNotificationText({
+        about,
+        text: (subject) => approvalNotificationText({
           title: 'approvalEscalatedTitle', body: 'approvalEscalatedBody', params: subject,
-        })),
+        }),
       });
     } else if (action === 'auto_approve' || action === 'auto_reject') {
       // [#24753] The submitter hears this outcome from the submitter notice
@@ -7266,9 +7347,10 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: [...pending, ...escalatees],
         source: { object: 'sys_approval_request', id: raw.id },
-        ...approvalNotice(approvalNotificationText({
+        about,
+        text: (subject) => approvalNotificationText({
           title: 'approvalSlaBreachedTitle', body: 'approvalSlaBreachedBody', params: subject,
-        })),
+        }),
       });
     }
 
@@ -7278,10 +7360,11 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         source: { object: 'sys_approval_request', id: raw.id },
-        ...approvalNotice(approvalNotificationText({
+        about,
+        text: (subject) => approvalNotificationText({
           title: 'approvalSlaBreachedSubmitterTitle', body: 'approvalSlaBreachedSubmitterBody',
           params: { ...subject, action: taken },
-        })),
+        }),
       });
     }
   }
@@ -7668,8 +7751,8 @@ export class ApprovalService implements IApprovalService {
    * may be served still names the record. This narrows only; nothing here
    * grants a reader anything.
    *
-   * The `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
-   * does not read this: it has no reader to narrow for.
+   * [#26181] A notification body names the record by the same rule, asked as
+   * each recipient ({@link ApprovalService.subjectNamesFor}).
    */
   private async resolveSubjectDisplays(
     byObject: ReadonlyMap<string, ReadonlySet<string>>,
@@ -7718,17 +7801,27 @@ export class ApprovalService implements IApprovalService {
       where: { id: { $in: list } }, limit: list.length, context: SYSTEM_CTX,
     });
     for (const rec of (recs ?? []) as any[]) {
-      const asServed = readable === undefined ? rec : redactSnapshot(rec, readable).payload;
-      const title = ApprovalService.pickTitle(asServed, displayField);
+      const title = ApprovalService.titleAsServed(rec, displayField, readable);
       if (rec?.id && title) into.set(`${object} ${rec.id}`, title);
     }
   }
 
   /**
+   * The title of `rec` as served to a reader whose served fields are
+   * `readable` (`undefined`: the seam's pass-through): picked from the record
+   * after `redactSnapshot` keeps only those fields. Shared by
+   * {@link titlesAsServed} and a notification's per-recipient name
+   * ({@link subjectNamesFor}).
+   */
+  private static titleAsServed(rec: any, displayField: string | undefined, readable: string[] | undefined): string | undefined {
+    const asServed = readable === undefined ? rec : redactSnapshot(rec, readable).payload;
+    return ApprovalService.pickTitle(asServed, displayField);
+  }
+
+  /**
    * An object's schema label, or `undefined` — the one spelling of "the
    * object's label" the inbox row ({@link ApprovalService.resolveSubjectDisplays})
-   * and the `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
-   * share. A schema that cannot be read has no label (the label is optional).
+   * and every notification body (`notify()`) share. A schema that cannot be read has no label (the label is optional).
    */
   private objectLabelOf(object: string): string | undefined {
     try {
@@ -7738,27 +7831,100 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * [#23556] The record an approval notification is about: the object's label
-   * (its API name only when the schema has none, as the inbox falls back),
-   * then the record id — `Deal D_123`. The body carried the id before; what
-   * changed is the API name giving way to the label.
+   * [#26181 ruling A′] The name each of `recipients` reads for the record
+   * `about` names in a notification body, the `{{record}}` beside the object's
+   * label: its display title (ADR-0079 `nameField`,
+   * {@link resolveDisplayField}) as THAT recipient may read it, else the
+   * record id. Each notification is delivered to one named recipient — the
+   * bell row and the e-mail alike — so, unlike the token-bearing action-link
+   * pages (`action-link-pages.ts`), it has a reader to narrow for.
    *
-   * ⛔ No title, from any source — neither the live record nor the payload
-   * snapshot (which the inbox serves only after redacting it for its reader,
-   * #10749). Notification text is stored and may be e-mailed, and it has no
-   * reader to narrow for.
+   * The inbox's own rule, asked as the recipient rather than the reading
+   * caller ({@link resolveSubjectDisplays}): the record is read under the
+   * system context (#7497 ruling C), and the title is picked from it AS SERVED
+   * to the recipient ({@link titleAsServed} over their {@link servedFields}
+   * answer), so a title field the recipient may not read, or is served
+   * masked, gives the id. So does a record with no title, one that cannot be
+   * read, and a recipient whose envelope cannot be resolved (at `warn`): every
+   * failure falls back to the id, never to a title.
    *
-   * [#24978] Answered as the two `{{object}} {{record}}` holes of the keyed
-   * sentence rather than one string: the label is keyed by
-   * `objects.<object>.label`, so a recipient whose language pack holds it
-   * reads it in their language at delivery, and the schema label (the API name
-   * when there is none) is the text it falls back to — the literal, which is
-   * exactly the `Deal D_123` this named before.
+   * Cost: one record read per notice, and one envelope resolution
+   * ({@link recipientContext}) plus one field-visibility ask per recipient —
+   * only when a field-visibility source is composed and the record has a title
+   * at all. A notice reaches one recipient at most call sites, and a slate at
+   * the others; the envelope is the one the administrators' slate already
+   * resolves per member ({@link organizationAdministrators}).
    */
-  private nameSubjectRecord(object: string, recordId: string): ApprovalSubjectParams {
-    // [#23594 / #23556 ruling B] The inbox serves the title narrowed per reader (resolveSubjectDisplays); this body is
-    // written once at send time, with no per-recipient reader to narrow for, so it stays label-and-id.
-    return subjectParams(object, this.objectLabelOf(object), recordId);
+  private async subjectNamesFor(
+    about: { readonly object: string; readonly recordId: string },
+    recipients: readonly string[],
+    organizationId: string | undefined,
+  ): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const displayField = this.resolveDisplayField(about.object);
+    let record: any;
+    try {
+      const rows = await this.engine.find(about.object, {
+        where: { id: about.recordId }, limit: 1, context: SYSTEM_CTX,
+      });
+      record = Array.isArray(rows) ? rows[0] : undefined;
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] the record a notification names could not be read — it is named by its id', {
+        object: about.object, error: err?.message ?? String(err),
+      });
+      return names;
+    }
+    if (!record || !ApprovalService.titleAsServed(record, displayField, undefined)) return names;
+    // No field-visibility source: the seam's pass-through (`servedFields`
+    // answers `undefined` for every caller), so every recipient reads the title
+    // the inbox serves them, and no envelope needs resolving to say so.
+    const authority = this.fieldVisibility;
+    const narrows = !!authority && typeof authority.getReadableFields === 'function';
+    for (const recipient of recipients) {
+      try {
+        const context = narrows ? await this.recipientContext(recipient, organizationId) : undefined;
+        if (narrows && !context) continue;
+        const readable = context ? (await this.servedFields([about.object], context)).get(about.object) : undefined;
+        const title = ApprovalService.titleAsServed(record, displayField, readable);
+        if (title) names.set(recipient, title);
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] what a notification recipient may read could not be resolved — the record is named by its id', {
+          object: about.object, recipient, error: err?.message ?? String(err),
+        });
+      }
+    }
+    return names;
+  }
+
+  /**
+   * [#26181] The envelope `recipient` reads with in the request's
+   * organization, built as the `@mention` recipient gate (`plugin-audit`)
+   * builds a mentioned user's: their own grants by the resolver every request
+   * envelope comes from (`resolveUserAuthzGrants`), with the organization kept
+   * only while `vetOrganizationClaim` — the session arm of
+   * `resolveAuthzContext` — backs it under the posture in force. An e-mail
+   * address names the account that carries it; one that no account carries
+   * has no envelope (`undefined`).
+   */
+  private async recipientContext(
+    recipient: string,
+    organizationId: string | undefined,
+  ): Promise<ExecutionContext | undefined> {
+    let userId = recipient;
+    if (recipient.includes('@')) {
+      const rows = await this.engine.find('sys_user', {
+        where: { email: recipient }, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+      });
+      const id = Array.isArray(rows) ? (rows[0] as any)?.id : undefined;
+      if (id == null || String(id) === '') return undefined;
+      userId = String(id);
+    }
+    let grants = await resolveUserAuthzGrants(this.engine, userId, organizationId ? { tenantId: organizationId } : {});
+    const tenantId = vetOrganizationClaim(
+      organizationId, grants.accessible_org_ids, this.tenancyPosture?.() as TenancyPosture | undefined,
+    );
+    if (organizationId && !tenantId) grants = await resolveUserAuthzGrants(this.engine, userId, {});
+    return { ...grants, userId, ...(tenantId ? { tenantId } : {}) } as unknown as ExecutionContext;
   }
 
   /**

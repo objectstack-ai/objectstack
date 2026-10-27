@@ -55,7 +55,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 // The reference glyph the render rows compare against, imported at module
 // scope rather than in a hook (see the test-discipline section of AGENTS.md):
 // `LazyIcon` draws `map-pin` through lucide's `DynamicIcon`, which fetches the

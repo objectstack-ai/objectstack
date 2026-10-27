@@ -22,7 +22,7 @@
  *   |--------------------------------|------------------------|---------------------------------|
  *   | value omitted (unary operator) | `value?`               | `value` required                |
  *   | value `null`                   | admitted               | refused                         |
- *   | boolean entry in a list / pair | refused                | admitted (kept, see below)      |
+ *   | boolean entry in a list / pair | refused                | admitted (narrowed by #26348)   |
  *   | operator                       | `VIEW_FILTER_OPERATORS` | those + opt-in `exists` / `notExists` |
  *
  * The operator row is not a divergence on the way IN: every spec id is a
@@ -36,12 +36,11 @@
  * threw on `.trim()` and on a text column came back as the string
  * `"undefined"`.
  *
- * The third case runs the other way — the builder is WIDER than the spec, so it
- * does not keep an authored group out — and is left as it is here: the row
- * keeps its boolean list member beside the spec's value, and narrowing it is a
- * breaking change to a published type with a consumer in `@object-ui/plugin-list`
- * (`UserFilters` hands `LookupValuePicker` a boolean-bearing list). The pin
- * below states the width as it is, so the narrowing has to change it.
+ * The third case runs the other way — the builder was WIDER than the spec, so it
+ * did not keep an authored group out — and was left as it was here. #26348
+ * narrowed it: the row's value is now the spec's value and nothing wider, and
+ * the writers that produced a boolean list entry write its string spelling.
+ * Its pins live in `filter-builder-boolean-list-26348.test.tsx`.
  *
  * Type-level pins are judged by `tsc -p tsconfig.test.json`; a green vitest run
  * says nothing about them.
@@ -66,9 +65,8 @@ type Assignable<From, To> = [From] extends [To] ? true : false;
 
 /* ── The shapes ───────────────────────────────────────────────────────────── */
 
-// The row's value IS the spec rule's value — by reference, not a copy of it —
-// plus the builder's own wider list member.
-expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value'] | (string | number | boolean)[]>>();
+// The row's value IS the spec rule's value — by reference, not a copy of it.
+expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value']>>();
 expectType<Assignable<ViewFilterRule['value'], FilterBuilderRow['value']>>();
 // The renderer's two reads cross with no cast: the authored group and the
 // authored field list are what the builder's props take.
