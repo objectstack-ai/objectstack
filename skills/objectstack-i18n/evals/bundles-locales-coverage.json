@@ -54,7 +54,7 @@
     {
       "id": 6,
       "prompt": "Add zh-CN for the `pipeline_by_stage` report, the `sales_manager` permission set, the `regional_lead` position and the `deal_stage` picklist's option labels.",
-      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, never `permissionSets`), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist.",
+      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, not the camelCase name), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist.",
       "files": [],
       "assertions": {
         "must_contain": ["reports", "permissions", "positions", "picklists"],
