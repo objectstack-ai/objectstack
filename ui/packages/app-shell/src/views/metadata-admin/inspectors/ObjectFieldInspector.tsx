@@ -1516,10 +1516,14 @@ function TextareaField({
   mono?: boolean;
   placeholder?: string;
 }) {
+  // The pair is closed the way `_shared.tsx`'s form atoms close theirs: an id
+  // minted per instance, so the label names the textarea.
+  const id = React.useId();
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
       <textarea
+        id={id}
         value={value}
         disabled={disabled}
         rows={rows}

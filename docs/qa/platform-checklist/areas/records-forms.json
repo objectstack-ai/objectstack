@@ -6,9 +6,9 @@
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed, nothing to un-seed beyond the teardown line) and every call below is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted.",
     "qa-feeds-disabled": {
-      "title": "Scratch feeds-DISABLED parent (qa_nofeeds) — the FEEDS_DISABLED probe target",
+      "title": "Scratch feeds-DISABLED parent (qafeeds_nofeeds) — the FEEDS_DISABLED probe target",
       "why": "Stock showcase declares NO object with `enable.feeds: false`. Feeds is opt-OUT (spec default true, packages/spec/src/data/object.zod.ts), so every showcase object has comments ON and there is no naturally-occurring disabled parent to borrow — the opposite of the files case, where opt-IN (default false) leaves most objects files-disabled incidentally and attachments-storage could probe showcase_account before qa_nofiles existed. Without this recipe BOTH FEEDS_DISABLED clauses of record-discussion-mentions are blocked(fixture) and the code survives in that item's `negative` list alone — named but never driven, which is the gap #12118 was filed against.",
-      "provenance": "#12118 — the gap was measured from PR #12116 (the files-side twin, which added the FILES_DISABLED update-verb probe and reported this one rather than widening). Recipe shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670) rather than invented.",
+      "provenance": "#12118 — the gap was measured from PR #12116 (the files-side twin, which added the FILES_DISABLED update-verb probe and reported this one rather than widening). Recipe shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670) rather than invented. #26876: replayed on a fresh stock showcase boot at main a51ba639 (REST only, 2026-10-27). As written (no namespace) step 1 answered 201 with the derived namespace 'feeds' and step 2 answered 422 NAMESPACE_PREFIX ('Rename it to feeds_qa_nofeeds'), so the object is now qafeeds_nofeeds under the declared namespace 'qafeeds'. Fixed, on one boot beside qa-scratch-authz steps 1-4 ('qa') and qa-media-constraints ('qamedia'): step 1 answered 201 echoing namespace 'qafeeds', step 2 answered 200, a qafeeds_nofeeds record POST answered 201 and a sys_comment on its thread answered 403 FEEDS_DISABLED; a second package declaring 'qa' answered 422 NAMESPACE_CONFLICT on the same boot; the teardown DELETE answered 200 and the object then read 404",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
@@ -24,18 +24,19 @@
               "id": "com.objectstack.qa.feeds",
               "name": "QA feeds fixture",
               "version": "1.0.0",
-              "type": "app"
+              "type": "app",
+              "namespace": "qafeeds"
             },
             "enableOnInstall": true
           },
-          "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
-          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts"
+          "expect": "2xx with the installed package echoed back, manifest.namespace 'qafeeds'. The namespace is DECLARED on purpose: every object a package defines must be named NS_SHORT, and a manifest that declares none gets one derived from the id's last segment ('feeds'), under which step 2 answers 422 NAMESPACE_PREFIX. It is NOT 'qa': attachments-storage's qa-scratch-authz package owns 'qa', and a namespace has one owner per boot, so a second 'qa' install answers NAMESPACE_CONFLICT. With 'qafeeds' this recipe co-installs on one boot with qa-scratch-authz ('qa') and qa-media-constraints ('qamedia'), which is a supported run shape. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts#packages note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts. Namespace derivation and the prefix judge: packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId and #validateObjectNamespacePrefix; one owner per namespace: packages/objectql/src/registry.ts#NamespaceConflictError"
         },
         {
           "step": 2,
-          "call": "PUT /api/v1/meta/object/qa_nofeeds?package=com.objectstack.qa.feeds",
+          "call": "PUT /api/v1/meta/object/qafeeds_nofeeds?package=com.objectstack.qa.feeds",
           "body": {
-            "name": "qa_nofeeds",
+            "name": "qafeeds_nofeeds",
             "label": "QA No Feeds",
             "sharingModel": "public_read_write",
             "enable": {
@@ -53,10 +54,10 @@
           "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#sharingModel; ADR-0090 D4 — re-pointed #18104: query is not a key this schema declares, and sharingModel is the key this sentence is about). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the run's own file DB, which is the cheaper path and the one a boot on its own port and DB makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the run's own file DB, which is the cheaper path and the one a boot on its own port and DB makes free. Any throwaway qafeeds_nofeeds record and any sys_comment row created against it go with the package.",
       "knownGaps": [
-        "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
-        "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
+        "The recipe lands the OBJECT only. Each probe inserts its own throwaway qafeeds_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
+        "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qafeeds_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
       ]
     }
   },
@@ -2880,7 +2881,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2913,8 +2914,8 @@
         "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, oldest-first",
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads the inbox feed over GET /api/v1/notifications (objectui app-shell useInboxBell.ts) — read unreadCount there",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
-        "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qa_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qa_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qa_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
-        "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
+        "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qafeeds_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qafeeds_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qafeeds_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
+        "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qafeeds_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution",
@@ -2952,7 +2953,7 @@
           "evidence": "both users' bells"
         },
         {
-          "clause": "a NEW comment targeting a feeds-DISABLED parent is refused authoritatively: POST /api/v1/data/sys_comment with a qa_nofeeds thread_id answers 403 with code FEEDS_DISABLED, and no sys_comment row lands — the refusal is the oracle, and a silent no-op that returns 2xx while writing nothing is equally a FAIL",
+          "clause": "a NEW comment targeting a feeds-DISABLED parent is refused authoritatively: POST /api/v1/data/sys_comment with a qafeeds_nofeeds thread_id answers 403 with code FEEDS_DISABLED, and no sys_comment row lands — the refusal is the oracle, and a silent no-op that returns 2xx while writing nothing is equally a FAIL",
           "oracle": "api",
           "verify": "the POST returns status 403 and a body whose `code` is exactly \"FEEDS_DISABLED\" (plugin-audit enforceFeedsCapability throws { code: 'FEEDS_DISABLED', status: 403, object } and the REST layer forwards.status verbatim — packages/plugins/plugin-audit/src/audit-writers.ts), AND a follow-up GET /api/v1/data/sys_comment filtered by that thread_id returns ZERO rows. The same call against the feeds-ENABLED control parent must return 2xx, or the 403 is not attributable to the capability gate",
           "evidence": "the 403 response body showing the code, the zero-row thread read, and the 2xx control"
@@ -2960,7 +2961,7 @@
         {
           "clause": "RE-THREADING an existing comment onto a feeds-disabled parent is refused identically — the flag is a property of the TARGET OBJECT, not of the verb that made a row point at it (#10170) — and the stored thread_id is UNCHANGED after the refusal",
           "oracle": "api",
-          "verify": "the PATCH re-threading an existing sys_comment onto the qa_nofeeds record answers 403 FEEDS_DISABLED, and a re-read of that sys_comment row shows thread_id still naming the ORIGINAL feeds-enabled parent — same authoritative-rejection rule as the create clause above. Grounded engine-side by the #10170 pin describe '[#10170] enable.feeds is asked on the UPDATE verb too' (packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts), which covers the by-id and predicate shapes; this clause is the REST-surface half that pin does not reach. Note the deliberate boundary: an update that carries NO thread_id is not a re-thread and stays allowed, so an ordinary body edit on a grandfathered row must still succeed",
+          "verify": "the PATCH re-threading an existing sys_comment onto the qafeeds_nofeeds record answers 403 FEEDS_DISABLED, and a re-read of that sys_comment row shows thread_id still naming the ORIGINAL feeds-enabled parent — same authoritative-rejection rule as the create clause above. Grounded engine-side by the #10170 pin describe '[#10170] enable.feeds is asked on the UPDATE verb too' (packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts), which covers the by-id and predicate shapes; this clause is the REST-surface half that pin does not reach. Note the deliberate boundary: an update that carries NO thread_id is not a re-thread and stays allowed, so an ordinary body edit on a grandfathered row must still succeed",
           "evidence": "the 403 response body, the unchanged-thread_id re-read, and the body-edit control"
         },
         {
@@ -2985,7 +2986,7 @@
       "negative": [
         "an optimistic comment that stays as a SECOND row after the server row lands (dupe) or vanishes entirely (phantom) is a FAIL — mergeFeedRows exists to keep exactly one",
         "a mention notification delivered to a NON-mentioned user is a FAIL — the recipientId gate is the boundary",
-        "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qa_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
+        "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qafeeds_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
         "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
         "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts), so a run that reports the 403 without the 2xx control has not measured the gate",
         "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop",
@@ -3077,6 +3078,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says acceptance[9]'s REST-door pin waits on #26625 and its cross-organization leg stays a live leg until then (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "the scratch parent is renamed qa_nofeeds → qafeeds_nofeeds in steps[8], steps[9], acceptance[5], acceptance[6].verify and negative[2] (the thread_id spelling 'qafeeds_nofeeds:<id>' included), because the qa-feeds-disabled recipe now declares manifest.namespace 'qafeeds' (#26876). Replayed on a fresh stock showcase boot at main a51ba639: as written, the install derived namespace 'feeds' and the object save answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no feeds-disabled parent and acceptance[5] and [6] would have scored blocked(fixture). The recipe cannot declare 'qa': qa-scratch-authz owns it, and a second 'qa' package answers 422 NAMESPACE_CONFLICT. With 'qafeeds', steps 1-2 answered 201/200 beside the qa and qamedia packages on one boot, and a comment on a qafeeds_nofeeds record answered 403 FEEDS_DISABLED. Only the object name changed; no clause's assertion, step order or oracle changed",
+          "ref": "#26876"
         }
       ]
     },
@@ -4392,7 +4399,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4405,24 +4412,24 @@
           "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts and semantic-zoo.object.ts — NEITHER carries visibleWhen"
         ],
         "knownGaps": [
-          "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qa_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
+          "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qagroup_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
           "the console leg at objectui 1fb1ced36243: BOTH adapters carry the predicate. The FORM adapter copies the key (plugin-form fieldGroups.ts passes visibleWhen onto the derived section). The DETAIL page writes each declared group as the spec's `{ group }` reference (plugin-detail buildDefaultPageSchema.ts resolveDetailSections), and record:details resolves it and evaluates the group's visibleWhen per record (renderers/record-details.tsx; pin record-details.groupVisibleWhen-11630.test.tsx) — objectui#11630 is fixed. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
         ]
       },
       "steps": [
         "boot the showcase on its own port and DB; sign in as the seeded admin; keep an API token",
-        "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
+        "author the scratch carrier: install a scratch package that DECLARES its namespace — POST /api/v1/packages { manifest: { id: 'com.objectstack.qa.group', name: 'QA field-group fixture', version: '1.0.0', type: 'app', namespace: 'qagroup' }, enableOnInstall: true } (a manifest with no namespace gets one derived from the id's last segment, and the object save then answers 422 NAMESPACE_PREFIX; not 'qa', which attachments-storage's qa-scratch-authz package owns — a second 'qa' install answers 422 NAMESPACE_CONFLICT) — then PUT /api/v1/meta/object/qagroup_group_gate?package=com.objectstack.qa.group with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
-        "console leg: open a qa_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
+        "console leg: open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
         "display-tier probe: with kind=basic (predicate FALSE), pre-fill a pro_details member value via API, open the form, save an unrelated edit, then re-read the member field over the API"
       ],
       "acceptance": [
         {
           "clause": "authoring accepts both the bare CEL string and the {dialect:'cel',source} envelope on fieldGroups[].visibleWhen; the schema parse normalizes the string to the envelope (batch20 pin), the meta API serves the body as authored, and either form gates the group identically at render.",
           "oracle": "api",
-          "verify": "PUT + GET round-trip of qa_group_gate with each spelling: the GET body's fieldGroups[0].visibleWhen is what was PUT (every type but view persists the request body verbatim — ADR-0005 appendix (c), metadata-protocol saveMetaItem); the normalization is the parse's (ExpressionInputSchema), pinned by object-strictness-batch20.test.ts's re-opened predicate slot; the render half is read on the form in clause 4",
+          "verify": "PUT + GET round-trip of qagroup_group_gate with each spelling: the GET body's fieldGroups[0].visibleWhen is what was PUT (every type but view persists the request body verbatim — ADR-0005 appendix (c), metadata-protocol saveMetaItem); the normalization is the parse's (ExpressionInputSchema), pinned by object-strictness-batch20.test.ts's re-opened predicate slot; the render half is read on the form in clause 4",
           "evidence": "the two PUT payloads + the GET bodies' fieldGroups entries + the pin run"
         },
         {
@@ -4510,6 +4517,12 @@
           "date": "2026-10-26",
           "change": "acceptance[3].verify ran its detail pin from an objectui checkout at the retired .objectui-sha pin; it now runs from ui/ in this checkout, where the file is on main cc378e93. Carried for #26035. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "steps[1] names the scratch package and DECLARES its namespace (manifest id com.objectstack.qa.group, namespace 'qagroup'), and the scratch object is renamed qa_group_gate → qagroup_group_gate in fixtures.knownGaps[0], steps[1], steps[5] and acceptance[0].verify (#26876, the triage sweep of the qa-feeds-disabled pattern this step reuses). Replayed on a fresh stock showcase boot at main a51ba639 (REST only): with no namespace the install derived 'group' from the id and the object save answered 422 NAMESPACE_PREFIX, so the item's carrier could not be authored as written. Not 'qa': qa-scratch-authz's package owns it, and a second 'qa' install answers 422 NAMESPACE_CONFLICT. With 'qagroup', beside the qa, qamedia and qafeeds recipe packages on one boot (no collision), the install answered 201, the active PUT 200, the GET read fieldGroups[0].visibleWhen back as the bare string authored and highlightFields ['kind'], the visibleOn draft answered 422 INVALID_METADATA (fieldGroups.0 unrecognized_keys), a record POST 201, and the teardown DELETE 200. No clause's assertion or oracle changed",
+          "ref": "#26876"
         }
       ]
     },
