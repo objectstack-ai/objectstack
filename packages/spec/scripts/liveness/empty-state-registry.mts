@@ -150,6 +150,13 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
       '[ADR-0085] Absence permits stage heuristics to infer the lifecycle field; `false` suppresses them. It selects how the renderer guesses, not who may read anything.',
   },
   {
+    file: 'packages/spec/src/ui/report.zod.ts',
+    property: 'dateRange',
+    semantics: 'scope',
+    rationale:
+      'A report with no `dateRange` applies no date window, so its table shows every period, exactly as before the key existed. It selects which aggregated rows the table shows, not who may read them: the dataset query still runs under the base object\'s permissions and row-level security, so a missing window widens the period, never the access.',
+  },
+  {
     file: 'packages/spec/src/ui/page.zod.ts',
     property: 'columns',
     semantics: 'scope',

@@ -324,6 +324,7 @@ import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, resolveFieldLabel, isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
@@ -14174,6 +14175,7 @@ export class ObjectQL implements IObjectQLEngine {
       get _writeGateProbe() { return readWriteGateProbe(); },
       resolvePredicateRelated: (...a) => this.resolvePredicateRelated(...a),
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
+      getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
     };
     return validate.call(host, object, data, options);
   }
@@ -15137,6 +15139,15 @@ export class ObjectQL implements IObjectQLEngine {
         // when no rule traverses. Read under SYSTEM authority, bounded by the
         // projection — see `resolvePredicateRelated`.
         const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
+        // [#25579] Batch equals one-by-one: the related rows above were read
+        // ONCE, before any row of this batch is written, so a rule reading a
+        // parent roll-up would judge every row against the summary as it stood
+        // before the batch. The rows the rules admit are accumulated in memory
+        // and overlaid on each later row's binding — never re-read per row.
+        // `undefined` (no roll-up aggregates this object exactly) pays nothing.
+        const batchSummaries = rows.length > 1
+          ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
+          : undefined;
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -15156,10 +15167,12 @@ export class ObjectQL implements IObjectQLEngine {
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
+            // [#25579] Admitted: a later row of this batch reads it in the summary.
+            batchSummaries?.accept(rows[i]);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;

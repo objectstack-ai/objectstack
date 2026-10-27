@@ -108,6 +108,21 @@ export const reportForm = defineForm({
         { field: 'chart', type: 'composite', visibleWhen: "data.type != 'joined'", helpText: 'Chart config (type, legend, colors)' },
       ],
     },
+    {
+      // #26548 — the report page's period and its table download. A `joined`
+      // report refuses both keys (its blocks may bind different datasets, and
+      // it draws one table per block), so the section is offered only where
+      // they parse.
+      label: 'Period & export',
+      description: 'The default period of the report and the formats its table can be downloaded in.',
+      collapsible: true,
+      collapsed: true,
+      visibleWhen: "data.type != 'joined'",
+      fields: [
+        { field: 'dateRange', type: 'composite', helpText: 'Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one.' },
+        { field: 'exportOptions', type: 'composite', helpText: 'Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object.' },
+      ],
+    },
     // An "Advanced" section offering `aria` + `performance` used to sit here.
     // #3496 pruned both keys from ReportSchema (dead in both layers) but left
     // this form untouched, so the section rendered two controls whose values

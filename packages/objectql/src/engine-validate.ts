@@ -49,6 +49,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
 import {
   droppedFieldEvents,
@@ -89,11 +90,12 @@ export interface ValidateHost {
   resolvePreviewParents: ObjectQL['resolvePreviewParents'];
   resolvePredicateRelated: ObjectQL['resolvePredicateRelated'];
   resolveOptionPermissions: ObjectQL['resolveOptionPermissions'];
+  getSummaryDescriptors: ObjectQL['getSummaryDescriptors'];
 }
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {
@@ -487,6 +489,12 @@ export async function validate(
   // write would — resolved once for the whole set, like every posture input
   // above. A resolution failure rejects the preview, as it fails the write.
   const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, permissionResolution);
+  // [#25579] A multi-row insert preview judges a rule reading a parent
+  // roll-up the way the write judges the batch: each row sees the earlier
+  // rows the preview accepted, accumulated in memory (see `insert()`).
+  const batchSummaries = mode === 'insert' && rows.length > 1
+    ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
+    : undefined;
 
   const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
     const warnings: ValidateDataIssue[] = [];
@@ -541,7 +549,7 @@ export async function validate(
         // repoint, `roWhenPreviousParent`.
         parent: previewParents?.parents[i],
         previousParent: previewParents?.previousParents[i],
-        related: previewRelatedForRow(judgedViews[i]),
+        related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
       }));
     } catch (e) {
@@ -550,6 +558,7 @@ export async function validate(
       }
       throw e;
     }
+    batchSummaries?.accept(row);
     // [#20922] THIS row's drops, from the strips' own per-row record above
     // — the report `insertMany` hangs on the same row's `ok` outcome, so a
     // dry run and its commit answer one row in one vocabulary. Only on a

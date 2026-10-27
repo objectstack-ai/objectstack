@@ -33,7 +33,8 @@ const METADATA_SEED_CACHE_PREFIX = 'objectui:metadata:';
  *
  * `sessionStorage` is per-TAB, not per-session, and no sign-out call site
  * reloads the page — `AppHeader`, `UserMenu` and `RemediationOverlay` all
- * just call `signOut()` and let the SPA keep running.
+ * just call `signOut()` and let the SPA keep running. Even a sign-out that
+ * follows a provider-logout redirect comes back to this SPA in the same tab.
  * So without this the next person to sign in in the same tab (a shared or
  * kiosk browser, a handover, a support session) is SEEDED from the previous
  * user's entry, and what is in it is that user's PERMISSION-FILTERED app list —
@@ -457,6 +458,11 @@ export function AuthProvider({
       // Unconditional: `createAuthClient.signOut` clears `TokenStorage` BEFORE
       // it rethrows a server error, so a failed call still leaves this tab
       // without a session — the caches it authenticated for must go with it.
+      // When the sign-out answered a provider-logout redirect, the client has
+      // already started that navigation; this still runs first, because the
+      // page unloads in a later task. It matters there too: `sessionStorage`
+      // survives the round trip, since the provider sends the browser back to
+      // this SPA's sign-in page in the same tab.
       purgeSignedOutClientCaches();
       setIsLoading(false);
     }
