@@ -23,7 +23,8 @@ import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { I18nLabelSchema } from './i18n.zod';
+import { I18nLabelSchema, InlineLocaleMapSchema } from './i18n.zod';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
@@ -902,29 +903,21 @@ const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplate
  * - it is not an expression — no lint or evaluator reads it as a condition,
  *   and a predicate-looking value is just a sentence.
  *
- * A blank reason is refused, in either form: it would replace the console's
- * default, "Not available for this record", with an empty tooltip. Omitting
- * the key is how an author keeps that default.
+ * A blank string is refused: it would replace the console's default, "Not
+ * available for this record", with an empty tooltip. Omitting the key is how
+ * an author keeps that default. The rule is {@link NON_BLANK_STRING}, so the
+ * published JSON Schema carries it too (`minLength` + a `\S` pattern) rather
+ * than accepting a document the parse refuses. The locale-map arm is
+ * `InlineLocaleMapSchema` unchanged — the I18nLabel every other copy key takes.
  */
 const DISABLED_REASON_BLANK =
   'a blank `disabledReason` would replace the console\'s default reason, "Not available for this '
   + 'record", with an empty tooltip. Write the sentence that says what is missing (e.g. "An '
   + 'approved legal review is required first."), or omit the key to keep the default.';
-const actionDisabledReason = () => I18nLabelSchema.superRefine((value, ctx) => {
-  if (typeof value === 'string') {
-    if (value.trim() === '') ctx.addIssue({ code: 'custom', message: DISABLED_REASON_BLANK });
-    return;
-  }
-  const blank = Object.entries(value).filter(([, text]) => text.trim() === '').map(([tag]) => tag);
-  if (Object.keys(value).length === 0 || blank.length > 0) {
-    ctx.addIssue({
-      code: 'custom',
-      message: blank.length > 0
-        ? `the inline \`disabledReason\` map gives a blank reason for ${blank.map((tag) => `\`${tag}\``).join(', ')} — ${DISABLED_REASON_BLANK}`
-        : `an empty inline \`disabledReason\` map gives no reason in any locale — ${DISABLED_REASON_BLANK}`,
-    });
-  }
-});
+const actionDisabledReason = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: DISABLED_REASON_BLANK }),
+  InlineLocaleMapSchema,
+]);
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.
