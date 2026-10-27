@@ -34,11 +34,13 @@ Listed side by side, never renumbered (Prime Directive 13). A **collision** is t
 
 ### ADR-0006 — one decision, 3 versions
 
+A bare `ADR-0006` names the decision; its current text is [0006-project-environment-split.v4.md](./0006-project-environment-split.v4.md). Cite one revision by its version or its stem.
+
 | Cite as | File | Title | Status | Date |
 |---|---|---|---|---|
-| `ADR-0006` | [0006-project-environment-split.md](./0006-project-environment-split.md) | Environment & Project as Independent Siblings — v3 | Superseded — by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20 | 2026-05-20 |
+| `ADR-0006-project-environment-split` (unversioned file, superseded) | [0006-project-environment-split.md](./0006-project-environment-split.md) | Environment & Project as Independent Siblings — v3 | Superseded — by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20 | 2026-05-20 |
 | `ADR-0006 v2` / `ADR-0006-project-environment-split.v2` | [0006-project-environment-split.v2.md](./0006-project-environment-split.v2.md) | Three-Layer Tenancy — Organization, Project, Environment | Superseded — by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20 | 2026-05-20 |
-| `ADR-0006 v4` / `ADR-0006-project-environment-split.v4` | [0006-project-environment-split.v4.md](./0006-project-environment-split.v4.md) | Environment & Project — v4 (drop dev-workspace Project, unify on Package) | Accepted — v4 — supersedes v3 — API-surface vocabulary boundary recorded 2… | 2026-05-20 |
+| `ADR-0006` (current) / `ADR-0006 v4` / `ADR-0006-project-environment-split.v4` | [0006-project-environment-split.v4.md](./0006-project-environment-split.v4.md) | Environment & Project — v4 (drop dev-workspace Project, unify on Package) | Accepted — v4 — supersedes v3 — API-surface vocabulary boundary recorded 2… | 2026-05-20 |
 
 ### ADR-0010 — 2 unrelated decisions — a collision
 
@@ -140,14 +142,14 @@ Listed side by side, never renumbered (Prime Directive 13). A **collision** is t
 | [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) | Unified user-context contract & built-in identity roles — one `currentuser` shape across formula/RLS/client,… | Accepted — 2026-06-24 — implemented under the position model: `EvalUser` f… | 2026-06-24 | — | — |
 | [ADR-0069](./0069-enterprise-authentication-hardening.md) | Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, a… | Accepted — P1 + P2 implemented (2026-07-04); P3 partially landed (see Adde… | 2026-07-04 | — | — |
 | [ADR-0070](./0070-package-first-authoring.md) | Package-first authoring — every runtime-authored item lives in a writable package (base); no orphans | Accepted — 2026-06-24 — P1–P3 implemented, merged & live-verified (see Imp… | 2026-06-24 | — | — |
-| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Proposed — (Refocused — see Correction below. The first merged draft also | — | — | — |
+| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Proposed — Refocused — see Correction below. The first merged draft also p… | — | — | — |
 | [ADR-0072](./0072-reference-scope-and-resolvability.md) | Reference Scope & Resolvability — the authored-expression data-picker model (#1934) | Proposed — 2026-06-25 | 2026-06-25 | — | — |
 | [ADR-0073](./0073-automation-execution-identity.md) | Automation execution identity — a built-in non-human principal for user-less runs, `runAs` as authorization p… | Proposed — 2026-06-25 | 2026-06-25 | — | — |
 | [ADR-0074](./0074-canonical-audit-timestamp-storage-on-sqlite.md) | Audit timestamps are stored in one canonical, timezone-explicit format on SQLite | Accepted — 2026-06-26. Read side extended (2026-09-07): the read repair th… | 2026-06-26 | — | — |
 | [ADR-0076](./0076-objectql-core-tiering.md) | objectql is the data engine — relocate metadata management (protocol) out of it; enforce the boundary; defer… | Accepted — D1/D2/D4/D5/D6/D8/D9 implemented; D10/D12 partially landed; D11… | 2026-08-15 | — | — |
 | [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) | The authoring-surface boundary — route by intent, not mechanism; verifiability tier = friction tier; loud-not… | Proposed — 2026-06-28 | 2026-06-28 | — | — |
 | [ADR-0078](./0078-no-silently-inert-metadata.md) | A Zod-valid metadata instance that is functionally incomplete must fail loudly at author time, uniformly acro… | Accepted — framework implemented; the cloud half of §2/§3 pending (cloud)… | 2026-06-28 | — | — |
-| [ADR-0079](./0079-record-display-name.md) | The record display-name contract — `nameField` is the one canonical primary-title pointer | Accepted — implemented. This file is a RETROACTIVE RECONSTRUCTION written… | 2026-08-08 | — | — |
+| [ADR-0079](./0079-record-display-name.md) | The record display-name contract — `nameField` is the one canonical primary-title pointer | Accepted — implemented. This file is a RETROACTIVE RECONSTRUCTION written… | 2026-06-28 | — | — |
 | [ADR-0080](./0080-ai-authored-ui-jsx-source.md) | AI-authored UI pages — JSX source compiled to the SDUI tree (parse ≠ execute); the component registry is the… | Proposed — 2026-06-29 — partially implemented (2026-07-16 audit): `sdui-pa… | 2026-06-29 | — | ADR-0065 |
 | [ADR-0081](./0081-trusted-react-page-tier.md) | A trusted `kind:'react'` page tier — real React executed in the main tree, gated by a host capability; and re… | Accepted — 2026-06-30 — framework scope implemented (`html`/`react` page k… | 2026-06-30 | — | ADR-0065 |
 | [ADR-0082](./0082-react-component-contract-governance.md) | Governing the react-tier component contract — spec is the protocol source of truth, the registry is a designe… | Accepted — 2026-06-30 | 2026-06-30 | — | — |
@@ -202,7 +204,7 @@ Listed side by side, never renumbered (Prime Directive 13). A **collision** is t
 | [ADR-0132](./0132-multi-organization-runtime-is-open-core.md) | The multi-organization runtime is open core — single-database organization isolation ships open; only the ent… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` | 2026-09-07 | — | — |
 | [ADR-0133](./0133-org-management-open-basics.md) | Organization management — the open basics; a mirror of cloud ADR-0081 D1/D3/D4 in the repository whose code e… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` (#1… | 2026-09-07 | — | — |
 | [ADR-0134](./0134-env-side-scim-provisioning.md) | Env-side SCIM provisioning — `@better-auth/scim` is the mechanism, and this platform writes the deactivation | Proposed — 2026-09-07. This file is a MIRROR of the open, mechanism half of | 2026-09-07 | — | — |
-| [ADR-0135](./0135-identity-and-access-architecture.md) | Identity and access architecture — the open half, mirrored from cloud ADR-0024 | Accepted — The DECISION is — it is `objectstack-ai/cloud` ADR-0024, accept… | — | — | — |
+| [ADR-0135](./0135-identity-and-access-architecture.md) | Identity and access architecture — the open half, mirrored from cloud ADR-0024 | Accepted — The DECISION is — it is `objectstack-ai/cloud` ADR-0024, accept… | 2026-06-25 | — | — |
 | [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18 — this record declares; it implements nothing. D1's… | 2026-09-18 | — | — |
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |

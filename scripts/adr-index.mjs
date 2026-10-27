@@ -108,13 +108,13 @@ const TOMBSTONE_SLUG_PREFIX = 'withdrawn-';
 
 // ── The self-test's own battery roster and floor ───────────────────────────
 const SELF_TEST_BATTERIES = Object.freeze({
-  'record parsing: filename, title, status, date (#26076)': 11,
+  'record parsing: filename, title, status, date (#26076)': 12,
   'the one status-line spelling: every other spelling is Unparsed, never guessed': 5,
   'supersession references are extracted, not invented': 8,
-  'shared numbers and versions group side by side, registries never merge': 5,
+  'shared numbers and versions group side by side, registries never merge': 6,
   'rendering is deterministic and lists both registries': 7,
   'drift verdicts: --check reds, --report never does': 4,
-  'Live tree: every record parses and the registry is not empty': 6,
+  'Live tree: the generator reads the real registry (the records themselves are --report\'s business)': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
@@ -233,7 +233,7 @@ export function parseRecord(name, text) {
   const keyword = statusValue === null ? UNPARSED : statusKeywordOf(statusValue);
   const header = lines.slice(0, HEADER_WINDOW);
   const fields = headerFields(header);
-  const dateField = fields.find((f) => /^(date|日期)$/i.test(f.key));
+  const dateField = fields.find((f) => /^(date|decided|日期)$/i.test(f.key));
   const date = (dateField && ISO_DATE.exec(dateField.value)?.[0]) ?? (statusValue && ISO_DATE.exec(statusValue)?.[0]) ?? null;
 
   const supersedesFields = fields.filter((f) => /supersedes/i.test(f.key) && !/superseded by/i.test(f.key));
@@ -414,9 +414,21 @@ export function renderIndex({ root, ui }) {
     for (const s of shared) {
       const kind = s.kind === 'collision' ? `${s.records.length} unrelated decisions — a collision` : `one decision, ${s.records.length} versions`;
       out += `### ADR-${s.number} — ${kind}\n\n`;
+      const current = s.kind === 'versions' ? s.records[s.records.length - 1] : null;
+      if (current) {
+        out += `A bare \`ADR-${s.number}\` names the decision; its current text is [${current.file}](./${current.file}). Cite one revision by its version or its stem.\n\n`;
+      }
       out += '| Cite as | File | Title | Status | Date |\n|---|---|---|---|---|\n';
       for (const r of s.records) {
-        const citeAs = s.kind === 'collision' ? `\`ADR-${r.stem}\`` : r.version === null ? `\`ADR-${r.number}\`` : `\`ADR-${r.number} v${r.version}\` / \`ADR-${r.stem}.v${r.version}\``;
+        const stemId = r.version === null ? `ADR-${r.stem}` : `ADR-${r.stem}.v${r.version}`;
+        const citeAs =
+          s.kind === 'collision'
+            ? `\`ADR-${r.stem}\``
+            : r === current
+              ? `\`ADR-${r.number}\` (current) / \`ADR-${r.number} v${r.version}\` / \`${stemId}\``
+              : r.version === null
+                ? `\`${stemId}\` (unversioned file, superseded)`
+                : `\`ADR-${r.number} v${r.version}\` / \`${stemId}\``;
         out += `| ${citeAs} | [${r.file}](./${r.file}) | ${cell(r.title, 90)} | ${statusCell(r)} | ${r.date ?? '—'} |\n`;
       }
       out += '\n';
@@ -607,6 +619,7 @@ export function runSelfTest() {
       assert('status-value-is-read-off-the-line', r.statusValue === 'Accepted — implemented (2026-07-15)', JSON.stringify(r.statusValue));
       assert('keyword-is-the-earliest-vocabulary-entry', r.keyword === 'Accepted' && statusKeywordOf('The DECISION is Accepted — it is cloud ADR-0024') === 'Accepted' && statusKeywordOf('Partially implemented (revised)') === 'Partially implemented' && statusKeywordOf('Proposed — partially implemented') === 'Proposed', 'earliest entry wins, multi-word entries are whole');
       assert('date-prefers-the-date-line', r.date === '2026-06-01', JSON.stringify(r.date));
+      assert('a-decided-line-is-a-date-line', rec('0042-answer.md', canonical('Accepted — reconstructed 2026-08-08', '- **Decided**: 2026-06-28 (the decision), reconstructed 2026-08-08 (this file)\n')).date === '2026-06-28', 'the decision date, not the reconstruction date');
       assert('date-falls-back-to-the-status-line', rec('0042-answer.md', canonical('Proposed (2026-06-22)')).date === '2026-06-22', 'the first ISO date in the status value');
       assert('date-is-null-when-nothing-states-one', rec('0042-answer.md', canonical('Proposed')).date === null, 'no date is invented');
     }
@@ -648,6 +661,8 @@ export function runSelfTest() {
       assert('two-stems-under-one-number-group-as-collision', s.find((x) => x.number === '0010')?.kind === 'collision', JSON.stringify(s));
       assert('a-number-with-one-file-is-not-shared', !s.some((x) => x.number === '0011') && s.length === 2, JSON.stringify(s));
       assert('shared-groups-are-sorted-by-number-then-version', s[0].number === '0006' && s[0].records.map((r) => r.version).join(',') === ',2,4', JSON.stringify(s[0].records.map((r) => r.file)));
+      const vtext = renderIndex({ root: R, ui: [] });
+      assert('a-versions-group-cites-the-bare-number-as-the-highest-version', vtext.includes('A bare `ADR-0006` names the decision; its current text is [0006-split.v4.md](./0006-split.v4.md)') && vtext.includes('| `ADR-0006` (current) / `ADR-0006 v4` / `ADR-0006-split' + '.v4` |') && vtext.includes('| `ADR-0006-split` (unversioned file, superseded) |'), 'the superseded unversioned file is never offered as the bare citation');
       const text = renderIndex({ root: [rec('0001-root.md', canonical('Accepted'))], ui: [rec('0001-ui.md', canonical('Accepted'))] });
       assert('ui-records-never-join-a-root-number-group', !text.includes('## Shared numbers\n\nListed') && text.includes('[ui-0001](../../ui/docs/adr/0001-ui.md)'), 'the two registries are indexed apart');
     }
@@ -684,16 +699,20 @@ export function runSelfTest() {
       assert('report-mode-is-exit-zero-by-construction', /return 0;\s*}\s*function modeJson/.test(readFileSync(join(process.cwd(), SELF_PATH), 'utf8')) && !/process\.exit\(1\)[^\n]*report/.test(readFileSync(join(process.cwd(), SELF_PATH), 'utf8')), 'modeReport must end in `return 0` and never exit 1');
     }
 
-    battery('Live tree: every record parses and the registry is not empty');
+    battery('Live tree: the generator reads the real registry (the records themselves are --report\'s business)');
     {
+      // ⛔ Nothing here asserts on what the records SAY. A record with another
+      // status spelling, a stray note in the directory or a stale index is
+      // --report's warning (#26076, ruling A: 门禁不加), never this self-test's
+      // red — this battery only proves the generator finds and renders the
+      // real tree, so a wrong ADR_DIR or a renderer that throws on live input
+      // cannot pass on fixtures alone.
       const live = readRegistries(process.cwd());
-      assert('live-root-registry-is-populated', live.root.records.length >= 100, `got ${live.root.records.length} records under ${ADR_DIR}/`);
-      assert('live-root-registry-has-no-foreign-files', live.root.foreign.length === 0, `non-record markdown under ${ADR_DIR}/: ${live.root.foreign.join(', ')}`);
-      const unparsed = live.root.records.filter((r) => r.keyword === UNPARSED);
-      assert('live-every-root-record-carries-the-one-status-spelling', unparsed.length === 0, `Unparsed: ${unparsed.map((r) => r.file).join(', ')}`);
-      assert('live-shared-numbers-are-listed', sharedNumbers(live.root.records).length >= 1, 'the registry carries shared numbers today');
-      assert('live-ui-registry-parses', live.ui.records.length >= 1 && live.ui.records.every((r) => r.keyword !== UNPARSED), `ui: ${live.ui.records.length} records, unparsed ${live.ui.records.filter((r) => r.keyword === UNPARSED).map((r) => r.file).join(', ')}`);
+      assert('live-root-registry-is-read', live.root.records.length >= 1, `got ${live.root.records.length} records under ${ADR_DIR}/ — run from the repository root`);
+      assert('live-ui-registry-is-read', live.ui.records.length >= 1, `got ${live.ui.records.length} records under ${UI_ADR_DIR}/`);
       assert('live-index-renders', renderIndex({ root: live.root.records, ui: live.ui.records }).length > 10_000, 'the live rendering is not trivially small');
+      const v = verdict(live, readCommitted(process.cwd()));
+      assert('live-verdict-is-a-reading-not-a-throw', typeof v.stale === 'boolean' && Array.isArray(v.problems) && typeof v.expected === 'string', 'verdict() over the live tree returns its three fields');
     }
   } catch (e) {
     failures.push(`self-test threw before finishing — ${e && e.stack ? e.stack : e}`);
