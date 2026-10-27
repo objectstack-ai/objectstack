@@ -75,6 +75,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 import '../../services/builtinComponents';
 import { InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview, type MetadataPreviewProps } from '../metadata-admin/preview-registry';
+import { STUDIO_RAIL_ROW_ACTIVE } from './studio-tokens';
 
 vi.stubGlobal(
   'fetch',
@@ -194,7 +195,9 @@ describe('objectstack#26889 — Interfaces lists what no navigation entry names'
       fireEvent.click(within(sections).getByRole('button', { name: label }));
       expect(await screen.findByText(opened, undefined, { timeout: 8000 })).toBeInTheDocument();
       expect(screen.getByTestId('if-breadcrumb')).toHaveTextContent(label);
-      expect(within(sections).getByRole('button', { name: label }).className).toMatch(/bg-/);
+      // The row it was opened from is the active one, and only it.
+      const active = within(sections).getAllByRole('button').filter((b) => b.className.includes(STUDIO_RAIL_ROW_ACTIVE));
+      expect(active.map((b) => b.textContent)).toEqual([label]);
     }
   });
 
