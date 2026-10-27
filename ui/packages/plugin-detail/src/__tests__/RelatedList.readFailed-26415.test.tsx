@@ -147,7 +147,7 @@ describe('RelatedList — a failed read on the adapter path draws the load-faile
 
     await screen.findByText(EMPTY_TEXT);
     expect(failedLine()).toBeNull();
-    expect(onEmptyChange).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(onEmptyChange).toHaveBeenLastCalledWith(true));
   });
 });
 
