@@ -737,7 +737,7 @@ One locale of translations — the `translation` metadata type
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
-| **name** | `string` | optional | Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent |
+| **name** | `string` | optional | Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale` |
 | **label** | `string` | optional | Human-readable label shown in metadata lists |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
