@@ -69,18 +69,16 @@ export function BuilderLanding(): React.ReactElement {
   const locale = useMetadataLocale();
   const [pkgs, setPkgs] = React.useState<PkgEntry[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [createOpen, setCreateOpen] = React.useState(false);
-
   // The new-package deep link (`studioNewPackage.ts`): Home's and the `/ai`
-  // screen's "New in Studio" land here with the create dialog open. Consumed
-  // once and dropped from the address with a replace, so a refresh or Back
-  // does not open the dialog a second time. Keyed on the param's value, the
-  // primitive this reads (ui/AGENTS.md #10).
+  // screen's "New in Studio" land here with the create dialog open. Read once,
+  // on arrival, and dropped from the address with a replace, so a refresh or
+  // Back does not open the dialog a second time. The effect is keyed on the
+  // param's value, the primitive it reads (ui/AGENTS.md #10).
   const [searchParams, setSearchParams] = useSearchParams();
   const newParam = searchParams.get(STUDIO_NEW_PARAM);
+  const [createOpen, setCreateOpen] = React.useState(() => newParam === STUDIO_NEW_PACKAGE_VALUE);
   React.useEffect(() => {
     if (newParam !== STUDIO_NEW_PACKAGE_VALUE) return;
-    setCreateOpen(true);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
