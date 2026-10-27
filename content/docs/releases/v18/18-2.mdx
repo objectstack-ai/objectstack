@@ -1,21 +1,21 @@
 ---
 title: 18.2.0
-description: "Release notes and upgrade checklist for 18.2.0, the first release that ships the Console and the @object-ui packages from this repository. A minor that carries breaking changes: one access rule for file references, app automation refused identity writes under elevation, installs that check declared dependencies, action copy refused at publish, and six narrowings that os migrate meta converts."
+description: "Release notes and upgrade checklist for 18.2.0, the first release that ships the Console and the @object-ui packages from this repository. A minor that carries breaking changes: one access rule for file references, app automation refused identity writes under elevation, installs that check declared dependencies, action copy refused at publish, and eight breaking changes that os migrate meta carries."
 ---
 
 <Callout type="info">
-**How this page was compiled.** From the 227 changesets added to `.changeset/`
-between the 18.1.0 tag and `main` at `f9e871a1c4`, each placed by
+**How this page was compiled.** From the 232 changesets added to `.changeset/`
+between the 18.1.0 tag and `main` at `00a4593ad7`, each placed by
 `classifyReleaseBullet` in `scripts/release-github-releases.mjs`, the function
 that groups the GitHub Release body. The five sections below use its five
-headings, in its order, and its counts: **52** need you to act, **6** are
+headings, in its order, and its counts: **52** need you to act, **8** are
 converted for you, **41** add capabilities, **3** declare a semantic change,
-and **125** are other fixes. Every changeset is listed once, under its
+and **128** are other fixes. Every changeset is listed once, under its
 section. A version pass rehearsed in a throwaway clone wrote an `## 18.2.0`
 section into 111 CHANGELOGs, and the same function placed each of their
 distinct entries in the section this page lists it under. Each package's
 Release also carries an `Updated dependencies` bullet under 其他修复, which this
-page does not repeat. Changesets merged after `f9e871a1c4` and before the
+page does not repeat. Changesets merged after `00a4593ad7` and before the
 version commit are not on this page. The
 [upgrade checklist](#upgrade-checklist) is compiled from the changesets and
 has not been walked.
@@ -31,10 +31,10 @@ has not been walked.
   Console tarball. The 37 public `@object-ui/*` packages join the
   `@objectstack/*` fixed group, so 18.2.0 is the first release in which both
   scopes publish at one version. See [Console (Studio)](#console).
-- ⚠️ **A minor that breaks.** 58 of the 227 changesets are declared breaking:
-  14 graded `minor` because they narrow the metadata protocol, and 44 graded
+- ⚠️ **A minor that breaks.** 60 of the 232 changesets are declared breaking:
+  16 graded `minor` because they narrow the metadata protocol, and 44 graded
   `patch` under the level rule (#25105, ruling A). 52 of them need you to act;
-  6 are converted by `os migrate meta`. Read
+  8 are converted by `os migrate meta`. Read
   [the version number](#the-version-number-is-not-the-signal).
 - **One access rule for a file reference.** A record write claims or copies
   only a file its caller may read, and is refused at the field when it names
@@ -46,7 +46,8 @@ has not been walked.
   `runAs: 'system'` hook, an action body, an inherited system context and
   `ctx.api.sudo()` are refused writes to position holdings, permission-set
   grants, invitations and memberships, as a system flow already was
-  (`073f08b`, `6a6ebff`). A permission set that only shares a position's name
+  (`073f08b`, `6a6ebff`), and a hook or action body that writes one in its
+  source is refused at save (`07586f5`). A permission set that only shares a position's name
   is no longer granted to its holders (`733b3c8`): name it in the position's
   `permissionSets`. An environment that runs HotCRM takes HotCRM `v6.0.0` or
   later first.
@@ -75,7 +76,7 @@ has not been walked.
 
 ## Release facts, as measured
 
-Read before the cut, from `main` at `f9e871a1c4`, a version pass rehearsed in
+Read before the cut, from `main` at `00a4593ad7`, a version pass rehearsed in
 a throwaway clone, and `npm view` on 2026-10-27:
 
 | | Measured |
@@ -120,7 +121,7 @@ protocol** moved, and nothing else:
 | Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
 
 So 18.2.0 carries 44 changesets graded `patch` that say **BREAKING**, beside
-14 graded `minor`. Of all 227, 37 are graded `minor` and 190 `patch`; none is
+16 graded `minor`. Of all 232, 39 are graded `minor` and 193 `patch`; none is
 `major`. Pin exact versions of both scopes, and read the release notes for
 every version you cross.
 
@@ -409,9 +410,10 @@ names what you do; the CHANGELOG entry carries the full before and after.
 
 ### 自动迁移 — converted for you by `os migrate meta` [#migrated-for-you]
 
-Six narrowings carry an ADR-0087 registration on the protocol-18 step, and
+Eight breaking changes carry an ADR-0087 registration on the protocol-18 step, and
 `os migrate meta` does each one: it converts what has one meaning and lists
-the rest for you. A live author is refused at parse, with the prescription.
+the rest for you. A live author of a narrowing is refused at parse, with the
+prescription.
 `os migrate meta --from 17` lists the edits for your sources (`--write`
 applies the ones it can trace to one literal), and `os migrate meta --stored`
 lists and rewrites a deployment's stored rows.
@@ -423,6 +425,8 @@ lists and rewrites a deployment's stored rows.
 | The package upgrade model leaves `@objectstack/spec`: `UpgradePlanSchema` and its family, `IPackageService.planUpgrade` / `upgrade` / `rollback` / `getSnapshot`, and `PackageUpgradeResponse.data.plan` (`557973d`, #25757) | `kernel-package-upgrade-family-retired` | lists it; nothing ever read or produced these shapes. Delete the imports. A new version over an installed package is `POST /api/v1/packages` with `overwrite: true`; the package rollback served is `POST /api/v1/packages/:id/rollback` with a `commitId` |
 | `PackageDependency.optional` and `AppManifest.dependencies` are tombstones (`436d284`, #26401) | `dependency-unread-spellings-retired` | lists it; nothing read either key. Delete the key, and declare each dependency with its range in `manifest.dependencies` |
 | A locale must be a BCP-47 tag: `zh_CN`, a padded value or a language name is refused (`39a78b1`, #25983) | `translation-locale-tag-canonicalized`, `translation-locale-non-tag-refused` | rewrites `zh_CN` to `zh-CN` and trims whitespace, in stored rows and with `--from 17 --write` in sources; any other value is reported as a TODO. Replace a language name with its tag |
+| A `runAs: 'system'` hook or a `type: 'script'` action whose sandboxed JS body writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused at save, not only when it runs (`07586f5`, #26430) | `hook-action-body-system-identity-assignment-write-refused` | lists each one; no conversion, because the route is your choice. Set the hook's `runAs` to `'user'`, or move an action's grant into a `runAs: 'user'` flow; use the organization endpoints for invitations and memberships |
+| `GroupNavItem.expanded` defaults to `true`, so a navigation group that says nothing opens on first view (`21a13f1`, #26427) | `ui-nav-group-expanded-default-open` | lists it. A group meant to start collapsed writes `expanded: false`; recompile an `os compile` artifact, which still carries the old written `false` |
 | `PositionGrantVia` loses `'name'`, and Setup → Positions drops its "(by name)" badge (`9494dd8`, #26398) | `position-grant-via-name-retired` | lists it; no server serves the value. Delete a branch that compares with `'name'`, and name the set in the position's `permissionSets` |
 
 ### 新增能力 — new capabilities [#new-capabilities]
@@ -556,15 +560,16 @@ lists and rewrites a deployment's stored rows.
   (`f02e644`, #26277). A page that wrote `actions: []` and still wants New
   deletes the key.
 
-Three entries the Release body files elsewhere declare `Metadata-protocol:
+Four entries the Release body files elsewhere declare `Metadata-protocol:
 semantic` too. The flow screen field typed `file` (#26134) is breaking, so it
-is listed under 需手动处理. The action copy `template` slots (#25637) and
+is listed under 需手动处理, and the navigation group default (#26427) is
+breaking with a registration, so it is listed under 自动迁移. The action copy `template` slots (#25637) and
 object-level `composite` / `repeater` (#25755) declare a `Clause-②: yes`
 widening, so they are new capabilities.
 
 ### 其他修复 — other fixes [#other-fixes]
 
-The 125 entries that declare no breaking change and no protocol kind. The
+The 128 entries that declare no breaking change and no protocol kind. The
 ones that touch an upgrade come first.
 
 #### Packaging and module formats
@@ -713,6 +718,9 @@ ones that touch an upgrade come first.
   layout (`f0b33ee`, #25975).
 - The liveness author warnings read ledger rows at every depth of `children`
   (`13136f7`, #26379).
+- The `onSuccess.navigate` and `type: 'url'` `target` describes say an in-app
+  path is an app-qualified console route, `/apps/APP/OBJECT/record/ID`
+  (`ab0bc89`, #26435).
 
 #### Skills
 
@@ -834,9 +842,11 @@ ones that touch an upgrade come first.
   #26396), module-level helpers (`d00215f`, #26152), identity import and
   record navigation (`3db7bbf`, #26353), realtime refresh and record count
   (`b9cd980`, #26336), view options (`96635f5`, #26233), tab strip and header
-  chrome (`08ed7e2`, #26412), and toolbar affordances (`3acbeff`, #26374).
+  chrome (`08ed7e2`, #26412), toolbar affordances (`3acbeff`, #26374), and page header and record overlay
+  (`a7f4b99`, #26434).
 - `ObjectGrid`'s module-level helpers (`7158025`, #26323) and its host-facing
-  props types (`222755e`, #26354) move into sibling modules.
+  props types (`222755e`, #26354) move into sibling modules, and its
+  authored-input diagnostics into a sibling hook (`eeaa827`, #26364).
 - Five Interfaces rail label tests share one Studio harness (`697a307`,
   #26255).
 - The Console's build-identity define no longer leaks into the other ui test
@@ -873,12 +883,12 @@ released (`2a61f08`, #25745).
 - **The `objectui` authoring skill** ships in `@objectstack/skills`
   (`a8f2afa`, #26097).
 
-Every Console change is listed once, in its section above. 87 of the 227
+Every Console change is listed once, in its section above. 89 of the 232
 changesets touch an `@object-ui/*` package: 10 under
 [需手动处理](#action-required) (most under "Console and the `@object-ui/*`
 packages"), 1 under [自动迁移](#migrated-for-you) (the "(by name)" badge), 14
 under [新增能力](#new-capabilities), 1 under
-[语义变化](#semantic-changes), and 61 under [其他修复](#other-fixes), where the
+[语义变化](#semantic-changes), and 63 under [其他修复](#other-fixes), where the
 "Console (Studio)" groups hold them. What a Console user notices first:
 
 - **Approvals.** An administrator who is not the approver sees one status line
@@ -948,7 +958,7 @@ the exact refusal.
 ```bash
 os validate
 os build
-os migrate meta --from 17     # the protocol-18 step, with this release's six conversions
+os migrate meta --from 17     # the protocol-18 step, with this release's eight entries
 ```
 
 Fix each refusal with its line in [需手动处理](#action-required) or
@@ -965,6 +975,8 @@ Fix each refusal with its line in [需手动处理](#action-required) or
 - `allowDelete: false` beside `modifyAllRecords: true` (`f6ba134`);
 - a locale that is not a BCP-47 tag, such as `zh_CN` (`39a78b1`);
 - `visibleOn`, `hiddenOn` or `disabledOn` on a page node (`e843b5b`);
+- a `runAs: 'system'` hook or `script` action whose body writes an
+  identity-assignment object (`07586f5`);
 - `optional` on a marketplace dependency entry, or `dependencies` on an app
   install manifest (`436d284`).
 
@@ -981,6 +993,8 @@ and `FilterBuilderRow.value` (`0489214`, `57ab06b`).
 - **Run `os migrate meta --stored`** to list and rewrite the stored rows the
   conversions touch: permission sets that store `allowDelete: false` beside
   `modifyAllRecords: true`, and `translation` rows under `zh_CN`-style locales.
+- **Write `expanded: false` on each navigation group that should start
+  collapsed**; a group that says nothing now opens (`21a13f1`).
 - **Name each permission set a position should grant in its
   `permissionSets`.** The `position_name_fold_grant` warning, now logged with
   `granted: false`, names each position whose same-named set is no longer
