@@ -7,6 +7,7 @@ import type {
   SharingRuleEvaluationResult,
   ShareAccessLevel,
   SharingRuleRecipientType,
+  IOwnershipQueueService,
 } from '@objectstack/spec/contracts';
 // [#7136] The full `resolveAuthzContext` envelope — what `ISharingRuleService`
 // has declared for every one of these context parameters since commit aa4b90d9a (the
@@ -76,6 +77,9 @@ export const SHARING_RULE_ACTIVATION_TYPE = 'sharing_rule';
  * {@link SharingRuleService.defineRule}.
  */
 export const FIELD_NAME_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+
+/** [ADR-0142 D7] The grammar a `queue` recipient's `recipientId` is held to: a queue machine name. */
+const QUEUE_NAME_GRAMMAR = /^[a-z][a-z0-9_]*$/;
 
 /**
  * [#15072] The user ids a record's user-typed column names.
@@ -420,6 +424,12 @@ export interface SharingRuleServiceOptions {
    * `sys_sharing_rule` rows alone.
    */
   declaredRules?: DeclaredSharingRuleSource;
+  /**
+   * [ADR-0142 D7] The ownership-queue service, resolved at use: a `queue`
+   * recipient expands to the queue's members through it. Absent (or answering
+   * nothing), a queue rule grants nobody — the recipient fails closed.
+   */
+  ownershipQueues?: () => Pick<IOwnershipQueueService, 'expandMembers' | 'isMember'> | null | undefined;
   logger?: {
     info?: (msg: any, ...rest: any[]) => void;
     /**
@@ -518,6 +528,7 @@ export class SharingRuleService implements ISharingRuleService {
 
   /** [ADR-0131 D2] Where declared rules are read. */
   private readonly declaredSource?: DeclaredSharingRuleSource;
+  private readonly ownershipQueues?: SharingRuleServiceOptions['ownershipQueues'];
   /**
    * [ADR-0131 D2] The scopes a declared rule is served in: the deployment
    * under `single` (one {@link DeploymentWideSharingRule} projection), every
@@ -543,6 +554,7 @@ export class SharingRuleService implements ISharingRuleService {
     this.sharing = opts.sharing;
     this.logger = opts.logger;
     this.declaredSource = opts.declaredRules;
+    this.ownershipQueues = opts.ownershipQueues;
   }
 
   /**
@@ -763,6 +775,13 @@ export class SharingRuleService implements ISharingRuleService {
     // (`owner.manager_id`: a graph walk spelled as a value, the shape the
     // ruling's ⛔ on a `manager` member refuses) would reach the executor and
     // share with nobody in silence.
+    // [ADR-0142 D7] A queue is named by its machine name, never an id.
+    if (input.recipientType === 'queue' && !QUEUE_NAME_GRAMMAR.test(String(input.recipientId))) {
+      throw new Error(
+        "VALIDATION_FAILED: recipientId must name a queue by its machine name when recipientType is 'queue' " +
+          `(got ${JSON.stringify(input.recipientId)})`,
+      );
+    }
     if (input.recipientType === 'field' && !FIELD_NAME_GRAMMAR.test(String(input.recipientId))) {
       throw new Error(
         "VALIDATION_FAILED: recipientId must name a user-typed field on the object when recipientType is 'field' " +
@@ -1708,6 +1727,12 @@ export class SharingRuleService implements ISharingRuleService {
       return positionGraph.holdsPosition(userId, rule.recipient_id, rule.organization_id ?? undefined);
     }
     if (rule.recipient_type === 'team') return teamHasMember(this.engine, rule.recipient_id, userId);
+    // [ADR-0142 D7] A queue reaches the user its specifications reach — the
+    // queue service's holder check, not a full expansion.
+    if (rule.recipient_type === 'queue') {
+      const queues = this.ownershipQueues?.();
+      return queues ? queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null) : false;
+    }
     return (await this.expandRecipient(rule, pass)).includes(userId);
   }
 
@@ -2136,7 +2161,17 @@ export class SharingRuleService implements ISharingRuleService {
       this.warnOnEmptyUnitExpansion(rule, members);
       return members;
     }
-    // queue — v1 stores literal; treat as no-op until queue impl lands.
+    if (rule.recipient_type === 'queue') {
+      // [ADR-0142 D7] The queue's members in the rule's organization, through
+      // the one expander every queue consumer reads. Grants are materialised
+      // per member and recomputed when membership moves (`queue-hooks.ts` and
+      // the two recompute modules' look-through). ⛔ This grants the rule's
+      // matched records to the queue's people; it confers no sitting-record
+      // access, which is the access path's (`SharingService`).
+      const queues = this.ownershipQueues?.();
+      if (!queues) return [];
+      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null);
+    }
     return [];
   }
 
@@ -2162,8 +2197,8 @@ export class SharingRuleService implements ISharingRuleService {
    * recipient cannot be empty, and `team` / `position` / `queue` have their own
    * reasons for an empty set that this issue did not measure. ⛔ Do not widen
    * this into "warn whenever any recipient expands to zero" without measuring
-   * those — `queue` expands to `[]` by construction today, so a blanket warn
-   * would fire on every pass of every queue rule, and a `field` rule's empty
+   * those — an empty `queue` is a queue nobody staffs yet (ADR-0142 D2: an
+   * empty expansion is a fact, not a fault), and a `field` rule's empty
    * column is a legitimate state (an unassigned record shares with nobody,
    * #15072), not a misconfiguration.
    *

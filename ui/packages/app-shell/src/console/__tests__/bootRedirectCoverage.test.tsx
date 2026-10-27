@@ -192,7 +192,11 @@ describe('boot-gate coverage — ConsoleShell (objectui#6507)', () => {
     expectCovered(reading, 'RequireOrganization (no org, multi-org on)');
   });
 
-  it('RequireAiSurface :382 — the runtime serves no agent', async () => {
+  it('RequireAiSurface — the runtime serves no agent', async () => {
+    // No redirect any more (objectstack#26614): the gate shows its
+    // no-assistant screen in place. The deciding commit must still hand the
+    // splash to something that covers the viewport, which that screen's
+    // full-height frame does.
     aiSurface = { enabled: false, isLoading: false };
     const reading = await coverageAt(
       '/ai',

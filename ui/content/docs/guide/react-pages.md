@@ -368,21 +368,35 @@ by the build* — but with this tier's own primitive: lay out with the blocks'
 structured props (`<flex direction gap>`, `<grid columns>`) and add CSS as a JSON
 `style` object. See *Styling*, above.
 
-## List blocks in a narrow region
+## List blocks in a page region
 
 Region pages (the schema-tree pages above, built from `regions[].components[]`)
 size each block to the region it sits in. A `list-view` block in a region
 narrower than half the page, such as an `aside` rail beside `main`, renders a
 compact list: a header with the title and record count, then two-line rows
 built from the view's first two visible columns. It renders no toolbar, no view
-tabs and no row-number column. A region half the page or wider renders the full
-list.
+tabs and no row-number column.
+
+A region half the page or wider renders a capped list: the first rows only, at
+most the block's `dataSource.limit` and 5 when it sets none, in a short table of
+the view's first four visible columns (the rest are dropped, not scrolled),
+ending with a "View all N" link. It renders no toolbar, no row-number column and
+no pager either. A page block is a summary; the link opens the whole list.
+
+```json
+{ "type": "list-view", "dataSource": { "object": "crm_lead", "view": "my_leads", "limit": 8 } }
+```
 
 The posture is measured from the region's rendered width, never authored, and
 no page or block key sets it. `kind:'html'` and `kind:'react'` pages have no
 regions, so their list blocks always render the full list.
 
-Under its rows the compact list draws a "View all" link. A block bound to a
+A `page:tabs` block whose tabs hold list blocks badges each tab with the number
+of records its list holds, the count the list's own query answered, before the
+tab is opened. A tab item's own `count` still wins.
+
+Under its rows the compact list draws a "View all" link, and the capped list a
+"View all N" link to the same place. A block bound to a
 saved view (`dataSource.view`) links to that view's page in the console
 (`/apps/APP/OBJECT/view/VIEW`); any other block links to the object's list
 (`/apps/APP/OBJECT`). The block's own filter, columns and sort are not carried

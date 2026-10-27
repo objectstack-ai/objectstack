@@ -95,7 +95,7 @@ import type {
   ToggleSchema,
 } from '../form';
 
-import { ActionSchema as ActionMirror } from '../zod/crud.zod';
+import { CRUDActionSchema as ActionMirror } from '../zod/crud.zod';
 import {
   AccordionItemSchema,
   CollapsibleSchema as CollapsibleMirror,
@@ -199,7 +199,7 @@ const IN_SCOPE: readonly MirrorCase[] = [
   { name: 'form.zod.ts#InputOTPSchema', mirror: FormMirrors.InputOTPSchema, fixture: { type: 'input-otp' } },
   { name: 'form.zod.ts#FormSchema', mirror: FormMirrors.FormSchema, fixture: { type: 'form', fields: [{ name: 'title', type: 'text' }] } },
   { name: 'form.zod.ts#ComboboxSchema', mirror: FormMirrors.ComboboxSchema, fixture: { type: 'combobox', options: [{ label: 'A', value: 'a' }] } },
-  { name: 'crud.zod.ts#ActionSchema', mirror: ActionMirror, fixture: { type: 'action', label: 'Save' } },
+  { name: 'crud.zod.ts#CRUDActionSchema', mirror: ActionMirror, fixture: { type: 'action', label: 'Save' } },
   {
     name: 'disclosure.zod.ts#CollapsibleSchema',
     mirror: CollapsibleMirror,

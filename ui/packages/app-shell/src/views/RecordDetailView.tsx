@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -36,6 +36,7 @@ import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
+import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
@@ -828,14 +829,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Every rejection used to land on `missing`, so a refused read told the
   // viewer the record "may have been deleted" — and they reported a lost record
   // instead of asking for access — and a transient failure looked final.
+  //   - `accessEnded` — a `missing` answer that follows this viewer's OWN
+  //     approval decision on this record (objectstack#26589, below).
   const [pageRecordStatus, setPageRecordStatus] = useState<
-    'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed'
+    'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
   // Cleared with the effect, so a Retry can never run a superseded load.
   const reloadPageRecordRef = useRef<(() => void) | null>(null);
+  // objectstack#26589 — the record this viewer just decided an approval on,
+  // as `objectName` + `recordId`. A pending approver with no standing access
+  // reads the record only while their step waits (objectstack#26180): the
+  // server revokes that read when the step ends, so the re-read that follows
+  // their own decision answers 404. That 404 is the read ENDING, not a lost
+  // record, and the load below draws `accessEnded` for it, not "Record not
+  // found". Only `handleApprovalActionDone` sets it, so any 404 that does not
+  // follow this viewer's decision on THIS record is still `missing`: the load
+  // compares it with the record it reads, so a move to another record never
+  // inherits it. Cleared by a read that answers the record (a viewer with
+  // standing access keeps reading it).
+  const decidedRecordRef = useRef<string | null>(null);
 
   // Permissions context.
   //
@@ -919,6 +934,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       setPageRecordStatus('idle');
       return;
     }
+    const decidedKey = `${objectName}:${pureRecordId}`;
     const expandFields: string[] = JSON.parse(pageRecordExpand);
     const params = expandFields.length > 0 ? { $expand: expandFields } : undefined;
     const loadRecord = () => {
@@ -930,11 +946,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         .then((rec: any) => {
           if (cancelled) return;
           if (rec && typeof rec === 'object') {
+            decidedRecordRef.current = null;
             setPageRecord(rec);
             setPageRecordStatus('loaded');
           } else {
             setPageRecord(null);
-            setPageRecordStatus('missing');
+            setPageRecordStatus(decidedRecordRef.current === decidedKey ? 'accessEnded' : 'missing');
           }
         })
         .catch((err: unknown) => {
@@ -1566,6 +1583,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [authFetch],
   );
 
+  // The registered `api` handler: {@link apiHandler}, except that an action
+  // declaring `opensInNewTab` + `newTabUrl` takes the server-action handler's
+  // zero-roundtrip new-tab path against THIS page's record, sending no request
+  // — from the header and its more-menu alike (objectstack#26747). Same
+  // composition as `useConsoleActionRuntime`.
+  const apiActionHandler = useMemo(
+    () => withNewTabUrlFastPath(apiHandler, serverActionHandler),
+    [apiHandler, serverActionHandler],
+  );
+
   /**
    * `type: 'modal'` dispatch — same rule as the shared console runtime (see
    * `useConsoleActionRuntime.modalActionHandler`): CLIENT-SIDE ONLY. The
@@ -1737,10 +1764,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // engine-written mirrors (`approval_status`, stage fields) change with the
   // decision. `refreshAfter: true` on every declared decision action is what
   // calls this.
+  //
+  // objectstack#26589 — it also marks this record as the one this viewer just
+  // decided, BEFORE the re-read goes out, so a 404 that re-read answers draws
+  // the ended-access state instead of "Record not found".
   const handleApprovalActionDone = useCallback(() => {
+    if (objectName && pureRecordId) decidedRecordRef.current = `${objectName}:${pureRecordId}`;
     void approvalsRef.current.refresh();
     notifyRecordChanged();
-  }, [notifyRecordChanged]);
+  }, [notifyRecordChanged, objectName, pureRecordId]);
 
   // Discover reverse references: other objects with lookup/master_detail fields
   // pointing to the current object (e.g., order_item.order → order).
@@ -3321,6 +3353,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     );
   }
 
+  // objectstack#26589 — the read ended with this viewer's own approval
+  // decision: the step that granted it is over (objectstack#26180 revokes it
+  // then), so say the decision landed and where their work continues, never
+  // that the record does not exist. The read is not kept any longer; the
+  // inbox link is the way on.
+  if (pageRecordStatus === 'accessEnded') {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <Empty data-testid="record-access-ended">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <EmptyTitle>{t('empty.recordAccessEnded', { defaultValue: 'Decision recorded' })}</EmptyTitle>
+          <EmptyDescription>
+            {t('empty.recordAccessEndedDescription', {
+              defaultValue: 'Your approval step is complete, so your access to this record has ended.',
+            })}
+          </EmptyDescription>
+          {appName && (
+            <div className="mt-4">
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/apps/${appName}/system/approvals`} data-testid="record-access-ended-inbox">
+                  <Inbox className="mr-1.5 h-4 w-4" />
+                  {t('notifications.openApprovalsInbox', { defaultValue: 'Open Approvals Inbox' })}
+                </Link>
+              </Button>
+            </div>
+          )}
+        </Empty>
+      </div>
+    );
+  }
+
   // objectui#11902 — a REFUSED read. The refusal is about the object, not this
   // record, so the copy names the object and never implies the record exists:
   // it shows no more than the server's own 403 already says (objectstack#8013).
@@ -3787,7 +3852,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onParamCollection={paramCollectionHandler}
           onResultDialog={resultDialogHandler}
           onModal={modalHandler}
-          handlers={{ api: apiHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
+          handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">

@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -83,7 +83,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "`objectstack verify --rls` (packages/verify/src/rls.ts runRlsProofs) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts. packages/verify/src/rls.ts is a source file, not a test: acceptance[4] scores from a run that executes the command over the showcase, and no pin does — rls-fixture.dogfood.test.ts and rls-multitenant.dogfood.test.ts run runRlsProofs on purpose-built fixtures only. The showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read acceptance[2] and negative[0] require is pinned for a fixture object in packages/qa/dogfood/test/rls-fixture.dogfood.test.ts, not for showcase_private_note, so on the showcase that re-read is hand-driven"
+        "ref": "`objectstack verify --rls` (packages/verify/src/rls.ts runRlsProofs) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts. packages/verify/src/rls.ts is a source file, not a test: acceptance[4] scores from a run that executes the command over the showcase, and no pin does — rls-fixture.dogfood.test.ts and rls-multitenant.dogfood.test.ts run runRlsProofs on purpose-built fixtures only. The showcase pin drives acceptance[0]–[3] and negative[0] on showcase_private_note through the in-process HTTP stack: each member's list (presence and absence), the foreign by-id read answering non-2xx, the foreign PATCH answering >= 400 with the admin's re-read of the row unchanged ('a refused foreign PATCH leaves the row byte-identical on the admin re-read'), and the admin's filtered list carrying every note the file created, both owners' ('the admin (platform posture) lists every note this file created'). acceptance[5], negative[1] and negative[2] stay with the run: they are procedural (the per-skip explanation is a reading of the verify report; the record-once and naming rules govern a run record), and the D11 spot-check needs the private write-up (knownGaps[0])"
       },
       "source": [
         "packages/verify/src/rls.ts",
@@ -136,6 +136,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4: automated.ref named packages/verify/src/rls.ts, a source file; no pin runs runRlsProofs over the showcase (rls-fixture / rls-multitenant run it on purpose-built fixtures), so the ref now names the command and says the clause scores from a run of it. a2/n0: the showcase pin's foreign PATCH asserts only status >= 300; the row-unchanged re-read is pinned for a fixture object in rls-fixture.dogfood.test.ts, which the ref now says. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[2], acceptance[3] and negative[0] are now pinned at their oracle's layer (api, in-process HTTP) in showcase-private-owd.dogfood.test.ts: the admin re-read proving the refused foreign PATCH changed nothing, and the admin's list of every row the file created. automated.ref names both cases and says why acceptance[5], negative[1] and negative[2] stay with the run. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -144,7 +150,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -218,7 +224,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts); negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine over a recording / fake driver and their own test objects, not showcase_contact's lead_score — they score the one engine function negative[1] names, and the showcase field is not observed. What the dogfood pins do not assert: acceptance[0]'s droppedFields on the INSERT strip (showcase-static-readonly asserts the stripped value, not the advertisement); acceptance[4] and acceptance[6] — owner-anchor-and-bulk-writes' bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation; acceptance[5]'s mixed updateMany (results[i].droppedFields) and the line's product field — showcase-readonly-when-parent pins the single-row PATCH strip and the X-ObjectStack-Dropped-Fields header only. Those legs are hand-driven"
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts + showcase-static-readonly.dogfood.test.ts + showcase-readonly-when-parent.dogfood.test.ts, all through the in-process HTTP stack; negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine over a recording / fake driver and their own test objects, not showcase_contact's lead_score — they score the one engine function negative[1] names, and the showcase field is not observed. Per clause: acceptance[0] and [1] — showcase-static-readonly: a member's forged lead_score is stripped on INSERT and on UPDATE, and the INSERT strip is advertised ('the INSERT strip is ADVERTISED': body droppedFields and the X-ObjectStack-Dropped-Fields header name lead_score with reason readonly); acceptance[2], [3] and negative[0] — owner-anchor-and-bulk-writes: the member's forge, transfer and disown refused with the owner unchanged, the self-owner insert passing, and the platform admin's forge-insert, transfer and disown passing ('a privileged caller CAN …'); acceptance[4] — owner-anchor-and-bulk-writes: a member's REST createMany of three rows with no owner_id reads back owner_id == the caller on every row (its older bulk cases are engine-direct ql.update / ql.delete owner scoping, #2982); acceptance[5] — showcase-readonly-when-parent, as the admin: the paid invoice's tax_rate and its line's quantity, unit_price and product survive a PATCH, and a mixed updateMany is judged per row — the locked row's results[i].droppedFields names quantity with reason readonly_when while the open row in the same batch lands; acceptance[6] — showcase-readonly-when-parent: updateMany with options.continueOnError true over [compliant, quantity below min 0, compliant] lines answers total 3 / succeeded 2 / failed 1, the violating row VALIDATION_FAILED and unchanged, both neighbours applied; the default stop (rows before applied, the tail NOT_ATTEMPTED and unchanged) is pinned beside it as the contrast"
       },
       "traps": [
         "wrong-persona"
@@ -273,6 +279,12 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a4/a6: automated.ref named owner-anchor-and-bulk-writes for bulk writes, but its bulk cases are engine-direct ql.update / ql.delete owner scoping, with no createMany stamping and no per-row validation. a5: showcase-readonly-when-parent pins the single-row PATCH strip and the header; the mixed updateMany leg and the product field are unpinned. a0: showcase-static-readonly asserts no droppedFields on the INSERT strip. n1: the two objectql pins run a recording / fake driver on their own objects, not showcase lead_score. The ref names each. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s droppedFields advertisement on the INSERT strip (showcase-static-readonly); acceptance[4]'s createMany owner stamping and negative[0]'s admin forge-insert and disown (owner-anchor-and-bulk-writes); acceptance[5]'s mixed updateMany per-row droppedFields and the line's product field, and acceptance[6]'s per-row validation under continueOnError with the default-stop contrast (showcase-readonly-when-parent). automated.ref now maps every clause to its case. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -481,7 +493,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -498,7 +510,7 @@
         "knownGaps": [
           "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 164 showcase_* cells (41 rows × 4 verbs at revision 4) are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
           "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200 — the organization's whole user directory, not a self-scoped row: member_default's sys_user_org_members policy selects `id in current_user.org_user_ids`; sys_account and sys_session are the self-scoped ones). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
-          "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot — record it blocked(fixture), never pass or fail. The guest anchor ships unbound (binding guest → showcase_guest_portal is an admin action; the app only ships the capability, permission-sets.ts GuestPortalPermissionSet), a member persona holding the set also holds the baseline's read on showcase_inquiry, and QA run #21056 measured REST anonymous create AND read both answering 401 even with the anchor bound. The only anonymous create lane is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created — a different contract from this clause's",
+          "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot, and not for want of a fixture: no door binds a set to the guest anchor. Record it blocked(dependency) with ref #23267, never pass or fail. ADR-0138 D3 item 5, amended implementation-first by ruling C on #23267 (comment 6159279205; the maintainer: no public site or portal is planned), builds the bind door only when a named deployment needs one; until then the guest anchor stays at the deny-all empty state. Every route a runner could try is refused: PUT /api/v1/meta/position/guest answers 403 NOT_OVERRIDABLE (the anchor is packaged metadata; packages/qa/dogfood/test/guest-grants-channel.dogfood.test.ts, the case 'the metadata door refuses a save of the packaged `guest` position'), packages/plugins/plugin-security/src/suggested-audience-bindings.ts#confirmAudienceBindingSuggestion refuses a guest row (the suggestion sync never writes one), and the package door refuses a built-in position name. #26623 found no recipe to write for that reason: a provisioning recipe needs a replayable door, and an area recipe no item can use is refused by check:platform-checklist. The app ships only the capability (permission-sets.ts GuestPortalPermissionSet), and a member persona holding the set also holds the baseline's read on showcase_inquiry, so a member cannot stand in for the guest. Even with the anchor bound, /api/v1/data would not serve the guest: ADR-0138 D2 admits an anonymous request only at its closed list of door classes (a data operation only through an authRequired:false endpoint, classes 4 and 5) and everything else answers 401, which QA run #21056 measured for REST anonymous create and read. The clause's shape is held in-process on an inline fixture whose binding the test installs through the registry's bare slot (guest-grants-channel.dogfood.test.ts: a bound create lands with no owner, and a bound read set reads 0 rows under every sharing model); that file drives no showcase object, so it scores nothing here. The only anonymous create lane on the showcase is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created, a different contract from this clause's. When the #23267 door is built, re-read this line and write the recipe it then allows",
           "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403"
         ]
       },
@@ -508,7 +520,7 @@
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + error.code for each cell",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
         "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
-        "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(fixture) per knownGaps — a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
+        "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(dependency, #23267) per knownGaps[2]: no door binds a set to the guest anchor (ADR-0138 D3 item 5, ruling C), a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
         "for the 4 showcase_field_ops_delegate × sys_* rows, drive the delegate by hand; for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
         "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
       ],
@@ -573,7 +585,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "`objectstack verify --rls` (packages/verify/src/verify.ts runCrudVerification + packages/verify/src/rls.ts runRlsProofs) for the OBJECT-level CRUD and cross-owner RLS half — a CLI proof a runner invokes, not a test file: no pin in this ref drives it over the showcase (rls-fixture and rls-multitenant dogfood run runRlsProofs on purpose-built fixtures only), so that half scores only from a run that executes the command (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2 and 4 for those rows; clause 3 only on showcase_private_note (the auditor's viewAllRecords reads of showcase_inquiry, showcase_invoice and showcase_invoice_line are not asserted — drive them by hand); clause 6 only for the 41 showcase_* rows (the pin excludes the 4 sys_* rows by name, so clause 6 cannot be pinned whole); every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 4 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200 — the organization's user directory, not only its own row — though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins ON THE VERIFY HARNESS — its in-subtree assignment asserts a 2xx and its out-of-subtree create asserts only a non-2xx, not the 403 PERMISSION_DENIED named below, so the code is a hand-scored answer — a raw cell verdict there would be false in one direction or the other. That pin runs on the verify harness, so drive those cells by hand on the dev boot and score them against the live answer: since #21057 closed (2026-10-08) the seeded business units carry organization_id and the delegate's in-subtree sys_user_position create answers 201 while the out-of-subtree create (bu_hq_finance) answers 403 PERMISSION_DENIED 'outside the delegated subtree'; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
+        "ref": "`objectstack verify --rls` (packages/verify/src/verify.ts runCrudVerification + packages/verify/src/rls.ts runRlsProofs) for the OBJECT-level CRUD and cross-owner RLS half — a CLI proof a runner invokes, not a test file: no pin in this ref drives it over the showcase (rls-fixture and rls-multitenant dogfood run runRlsProofs on purpose-built fixtures only), so that half scores only from a run that executes the command (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells, through the in-process HTTP stack. The sweep drives every showcase_* row of access-matrix.json (41 at revision 4) over all four verbs with one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline; every denial is checked to be 403 PERMISSION_DENIED, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. That reaches clauses 0, 1, 2 and 4 for those rows. The same file carries: clause 3 on all four objects the auditor's viewAllRecords names — showcase_private_note, showcase_inquiry, showcase_invoice and showcase_invoice_line, by id and in a filtered list, against a showcase_contributor member that holds read without the bit and gets none of the foreign rows (private OWD, owner RLS and the master-derived scope respectively); negative[0] — the first denied cell of every set, re-run as the admin, answers 2xx; and the 4 showcase_field_ops_delegate × sys_* rows as one case ('the 16 showcase_field_ops_delegate × sys_* cells answer the matrix'): a member holding exactly that set reads sys_business_unit, sys_business_unit_member and sys_user (200), is refused their withheld verbs 403 PERMISSION_DENIED, meets 405 OBJECT_API_METHOD_NOT_ALLOWED on sys_user create and delete (the admin control answers 405 too: sys_user declares apiMethods ['get','list','update','bulk']), and runs sys_user_position's four verbs 2xx on a row it made inside its Field Operations subtree (the out-of-subtree side of that ADR-0090 D12 gate is showcase-permission-zoo.dogfood.test.ts's, which asserts 403 DELEGATION_SCOPE_VIOLATION). So clause 6 is pinned over the whole table: 45 rows × 4 verbs. STILL MANUAL: clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane that no door can bind today (knownGaps[2] records it blocked(dependency), #23267)"
       },
       "traps": [
         "wrong-persona",
@@ -628,6 +640,18 @@
           "date": "2026-10-26",
           "change": "Six checklist-accuracy findings of the 18.2.0 sweep, re-read on main b4199c96. From P0 record #25812: knownGaps[1] said a plain member reads /data/sys_user self-scoped; member_default's sys_user_org_members policy (id in current_user.org_user_ids) serves the organization's whole directory, so the gap and automated.ref now say so. From Tier 1 record #25815: automated.ref no longer reads `objectstack verify --rls` as a pin (it is a CLI proof no test here drives over the showcase); it no longer claims clauses 3 and 6 whole (the viewAllRecords case probes showcase_private_note only, and the pin excludes the 4 sys_* rows by name); it says the zoo's out-of-subtree case asserts a non-2xx, not 403 PERMISSION_DENIED; acceptance[6].verify says which 164 cells the pin judges and which 16 are hand-driven. The pin header comment's '6 delegate × sys_* rows' is in the test file, outside this ledger: the ledger already says 4. No status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). showcase-crud-persona-matrix.dogfood.test.ts gains three cases at the api oracle's layer (in-process HTTP): the auditor's viewAllRecords over the foreign inquiry, invoice and line with a contributor as the contrast (acceptance[3] on all four named objects); one denied cell per set re-run as the admin (negative[0]); and the 16 showcase_field_ops_delegate × sys_* cells, sys_user create and delete scored 405 OBJECT_API_METHOD_NOT_ALLOWED for the delegate and the admin (acceptance[0], [1] and [6] over the whole table). acceptance[5] stays blocked(fixture) as knownGaps[2] says. automated.ref restated; it no longer calls the delegate rows hand-driven. acceptance[6].verify and steps[6] still describe those 16 cells as hand-driven, outside this revision's edit surface. No clause or status changed",
+          "ref": "#26571"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "Card #26623 asked for an area-level provisioning recipe that binds the guest anchor so acceptance[5] can be scored. No such recipe can be written, because no door binds a set to the guest anchor: ADR-0138 D3 item 5, amended by ruling C on #23267 (comment 6159279205), builds that door only when a named deployment needs one. So no area recipe and no fixtures.provisioning reference were added, and the product card is the existing, ruled #23267 rather than a new one. acceptance[5] was re-driven once over REST on a fresh stock showcase boot at main 1708115e2f: the admin's GET /api/v1/meta/position/guest answered 200 with the packaged anchor (provenance package, no permissionSets); PUT /api/v1/meta/position/guest naming showcase_guest_portal answered 403 NOT_OVERRIDABLE and the re-read was unchanged; GET /api/v1/security/suggested-bindings listed one row, the confirmed everyone suggestion for showcase_member_default, and no guest row; anonymous POST and GET /api/v1/data/showcase_inquiry each answered 401 UNAUTHENTICATED. Verdict: blocked(dependency, #23267). knownGaps[2] now records the clause as a ruled product limit, not a fixture gap, with the refusals and the pin that holds them (guest-grants-channel.dogfood.test.ts); steps[5] and the closing words of automated.ref say blocked(dependency) to match. No other clause or status changed",
+          "ref": "#26623"
         }
       ]
     },
@@ -636,7 +660,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -719,7 +743,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + controlled-by-parent.dogfood.test.ts + showcase-invoice-cbp.dogfood.test.ts. Not every model is pinned, and the ones that are fall short of their clauses in named ways: acceptance[0] — showcase-private-owd asserts the denied PATCH's status only (no admin re-read of the row) and the by-id GET as not-200 rather than non-2xx; acceptance[2] (modifyAllRecords crossing the owner-writes baseline), acceptance[3] (public_read_write) and acceptance[5] (the auditor's viewAllRecords over derived lines) have no pin; acceptance[4] — showcase-invoice-cbp boots a test-local fallback set (showcase_cbp_member), not the C1/C2 contributor personas, and asserts by-id read and write but no list exclusion, while controlled-by-parent.dogfood.test.ts runs a synthetic cbp_account / cbp_note fixture, not showcase_invoice_line. Those legs are hand-driven"
+        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + showcase-invoice-line-contributor-pair.dogfood.test.ts + showcase-crud-persona-matrix.dogfood.test.ts, all through the in-process HTTP stack, with controlled-by-parent.dogfood.test.ts (a synthetic cbp_account / cbp_note fixture) and showcase-invoice-cbp.dogfood.test.ts (a test-local fallback set) pinning the ADR-0055 derivation beneath. Per clause: acceptance[0] — showcase-private-owd: the member's list excludes the foreign note, the by-id GET answers non-2xx, the PATCH >= 400 with the admin's re-read of the row unchanged, the owner's own read and write 2xx; acceptance[1] — showcase-public-read-owd: the non-owner reads the announcement by id and in the list, and the non-owner PATCH answers >= 400 with the admin re-read unchanged; acceptance[2] — showcase-crud-persona-matrix's modifyAllRecords case: showcase_ops PATCHes the admin's announcement 2xx and the re-read shows it, the plain member's identical PATCH 403 with the row untouched; acceptance[3] — the same file's sweep cells: showcase_contributor × showcase_project edit (2xx and persisted on the admin's project, a set that cannot create edits the admin's row) and showcase_member_default × showcase_project edit (403 PERMISSION_DENIED, unchanged); acceptance[4] and [5] — showcase-invoice-line-contributor-pair on the STOCK grants: two showcase_contributor members C1/C2, C1's invoice (owner = C1's email) and line made over REST, C2's filtered list excludes the line while C1's identical list carries it, C2's by-id GET non-2xx and PATCH >= 400 with the row unchanged, C1 reads and edits it by id, and a showcase_auditor member's list and by-id read carry it (viewAllRecords over the derived scope). acceptance[6] is procedural: run-record completeness over the four models"
       },
       "traps": [
         "wrong-persona"
@@ -761,6 +785,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96; automated.ref read as if all four OWD models were pinned. a0: the private pin asserts the denied PATCH by status with no admin re-read, and the by-id GET as not-200. a2/a3/a5: no pin covers the modifyAllRecords bypass, public_read_write or the auditor's VAMA over derived lines. a4: showcase-invoice-cbp uses a test-local fallback set and no list exclusion, and controlled-by-parent.dogfood.test.ts is a synthetic fixture. The ref names each gap. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s admin re-read of the refused PATCH and its non-2xx by-id read (showcase-private-owd); acceptance[1]'s >= 400 non-owner PATCH with the admin re-read (showcase-public-read-owd); acceptance[4] on the stock C1/C2 contributors with C2's list exclusion, and acceptance[5]'s auditor listing of derived lines (new showcase-invoice-line-contributor-pair). automated.ref also names the existing showcase-crud-persona-matrix cases that already pin acceptance[2] and acceptance[3], which revision 5 recorded as unpinned. acceptance[6] stays procedural. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -769,7 +799,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -840,7 +870,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — WRITE half: the showcase's own readable:true/editable:false grant) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin; (a2) clause 2, the admin's budget write on the other side of the lock, is asserted by neither pin; (a0) clause 0's re-read leg — the zoo FLS case asserts the contributor's name PATCH status (< 300) only, never a re-read showing the name changed; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget cases — WRITE half: the showcase's own readable:true/editable:false grant; the contributor's name PATCH re-reads changed, the budget PATCH is refused with the stored value unchanged, and the admin's budget PATCH on the same project lands and re-reads changed — acceptance[0], [1] and [2], api, in-process HTTP) + packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts (READ half, asserted server-side: a readable:false field is STRIPPED — the KEY is absent from the by-id record, from every listed row and from an explicit `select` that names it, and it is neither nulled nor replaced by a placeholder — while the entitled caller still receives it on the same row and request; filtering or sorting on the stripped field is refused 403 PERMISSION_DENIED naming the field, and the entitled caller can still do both; the read-deny's write complement is refused and the stored value is unchanged. The scratch readable:false set is authored at runtime, per this item's own steps). STILL MANUAL: (a) clause 3 and the UI half of clause 4 — the console render of the FLS state — have no pin and stay a run's browser leg: the dogfood suite boots the in-process HTTP stack and drives no browser, and the card that upgraded these pins (#26571) adds no CI lane; (b) the partial-MASKING path (#8993 `maskingRule`: key PRESENT, value replaced by a mask image) is unpinned and has no fixture anywhere in this repo — NO object declares a maskingRule, so the masked-value wire shape cannot be asserted on the stock showcase. The read pin covers the STRIP mechanism only; do not read it as covering the masked one."
       },
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (contributor FLS)",
@@ -883,6 +913,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-permission-zoo.dogfood.test.ts and showcase-fls-read-mask-strip.dogfood.test.ts: acceptance[2]'s admin-side budget write is asserted by neither pin, and acceptance[0]'s re-read leg is unpinned (the zoo asserts the name PATCH status only). automated.ref's STILL MANUAL list names both. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[0]'s re-read of the contributor's name edit and acceptance[2]'s admin budget write with its re-read are now pinned in showcase-permission-zoo.dogfood.test.ts at the api oracle's layer (in-process HTTP). acceptance[3] and the UI half of acceptance[4] stay a live browser leg; automated.ref says why (no browser in the dogfood suite, no new CI lane). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -1006,7 +1042,7 @@
       "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1086,7 +1122,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Batch and security-explain joined at revision 2; before that they were checked by hand only. What it does NOT assert, so these legs stay hand-driven: acceptance[4]'s /meta member contrast is `.not.toBe(401)` in the pin, not the clause's 200 (only the /data contrast asserts 200); acceptance[5]'s declared-public contrast (an anonymous forms-family route answering non-401) has no case in any pin; negative[0]'s read-back — the authed GET /api/v1/automation/showcase_reassign_wizard answering 200 after the anonymous DELETE — is not driven (the pin asserts only the DELETE's 401)"
+        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts (shared-showcase project, the platform-default posture: the harness passes no requireAuth override) — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Per clause: acceptance[0]–[3] — the per-surface 401 cases, the nonexistent-record action probe (401, never 404), the two mutually exclusive envelope predicates, and the analytics faces for both callers; acceptance[4] — the member's GET /data/showcase_private_note and GET /meta both asserted 200; acceptance[5] — an anonymous GET /forms/contact-us (the rest-route ledger's 'public' forms row) on the same boot answers 200 serving the showcase_inquiry form, never 401; negative[0] — the anonymous DELETE /automation/showcase_reassign_wizard answers 401 and the admin's GET /automation/showcase_reassign_wizard then answers 200, so the flow is still registered. acceptance[6] is procedural (one verdict per variant in the run record). Batch and security-explain joined at revision 2"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1124,6 +1160,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in showcase-anonymous-deny-surfaces.dogfood.test.ts: acceptance[4]'s /meta member contrast is .not.toBe(401) where the clause demands 200; acceptance[5]'s public-forms contrast is in no pin; negative[0]'s post-DELETE authed read-back is not driven. automated.ref names all three as hand-driven legs. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP) in showcase-anonymous-deny-surfaces: acceptance[4]'s member /meta read now asserts 200 (it was .not.toBe(401)); acceptance[5]'s declared-public contrast (anonymous GET /forms/contact-us answers 200 with the form, on the same platform-default boot); negative[0]'s read-back (the flow answers 200 at its own route after the refused anonymous DELETE). acceptance[6] stays procedural. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -1692,7 +1734,7 @@
       "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1770,7 +1812,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 3 cases: the precondition, acceptance[0] through the save's env-wide message, and acceptance[1], end to end on a showcase boot with an organization active) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). The no-organization read of step 4 has no end-to-end pin, so acceptance[0] does not score from the pins alone: the dogfood pin carries the save's 200 naming the environment-wide scope, both doors' 404 FORM_NOT_FOUND and the 0 landed rows, and the no-organization read is a live leg. acceptance[2] to acceptance[5] have no stock fixture (knownGaps); their pins are a unit (the rest file drives RestServer over a mocked protocol) and an in-process protocol over a stub registry (the metadata-protocol file), which is the layer their test oracle asks for"
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 4 cases on a showcase boot with an organization active: the precondition, acceptance[0] and negative[1] through the save — 200, a message naming the env-wide scope and never the active organization's id, both doors 404 FORM_NOT_FOUND, 0 landed rows — then the no-organization read: set-active null, GET /meta/view/showcase_inquiry.contact serves config.sharing.allowAnonymous false with the link kept, set-active the organization again; and acceptance[1], both doors open with the row landing in the organization) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). acceptance[0], acceptance[1], negative[0] and negative[1] score from the dogfood pin. acceptance[2] to acceptance[5] have no stock fixture (knownGaps); their pins are a unit (the rest file drives RestServer over a mocked protocol) and an in-process protocol over a stub registry (the metadata-protocol file), which is the layer their test oracle asks for. negative[2] is the dogfood pin's save at 200; negative[3] to negative[5] are procedural"
       },
       "source": [
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors make over the environment's list: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
@@ -1806,6 +1848,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a0: the ref conceded no end-to-end pin for step 4's no-organization read; it now draws the consequence (acceptance[0] does not score from pins alone) and names which legs the dogfood pin does carry. a2-a5: the record measured the rest pin as a unit over a mocked protocol and the protocol pin as in-process over a stub registry, both fitting the test oracle; the ref names those layers. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP) in showcase-public-form-withdrawal-layers: step 4's no-organization read (set-active null, the /meta view read serves allowAnonymous false with the link kept, then the organization is made active again), which closes acceptance[0]'s live leg; and negative[1]'s save message, asserted to name no organization id. acceptance[2] to acceptance[5] stay test-scored (no stock fixture). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -2624,7 +2672,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 12,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2712,8 +2760,8 @@
         "expect": 3
       },
       "automated": {
-        "kind": "unit",
-        "ref": "packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157, flow door) + packages/runtime/src/domains/action-activation-posture-gate.test.ts (#12160, action door) — the posture x operator matrix for both doors, including the group/isolated legs this item marks blocked(fixture), the no-write-on-refusal assertion, and the isSystem bypass; both are unit pins (the domain handler over fakes, no HTTP). What they do NOT reach: the flow pin has no caller-without-manage_metadata case at all — that tier and its exact FLOW_ENABLEMENT_DENY_MESSAGE sentence are pinned at the same unit layer by packages/runtime/src/domains/automation-toggle-deny-message.test.ts (#11666, sentence plus 403 PERMISSION_DENIED, both directions) and packages/runtime/src/domains/automation-write-capability-gate.test.ts (envelope); the action pin's 'REFUSES a caller without `manage_metadata`, in every posture' runs only `single` and asserts only that the message contains 'manage_metadata' — not acceptance[1]'s 'functionally equivalent to deleting it' rationale nor its 'a packaged action' subject. + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (#12359) drives the action flip over HTTP and asserts ONE deployment-level row with no organization_id key — acceptance[3]'s row shape — but as the dev admin, not a manage_metadata holder without platform_admin, so acceptance[3]'s persona leg stays live. STILL MANUAL: acceptance[1] and acceptance[0] over HTTP (the pins stop at the handler), acceptance[3]'s persona, and acceptance[5]'s live corroboration — no pin restarts a boot and reads the re-hydration line, only the test half is pinned"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/activation-write-operator-gate-single.dogfood.test.ts (#26571, isolated showcase boot, the stock single posture) drives both doors over HTTP: acceptance[0] — a plain member's POST /automation/showcase_urgent_task_alert/toggle {enabled:false} answers 403 PERMISSION_DENIED with exactly FLOW_ENABLEMENT_DENY_MESSAGE; acceptance[1] — the same member's POST /actions/_activation/showcase_task/showcase_mark_done answers 403 PERMISSION_DENIED with exactly the refuseUngrantedActivationAuthoring sentence ('a packaged action', 'functionally equivalent to deleting it'); acceptance[2] — the {enabled:\"false\"} body still answers the 403 at both doors, and GET /data/sys_metadata_activation filtered on the two names returns no row after the refusals; acceptance[3] — a fresh member granted a runtime-authored set (PUT /meta/permission, systemPermissions ['manage_metadata'], a sys_user_permission_set row) whose get-session and /auth/me/permissions carry no platform_admin position is admitted 200 at both doors, each landing one row (metadata_type 'flow' / 'action', active false) whose KEY SET has no organization_id over HTTP and in the store, then re-enabled; negative[0] — no refusal message matches 'tenancy posture'; negative[1] — the admin's same calls answer 200; negative[2] — the two sentences are distinct. Unit pins beneath: packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) + action-activation-posture-gate.test.ts (#12160) — the posture x operator matrix for both doors, including the group/isolated legs, the no-write-on-refusal assertion and the isSystem bypass — with automation-toggle-deny-message.test.ts (#11666) and automation-write-capability-gate.test.ts for the flow door's tier sentence and envelope, and packaged-activation-ledger-reach.dogfood.test.ts (#12359) for the deployment-level row as the dev admin. acceptance[4] stays pin-scored (its live leg needs a walled boot, knownGaps[0]); acceptance[5] is test-scored, and no pin restarts a boot to read the re-hydration line. negative[3] is procedural"
       },
       "source": [
         "packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite (the shared §5 gate: the posture read through readEffectiveTenancyPosture and the early return where postureEnforcesWall is false, then the PLATFORM_ADMIN posture-rung test, #15981 — never a position name) + packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationAuthoring (the manage_metadata tier) + packages/runtime/src/domains/activation-gate.ts#FLOW_ACTIVATION_SUBJECT and packages/runtime/src/domains/activation-gate.ts#ACTION_ACTIVATION_SUBJECT (the per-artifact remedies); the fail-open rationale is the file header's section 'Fail-open on an ABSENT posture is deliberate'",
@@ -2783,6 +2831,18 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96, all in automated.ref. a0/n2: the ref claimed the full posture x identity matrix while automation-activation-posture-gate.test.ts has no caller-without-manage_metadata case — the ref now says so and names the two unit pins that do hold that tier. The record's second half (FLOW_ENABLEMENT_DENY_MESSAGE asserted by no test) does not hold on this tree: automation-toggle-deny-message.test.ts (#11666) asserts the sentence verbatim, by value rather than by the constant's name; it joins the ref. a1: the action pin's no-manage_metadata case is single-only and asserts a substring. a3: packaged-activation-ledger-reach.dogfood.test.ts joins the ref for the row shape, with its dev-admin persona named. a5: the restart re-hydration corroboration is named unpinned. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin activation-write-operator-gate-single at the api oracle's layer: acceptance[0] and [1] over HTTP with each door's exact sentence, acceptance[2] (invalid body still 403, no ledger row after the refusals), acceptance[3]'s persona (a manage_metadata holder without the platform_admin position, admitted at both doors, rows with no organization_id key), negative[0] to negative[2]. acceptance[4] and [5] stay test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-27",
+          "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 11's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -2985,7 +3045,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3068,8 +3128,8 @@
         "auth-state-leak"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4; clause 6 is test-only) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server. Also unpinned: negative[0]'s declaration — ADMIN_STANDING_NON_TABLE_INPUTS in packages/core/src/security/admin-standing-surface.ts, where OS_PLATFORM_OWNER_EMAIL is declared a non-table derivation input — is asserted by no test; admin-standing-surface.test.ts pins ADMIN_STANDING_SURFACE (the tables the resolver reads) and never reads the non-table list, so a run reads that declaration from source"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; negative[3] is out of scope"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
@@ -3137,6 +3197,18 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: admin-standing-surface.test.ts never asserts ADMIN_STANDING_NON_TABLE_INPUTS, the OS_PLATFORM_OWNER_EMAIL non-table declaration negative[0] cites (no test in the repo names it); automated.ref now says so. a0-a3: the record confirms the ref already records these as STILL MANUAL live-HTTP arms that the unit pins do not score — no edit was owed for that line. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin platform-owner-email-anchor at the api / log oracles' layer, restarting one deployment per value: acceptance[0] to acceptance[3] and acceptance[4]'s live leg over HTTP, the [authz] log line captured for acceptance[3], and negative[0]'s ADMIN_STANDING_NON_TABLE_INPUTS declaration, which no test asserted. acceptance[5] stays test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-27",
+          "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 10's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3282,7 +3354,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3364,8 +3436,8 @@
         "absence-inference"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. STILL MANUAL: the stock-boot honest-default (clause 1) and the configured live loop through the mounted server (clauses 2-5, fixture-gapped per knownGaps). For clause 5 in particular: the exclusion-filter pin probes sys_audit_log and sys_session, not the sys_job the clause names (sys_job is still on AUDIT_EXCLUDED_OBJECTS, audit-writers.ts), and no pin observes the AuditPlugin install line ('record-view auditing installed on N object(s)'), so both halves of its log oracle are read from a live boot"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin()): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] needs a broken ledger and is out of scope for a stock run; negative[1] is the unit pin's no-principal skip; negative[2] is a cross-reference"
       },
       "source": [
         "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
@@ -3397,6 +3469,18 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. n0: negative[0] said a ledger write failure is reported once per process; read-audit.test.ts's '#18247' describe pins once per CAUSE (a second, different cause reports again at error), so the text now says that. a4: clause 5 cites sys_job while the pin probes sys_audit_log / sys_session, and no pin observes the install line; automated.ref says both halves of the log oracle are live. No clause's assertion or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin record-view-read-audit at the api / log oracles' layer: acceptance[0] on the stock option-less AuditPlugin (no read row after a 200 detail read, no install line with INFO present), and the configured opt-in through bootShowcase's extraPlugins in place of the scratch-copy recipe — acceptance[1] to acceptance[4], including the install line, the sys_job exclusion warning and the landed row's fields. acceptance[5] stays test-scored. automated.kind is left as it was (this slice's edit surface is ref, revision and history). No clause or status changed",
+          "ref": "#26571"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 5's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3534,7 +3618,7 @@
       "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3600,7 +3684,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/rest/src/rest-docs-viewer-retired.pin.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts. What the pins assert, clause by clause (RUNNER rule 6, layer named), so a run knows which legs stay live: acceptance[1] — the sweep's EVERYTHING_ELSE expectation (packages/qa/dogfood/test/anonymous-door-sweep.classification.ts) checks status 401 and an error envelope, never error.code; UNAUTHENTICATED is asserted by this ref's i18n, settings and API-description unit pins and, outside this ref, on other faces of the same families by packages/plugins/plugin-sharing/src/share-link-routes.anonymous-floor.pin.test.ts (every registered share-link route, on a mock host), packages/runtime/src/notifications-every-verb.hono.integration.test.ts (the unserved verbs, over a real Hono app) and packages/runtime/src/api-key-lifecycle.pin.test.ts (POST /keys) — no pin asserts the code on the GET /notifications, GET /keys and GET /share-links faces steps[0] lists; acceptance[2] — rest-docs-viewer-retired.pin.test.ts asserts that /docs has no registration on the server, its route manager or the host, but no pin compares GET /api/v1/docs with the never-served control path, anonymous and as admin; acceptance[3] — the sweep's share-link token class (DOOR_CLASSES[1], REFUSED_WITHOUT_A_SUBJECT) accepts any 4xx, 401 included, so the clause's 'not 401' is asserted by no pin; acceptance[4] — the dogfood submit asserts a 2xx and body keys ['id'] on the showcase without sending steps[3]'s forged owner_id and status, and the exact 201 is asserted only by public-form-submit-answer.test.ts (the registered handler, and the real Hono transport over a protocol double)"
+        "ref": "packages/qa/dogfood/test/anonymous-floor-v18-doors.dogfood.test.ts + packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts + packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/rest/src/rest-docs-viewer-retired.pin.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts. Per clause, at the api oracle's layer (in-process HTTP): acceptance[1] — anonymous-floor-v18-doors drives steps[0]'s six doors (GET /api/v1/notifications, /keys, /share-links, /openapi.json, /i18n/locales and GET /api/settings/branding) anonymously and asserts 401 with error.code UNAUTHENTICATED or AUTH_REQUIRED on each, and the admin's identical GET is served 200 on every door but /keys, which serves POST alone (#23909) and answers the admin's GET 405, so its 401 is the floor's by the same argument; the sweep adds one unauthenticated request per registered route (401 and an error envelope). acceptance[2] — showcase-anonymous-deny-surfaces' retired-viewer case: GET /api/v1/docs answers 404 with the never-served control path's body, anonymously, as a member and as the admin, never text/html. acceptance[3] — anonymous-floor-v18-doors: GET /api/v1/share-links/BOGUS/resolve answers a 4xx that is not 401 and carries neither unauthenticated code. acceptance[4] — anonymous-floor-v18-doors: an anonymous POST /api/v1/forms/contact-us/submit with the four whitelisted fields plus a forged owner_id and a non-whitelisted status answers 201 with body keys exactly ['id'], and the stored row carries neither forged value; public-form-submit-answer.test.ts pins the same answer on the registered handler. negative[0] — the sweep's everything-else class answers 401 throughout. acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous",
@@ -3632,6 +3716,12 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96; automated.ref now says what each pin asserts per clause. a1: EVERYTHING_ELSE never reads error.code. The record's further claim that no pin asserts UNAUTHENTICATED for /notifications, /keys and /share-links does not hold on this tree for those families' other faces — share-link-routes.anonymous-floor.pin.test.ts, notifications-every-verb.hono.integration.test.ts and api-key-lifecycle.pin.test.ts assert it — but none asserts it on the three GET faces steps[0] lists, which is what the ref now says. a2: the docs-viewer pin asserts non-registration, not the control-path comparison. a3: the share-link token class accepts 401. a4: the dogfood submit sends no forged fields and asserts 2xx, the exact 201 is pinned over a protocol double. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[1]'s error.code on each of steps[0]'s six doors with the admin's served control (new anonymous-floor-v18-doors); acceptance[2]'s admin leg of the retired /docs comparison (showcase-anonymous-deny-surfaces); acceptance[3]'s bogus-token refusal asserted not 401; acceptance[4]'s exact 201 and {id} body with the forged owner_id and status sent. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3745,7 +3835,7 @@
       "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3794,7 +3884,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts. Layers (RUNNER rule 6): meta-view-dashboard-audience-gate.test.ts drives RestServer over a mock server and protocol (unit) and covers list pruning, the plain by-name refusal and the cached arm only — it has no /published, /layers or ?state=draft door and no /history case for a studio.access holder lacking the view's requiredPermissions, so acceptance[2]'s alternate doors and its /history leg stay live. negative[0]'s 304 assertion ('a caller who no longer holds the capability is never answered a 304…') exists only at that unit layer; the live 304 probe is driven by hand"
+        "ref": "packages/qa/dogfood/test/meta-view-audience-alternate-doors.dogfood.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts. Per clause: acceptance[1] — wall-authoring-trail-doors' single describe drives history, audit and diff (403 FORBIDDEN) and /packages/:id/commits (403 PERMISSION_DENIED) for a setup.access-only holder over HTTP. acceptance[2] — meta-view-audience-alternate-doors (in-process HTTP): the admin saves a scratch list view showcase_task.qa_gated_view gated on manage_users, with a pending draft; a setup.access-only member does not find it in GET /meta/view, and the plain read, /published, /layers and ?state=draft each answer it 403 PERMISSION_DENIED; on /history that member is refused 403 FORBIDDEN first (the authoring-trail gate), while a studio.access member, whom the trail gate admits, gets the audience refusal 403 PERMISSION_DENIED; the admin reads the view on every door. negative[0] — the same file replays the admin's ETag as the member's If-None-Match and is answered 403 PERMISSION_DENIED, never 304, beside the control that the admin's own validator is a 304; meta-view-dashboard-audience-gate.test.ts holds the cached arm at the unit layer (RestServer over a mock protocol). acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions",
@@ -3819,6 +3909,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96 in meta-view-dashboard-audience-gate.test.ts. a2: the pin is a unit (RestServer over a mock server and protocol) covering list pruning and the plain by-name refusal; the /published, /layers, ?state=draft doors and the studio.access /history leg are in no pin. n0: the never-a-304 assertion is unit-only. automated.ref names both. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin meta-view-audience-alternate-doors at the api oracle's layer: acceptance[2]'s list prune and the /published, /layers and ?state=draft refusals for a setup.access-only member, the /history leg for a studio.access member (audience refusal) beside the trail gate's FORBIDDEN, the admin control on every door, and negative[0]'s ETag replay over the real server. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3827,7 +3923,7 @@
       "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3879,7 +3975,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/runtime/src/domains/catalog-activation-door.test.ts + packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts. Which arms are pinned over HTTP and which only at the unit layer (the domain handler over fakes): acceptance[2] — the dogfood activation pin drives the unknown-name 404 (and a 400 for a type with no switch); the everyone / guest audience-anchor 400 is asserted only in catalog-activation-door.test.ts. acceptance[3] — the dogfood clone pin drives 200 with the dropped keys, 409 for another set's name, 404, the bad-name 400 and 403; the anonymous 401, the 409 for the source's own name and the closed-body 400 are unit-only. Those HTTP legs are hand-driven"
+        "ref": "packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts + packages/runtime/src/domains/catalog-activation-door.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts. Per clause, at the api oracle's layer (in-process HTTP on a booted showcase): acceptance[1] — catalog-activation-door: a declared position switches off 200 with one deployment-level row, the resolver stops granting through it and grants again once it is back on. acceptance[2] — the same file: the audience anchors everyone and guest are refused 400 naming the anchor, with no ledger row; an undeclared name is 404 and writes nothing; a type with no switch is 400. acceptance[3] — permission-set-clone-door: a manage_metadata holder clones a packaged set 200 with the facets and without adminScope / isDefault / packageId; another set's name and the source's own name are 409 RESOURCE_CONFLICT; an unknown source 404; a bad name 400; the closed body (a key missing, or an extra key) 400 VALIDATION_FAILED with nothing saved; a member without manage_metadata 403 PERMISSION_DENIED; an anonymous caller 401. The unit files hold the same arms on the domain handler over fakes. acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/runtime/src/domains/catalog-activation.ts#handleCatalogActivationWrite",
@@ -3899,6 +3995,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a2: the everyone/guest 400 is asserted only by the unit catalog-activation-door.test.ts; the dogfood pin drives the 404 arm (and a no-switch-type 400). a3: the dogfood clone pin drives 200 + dropped keys, 409 (another set's name), 404, bad-name 400 and 403; the anonymous 401, the source-name 409 and the closed-body 400 are unit-only. automated.ref names the split. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned over HTTP the arms only the unit layer reached: acceptance[2]'s everyone / guest 400 (catalog-activation-door), and acceptance[3]'s source's-own-name 409, closed-body 400 and anonymous 401 (permission-set-clone-door). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3907,7 +4009,7 @@
       "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3963,8 +4065,8 @@
         "destructive-in-place"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts + packages/cloud-connection/src/marketplace-install-local-catalog-name-collision.test.ts. What each clause's pins reach: acceptance[1] — the boot-refusal pins stop at manifest registration; the last file drives POST /marketplace/install-local in-process (the plugin's route handler with a stubbed cloud fetch) and asserts 422 PLUGIN_REGISTER_FAILED with nothing registered, so the install-local door is pinned above HTTP and its live leg stays. acceptance[2] — permission-set-owner-registration.test.ts proves VALIDATION_ERROR / 400 at ObjectQL.registerApp, not on a permission-set save door; no HTTP pin drives the save. acceptance[3] — the CLI integration test runs MigrateSecurityCatalogOverlays.run in-process (oclif), not a spawned process, which the build oracle accepts. acceptance[4] — catalog-reference-report.test.ts asserts the [security] error and info lines on a vi.fn logger; the ≤50-names cap (LOGGED_LIMIT in catalog-reference-report.ts) is asserted by no case"
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/security-catalog-one-holder-http.dogfood.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts + packages/cloud-connection/src/marketplace-install-local-catalog-name-collision.test.ts. Per clause: acceptance[1] (api) — security-catalog-one-holder-http mounts MarketplaceInstallLocalPlugin on a booted showcase and POSTs /marketplace/install-local with an inline manifest whose permissions redeclare showcase_auditor: 422 PLUGIN_REGISTER_FAILED, the message naming \"showcase_auditor\" and com.example.showcase, and GET /packages lists the same packages before and after; the cloud-connection file holds the same refusal for every catalog type and both branches on the route handler. acceptance[2] (api) — the same file: PUT /meta/permission/qa_owner_binding_set?package=com.example.showcase with a body packageId naming another package answers 400 VALIDATION_ERROR located at packageId; the objectql file holds it at registerApp. acceptance[3] (build) — the cli integration test runs MigrateSecurityCatalogOverlays in-process (oclif). acceptance[4] (log) — the same dogfood file boots a database file and captures the process output: the clean boot logs the one INFO catalog-reference line and no grant error; a reboot of that database holding 51 grants that name no catalog set logs one ERROR line '[security] 51 sys_user_permission_set grant(s) name a permission set the security catalog does not resolve', listing the names and capping the grant ids at 50 with the rest counted (more: 1, LOGGED_LIMIT); catalog-reference-report.test.ts holds every category on a vi.fn logger. acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/objectql/src/registry.ts#SecurityCatalogNameConflictError",
@@ -3991,6 +4093,12 @@
           "date": "2026-10-26",
           "change": "Four checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1: packages/cloud-connection/src/marketplace-install-local-catalog-name-collision.test.ts (in-process plugin, stubbed cloud fetch: 422 PLUGIN_REGISTER_FAILED, nothing registered) was not in the ref; it joins it, with its layer. a2: the owner-registration pin proves the 400 at registerApp, not a save door. a3: the CLI runs in-process, which the record judged acceptable for the build oracle; the ref records it. a4: the ≤50-names cap is not asserted. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin security-catalog-one-holder-http: acceptance[1]'s install-local refusal and acceptance[2]'s owner-binding refusal over HTTP on a booted showcase, and acceptance[4]'s live boot log (the clean INFO line, the ERROR line over planted grants, and the 50-entry cap no case asserted). automated.kind set to dogfood: the ref now leads with dogfood pins (the slice-2 ACCEPT's kind correction, applied here too). No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },
@@ -3999,7 +4107,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4057,7 +4165,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts. Layers (RUNNER rule 6): the four plugin-security files are ENGINE pins — a real ObjectQL engine and SQL driver, the thrown error read through resolveThrownHttpError — so acceptance[1], acceptance[3] and acceptance[4] (api oracle) score partial from them: no pin here drives the /data door over HTTP for those three. The one HTTP pin, permission-set-assignment-window.dogfood.test.ts › 'the door refuses a window whose end is not after its start…', asserts [400, VALIDATION_FAILED] and fields [[valid_until, rule_violation]] only; acceptance[2]'s authored message, the absent or non-'unevaluable' constraint and the valid-window 201 control are not asserted over HTTP and stay live legs"
+        "ref": "packages/qa/dogfood/test/grant-table-write-contract.dogfood.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts. Per clause, at the api oracle's layer (POST /data/sys_user_permission_set as the admin, in-process HTTP): acceptance[1] — grant-table-write-contract: a body naming the retired permission_set_id is 400 INVALID_FIELD naming the column, with nothing stored; a second identical grant is 409 UNIQUE_VIOLATION with one row standing. acceptance[2] — permission-set-assignment-window › 'the door refuses a window whose end is not after its start…': 400 VALIDATION_FAILED, fields [[valid_until, rule_violation]], the authored message opening 'Valid Until must be later than Valid From', no constraint.reason 'unevaluable', nothing stored, and a valid window on the same door 201 (the control). acceptance[3] — grant-table-write-contract: a grant naming another user as granted_by stores the admin, on the wire read-back and in the store. acceptance[4] is the walled-boot leg (knownGaps): scored from grant-holder-membership-refusal.test.ts, an engine pin. The four plugin-security files are engine pins beneath (a real ObjectQL engine and SQL driver). acceptance[0] is the pin run itself"
       },
       "source": [
         "packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts",
@@ -4106,6 +4214,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815, re-read on main b4199c96. a1/a3/a4: the plugin-security pins in automated.ref run at the engine layer (real ObjectQL + SqlDriver, errors through resolveThrownHttpError), so the api-oracle clauses score partial from them; the ref now names the layer. a2: the dogfood window case asserts status, code and the fields pair only; the message, constraint and 201 control legs are named live. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned over the REST data door: acceptance[1]'s INVALID_FIELD and UNIQUE_VIOLATION and acceptance[3]'s granted_by read-back (new grant-table-write-contract); acceptance[2]'s authored message, the absent 'unevaluable' constraint and the valid-window 201 control (permission-set-assignment-window). acceptance[4] stays the walled leg. No clause or status changed",
+          "ref": "#26571"
         }
       ]
     },

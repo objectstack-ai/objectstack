@@ -202,16 +202,18 @@ describe('sys_user.locale — the guard and the shape check compose', () => {
     expect(refusal(data, 'update')).toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
-  it('the check is of SHAPE, not of membership — an 8-letter word is a legal tag', () => {
-    // Measured while writing this file, and worth a pin rather than a comment:
-    // `Japanese` is eight letters, so it satisfies the primary-subtag rule and
-    // the column accepts it. That is correct and deliberate — membership in a
-    // shipped template bundle is the bundle's business, and a tag nothing
-    // ships falls to the delivery ladder's floor (`en-US` in `sendTemplate`,
-    // `DEFAULT_LOCALE` in the store) rather than dead-lettering. The ruling's
-    // safety property is about malformed values, NOT unknown ones, and a
-    // reader who expects this rule to reject `Japanese` would "fix" it into a
-    // closed vocabulary the platform does not have.
-    expect(refusal({ locale: 'Japanese' }, 'update')).toBeNull();
+  it('the check is of SHAPE, not of membership — a language name is malformed, an unshipped tag is not', () => {
+    // The ruling asks for a BCP-47 SHAPE check and fixes no subtag length.
+    // Since #26463 the primary subtag is the 2–3 letters of the ISO 639 codes
+    // real tags start with (BCP-47 reserves 4 letters and registers no 5–8
+    // letter language), so `Japanese` is refused as malformed: it is a name,
+    // and no session ever asks for it. That is still shape, not membership —
+    // a well-formed tag nothing ships (`tlh-QQ`) is accepted and falls to the
+    // delivery ladder's floor (`en-US` in `sendTemplate`, `DEFAULT_LOCALE` in
+    // the store) rather than dead-lettering. A reader who wants this rule to
+    // reject an unshipped tag would "fix" it into a closed vocabulary the
+    // platform does not have.
+    expect(refusal({ locale: 'Japanese' }, 'update')).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(refusal({ locale: 'tlh-QQ' }, 'update')).toBeNull();
   });
 });

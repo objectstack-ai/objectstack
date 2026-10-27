@@ -72,7 +72,7 @@ export default defineStack({
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
-| Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
+| Action labels, confirm text, success messages, disabled reasons | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
@@ -89,12 +89,13 @@ export default defineStack({
 | Screen-flow wizards (flow label, screen headings and body text, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.description` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
 | Position label / description | `positions.<name>.label` / `description` — keyed by the position's `name`; overlaid on every served position, which is the list the console's position picker draws |
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
+| Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, dataset, report, page, picklist, position and permission** — a field's labels are translated as part of
+dashboard, dataset, report, page, picklist, position, permission and book** — a field's labels are translated as part of
 its object document, and so are the labels of any actions the object declares
 inline
 (#3370). Before that, an object document went out with its authored action

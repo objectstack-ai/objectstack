@@ -57,6 +57,8 @@ export * from './sms-service.js';
 export * from './security-service.js';
 export * from './sharing-service.js';
 export * from './rls-membership-resolver.js';
+// [ADR-0142 D1/D2] The ownership-queue service (registered as `ownership-queue`, never `queue`).
+export * from './ownership-queue-service.js';
 export * from './share-link-service.js';
 // './report-service.js' (the saved-report contract and its seven types) removed
 // (#20102): the saved-report stack it described had zero callers in any repo.

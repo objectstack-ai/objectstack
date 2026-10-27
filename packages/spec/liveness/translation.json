@@ -123,6 +123,26 @@
           "verifiedAt": "2026-10-25",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportAttr (`reports.<name>.description`, read by translateReport)",
           "note": "Overlays the served report's own `description`."
+        },
+        "blocks": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#translateReportBlocks (`reports.<name>.blocks.<block_name>`, read by translateReport per joined block, keyed by the block's required `name`)",
+          "note": "A joined report's block heading and caption, drawn by the joined renderer off the served report. Seeded LIVE with its reader in the same change; the catalog yields per block to a string an org re-authored on the packaged report (ADR-0029 D9.2a).",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportBlockAttr (`reports.<name>.blocks.<block_name>.label`, read by translateReportBlocks)",
+              "note": "Overlays the served block's own `label`."
+            },
+            "description": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupReportBlockAttr (`reports.<name>.blocks.<block_name>.description`, read by translateReportBlocks)",
+              "note": "Overlays the served block's own `description`."
+            }
+          }
         }
       }
     },
@@ -243,6 +263,40 @@
           "verifiedAt": "2026-10-24",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupSecurityCatalogAttr (`permissions.<name>.description`, read by translatePermissionSet)",
           "note": "Overlays the served permission set's own `description`."
+        }
+      }
+    },
+    "books": {
+      "status": "live",
+      "verifiedAt": "2026-10-27",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateBook (`books.<name>.label` / `.description` and `books.<name>.groups.<key>.label`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/rest/src/meta-item-read-gate.ts#translateMetaList (the /meta list read that applies it per request locale); packages/rest/src/meta-item-read-gate.ts#createMetaBookTreeAnswer (the book tree translates the book it resolves through the same table)",
+      "note": "Seeded LIVE with its readers in the same change (the datasets precedent): a served `book` document is localized at the REST boundary, list and item, and `GET /meta/book` is what the console's docs portal builds its sidebar from; the tree route translates the resolved book before rendering the spine. Retires nothing: the book's inline `translations` map stays a tombstone, and its prescription now points here.",
+      "children": {
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookAttr (`books.<name>.label`, read by translateBook)",
+          "note": "Overlays the served book's own `label` — the docs sidebar title."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookAttr (`books.<name>.description`, read by translateBook)",
+          "note": "Overlays the served book's own `description`."
+        },
+        "groups": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
+          "note": "Overlays each group's `label`, addressed by the group's stable `key` — the sidebar's section titles.",
+          "children": {
+            "label": {
+              "status": "live",
+              "verifiedAt": "2026-10-27",
+              "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupBookGroupLabel (`books.<name>.groups.<key>.label`, read by translateBook)",
+              "note": "The group's section title in the docs sidebar and in the resolved tree's `groups[].label`."
+            }
+          }
         }
       }
     },

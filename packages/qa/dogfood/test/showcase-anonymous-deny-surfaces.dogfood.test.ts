@@ -402,6 +402,26 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   it('an authenticated member is NOT denied on /meta (deny targets anonymity)', async () => {
     const r = await stack.apiAs(memberToken, 'GET', '/meta');
     expect(r.status, 'authenticated metadata read must clear the auth gate').not.toBe(401);
+    // [#26571] access-security.anonymous-deny-surfaces acceptance[4] scores the
+    // member's /meta read at 200, not merely "past the floor": the same read the
+    // anonymous caller is refused is served to a signed-in baseline member.
+    expect(r.status, 'a signed-in member is served the metadata read').toBe(200);
+  });
+
+  // ── a declared-public route (#26571, acceptance[5]) ──────────────────────
+  //
+  // The other side of the gate. `GET /api/v1/forms/:slug` is the rest-route
+  // ledger's `public` disposition (forms family), and the showcase's
+  // `contact-us` form declares anonymous sharing. On this same platform-default
+  // boot, where every surface above answers an anonymous caller 401, that
+  // route answers the anonymous caller with the form: the deny keys on the
+  // route's declared posture, it does not blanket the server.
+  it('[#26571] an anonymous caller is served a declared-public forms route — not 401', async () => {
+    const r = await anon('GET', '/forms/contact-us');
+    expect(r.status, 'the declared-public form route must not be gated').not.toBe(401);
+    expect(r.status, 'and it serves the form').toBe(200);
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body.object, 'the served form is the showcase intake').toBe('showcase_inquiry');
   });
 
   // ── /meta WRITE doors (#11373) ─────────────────────────────────────────
@@ -601,6 +621,11 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   it('anonymous DELETE /automation/:name is denied (401) — the destructive one', async () => {
     const r = await anon('DELETE', `/automation/${FLOW}`);
     expect(r.status, 'anonymous flow deregistration must be 401').toBe(401);
+    // [#26571] negative[0]'s read-back: the refused DELETE removed nothing. A
+    // signed-in caller still reads the flow at its own route (the flow list is
+    // retired, #19543), so a 401 that had deregistered it anyway would fail here.
+    const after = await stack.apiAs(adminToken, 'GET', `/automation/${FLOW}`);
+    expect(after.status, 'the flow is still registered after the anonymous DELETE').toBe(200);
   });
 
   it('an authenticated caller reaches the domain, which answers 200 — not 401', async () => {
@@ -765,6 +790,12 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(memberRes.status, 'a session must not change the answer on a route that is gone').toBe(404);
     expect(memberRes.headers.get('content-type') ?? '', 'no page is served').not.toContain('text/html');
     expect(await memberRes.text(), 'the retired path answers the ordinary not-found body').toBe(controlBody);
+    // [#26571] access-security.anonymous-floor-v18-doors acceptance[2] names
+    // the ADMIN: the platform administrator's session finds no page either.
+    const adminRes = await stack.apiAs(adminToken, 'GET', RETIRED_VIEWER_PATH);
+    expect(adminRes.status, 'the admin is answered the same not-found').toBe(404);
+    expect(adminRes.headers.get('content-type') ?? '', 'no page is served to the admin').not.toContain('text/html');
+    expect(await adminRes.text(), 'the retired path answers the admin the ordinary not-found body').toBe(controlBody);
   });
 
   // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432

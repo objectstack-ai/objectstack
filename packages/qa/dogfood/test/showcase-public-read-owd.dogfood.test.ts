@@ -17,16 +17,18 @@ import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_announcement';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
+const recordOf = (b: any) => b?.record ?? b?.data ?? b;
 
 describe('showcase: public-read OWD (ADR-0056)', () => {
   let stack: VerifyStack;
+  let adminToken: string;
   let aToken: string;
   let bToken: string;
   let aAnnId: string;
 
   beforeAll(async () => {
     stack = await getSharedShowcase();
-    await stack.signIn();
+    adminToken = await stack.signIn();
     aToken = await stack.signUp('pr-alice@verify.test');
     bToken = await stack.signUp('pr-bob@verify.test');
 
@@ -58,5 +60,23 @@ describe('showcase: public-read OWD (ADR-0056)', () => {
     // private note forbids — confirming `read` vs `private` are distinct OWDs.
     const r = await stack.apiAs(bToken, 'GET', `${OBJ}/${aAnnId}`);
     expect(r.status).toBe(200);
+  });
+
+  // ── access-security.owd-sharing-matrix a1 (#26571) ──────────────────────────
+  // The clause wants the foreign write REFUSED (>= 400, not merely not-2xx) and
+  // the row unchanged on an entitled re-read — a 4xx over a mutated row is
+  // still the failure.
+  it('a non-owner PATCH answers >= 400 and the admin re-read shows the row unchanged', async () => {
+    const read = async () => {
+      const r = await stack.apiAs(adminToken, 'GET', `${OBJ}/${aAnnId}`);
+      expect(r.status, 'the admin reads the announcement').toBe(200);
+      return recordOf(await r.json());
+    };
+    const before = await read();
+    const forged = await stack.apiAs(bToken, 'PATCH', `${OBJ}/${aAnnId}`, { body: 'forged by bob' });
+    expect(forged.status, 'the public_read OWD refuses the non-owner write').toBeGreaterThanOrEqual(400);
+    const after = await read();
+    expect(after, 'the refused write changed nothing on the row').toEqual(before);
+    expect(after.body, 'the forged value never landed').not.toBe('forged by bob');
   });
 });

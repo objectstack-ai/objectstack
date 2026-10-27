@@ -1033,6 +1033,14 @@ export const ObjectFormSchema = BaseSchema.extend({
   drawerWidth: z.string().optional().describe('Drawer width as a CSS value; drawer forms only'),
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal dialog size; modal forms only'),
   modalCloseButton: z.boolean().optional().describe('Show the modal header close button; modal forms only'),
+  // objectstack#25923 (work item 4) — two members `ComponentPropsMap['object-form']`
+  // declares and the drawer / modal presentations read (`ModalForm` tests
+  // `schema.contentLayout === 'tabbed'`; `ModalForm` and `DrawerForm` read
+  // `schema.confirmOnDiscard !== false`), which neither face of this package
+  // named. The row's own members BY REFERENCE, so a misspelled `'tabs'` is
+  // refused here as the spec refuses it. The TS twin takes the same members.
+  contentLayout: stripImportedDefaults(SpecObjectFormPropsSchema).shape.contentLayout,
+  confirmOnDiscard: stripImportedDefaults(SpecObjectFormPropsSchema).shape.confirmOnDiscard,
   mobile: z.looseObject({
     stickyActions: z.boolean().optional().describe('Pin Submit/Cancel to the bottom of the viewport on mobile'),
     stepper: z.union([z.boolean(), z.literal('auto')]).optional().describe('One-field-at-a-time stepper on small screens: true, false or auto'),
@@ -3165,6 +3173,14 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
   navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  // objectstack#25923 (work item 4) — two NODE members `ComponentPropsMap['object-calendar']`
+  // declares and `plugin-calendar`'s registration boundary reads off the node
+  // (`resolveAuthoredLocale(rest.locale)`, `resolveExternalLoading(rest.loading)`),
+  // which neither face of this package named. The row's own members BY
+  // REFERENCE. Neither is one of the five calendar field-name keys item 1 moved
+  // into the `calendar` block; the spec authors both on the node itself.
+  locale: stripImportedDefaults(SpecObjectCalendarPropsSchema).shape.locale,
+  loading: stripImportedDefaults(SpecObjectCalendarPropsSchema).shape.loading,
   // objectui#9256 (E3 residual, ruling Q2 A on objectui#8284): the renderer reads NEITHER content
   // channel, so both are refused by name here as on the TypeScript twin, each kept a MEMBER.
   body: retirementTombstone(OBJECT_CALENDAR_NEITHER_CHANNEL),

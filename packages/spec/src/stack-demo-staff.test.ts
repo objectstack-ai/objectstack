@@ -173,6 +173,99 @@ describe('refuse — `defineStack` cross-checks every entry against the stack', 
   });
 });
 
+// ─── MANAGER — an entry names its line manager by address ─────────
+
+describe('manager — an entry names another entry of the same list by its email', () => {
+  const lead = { name: 'Legal Lead', email: 'lead@legal.example', position: 'legal_counsel' };
+
+  it('accepts a manager declared after the entry, compared without regard to case', () => {
+    const stack = defineStack({
+      ...base(),
+      demoStaff: [{ ...counsel(1), manager: 'LEAD@legal.example' }, { ...counsel(2), manager: lead.email }, lead],
+    } as never);
+    expect(stack.demoStaff?.map((entry) => entry.manager)).toEqual(['LEAD@legal.example', lead.email, undefined]);
+  });
+
+  it('accepts a chain several levels deep that reaches someone with no manager', () => {
+    const verdict = refusalOf({
+      ...base(),
+      demoStaff: [
+        { ...counsel(1), manager: counsel(2).email },
+        { ...counsel(2), manager: counsel(3).email },
+        { ...counsel(3), manager: lead.email },
+        lead,
+      ],
+    });
+    expect(verdict).toBeUndefined();
+  });
+
+  it('refuses a manager named by display name, at the entry`s path, saying it takes an address', () => {
+    const verdict = parse({ ...base(), demoStaff: [{ ...counsel(1), manager: 'Legal Lead' }, lead] });
+    expect(issuesOf(verdict).some((i) => i.endsWith('@ demoStaff.0.manager'))).toBe(true);
+    if (verdict.success) return;
+    expect(verdict.error.issues.find((i) => i.path.join('.') === 'demoStaff.0.manager')?.message).toContain(
+      'named by the email of another demoStaff entry',
+    );
+  });
+
+  it('refuses `reportsTo` and `managerEmail` with the canonical key, not a distance guess', () => {
+    for (const key of ['reportsTo', 'managerEmail']) {
+      const verdict = DemoStaffSchema.safeParse({ ...counsel(1), [key]: lead.email });
+      expect(verdict.success, `'${key}' must refuse`).toBe(false);
+      if (verdict.success) continue;
+      expect(verdict.error.issues.map((i) => i.message).join('\n'), key).toContain('manager');
+    }
+  });
+
+  it('refuses a manager that names no entry, with the ADR-0112 envelope', () => {
+    const refused = refusalOf({ ...base(), demoStaff: [{ ...counsel(1), manager: 'nobody@legal.example' }, lead] });
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues?.join('\n')).toContain(
+      "Demo account 'Legal Counsel 1' (stack.demoStaff[0]) names manager 'nobody@legal.example', which is the " +
+        'address of no demoStaff entry.',
+    );
+  });
+
+  it('refuses an entry that names itself — compared without regard to case', () => {
+    const refused = refusalOf({ ...base(), demoStaff: [{ ...counsel(1), manager: 'Counsel1@Legal.example' }] });
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues?.join('\n')).toContain(
+      "Demo account 'Legal Counsel 1' (stack.demoStaff[0]) names itself as its manager",
+    );
+  });
+
+  it('refuses a two-entry loop, once, naming both entries', () => {
+    const refused = refusalOf({
+      ...base(),
+      demoStaff: [{ ...counsel(1), manager: counsel(2).email }, { ...counsel(2), manager: counsel(1).email }],
+    });
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.status).toBe(422);
+    const loops = (refused?.issues ?? []).filter((i) => i.includes('form a loop'));
+    expect(loops).toHaveLength(1);
+    expect(loops[0]).toContain("'Legal Counsel 1' → 'Legal Counsel 2' → 'Legal Counsel 1'");
+    expect(loops[0]).toContain('stack.demoStaff[0] and stack.demoStaff[1]');
+  });
+
+  it('refuses a loop that an entry outside it hangs from, naming only the loop', () => {
+    const refused = refusalOf({
+      ...base(),
+      demoStaff: [
+        { ...counsel(1), manager: counsel(2).email },
+        { ...counsel(2), manager: counsel(3).email },
+        { ...counsel(3), manager: lead.email },
+        { ...lead, manager: counsel(2).email },
+      ],
+    });
+    const loops = (refused?.issues ?? []).filter((i) => i.includes('form a loop'));
+    expect(loops).toHaveLength(1);
+    expect(loops[0]).toContain("'Legal Counsel 2' → 'Legal Counsel 3' → 'Legal Lead' → 'Legal Counsel 2'");
+    expect(loops[0]).not.toContain('stack.demoStaff[0]');
+  });
+});
+
 // ─── DARK CONTROL ───────────────────────────────────────────────────
 
 describe('control — one key was declared, the door did not open', () => {

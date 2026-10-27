@@ -53,6 +53,7 @@ import {
   type ServerActionHandler,
   type ServerActionRecordIdResolver,
 } from '@object-ui/core';
+import { takesNewTabUrlFastPath } from './newTabUrlFastPath.js';
 
 /**
  * i18next-style translate function: `t(key, englishDefault)` returns the
@@ -185,8 +186,8 @@ export function createConsoleServerActionHandler(opts: ConsoleServerActionOption
     // until the (possibly slow) endpoint commits its redirect. Record-id
     // resolution runs BEFORE the pre-open so a blocked resolution
     // (multi-select, empty selection) never flashes a tab.
-    const newTabUrl = typeof action.newTabUrl === 'string' ? action.newTabUrl : '';
-    if (action.opensInNewTab && newTabUrl) {
+    if (takesNewTabUrlFastPath(action)) {
+      const newTabUrl = action.newTabUrl;
       // Both refusals below are shown in the session's language
       // (objectui#13397): the resolver's through the pack key it names
       // (objectui#13384), this wrapper's own through `console.serverAction.*`.

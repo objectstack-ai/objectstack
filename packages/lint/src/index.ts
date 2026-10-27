@@ -315,6 +315,13 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
 
 export {
+  validateAssignmentRules,
+  ASSIGNMENT_RULE_USER_TARGET,
+  ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
+} from './validate-assignment-rules.js';
+export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
+
+export {
   validateSeedReplaySafety,
   SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
 } from './validate-seed-replay-safety.js';
@@ -525,11 +532,14 @@ export type {
 // name with the tombstone's prescription (`os lint` never parses).
 // [#25786] Its SIXTH: a grouping level's `orderBy` naming a field the group
 // header query cannot order by (`min` / `max` refused for its type).
+// [#26719] Its SEVENTH: a list view whose `chart` binds a dataset declared
+// over another object than the one the list view lists.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
@@ -645,6 +655,18 @@ export {
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
+
+// [#26548] A report's `dateRange` resolved against its dataset: the one
+// `type: 'date'` dimension the period applies to. Beside the chart rule
+// because it resolves the same report against the same `stack.datasets`.
+export {
+  validateReportDateRange,
+  REPORT_DATE_RANGE_DIMENSION_UNKNOWN,
+  REPORT_DATE_RANGE_DIMENSION_NOT_DATE,
+  REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS,
+  REPORT_DATE_RANGE_DIMENSION_NONE,
+} from './validate-report-date-range.js';
+export type { ReportDateRangeFinding } from './validate-report-date-range.js';
 
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
@@ -981,6 +1003,15 @@ export {
   EMAIL_TEMPLATE_HOLE_PLACEMENT,
 } from './validate-email-template-hole-placements.js';
 export type { EmailTemplateHolePlacementFinding } from './validate-email-template-hole-placements.js';
+
+// Every hole of an email template is within the mail hole grammar
+// (`@objectstack/formula`'s `judgeMailHoleGrammar`). The rule id is published
+// for `--json` consumers (`rule-id-barrel-exports.test.ts`).
+export {
+  validateEmailTemplateHoleGrammar,
+  EMAIL_TEMPLATE_HOLE_GRAMMAR,
+} from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

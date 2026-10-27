@@ -168,7 +168,12 @@ export const SysSecret = ObjectSchema.create({
   ],
 
   enable: {
-    trackHistory: false, // rotation events are recorded by sys_setting_audit
+    // Settings rotation events are recorded by sys_setting_audit. `trackHistory`
+    // governs field-change summaries only: the compliance ledger's CRUD mirror
+    // still records each create / update / delete of a row here — which row,
+    // its producer-scoped label, key id, algorithm and version — and keeps no
+    // copy of the key material (plugin-audit `key-material-copy.ts`).
+    trackHistory: false,
     // [ADR-0103] Engine-owned: secrets are minted/rotated only by the settings /
     // secret service (SYSTEM_CTX), never via the generic data API. Locked to
     // reads (ciphertext only; decryption is a separate privileged path). Since

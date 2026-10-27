@@ -78,6 +78,12 @@ const BODIES: Record<string, Record<string, unknown>> = {
         condition: "record.status == 'open'", accessLevel: 'read',
         sharedWith: { type: 'position', value: 'probe_position' },
     },
+    // [ADR-0142 D1/D5] The ownership queue and the assignment rule routing into it.
+    queue: { name: NAME, label: 'Probe', members: [{ type: 'position', value: 'probe_position' }] },
+    assignment_rule: {
+        name: NAME, label: 'Probe', object: 'probe_object',
+        entries: [{ name: 'all', assignTo: { type: 'queue', value: 'probe_queue' } }],
+    },
 };
 
 /** The overlayable control: `allowEnvironmentOverlay: true`, declared through a stack collection. */

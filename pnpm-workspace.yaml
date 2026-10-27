@@ -709,9 +709,10 @@ overrides:
   #     21.0.4, one major above what objectui locked. Kept on purpose: 20.x has
   #     no fix, and no red class of the verification runs (objectstack#25718)
   #     traces to happy-dom. It is the one override that still moves an
-  #     objectui dependency (scripts/ui-import/README.md step 6, measured on
-  #     objectui main 3b7b04007f); the react-router floor above is scoped to
-  #     8.x so objectui's 7.x line stays its own.
+  #     objectui dependency (measured on objectui main 3b7b04007f by step 6 of
+  #     the import recipe, scripts/ui-import/README.md, which retired with its
+  #     splice tool in #25753; read it at 1c632311); the react-router floor
+  #     above is scoped to 8.x so objectui's 7.x line stays its own.
   #   NOT cleared: @azure/msal-node GHSA-xcx6-jx8p-x3h5 (high) — 5.4.1 from
   #     @azure/identity 4.13.1 (^5.1.0) under tedious 18.6.2, driver-sql's
   #     optional mssql peer. The fix is only in msal-node 7.1.0 and no

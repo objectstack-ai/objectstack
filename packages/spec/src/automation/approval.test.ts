@@ -53,26 +53,27 @@ describe('ApproverType', () => {
   // Cross-repo contract: the published node configSchema must carry
   // `xEnumDeprecated` on the approver type, or the Studio designer (objectui)
   // derives its dropdown straight from `enum` and keeps offering `role` — the
-  // exact trap ADR-0090 D3 retires — and `queue`, which the runtime never
-  // resolves (#3508). Renderers read this to omit these members from pickers
-  // while still rendering a stored value.
-  it('publishes xEnumDeprecated on the approver type so pickers drop `role` and `queue`', () => {
+  // exact trap ADR-0090 D3 retires. Renderers read this to omit these members
+  // from pickers while still rendering a stored value.
+  it('publishes xEnumDeprecated on the approver type so pickers drop `role`', () => {
     const schema = getApprovalNodeConfigJsonSchema() as any;
     const typeNode = schema?.properties?.approvers?.items?.properties?.type;
     expect(typeNode?.enum).toContain('role');            // still parses (back-compat)
-    expect(typeNode?.enum).toContain('queue');           // still parses (stored rows render)
+    expect(typeNode?.enum).toContain('queue');
     expect(typeNode?.enum).toContain('org_membership_level');
     expect(typeNode?.xEnumDeprecated).toEqual([...NON_AUTHORABLE_APPROVER_TYPES]);
     expect(typeNode?.xEnumDeprecated).toContain('role');
-    expect(typeNode?.xEnumDeprecated).toContain('queue');
+    // ADR-0142 D6: the queue approver resolves to the queue's members, so the
+    // picker offers it again.
+    expect(typeNode?.xEnumDeprecated).not.toContain('queue');
   });
 
-  // #3508: queue is declared-but-unenforced. It stays parseable (stored flows
-  // keep loading) but is not authorable, and every deprecated spelling is
-  // non-authorable too.
-  it('marks queue non-authorable while keeping it parseable', () => {
+  // Every deprecated spelling is non-authorable; `queue` is authorable again
+  // since the runtime resolves it (ADR-0142 D6, closing #3508's
+  // declared-but-unenforced gap).
+  it('keeps every deprecated spelling non-authorable and re-admits queue', () => {
     expect(() => ApproverType.parse('queue')).not.toThrow();
-    expect(NON_AUTHORABLE_APPROVER_TYPES).toContain('queue');
+    expect(NON_AUTHORABLE_APPROVER_TYPES).not.toContain('queue');
     for (const spelling of Object.keys(DEPRECATED_APPROVER_TYPES)) {
       expect(NON_AUTHORABLE_APPROVER_TYPES).toContain(spelling);
     }
@@ -175,14 +176,17 @@ describe('APPROVER_VALUE_BINDINGS — an approver value is picked from the recor
     expect(APPROVER_VALUE_BINDINGS.role).toEqual(APPROVER_VALUE_BINDINGS.org_membership_level);
     expect(APPROVER_VALUE_BINDINGS.manager.source).toBe('auto');
     expect(APPROVER_VALUE_BINDINGS.field.source).toBe('trigger-field');
-    expect(APPROVER_VALUE_BINDINGS.queue.source).toBe('unsupported');
+    // ADR-0142 D6: a queue is named by its machine name, declared or authored.
+    expect(APPROVER_VALUE_BINDINGS.queue).toEqual({
+      source: 'registry-and-record', type: 'queue', object: 'sys_queue', valueField: 'name',
+    });
   });
 
   it('publishes a manager mapping in the value xRef so designers can render auto-resolution', () => {
     const schema = getApprovalNodeConfigJsonSchema() as any;
     const valueNode = schema?.properties?.approvers?.items?.properties?.value;
     expect(valueNode?.xRef?.map?.manager).toBe('manager');
-    // queue stays mapped so stored rows keep rendering during the window.
+    // queue maps to the queue picker (declared queues and `sys_queue` rows).
     expect(valueNode?.xRef?.map?.queue).toBe('queue');
   });
 });
@@ -194,8 +198,9 @@ describe('APPROVER_VALUE_SOURCES — where each picker finds its candidates, pub
   it('covers every ApproverType member, exactly like the bindings it projects', () => {
     for (const t of ApproverType.options) {
       expect(APPROVER_VALUE_SOURCES[t], `no source published for '${t}'`).toBeDefined();
+      const bound = APPROVER_VALUE_BINDINGS[t].source;
       expect(APPROVER_VALUE_SOURCES[t].source).toBe(
-        APPROVER_VALUE_BINDINGS[t].source === 'record' ? 'data' : APPROVER_VALUE_BINDINGS[t].source,
+        bound === 'record' ? 'data' : bound === 'registry-and-record' ? 'registry-and-data' : bound,
       );
     }
   });
@@ -225,7 +230,10 @@ describe('APPROVER_VALUE_SOURCES — where each picker finds its candidates, pub
     expect(APPROVER_VALUE_SOURCES.manager).toEqual({ source: 'auto' });
     expect(APPROVER_VALUE_SOURCES.field).toEqual({ source: 'trigger-field' });
     expect(APPROVER_VALUE_SOURCES.expression).toEqual({ source: 'expression' });
-    expect(APPROVER_VALUE_SOURCES.queue).toEqual({ source: 'unsupported' });
+    // ADR-0142 D6: both sources, one committed name.
+    expect(APPROVER_VALUE_SOURCES.queue).toEqual({
+      source: 'registry-and-data', type: 'queue', object: 'sys_queue', valueField: 'name',
+    });
   });
 
   it('ships on the published JSON schema, where the designer reads it', () => {
@@ -265,13 +273,12 @@ describe('ApproverType declaration order is the authoring recommendation', () =>
 
   it('leads with indirect bindings and puts the literal `user` last', () => {
     expect(authorable).toEqual([
-      'manager', 'position', 'department', 'team', 'field', 'expression', 'org_membership_level', 'user',
+      'manager', 'position', 'department', 'team', 'queue', 'field', 'expression', 'org_membership_level', 'user',
     ]);
   });
 
   it('never offers a non-authorable spelling, wherever it sits in the enum', () => {
     expect(authorable).not.toContain('role');
-    expect(authorable).not.toContain('queue');
   });
 });
 

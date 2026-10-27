@@ -621,6 +621,60 @@ const containsAttachmentsNode = (nodes: any): boolean => {
   return false;
 };
 
+/**
+ * The count channel a `page:tabs` panel opens to the list blocks inside it
+ * (objectstack#26613). A `list-view` block reports the number of records its
+ * own query matched, and the tab's badge says the sum: the badge answers the
+ * question the rows answer, read off the same query, so the two cannot
+ * disagree the way a second, hand-built count query could.
+ *
+ * `report(token, null)` withdraws a block's number (it unmounted).
+ */
+interface PageTabPanelCounts {
+  report(token: object, count: number | null): void;
+}
+
+const PageTabPanelCountContext = React.createContext<PageTabPanelCounts | null>(null);
+
+/**
+ * For a block inside a `page:tabs` panel: the function it calls with its
+ * record count, which the tab's badge then shows. `undefined` outside a panel.
+ * The block's number is withdrawn when it unmounts. Exported for the
+ * `list-view` block in `@object-ui/plugin-list`.
+ */
+export function usePageTabCountReporter(): ((count: number) => void) | undefined {
+  const panel = React.useContext(PageTabPanelCountContext);
+  // One identity per mounted block: a `useState` initializer, which React runs
+  // once, not a memo whose identity it may discard (AGENTS.md #10).
+  const [token] = React.useState(() => ({}));
+  React.useEffect(() => {
+    if (!panel) return undefined;
+    return () => panel.report(token, null);
+  }, [panel, token]);
+  if (!panel) return undefined;
+  return (count: number) => panel.report(token, count);
+}
+
+/**
+ * Whether a tab's subtree holds a `list-view` block, the block that reports its
+ * count through {@link PageTabPanelCountContext}. Walks the same slots
+ * `collectRelatedLists` walks.
+ */
+const containsListViewNode = (nodes: any): boolean => {
+  if (!nodes) return false;
+  const list = Array.isArray(nodes) ? nodes : [nodes];
+  for (const n of list) {
+    if (!n || typeof n !== 'object') continue;
+    if (n.type === 'list-view') return true;
+    // `body` stays — same ground as `collectRelatedLists` above.
+    const candidates = [n.children, n.properties?.children, n.properties?.items, n.body, n.items];
+    for (const c of candidates) {
+      if (c && containsListViewNode(c)) return true;
+    }
+  }
+  return false;
+};
+
 const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const { designer } = splitDesignerProps(props);
   // The block's `aria` bag, on the `Tabs` root (see "The `aria` bag of the four
@@ -958,12 +1012,50 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ds, probeKey, parentId, countsVersion]);
 
+  // objectstack#26613 — the counts the `list-view` blocks in each tab report
+  // through their panel's channel, keyed by the tab's value and then by block.
+  // A tab that holds one is mounted while inactive (hidden), so its list runs
+  // its query and the badge has a number before the tab is opened.
+  const [listCounts, setListCounts] = React.useState<ReadonlyMap<string, ReadonlyMap<object, number>>>(
+    () => new Map(),
+  );
+  // One channel object per tab value for the life of the strip, held in state
+  // rather than a memo so its identity is the panel's, not React's to discard.
+  const [panels] = React.useState(() => new Map<string, PageTabPanelCounts>());
+  const panelFor = (value: string): PageTabPanelCounts => {
+    let panel = panels.get(value);
+    if (!panel) {
+      panel = {
+        report: (token, count) =>
+          setListCounts((prev) => {
+            const tab = prev.get(value);
+            if (count === null ? !tab?.has(token) : tab?.get(token) === count) return prev;
+            const nextTab = new Map(tab);
+            if (count === null) nextTab.delete(token);
+            else nextTab.set(token, count);
+            const next = new Map(prev);
+            next.set(value, nextTab);
+            return next;
+          }),
+      };
+      panels.set(value, panel);
+    }
+    return panel;
+  };
+  const reportedListCount = (value: string): number | undefined => {
+    const tab = listCounts.get(value);
+    if (!tab || tab.size === 0) return undefined;
+    let sum = 0;
+    for (const n of tab.values()) sum += n;
+    return sum;
+  };
+
   // Compute the displayed count by reading the store for every probe target.
   // useRelatedCountVersion above subscribed us to changes, so any store update —
   // whether from this effect or from an external invalidate — re-renders.
-  const computeCount = (idx: number): number | undefined => {
-    const probes = probeTargets.get(idx);
-    if (!probes || probes.length === 0) return undefined;
+  // objectstack#26613 — plus what the tab's list blocks reported.
+  const computeCount = (idx: number, value: string): number | undefined => {
+    const probes = probeTargets.get(idx) ?? [];
     let sum = 0;
     let seenAny = false;
     for (const p of probes) {
@@ -973,6 +1065,11 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         seenAny = true;
       }
     }
+    const listed = reportedListCount(value);
+    if (listed !== undefined) {
+      sum += listed;
+      seenAny = true;
+    }
     return seenAny ? sum : undefined;
   };
 
@@ -981,17 +1078,24 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // to the index-derived value for authored schemas that don't declare one.
   // Stable values are what make the active tab URL-addressable: an index
   // value would silently point at a different tab when the item list changes.
-  const itemsWithValue = items.map((it, idx) => ({
-    ...it,
-    value: typeof (it as any).value === 'string' && (it as any).value !== '' ? (it as any).value : `tab-${idx}`,
-    // pickLocalized first (honours `{ en, zh }` / `{ default }`); translateLabel
-    // then maps any plain-English well-known token (Details/Related/…) to the locale.
-    labelStr: translateLabel(pickLocalized(it.label, language), language, ttLabel),
-    // Explicit spec count wins; otherwise fall back to the derived probe.
-    count: it.count !== undefined && it.count !== null && it.count !== ''
-      ? it.count
-      : computeCount(idx),
-  }));
+  const itemsWithValue = items.map((it, idx) => {
+    const value: string =
+      typeof (it as any).value === 'string' && (it as any).value !== '' ? (it as any).value : `tab-${idx}`;
+    const authoredCount = it.count !== undefined && it.count !== null && it.count !== '';
+    return {
+      ...it,
+      value,
+      // pickLocalized first (honours `{ en, zh }` / `{ default }`); translateLabel
+      // then maps any plain-English well-known token (Details/Related/…) to the locale.
+      labelStr: translateLabel(pickLocalized(it.label, language), language, ttLabel),
+      // Explicit spec count wins; otherwise fall back to the derived probe.
+      count: authoredCount ? it.count : computeCount(idx, value),
+      // objectstack#26613 — a tab whose badge its list blocks answer is
+      // mounted while inactive, so they run their queries; an authored count
+      // needs none of that, and leaves the tab mounted on open only.
+      reportsListCount: !authoredCount && containsListViewNode((it as any).children),
+    };
+  });
 
   // Host-provided initial tab (e.g. app-shell restoring `?tab=` — the active
   // tab is state that must SURVIVE this component remounting, so it cannot
@@ -1113,12 +1217,18 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         <TabsContent
           key={item.value}
           value={item.value}
+          {...(item.reportsListCount ? { forceMount: true as const } : {})}
           className={cn(
             itemsWithValue.length > 1 ? 'mt-3' : 'mt-0',
             isVertical && 'mt-0 flex-1',
+            // A force-mounted panel stays in the tree while inactive; hidden,
+            // it is out of the layout and out of the accessibility tree.
+            item.reportsListCount && 'data-[state=inactive]:hidden',
           )}
         >
-          {renderChildren(item.children)}
+          <PageTabPanelCountContext.Provider value={panelFor(item.value)}>
+            {renderChildren(item.children)}
+          </PageTabPanelCountContext.Provider>
         </TabsContent>
       ))}
     </Tabs>
@@ -2256,14 +2366,18 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // it: that verdict is a fact about the record, read off the action spec.
     // The inline-edit lock above is the host's own state, and the host's Edit /
     // Delete carry a boolean the host computed (see `authoredKeys` in the plan
-    // memo), so neither says "not available for this record". The reason is
-    // the generic one; an author-written reason beside the predicate would be a
-    // spec key, which is objectstack's to declare.
+    // memo), so neither says "not available for this record". The text is the
+    // action's declared `disabledReason` (objectstack#26619), already resolved
+    // against the bundle by `localizeActionTexts` in the `headerActions` memo,
+    // and the generic reason when it declares none.
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
       if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
-      return tt('actions.notAvailableForRecord', 'Not available for this record');
+      const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
+      return declared.trim() !== ''
+        ? declared
+        : tt('actions.notAvailableForRecord', 'Not available for this record');
     };
     const renderButton = (action: any, idx: number) => {
       const label = resolveLabel(action);

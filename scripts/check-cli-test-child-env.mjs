@@ -2635,13 +2635,19 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the seventeen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the eighteen files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
         // packages the way `dev-standalone-self-heal` measures its `os dev`
         // boots. Its spawn hands the child `NODE_ENV: undefined`.
         'packages/cli/test/dev-connector-env-parity.integration.test.ts',
+        // [#26615] Joined the population deliberately, beside
+        // `dev-standalone-self-heal`: its subject is a plain `os dev` whose
+        // refused boot runs the organization-ownership ceremony through the
+        // SAME entry (`process.argv[1]`), measured on the BUILT packages. Its
+        // spawn hands the child `NODE_ENV: undefined`.
+        'packages/cli/test/dev-organization-ownership-stale-column.integration.test.ts',
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
         // (`os serve` with `NODE_ENV` unset must NOT auto-migrate) is only

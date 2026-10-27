@@ -883,6 +883,13 @@ const ar = {
     addRecord: "إضافة سجل",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "عرض الكل",
+    viewAllCount: "عرض كل السجلات: {{count}}",
+    viewAllCount_zero: "عرض {{count}} سجل",
+    viewAllCount_one: "عرض {{count}} سجل",
+    viewAllCount_two: "عرض السجلين ({{count}})",
+    viewAllCount_few: "عرض {{count}} سجلات",
+    viewAllCount_many: "عرض {{count}} سجلًا",
+    viewAllCount_other: "عرض {{count}} سجل",
     tabs: "علامات التبويب",
     allRecords: "جميع السجلات",
     userFilters: {
@@ -3098,6 +3105,7 @@ const ar = {
     build: {
       title: "إنشاء تطبيق",
       noCapability: "إنشاء التطبيقات غير متاح في هذا النظام — فهو يتطلب إذن «إدارة البيانات الوصفية» الذي لا يملكه حسابك.",
+      inStudio: "إنشاء جديد في Studio",
     },
     template: {
       title: "ابدأ من قالب",
@@ -3331,6 +3339,8 @@ const ar = {
     recordAccessDeniedDescription: "ليس لديك إذن لعرض السجلات من هذا النوع. تواصل مع المسؤول إذا كنت تعتقد أنه يجب أن يكون لديك وصول.",
     recordLoadFailed: "تعذّر تحميل هذا السجل",
     recordLoadFailedDescription: "حدث خطأ أثناء التحميل. تحقق من اتصالك وحاول مرة أخرى.",
+    recordAccessEnded: "تم تسجيل القرار",
+    recordAccessEndedDescription: "اكتملت خطوة الموافقة الخاصة بك، لذا انتهى وصولك إلى هذا السجل.",
   },
   actionDialog: {
     title: "معامِلات الإجراء",

@@ -786,6 +786,9 @@ const ja = {
     addRecord: "レコードを追加",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "すべて表示",
+    viewAllCount: "すべて表示（{{count}} 件）",
+    viewAllCount_one: "すべて表示（{{count}} 件）",
+    viewAllCount_other: "すべて表示（{{count}} 件）",
     tabs: "タブ",
     allRecords: "すべてのレコード",
     userFilters: {
@@ -2890,6 +2893,7 @@ const ja = {
     build: {
       title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
+      inStudio: "Studio で新規作成",
     },
     template: {
       title: "テンプレートから始める",
@@ -3104,6 +3108,8 @@ const ja = {
     recordAccessDeniedDescription: "この種類のレコードを表示する権限がありません。必要な場合は管理者にお問い合わせください。",
     recordLoadFailed: "このレコードを読み込めませんでした",
     recordLoadFailedDescription: "読み込み中に問題が発生しました。接続を確認して再試行してください。",
+    recordAccessEnded: "判断を記録しました",
+    recordAccessEndedDescription: "承認ステップが完了したため、このレコードへのアクセス権は終了しました。",
   },
   actionDialog: {
     title: "アクションパラメーター",

@@ -66,6 +66,7 @@ Translation data for a single field
 | **help** | `string` | optional | Translated help text |
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
+| **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
 
 
 ---
@@ -90,7 +91,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -107,6 +108,7 @@ Translation data for a single field
 | **help** | `string` | optional | Translated help text |
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
+| **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
 
 ### Nested Shape: `ObjectTranslationData._views[string]`
 
@@ -126,6 +128,7 @@ Translation data for a single field
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -177,11 +180,12 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -195,7 +199,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -225,6 +229,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -254,6 +259,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `PlatformTranslationData.pages[string]`
 
@@ -289,6 +295,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `PlatformTranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
@@ -334,11 +348,12 @@ Served translation data — the platform groups the browser reads, without the s
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -351,7 +366,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -381,6 +396,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -410,6 +426,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `ServedTranslationData.pages[string]`
 
@@ -445,6 +462,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `ServedTranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `ServedTranslationData.settingsCommon`
 
@@ -552,11 +577,12 @@ Per-app translation data for objects, apps, and UI messages
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -569,7 +595,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -599,6 +625,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -628,6 +655,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `TranslationData.pages[string]`
 
@@ -663,6 +691,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `TranslationData.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
@@ -729,15 +765,16 @@ One locale of translations — the `translation` metadata type
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
-| **reports** | `Record<string, { label?: string; description?: string }>` | optional | Report translations keyed by report name |
+| **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
+| **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
-| **name** | `string` | optional | Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent |
+| **name** | `string` | optional | Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale` |
 | **label** | `string` | optional | Human-readable label shown in metadata lists |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -756,7 +793,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated singular label |
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
-| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
+| **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
 | **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
@@ -786,6 +823,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated action description — the explanatory line under the title in the action's param dialog |
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
+| **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -815,6 +853,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated report label — overlays the report's own `label` |
 | **description** | `string` | optional | Translated report description — overlays the report's own `description` |
+| **blocks** | `Record<string, { label?: string; description?: string }>` | optional | Joined report block translations keyed by block name |
 
 ### Nested Shape: `TranslationItem.pages[string]`
 
@@ -850,6 +889,14 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated permission-set label — overlays the set's own `label` |
 | **description** | `string` | optional | Translated permission-set description — overlays the set's own `description` |
+
+### Nested Shape: `TranslationItem.books[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated book title — overlays the book's own `label` |
+| **description** | `string` | optional | Translated book description — overlays the book's own `description` |
+| **groups** | `Record<string, { label: string }>` | optional | Group (section) translations keyed by the group `key` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

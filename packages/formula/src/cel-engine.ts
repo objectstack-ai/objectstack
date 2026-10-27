@@ -82,7 +82,8 @@ export function buildEnv(
 /**
  * The one constructor behind {@link buildEnv} and the shared evaluation
  * environment: the same options and the same registrations, with the stdlib
- * reading its `now`, timezone and permission binding through `read`.
+ * reading its `now`, timezone, permission binding and option labels through
+ * `read`.
  */
 function buildEnvReading(read: () => StdLibBinding): Environment {
   const env = new Environment(CEL_ENV_OPTIONS);
@@ -121,8 +122,8 @@ let activeBinding: StdLibBinding = UNBOUND;
  * state: each evaluation gets its own `RootContext`, the parser resets its
  * input and limit counters at the start of every parse, and what the registry
  * caches (type declarations, overload resolution) is keyed on types, never on
- * values. What did vary per evaluation, the stdlib's `now`, timezone and
- * permission binding, is read from {@link activeBinding}.
+ * values. What did vary per evaluation, the stdlib's `now`, timezone,
+ * permission binding and option labels, is read from {@link activeBinding}.
  */
 let evaluationEnv: Environment | undefined;
 
@@ -2046,6 +2047,7 @@ export const celEngine: DialectEngine = {
           permissions: ctx.permissions,
           systemPermissions: ctx.systemPermissions,
         },
+        optionLabels: ctx.optionLabels,
       };
       try {
         // #3183 — coerce a date-field operand compared with `==`/`!=` against a

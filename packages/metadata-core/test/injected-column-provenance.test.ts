@@ -20,6 +20,7 @@ import {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  QUEUE_FIELD_DEF,
   injectedSystemColumnDefs,
   platformProvisionsStorage,
   resolveInjectedColumnProvenance,
@@ -36,6 +37,9 @@ const SEVEN_ANCHORS = [
   'owner_id',
   'owning_business_unit_id',
 ] as const;
+
+/** Every injected anchor today: the measured seven plus the ownership `queue` (ADR-0142 D3). */
+const INJECTED_ANCHORS = [...SEVEN_ANCHORS, 'queue'] as const;
 
 const remoteFields = () => ({
   name: { type: 'text', label: 'Name' },
@@ -63,6 +67,7 @@ const withInjectedAnchors = (def: Record<string, unknown>) => ({
     ...AUDIT_FIELD_DEFS,
     owner_id: { ...OWNER_FIELD_DEF },
     owning_business_unit_id: { ...OWNING_BUSINESS_UNIT_FIELD_DEF },
+    queue: { ...QUEUE_FIELD_DEF },
     ...(def.fields as Record<string, unknown>),
   },
 });
@@ -194,12 +199,12 @@ describe('[#7865] resolveInjectedColumnProvenance — the marker', () => {
       [
         "ownership: 'org'",
         { ...external(), ownership: 'org' },
-        ['owner_id', 'owning_business_unit_id'],
+        ['owner_id', 'owning_business_unit_id', 'queue'],
       ],
       [
         "ownership: 'business_unit'",
         { ...external(), ownership: 'business_unit' },
-        ['owner_id'],
+        ['owner_id', 'queue'],
       ],
     ];
     for (const [label, def, withheld] of cases) {
@@ -221,10 +226,10 @@ describe('[#7865] resolveInjectedColumnProvenance — the marker', () => {
 });
 
 describe('[#7865] unprovisionedInjectedColumns — the enumerable marker', () => {
-  it('lists exactly the seven measured anchors for the showcase-shaped federated object', () => {
-    expect(unprovisionedInjectedColumns(external()).sort()).toEqual([...SEVEN_ANCHORS].sort());
+  it('lists exactly the injected anchors (the seven measured plus `queue`) for the showcase-shaped federated object', () => {
+    expect(unprovisionedInjectedColumns(external()).sort()).toEqual([...INJECTED_ANCHORS].sort());
     expect(unprovisionedInjectedColumns(withInjectedAnchors(external())).sort()).toEqual(
-      [...SEVEN_ANCHORS].sort(),
+      [...INJECTED_ANCHORS].sort(),
     );
   });
 
@@ -251,6 +256,7 @@ describe('[#7865] the fence: the marker lives in the API, never in the data', ()
       ['TENANT_SCOPE_FIELD_DEF', TENANT_SCOPE_FIELD_DEF],
       ['OWNER_FIELD_DEF', OWNER_FIELD_DEF],
       ['OWNING_BUSINESS_UNIT_FIELD_DEF', OWNING_BUSINESS_UNIT_FIELD_DEF],
+      ['QUEUE_FIELD_DEF', QUEUE_FIELD_DEF],
       ...Object.entries(AUDIT_FIELD_DEFS).map(
         ([k, v]) => [`AUDIT_FIELD_DEFS.${k}`, v] as [string, Readonly<Record<string, unknown>>],
       ),

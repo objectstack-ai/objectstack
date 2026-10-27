@@ -1,0 +1,77 @@
+---
+title: Queue schema — Security Protocol reference
+navTitle: Queue
+description: "Queue schemas of the ObjectStack Security Protocol: DeclaredQueueMember, Queue, QueueMemberType — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/security/queue.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { DeclaredQueueMemberSchema, QueueSchema, QueueMemberType } from '@objectstack/spec/security';
+import type { DeclaredQueueMember, Queue, QueueMemberType } from '@objectstack/spec/security';
+
+// Validate data
+const result = DeclaredQueueMemberSchema.parse(data);
+```
+
+---
+
+## DeclaredQueueMember
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'position'` | ✅ | The member kind. A declared queue names positions only ('position'). |
+| **value** | `string` | ✅ | The position machine name whose holders are members of the queue |
+
+
+---
+
+## Queue
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Queue machine name (lowercase snake_case); the one name the `queue` column, an assignment rule, an approver and a sharing recipient reference it by |
+| **label** | `string` | ✅ | Display label (e.g. Support Intake) |
+| **description** | `string` | optional | Administrative notes |
+| **members** | `{ type: 'position'; value: string }[]` | optional (default: `[]`) | The positions whose holders are members, resolved in the organization a record or request belongs to. An empty list is a queue nobody staffs yet: records still sit in it. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `Queue.members[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'position'` | ✅ | The member kind. A declared queue names positions only ('position'). |
+| **value** | `string` | ✅ | The position machine name whose holders are members of the queue |
+
+
+---
+
+## QueueMemberType
+
+### Allowed Values
+
+* `user`
+* `team`
+* `position`
+* `unit_and_subordinates`
+* `business_unit`
+
+
+---
+

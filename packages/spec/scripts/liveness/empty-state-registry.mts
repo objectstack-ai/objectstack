@@ -150,6 +150,13 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
       '[ADR-0085] Absence permits stage heuristics to infer the lifecycle field; `false` suppresses them. It selects how the renderer guesses, not who may read anything.',
   },
   {
+    file: 'packages/spec/src/ui/report.zod.ts',
+    property: 'dateRange',
+    semantics: 'scope',
+    rationale:
+      'A report with no `dateRange` applies no date window, so its table shows every period, exactly as before the key existed. It selects which aggregated rows the table shows, not who may read them: the dataset query still runs under the base object\'s permissions and row-level security, so a missing window widens the period, never the access.',
+  },
+  {
     file: 'packages/spec/src/ui/page.zod.ts',
     property: 'columns',
     semantics: 'scope',
@@ -177,6 +184,14 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     rationale:
       'Which rows of a `mirror-deletion` (ADR-0131 D10 fate 2) table are copies of code, as the platform inventory\'s own `mirror` reads: absent = every row. It selects work for the ceremony\'s mirror step, not access, and the fate itself is the declaration that the rows are re-derivable. The step deletes nothing before the verified id-to-name rewrite, and it always keeps every row a named category claims and, on a table that records provenance, every row no seeder wrote.',
     evidence: 'packages/cli/src/utils/organization-ownership-apply.ts (deletableWhere — the mirror selector minus every claimed row)',
+  },
+  {
+    file: 'packages/spec/src/automation/assignment-rule.zod.ts',
+    property: 'criteria',
+    semantics: 'scope',
+    rationale:
+      "[ADR-0142 D5] Which inserted rows an assignment rule entry routes; absent = every row, the catch-all entry at the end of an ordered list (the first entry that matches decides). It selects work to route and grants nothing by itself: the author names the target explicitly, assignment runs only for a row that reaches the engine with no owner and no queue, and a parked row is readable only by members of the queue the author named. The failure direction of a missing criteria is mis-routing among the author's own targets, never a widened grant.",
+    evidence: 'packages/objectql/src/assignment-rules.ts (the first matching entry of the first matching rule decides; only rows with no owner and no queue are routed)',
   },
   {
     file: 'packages/spec/src/automation/flow.zod.ts',

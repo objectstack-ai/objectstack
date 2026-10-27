@@ -162,6 +162,16 @@
  * this stack declares is an orphan, `translation-target-unknown` (`error`).
  * Leaf keys below the name are the schema's (`label` / `description`, strict).
  *
+ * ── Doc books ────────────────────────────────────────────────────────────
+ *
+ * `books.<name>` resolves against `Book.name`, the name `translateBook` looks
+ * a served book up by, and `books.<name>.groups.<key>` against that book's
+ * group `key`s (#26690). A book no package declares, or a group key the book
+ * does not declare, is an orphan, `translation-target-unknown` (`error`). The
+ * implicit per-package book (`deriveImplicitPackageBook`: named by the package
+ * id, one group keyed `all`) is what the tree serves where a package authors
+ * no book of that name, so its keys resolve too.
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -207,7 +217,7 @@
  * is a key whose `COMPOSE_KEY_DISPOSITIONS` disposition puts it inside an
  * ADR-0130 D4 entry's assembled body: `objects` (#19064) plus `views`,
  * `pages`, `actions`, `apps`, `dashboards` and `flows` (#19349),
- * `positions` and `permissions`, and `reports`.
+ * `positions` and `permissions`, `reports`, and `books`.
  *
  * ⚠️ `apps` reads BOTH that carrier and `navigationContributions`, and they
  * answer different questions — what a sibling DECLARES, and what this package
@@ -228,6 +238,7 @@ import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spe
 import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
+  deriveImplicitPackageBook,
   PAGE_TABS_COMPONENT_TYPE,
   hasPlatformObjectPrefix,
   isPlatformProvidedObjectName,
@@ -268,6 +279,11 @@ const END_NODE_TYPE = 'end';
  */
 const PAGE_ACCORDION_COMPONENT_TYPE = 'page:accordion';
 const REFUSED_OUTCOME = 'refused';
+/**
+ * The one group key of the implicit per-package book, read off the spec's own
+ * synthesis so the two cannot drift (#26690).
+ */
+const IMPLICIT_BOOK_GROUP_KEY = deriveImplicitPackageBook('_').groups[0].key;
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -516,6 +532,11 @@ interface Universe {
   permissionSets: Set<string>;
   /** Report names (`Report.name`) a `reports.<name>` key may name. */
   reports: Set<string>;
+  /**
+   * Book name (`Book.name`) → the group `key`s a `books.<name>.groups.<key>`
+   * key may name; the implicit per-package book included (#26690).
+   */
+  books: Map<string, Set<string>>;
   /**
    * Page name (`Page.name`) → every component id the page ADDRESSES
    * (`pages.<page>.components.<id>`), with that component's type and, for a
@@ -1692,6 +1713,30 @@ function buildUniverse(stack: AnyRec): Universe {
   // `reports` carries disposition `concat` too, so a sibling's reports resolve.
   const reports = namesOf('reports');
 
+  // ── Doc books: the names `books.<name>` may name, and their group keys (#26690) ──
+  //
+  // `books` carries disposition `concat` too. A package's implicit book (named
+  // by its id, one `all` group) is served wherever no book of that name is
+  // authored, so its keys resolve as well.
+  const books = new Map<string, Set<string>>();
+  for (const record of [...recordsOf(stack.books), ...artifactProvidedRecords(stack, 'books')]) {
+    const name = strName(record.name);
+    if (!name) continue;
+    const keys = books.get(name) ?? new Set<string>();
+    for (const group of Array.isArray(record.groups) ? record.groups : []) {
+      const key = isRec(group) ? strName(group.key) : undefined;
+      if (key) keys.add(key);
+    }
+    books.set(name, keys);
+  }
+  const packageIds = [
+    isRec(stack.manifest) ? strName(stack.manifest.id) : undefined,
+    ...packagesOf(stack).map((entry) => (isRec(entry.manifest) ? strName(entry.manifest.id) : undefined)),
+  ];
+  for (const id of packageIds) {
+    if (id && !books.has(id)) books.set(id, new Set([IMPLICIT_BOOK_GROUP_KEY]));
+  }
+
   return {
     objects,
     extended,
@@ -1706,6 +1751,7 @@ function buildUniverse(stack: AnyRec): Universe {
     positions,
     permissionSets,
     reports,
+    books,
     pages,
   };
 }
@@ -2178,6 +2224,35 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
       }
 
+      // ── books.<name>[.groups.<key>] (#26690) ──────────────────────────
+      for (const [bookName, rawBook] of Object.entries(asRecord(rawData.books))) {
+        const bookPath = `${base}.books.${bookName}`;
+        const groupKeys = universe.books.get(bookName);
+        if (!groupKeys) {
+          orphan(
+            `${inLocale} · book "${bookName}"`,
+            bookPath,
+            `Translations are keyed to book "${bookName}", which no package in this stack declares, ` +
+              `so nothing resolves this key and the book keeps its source-locale title.` +
+              suggest(bookName, universe.books.keys()),
+            "Match the key to a book's `name`, or drop it.",
+          );
+          continue;
+        }
+        if (!isRec(rawBook)) continue;
+        for (const groupKey of Object.keys(asRecord(rawBook.groups))) {
+          if (groupKeys.has(groupKey)) continue;
+          orphan(
+            `${inLocale} · book "${bookName}" · group "${groupKey}"`,
+            `${bookPath}.groups.${groupKey}`,
+            `Translations are keyed to group "${groupKey}" of book "${bookName}", which declares no group ` +
+              `with that \`key\`, so the docs sidebar keeps the section's source-locale title.` +
+              suggest(groupKey, groupKeys),
+            "Match the key to a group's `key` (not its label), or drop it.",
+          );
+        }
+      }
+
       // ── flows.<name>[.screens.<node_id>[.fields.<field_name>]] ────────
       for (const [flowName, rawFlow] of Object.entries(asRecord(rawData.flows))) {
         const flowPath = `${base}.flows.${flowName}`;
@@ -2437,8 +2512,8 @@ interface ActionEntryContext {
  * dialog that declares none — so declaring the dialog is the whole condition.
  *
  * The leaf keys beside them (`label`, `description`, `confirmText`,
- * `successMessage`) are prose on a node that resolved, read whenever the
- * action is, as on the object branch.
+ * `successMessage`, `disabledReason`) are prose on a node that resolved, read
+ * whenever the action is, as on the object branch.
  *
  * ⛔ One vocabulary: a key naming a target the action does not declare is
  * `translation-target-unknown` at `params`' severity; an OPTION key keyed off
