@@ -56,7 +56,7 @@
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
-- 改作者可写面(种类非 `none` 或收窄)的卡,首触 done-when 写 skills + docs + eval 三项。
+- 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同机制 = 同一发现,不分车道,首触定级即并:证据搬先卡,后卡关 `duplicate_of`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
