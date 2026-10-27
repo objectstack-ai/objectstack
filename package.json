@@ -162,7 +162,7 @@
     "check:workflow-step-name-quoting": "node scripts/check-workflow-step-name-quoting.mjs --self-test && node scripts/check-workflow-step-name-quoting.mjs",
     "check:select-shard-packages": "bash scripts/ci/select-shard-packages.selftest.sh",
     "check:select-gate-families": "bash scripts/ci/select-gate-families.selftest.sh",
-    "check:shard-attestation": "node scripts/check-shard-attestation.mjs --self-test && node scripts/check-shard-attestation.mjs",
+    "check:shard-attestation": "node scripts/ci-shard-matrix.mjs --self-test && node scripts/check-shard-attestation.mjs --self-test && node scripts/check-shard-attestation.mjs",
     "check:required-contexts": "node scripts/check-required-contexts.mjs --self-test && node scripts/check-required-contexts.mjs",
     "check:aggregator-roster": "node scripts/check-aggregator-roster.mjs --self-test && node scripts/check-aggregator-roster.mjs",
     "check:ci-filter-parity": "node scripts/check-ci-filter-parity.mjs --self-test && node scripts/check-ci-filter-parity.mjs",

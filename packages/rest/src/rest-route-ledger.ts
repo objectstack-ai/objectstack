@@ -130,9 +130,10 @@ export interface RestRouteLedgerEntry {
    * identity, was guarded. Recorded so the next reader does not re-derive a
    * figure that has now been checked. ⛔ The rejection stands either way, and
    * the second spelling strengthens it — a syntactic scanner has to know both
-   * before it can read the file even this badly. The full reading lives in
-   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, the
-   * authority on this population.
+   * before it can read the file even this badly. The full reading is in
+   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts` at commit
+   * 67461403; that census was retired after it for a reach check derived
+   * from this ledger (`authz-probe-blind-spot.test.ts` beside it).
    *
    * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
    * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`

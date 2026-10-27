@@ -78,8 +78,8 @@ describe('RestServer metadata routes — anonymous-deny gate (#3963)', () => {
     // captured `this.routeManager` at definition time would register all eight
     // past the gate with every existing test still green.
     //
-    // It is also what licenses `authz-probe-blind-spot.census.ts` counting those
-    // 8 as REACHABLE by `meta:rest-server.ts:registerMetadataEndpoints`.
+    // It is also what licenses counting those 8 as REACHABLE by the dogfood
+    // authz ratchet's `meta:rest-server.ts:registerMetadataEndpoints` key.
     it('401s an anonymous helper-routed per-item route — the gate travels with `registerPerItemRoute` (#15542)', async () => {
         const protocol: any = { historyMetaItem: vi.fn().mockResolvedValue({ events: [] }) };
         const rest = new RestServer(makeServer() as any, protocol, {} as any);

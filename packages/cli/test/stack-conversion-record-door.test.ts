@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 180 — spawns the real producer once per single-cause fixture: 24 CLI spawns, one per case leg, each a distinct (command, flags, fixture) triple across `os validate` / `os build` / `os lint` over eight fixtures; slowest CI reading 141.61 s (run 40392443783) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * The ADR-0087 conversions a stack PRODUCER applied reach `os validate` and

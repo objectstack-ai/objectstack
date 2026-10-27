@@ -1,5 +1,243 @@
 # @objectstack/service-automation
 
+## 18.2.0
+
+### Minor Changes
+
+- d1e329e: feat(service-automation)!: a `notify` node mails the address in an email field of the trigger record, and refuses a computed address no user holds
+  
+  Clause-②: no (narrowing: a recipient that the value expression of a `notify` node whose `channels` include `email` evaluates to an email address no user holds now fails the node at run time instead of being mailed)
+  Metadata-protocol: narrowed
+  
+  A `notify` node can now reach a person who is not a user, such as an applicant who came in through a public form. `recipients: { emailField: 'applicant_email' }` with `channels: 'email'` (the form `@objectstack/spec` declared earlier in this release, which until now failed the run at the node) mails the address held in that `email`-typed field of the record that triggered the flow.
+  
+  - **The address.** It is read from the stored record by id when the node runs, never from the record snapshot the run carries. It must be exactly one plain ASCII mailbox, `name@example.com`. A list, a display name, a separator, a line break or an audience prefix such as `role:` fails the node and nothing is sent, and so does an address the `email` field type accepts but this node does not: a non-ASCII character, a quoted local part or an IP-literal domain. So do an empty field, a record that is not stored and a run with no trigger record. The failure names the field and the record, never the value.
+  - **The send.** The title and message render as for any notify, the email goes through the deployment's outbound mail, and it is recorded like every notification: a `sys_notification` event and a `sys_notification_delivery` row whose recipient is the address.
+  - **Per-address limit.** One address receives at most 5 email-field sends per hour (`EMAIL_FIELD_SENDS_PER_WINDOW`, `EMAIL_FIELD_SEND_WINDOW_SECONDS`), across every flow, counted case-insensitively in the kernel `cache` service (per process when none is registered, said once). A sixth fails the node before anything is written. The limit is best-effort: when the counter faults, the send is admitted and a warning is logged once.
+  - **BREAKING (narrowed): a computed address the node mails must be a user's.** In a `notify` node whose `channels` include `email`, a recipient that a value expression (a CEL envelope) evaluates to and that reads as an email address, bare or as `user:ADDRESS`, now resolves to the user who holds it, and fails the node when no user holds it (or when no user directory can be read), with a message that points to `{ emailField }`. Before, such an address was mailed as it stood, so an expression over record text let whoever typed that text choose who the flow mailed. A node that does not name `email` (`inbox` alone, the messaging default) mails nobody and is unchanged. An address written out in the flow (`recipients: ['ops@example.com']`) is the author's constant and is sent as written, as before.
+  - **Who moves.** A flow that mails (`channels` include `email`) a recipient its expression evaluates to an address no user holds. Measured over `examples/**` at `47af3dd`: no `notify` node names the `email` channel, so no in-repo flow changes. (Of the 17 `recipients` envelopes, the app-showcase ones over `record.owner` / `ownerId` do evaluate to addresses, since that field holds the owner's email, but those nodes are `inbox` only.) Fix: give the address its own `notify` node with `recipients: { emailField: 'FIELD' }` and `channels: 'email'`, or give the person a user.
+  - **Dependency.** `@objectstack/plugin-auth` moves from a dev dependency to a dependency of `@objectstack/service-automation`: the limit counts through its `rate-limit-storage` fixed-window counter, the repository's one counter, as `@objectstack/service-sms` does. This is a new workspace edge, `service-automation` → `plugin-auth`, and no cycle: neither `plugin-auth` nor what it depends on (`service-messaging`, `rest`) depends on `service-automation`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time refusal in a `notify` node that mails (`channels` include `email`) of a recipient that a value expression evaluates to an email address no user holds: no authorable key, spelling or stored shape moves, the parse is unchanged, and no stored flow is read, rewritten or converted. The repair is the author's choice between an email-field recipient naming a field of the trigger record and giving the person a user, which no ledger entry can derive, and no in-repo flow mails a computed address (no `notify` node in `examples/**` at `47af3dd` names the `email` channel). The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- fa44dd2: feat(spec): an `api` flow's start node may name its inbound hook secret (`config.secretRef`) instead of carrying it
+  
+  An app package can now ship an inbound `api` flow without publishing its credential. The start node names the secret, the deployment fills that name, and the engine reads it at every post:
+  
+  ```ts
+  {
+    id: 'start',
+    type: 'start',
+    config: { triggerType: 'api', hookId: 'heartbeat', secretRef: 'SRM_HEARTBEAT_SECRET' },
+  }
+  ```
+  
+  - The name resolves through the automation plugin's `credentialResolver`, the one a declarative connector's `auth.credentialRef` already uses: in the open tier it is the environment variable of that name (`process.env.SRM_HEARTBEAT_SECRET`); a host that wires a secrets service serves it from there.
+  - It is read per post, never cached, so a rotation applies to the next post. A post that arrives while the name has no value is refused `503 SERVICE_UNAVAILABLE` and is never verified; the server log names the flow and the reference, never a value.
+  - `FlowSchema` refuses a reference that is not a name (a letter or `_`, then letters, digits and `_`), one in the platform's `OS_` namespace (whoever signs the posts holds the hook secret, so a platform secret named there would be handed out with it), one beside a literal `secret`, and one on a flow that binds no inbound `api` trigger.
+  - `os validate` (`flow-api-trigger-secret-missing`) and the engine's registration check accept a usable reference in place of a literal, and the remedy they print now names `config.secretRef`.
+  - The reference is a name, not a credential: a flow read serves it as written. Saving a flow through the metadata API with a reference removes any hook secret the write-only flow credential store held for that start node.
+  - New exports from `@objectstack/spec/automation`: `ApiTriggerSecretRefSchema`, `apiTriggerSecretRefOf`, `apiTriggerSecretRefRefusals`, `API_TRIGGER_SECRET_REF_KEY`, `API_TRIGGER_SECRET_REF_RESERVED_PREFIX`. `AutomationEngineOptions` gains `credentialResolver`.
+  
+  A literal `config.secret` still works. To move a flow off one, replace `secret: '<value>'` with `secretRef: 'YOUR_NAME'` and set `YOUR_NAME` in the deployment's environment.
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: added
+  
+  Ruling-ref: 6386630545
+- 6d9d3ef: feat(spec,automation,app-shell): a flow screen field typed `file` collects an upload, and the run resumes with the uploaded file's id
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. `ScreenFieldConfigSchema.type` stays an open string, so every flow that parsed before still parses, and nothing exported is removed or narrowed. What changes is what a screen field already declared `type: 'file'` means: the console renders the upload widget for it, and the resume door refuses a value that is not a file id. The remedy is a change in what a caller posts to `resume` (the uploaded file's id), never a rewrite of a package source or a stored row, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no runtime interface, type or export is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  A wizard can now ask for a file before the record that will own it exists, and write everything after its last screen.
+  
+  - **`@objectstack/spec`**: `ScreenFieldConfigSchema.type` (and the `ScreenFieldSpec` contract) documents `'file'` as the second value domain beside `'number'`. A `type: 'file'` field renders the platform upload widget. The upload goes through the file service and lands as a `sys_file` that no record owns yet. The resume carries that file's id, which is ADR-0104 D3's stored form, and nothing else. A later `create_record` or `update_record` node writes the id into an object's `file` field, and that write claims the file for the record. Under the default `runAs: 'user'`, the claim first makes the download door's read check as the run's user; a `runAs: 'system'` run's write is not checked, as no system write is.
+  - **`@objectstack/service-automation`**: the resume re-checks a `type: 'file'` field as a value domain. A value that is not a file id, judged by the spec's `isFileIdToken` (the same predicate the claim path reads), is refused with `400 INVALID_SCREEN_INPUT` and the field code `invalid_type` ("must be the id of an uploaded file"). That covers a URL, the expanded `{ id, name, url, … }` read form, a list and a number. The value is never reduced to an id. The refusal writes nothing and keeps the pause, so a corrected resume still lands. An empty optional field and a hidden field are not judged. `image`, `avatar`, `video` and `audio` stay open widget hints.
+  - **`@object-ui/app-shell`**: the flow screen dialog renders the object form's `FileField` for a `type: 'file'` field and uploads through the console's `UploadProvider`. While an upload is in flight, Submit is disabled and reads "Uploading…". The resume posts each file field as its bare id, and a prefilled expanded value is reduced to its id first.
+  
+  **BREAKING** (a resume-acceptance narrowing) for a flow whose `screen` node already declares a field `type: 'file'`. None was found in this repository's examples or packages.
+  
+  - **Before.** `type: 'file'` was an open widget hint the console did not know, so the field rendered a plain text input, and `POST /automation/:name/runs/:runId/resume` accepted any value for it.
+  - **Now.** The field renders the upload widget, and the resume refuses any value that is not a file id with `400 INVALID_SCREEN_INPUT` (`invalid_type`). The refusal keeps the pause.
+  - **Fix.** A caller that resumes the run itself, without the console, uploads the file through the file service first and posts the minted `sys_file` id for the field: FROM `{ "contract_file": "https://…/nda.pdf" }` TO `{ "contract_file": "FILE_ID" }`. A field that was never meant to collect an upload takes another `type`, such as `text`.
+- 4548ba3: feat(spec,automation,app-shell): a read-only `record_link` screen field shows a record the run created, by its display name, as a link to its record page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A screen flow can now end on a result screen that links the records it created, instead of a toast that points at nothing.
+  
+  ```ts
+  { id: 'done', type: 'screen', config: { title: 'Lead converted', fields: [
+    { name: 'account_link', label: 'Account', type: 'record_link',
+      reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } },
+  ] } },
+  ```
+  
+  - **`@objectstack/spec`**: `ScreenFieldConfigSchema` gains the `type` member `'record_link'` (`SCREEN_FIELD_RECORD_LINK_TYPE`). On it, `reference` (the record's object) and `defaultValue` (a value slot that evaluates to the record's id) are required, and `required`, `options`, `placeholder`, `min` and `max` are refused, each at its own key with the exported refusal text (`SCREEN_FIELD_RECORD_LINK_REFERENCE_REQUIRED`, `SCREEN_FIELD_RECORD_LINK_DEFAULT_VALUE_REQUIRED`, `screenFieldRecordLinkRefusedKey`). The name is `record_link`, not `record`, because `record` is already an object field type (a name-keyed map of sub-objects) and a screen field's `type` uses the same vocabulary. Every other `type` value parses as before.
+  - **`@objectstack/service-automation`**: the resume refuses any value sent under a `record_link` field's name, `null` included and visible or not, with `400 INVALID_SCREEN_INPUT` and the field code `invalid_value` ("shows a record and takes no value"). The value is never bound to a flow variable, the refusal keeps the pause, and a resume that leaves the field out still lands. A caller's param that shares the field's name never counts as answering the screen, so a result screen always pauses.
+  - **`@object-ui/app-shell`**: the flow screen dialog shows a `record_link` field as the record's display name (the object's `nameField`, through the lookup widget's read-only branch) inside a link to `/apps/APP/OBJECT/record/ID`. An empty id shows "—" with no link, and an object the console cannot route to shows the name without a link. `visibleWhen` works as on any field. The dialog never seeds or posts a value for the field.
+
+### Patch Changes
+
+- b0384f3: fix(service-automation)!: a `notify` node that does not name the `email` channel fails on an address no user holds, written out or computed, instead of reporting success
+  
+  Clause-②: no (narrowing: a `notify` node whose `channels` do not include `email`, and whose `recipients` hold an email address no user holds, written out or evaluated by a value expression, bare or as `user:ADDRESS`, now fails the node at run time instead of reporting success)
+  Metadata-protocol: none
+  
+  An email address written out in `recipients` is the author's constant and is sent as written, and only the email channel sends to an address itself. The inbox delivers to a user, and so does the sms channel (or to a literal phone number). So on a node whose `channels` do not include `email` (the inbox, the default, or `inbox` or `sms` named), an address reaches someone only when a user holds it, wherever the address came from.
+  
+  - **BREAKING (run time): such a node now fails when no user holds the address, written out or computed.** Before, the address went on as it stood: the inbox wrote a `sys_inbox_message` row whose `user_id` was the address, which no inbox reads, and the node reported success. Now the node fails before anything is written, and the message names the node, each such recipient and the fix. A written-out address is named; one a value expression (a CEL envelope) evaluated to is named by the expression's source, never by its value. `user:ADDRESS` fails the same way, because `user:` takes a user id and the address is handed on as one with no lookup. With no data engine to look the address up, or a lookup that fails, the node fails too.
+  - **Unchanged.** An address a user holds, written bare, still reaches that user. A node whose `channels` include `email` sends a written-out address as written, as before. On a node whose `channels` include `email`, a computed address no user holds still fails through the ruling-B screen, pointing to `{ emailField }`. The node never adds the `email` channel its author did not declare.
+  - **Who moves.** A flow whose `notify` node does not name `email` and writes out an address no user holds, or whose recipient expression evaluates to one (for example a record field holding an address that is not a user's). Fix: add `email` to the node's `channels` to mail a written-out address, or name a user: a user id, an audience selector such as `role:NAME`, or the address that user holds, written bare. A computed address of a person who is not a user goes to its own node with `recipients: { emailField: 'FIELD' }` and `channels: 'email'`.
+  - **Who moves in this repository (app-showcase).**
+    - `alert_exec` (flow `showcase_project_escalation`) wrote out `exec@example.com`, which no user holds, on the inbox. It now notifies `role:owner`.
+    - `notify_cleared` (flow `showcase_invoice_signoff`, the seeded Invoice Dual Sign-off demo) notified `record.owner` on the inbox. The seeded invoices' owners (`ada@`, `linus@` and `grace@example.com`) are deliberately not users: they are the fixture of the ADR-0055 isolation demo, where an operator signs up as one of them, so provisioning them would delete that demo. Approving a seeded invoice would now have failed the run at this node. It now notifies `role:owner`, the Default Organization's admin on a dev boot, who also holds the finance and legal positions that clear the request. `approval-resume-relation-expand.test.ts` approves the seeded INV-1010 through it.
+    - Its other inbox nodes whose expressions read `record.owner`, `record.assignee` or `ownerId` (projects, tasks) evaluate to addresses its seeds provision as users (pinned by `inert-wirings.test.ts`), so they keep delivering.
+    - Four nodes write out `admin@objectos.ai` on the inbox: `digest` (`showcase_scheduled_digest`), `log_fail` (`showcase_project_escalation`), `notify_done` (`showcase_release_signoff`) and `report` (`showcase_inquiry_purge`). On a dev boot, where `plugin-auth` seeds that admin, they deliver as before. On a boot without that user they now fail loud, where before they wrote an inbox row nobody reads.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a run-time refusal in a `notify` node whose `channels` do not include `email` of a recipient, written out or computed, that is an email address no user holds: no authorable key, spelling or stored shape moves, the parse is unchanged, and no stored flow is read, rewritten or converted. The repair is the author's choice between mailing the address (adding `email` to `channels`) and naming a user, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- de2b7e0: fix(service-automation): a refusal a flow's write node meets is worded in the language of the person who started the run, as their own record save is
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A validation rule tripped through a record door (`POST` / `PATCH /api/v1/data/...`, batch, import) answers in the caller's locale: the engine looks the authored `message` up at `objects.OBJECT._validations.RULE.message` in the app's bundle. The same rule tripped by a flow's `create_record` or `update_record` answered in the authored English, and a `DELETE_RESTRICTED` refusal met by `delete_record` named its objects by their English labels — so a `FLOW_FAILED` from `POST /api/v1/actions/...` carried an English `innerRefusal.message` on a request whose screens rendered in Chinese.
+  
+  The run already knew the language (`AutomationContext.locale`, seeded by the `/actions` and trigger doors); `resolveRunDataContext` dropped it from the context its data nodes hand the engine. It now carries `locale` on both `runAs` arms, and the engine's one translation hook does the rest. Nothing new translates anything: a run no person started has no locale and keeps the authored text.
+  
+  What to do: nothing. Ship your translations under `objects.OBJECT._validations.RULE.message` as you already do for the record doors; a flow write now reads the same entry.
+- d12b0c1: fix(service-automation): a `notify` node naming `email` and another channel mails an address no user holds and no longer writes an inbox row addressed to it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An email address written out in `recipients` is the author's constant: on a node whose `channels` name `email` it is mailed as written. The inbox delivers to a user, keying its row by the recipient as a user id, and so does every channel but `email`. So on a node whose `channels` name `email` and another channel, such as `['inbox', 'email']`, an address no user holds now goes to the email channel alone.
+  
+  - **Fixed.** Before, the address went to every channel as it stood: the email channel mailed it, and the inbox also wrote a `sys_inbox_message` row whose `user_id` was the address, which no inbox reads. Now the node emits that address apart, on the `email` channel only, and the inbox writes no row for it. `user:ADDRESS` is handled the same way, whoever holds the address, because `user:` hands the address on as the user id with no lookup. An address whose holder cannot be looked up (no data engine, a lookup that fails) is mailed alone too.
+  - **Unchanged.** The node succeeds as before. An address a user holds, written bare, still reaches that user's inbox and is mailed. A value expression that evaluates to an address on a node naming `email` still resolves to the user who holds it, or fails the node pointing to `{ emailField }`. A node that does not name `email` still fails on an address no user holds.
+  - **What a run records.** When a node's recipients mix users and such addresses, the node writes two `sys_notification` events: one for the users on the node's `channels`, which the node's `notificationId` output names, and one for the addresses on `email` alone. The `delivered`, `enqueued` and `failed` outputs add up both.
+  - **Who moves.** Nobody needs to change a flow. A report or audit over `sys_inbox_message` no longer sees rows whose `user_id` is an address.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 14b5597: fix(formula,core,react): a template's formatter locale comes from a reserved context channel, so a root named `locale` is just a value, and the console passes the viewer's display locale
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. What changes is which input sets the template dialect's formatter locale: the evaluate context's own `locale` field instead of a root named `locale`. A template that names a root `locale` keeps compiling and rendering; its hole still prints that value, only the number and date formatting no longer follows it. There is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no runtime interface, type or export is removed or narrowed: `EvalContext` gains an optional member and `fillTemplateHoles` an optional trailing argument (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  The `template` dialect's formatters (`number`, `currency`, `percent`, `date`, `datetime`) used to take their locale from `extra.locale`, the same bag a caller passes the template's roots in. A template's roots are author-visible values, so a bulk action param or a flow variable named `locale` silently set the locale of every formatted value in the sentence, and no caller ever passed the viewer's locale.
+  
+  - **`@objectstack/formula`**: `EvalContext` gains `locale?: string`, a reserved channel like `timezone`. It is not bound as a variable, and the template engine reads its formatter locale from it alone, defaulting to `en-US` when unset or empty. `extra.locale` is no longer read.
+  - **`@objectstack/service-automation`**: a flow text slot's formatters render in `en-US`, and a flow variable named `locale` is a value like any other. The renderer's doc said the variable was also the formatters' locale; that line is gone.
+  - **`@object-ui/core`**: `fillTemplateHoles(source, roots, locale?)` passes `locale` on the engine's reserved channel, apart from the roots. `ActionRunner.setDisplayLocale(read)` installs where the runner reads the viewer's display locale; `confirmText` and `successMessage` templates format in it, and a `callContext` dispatch keeps it.
+  - **`@object-ui/react`**: `<ActionProvider>` and `useActionRunner` install `useDisplayLocale()` on the runner they build, read when a template is filled, so a locale switch reaches a runner built before it.
+  
+  **BREAKING** (a narrowing) for a caller that set the formatter locale through a root: a template evaluated with `extra: { locale }` (or a flow variable named `locale`) now formats in `en-US` and prints the value only where a hole names it. None was found in this repository: the one test that did so now passes `locale` on the context. What to do: pass the locale as the evaluate context's `locale` (`templateEngine.evaluate(expr, { extra: roots, locale })`), or as `fillTemplateHoles`'s third argument.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [431f065]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [d284ff3]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [7a04ba2]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [1d2a246]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [e3e936e]
+- Updated dependencies [83a26c3]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5cf1b9d]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Patch Changes

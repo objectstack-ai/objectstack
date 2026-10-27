@@ -135,7 +135,8 @@
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
 - coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
-- 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
+- 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
+- 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
@@ -143,15 +144,14 @@
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
 - worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
-- 终报 `needs_decision` ⇒ 席位附四维分析与推荐,并入决裁批次呈维护者裁;⛔ 无裁决线程。
-- 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
 
 ## 派发前置:前提核实,再把本地检出钉到 main
 
 - 派发前前提核实由只读子代理做(下限档);卡线程卡在交候选给 coordinator 之前做。
 - 成立 ⇒ 派;不成立而改法明确 ⇒ 改卡再派;判不了 ⇒ 入决策箱,⛔ 不占卡线程槽。
 - 改法明确 = 目标不变,只换落点或修法:评论记原前提、读数与改法,再改正文。
-- 砍范围、降级、关卡是卡的命运,归人工地板 ⛔ 不借改卡裁;读数落认领 `Premise:` 行。
+- 卡项与既裁冲突 ⇒ 席砍该项再派 ⛔ 不问分诊;行首 `Ruling-ref:` 引既裁出处,原话逐字。
+- 其余砍范围、降级、关卡归人工地板 ⛔ 不借改卡裁;读数落认领 `Premise:` 行。
 - subagent 读 PM 容器本地检出的 agent 定义与技能文本,不读 `origin/main`:过期则整批过期。
 - 每批派发前:`git -C <repo-root> fetch origin main && git -C <repo-root> checkout --detach origin/main`。
 - 游离 HEAD 使停止钩子跳过分支块,⛔ 不快进会话分支;只拒与切换冲突的脏改动,不拒分叉。

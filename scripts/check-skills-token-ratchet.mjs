@@ -467,7 +467,13 @@ export const CEILINGS = new Map([
   // text is 23924 bytes -> 5981 tokens: the 4 tokens of headroom are absorbed
   // and the ceiling moves 5828 -> 5981 (+153). Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23924 / 4)
-  ['skills/objectstack-platform/SKILL.md', 5981],
+  // 5981 -> 5997 (card #26302, the follow-up its contract review ordered): the
+  // section's opening reason reworded — a `sys_user` row written through
+  // `data` is not refused, it lands as a directory row with no account — +61
+  // bytes, so the priced text is 23924 -> 23985 bytes -> 5997 tokens, ceiling
+  // +16, pinned AT the measurement. Same ruling, same arithmetic rule as above.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23985 / 4)
+  ['skills/objectstack-platform/SKILL.md', 5997],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -837,7 +843,12 @@ export const CEILINGS = new Map([
   // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
   // ceiling +247, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1458],
+  // 1458 -> 1469 (card #26302 follow-up): eval 7's expected output says what a
+  // seeded `sys_user` row becomes instead of "(refused)" — +42 bytes, so the
+  // file is 5831 -> 5873 bytes -> 1469 tokens, ceiling +11, pinned AT the
+  // measurement.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5873 / 4)
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1469],
   // 955 -> 1175: one regression case for the now-anchored comparand (the
   // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
   // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored

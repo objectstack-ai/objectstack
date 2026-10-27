@@ -1,5 +1,177 @@
 # @object-ui/types
 
+## 18.2.0
+
+### Minor Changes
+
+- dc71845: feat(spec,console): a `type: 'flow'` action may declare `onSuccess`, and the console navigates after a run that completes
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A flow action that creates a record could not take the user to it. `ActionSchema` refused `onSuccess` beside `type: 'flow'` (and the page action rows refused it beside a `flow` executor), so after the run the user stayed on the page they started from.
+  
+  - **`@objectstack/spec`:** `onSuccess` is now accepted on a `type: 'flow'` action and beside a page action row's `flow` executor, next to `api` and `script`. On a flow action, `${result.*}` reads the completed run's answer (`AutomationResult`). Its `output` holds the flow's `isOutput` variables, so a `create_record` node that writes an `isOutput` variable `renewal` is reached as `${result.output.renewal.id}`. A variable the flow does not declare `isOutput: true` is not in `output`. The refusal text for `url`, `navigation`, `modal` and `form` now names the three executors. The Studio action form shows the `onSuccess` row for a flow action.
+  - **`@object-ui/types`:** `ActionResult` gains `handedOff`: the success is a hand-off to a follow-up surface, not a completion.
+  - **`@object-ui/app-shell`:** the flow launch judge marks a run that pauses at a screen, or ends refused, `handedOff`. A run that completes is not marked, including one whose toast is the flow's own `successMessage`.
+  - **`@object-ui/core`:** the action runner performs no `onSuccess` hop for a `handedOff` success. A flow run that pauses at a screen or ends refused does not navigate, neither when the screen or the refusal notice opens nor when the flow runner later finishes the run.
+  
+  Example:
+  
+  ```ts
+  {
+    name: 'start_renewal',
+    type: 'flow',
+    target: 'renewal_start',
+    onSuccess: { navigate: '/apps/clm/clm_contract/record/${result.output.renewal.id}' },
+  }
+  ```
+  
+  with the flow declaring `variables: [{ name: 'renewal', type: 'object', isOutput: true }]` and its `create_record` node writing `outputVariable: 'renewal'`.
+- 9a0af4e: **BREAKING** Object UI's changes from its 18.1.0 release to the day it moved into this repository, released here as one entry. They are objectui commits `a3c0da9`..`9e1fe03`, the release commit to the freeze. Their 65 changesets came across with the code under `ui/.changeset/`, which `changeset version` does not read, so this entry carries them into the release. Each of those 65 files stays in `ui/.changeset/` unchanged, as the full record of its change. Five of the changes are breaking retirements; each has a paragraph below and points at the file that holds its migration table.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The five retirements below shipped in objectui before it merged into this repository, and each one is an `@object-ui/*` surface: a renderer node type and its schema (`html`), a widget source member (`module`), exports nothing read, three providers that duplicated `@object-ui/react` and `@object-ui/app-shell` names, and nine `@object-ui/types` schema keys. None is an `@objectstack/spec` key, object definition or stored shape, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. objectui had no conversion registry; each old spelling is refused by name, at validation or by the compiler, and each change ships its own migration in the original changeset this entry points to, which is why this entry does not restate them (maintainer ruling 28 = B on objectstack#25831). -->
+  
+  ### The raw-HTML `html` node type is retired (objectui#13449, PR #13475)
+  
+  `@object-ui/components` no longer registers `html` or `ui:html`, `@object-ui/core` drops it from the public blocks, and `@object-ui/types` no longer exports `HtmlSchema`. Its renderer wrote the authored string into the page with no sanitiser. A page that still names the node draws the unknown-component panel, and `objectui validate` refuses `type: "html"` by name. The `html` field type is a different layer and stays. Migration: `ui/.changeset/13449-retire-html-renderer.md`.
+  
+  ### The `module` widget source is retired (objectui#13450, PR #13473)
+  
+  `WidgetRegistry` no longer loads a widget's code from a URL at runtime, and `@object-ui/types` no longer exports `WidgetSourceModule`. That loader was a runtime dynamic import and needed `unsafe-eval` under a strict content security policy. A manifest that still declares the `module` source is refused before anything is fetched, with a message that names both replacement sources. Migration: `ui/.changeset/13450-retire-widget-module-source.md`.
+  
+  ### Nine zero-consumer modules are retired and the runner is private (objectui#13453 part 1, PR #13506)
+  
+  `@object-ui/core` drops the fluent schema builders and the drag-and-drop, keyboard and sharing protocol bridges. `@object-ui/react` drops `useFocusTrap`, `useFocusReturn`, `useRovingFocus`, `usePageTransition`, `useSchemaPersistence` and `createLocalStorageAdapter`. `@object-ui/collaboration` drops `LiveCursors`. The test-only reset helpers are no longer on the package roots of `@object-ui/core`, `@object-ui/app-shell`, `@object-ui/types` and `@object-ui/plugin-detail`. Nothing in ObjectUI read any of them. `@object-ui/runner` is now private. Details: `ui/.changeset/13453-core-retire-dead-modules.md`, `13453-react-retire-dead-hooks.md`, `13453-collaboration-retire-live-cursors.md` and `13453-test-helpers-off-barrels.md`.
+  
+  ### The providers trio is retired (objectui#13453 part 2, PR #13507)
+  
+  `@object-ui/providers` no longer exports `DataSourceProvider` / `useDataSource`, `MetadataProvider` / `useMetadata` or `ThemeProvider` / `useTheme`. They duplicated names that `@object-ui/react` and `@object-ui/app-shell` publish with different implementations. `UploadProvider` and the upload adapters are unchanged. Migration: `ui/.changeset/13453-providers-retire-trio.md`.
+  
+  ### Nine duration keys carry their unit in their name (objectstack#25762, PR #13515)
+  
+  Nine keys on `carousel`, the three chatbot nodes, `ActionSchema`, `ActionSchema.retry`, `toast`, `tooltip`, `hover-card` and `report` now end in `Ms` or `Seconds`. The value and its unit do not change. An old key is refused at its own path with a message that names the new key, and its TypeScript member is `never`. Migration table: `ui/.changeset/25762-duration-keys-carry-unit.md`.
+  
+  ### Also in this range
+  
+  - Every package's `react` / `react-dom` peer range is `^19.0.0` (was `^18.0.0 || ^19.0.0`): a React 18 host is no longer supported (objectui#13465, PR #13481).
+  - The `react-pages` capability (`kind: 'react'` pages) now defaults to off in `@object-ui/core`; a host turns it on. The Console sets zod's `jitless` before any module runs, so zod no longer probes for `eval` (PR #13526).
+  - An invalid `gantt` block is refused with each schema issue named, instead of drawn (objectui#13459, PR #13490). An action's `confirmText` or `successMessage` with no template hole is shown exactly as written (objectui#13476, PR #13482).
+  - A record section whose fields are all empty folds into one "Show N empty fields" row (objectui#13386, PR #13483). The list, gallery, map and timeline record preview mounts `RecordDetailPanel` (PR #13486).
+  - Bulk actions keep each failed record's id and reason, and refresh the bound list once per run (objectui#13442, PR #13474). The AI build chat's plan card says how the build will land (objectui#12724, PR #13508). Assistant answers render text and charts in stream order (objectui#13492, PR #13500).
+  - Inline locale-map labels and descriptions on reports and pages show in the viewer's language (objectui#13470, #13488; PRs #13487, #13501). Positions show by label in a permission set's assigned users (objectui#13477, PR #13493). The translation preview draws the `positions` and `permissions` groups (objectui#13478, PR #13485). Calendar events with a lookup `titleField` show the record's display name (PR #13480). Unlabeled datasource enum selects get readable option labels (objectui#13353, PR #13499).
+  - More console pages are translated (objectui#13460, PRs #13489, #13503). Icon-only buttons have accessible names and clickable controls are keyboard-reachable (objectui#13461, PR #13494).
+  - Every published package declares `sideEffects` (objectui#13464, PR #13495). One `react` 19.3.0 line and one `zod` `^4.6.5` range across the packages, and single-copy pins for `@ai-sdk/react`, `ai` and `better-auth` (objectstack#25685, #25727; PRs #13472, #13496, #13512).
+  - Tooling and test-only changes for the merge, which publish nothing: workspace-root readers and test assumptions (objectstack#25723, #25733; PRs #13484, #13498) and warm test imports (objectstack#25763, PR #13513).
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+- e843b5b: feat(types,react,sdui-parser,app-shell)!: the node-level `visibleOn` / `hiddenOn` / `disabledOn` spellings are retired; `visibleWhen` / `hidden` / `disabled` are the one predicate each
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The three keys are `@object-ui/types` schema members on objectui's own node face, not an `@objectstack/spec` key, object definition, stored row or stored shape: the spec declares `visibleWhen` as the one conditional-visibility predicate at every layer (ADR-0089) and never declared a `*On` suffix on a page component, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. Each old spelling is refused by name on both faces (the TypeScript compiler, the Zod mirror behind `objectui validate`), and the refusal names the surviving key; that is the same disposition the objectui retirements took when the package merged into this repository (maintainer ruling 28 = B on objectstack#25831). The guidance below is for the author of a page, not for a metadata upgrader. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and what narrows is a declared schema key on a published metadata face, not a runtime-only interface, a type annotation or a runtime export (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `@objectstack/spec` declares exactly one conditional-visibility predicate at every layer, `visibleWhen`, and objectui carried three spellings of its own beside it: `visibleOn` beside `visibleWhen`, `hiddenOn` beside `hidden`, `disabledOn` beside `disabled`. Each pair was evaluated by the same code with the same polarity, so the second spelling added a dialect and nothing else. The three are retired, with no alias window.
+  
+  - **`@object-ui/types`**: `BaseSchema.visibleOn`, `hiddenOn` and `disabledOn` are `never` on the TypeScript face and alias refusals on the Zod mirror. A document that writes one is refused at that key, and the message names the key that survives (`visibleWhen`, `hidden`, `disabled`), says the polarity is the same, and says the value is unchanged. `objectui validate` reads the same mirror, so it prints the same refusal. The `object-view` table slot's refusal of the same three keys now names the surviving node key too (write `visibleWhen` / `hidden` / `disabled` on the object-view node itself) instead of sending the author to a retired spelling. Boolean `visible` stays: the spec declares it on actions, navigation entries, tabs, alerts and settings, and the renderer keeps evaluating it.
+  - **`@object-ui/react`**: `SchemaRenderer`'s visibility chain has three legs, `visibleWhen` and `visible` (shown when truthy) and `hidden` (hidden when truthy), and the enablement gate has one, `disabled`. A stale retired key that reaches the renderer unvalidated is not consulted and is held out of the component's props, so it neither gates the node nor lands in the DOM.
+  - **`@objectstack/sdui-parser`**: the three keys are no longer base props. `validateTree` reports each as an `unknown-prop` diagnostic that names the surviving key, so a TSX tree is told the same thing a JSON document is. `checkRetiredVisibilityDialect` and `RETIRED_VISIBILITY_DIALECTS` are exported for that reading.
+  - **`@object-ui/app-shell`**: the command palette reads a navigation entry's `visible` only; the `visibleOn` fallback it carried read a key `NavigationItem` never declared.
+  
+  **BREAKING** (an accept-set narrowing) for any page, view or component document that writes `visibleOn`, `hiddenOn` or `disabledOn` on a node. No shipped example, fixture or skill example in this repository wrote one; the ones in the documentation and the `objectui` skill are rewritten in this change.
+  
+  - **Before.** The three keys parsed, were evaluated beside their canonical twin, and the docs taught both spellings.
+  - **Now.** Each is refused by name on `objectui validate`, on the Zod mirror, by the TypeScript compiler and by the SDUI parser, and the renderer does not read it.
+  - **Fix.** Rename the key and keep the value: `visibleOn` becomes `visibleWhen`, `hiddenOn` becomes `hidden`, `disabledOn` becomes `disabled`. A form field's `fields[].visibleOn` is a different, view-level slot and is unchanged.
+
+### Patch Changes
+
+- 1bbb7bf: fix(types): the `@object-ui/types/zod` mirrors keep an unknown key instead of silently dropping it
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **What changed.** 145 objects in the zod mirrors were strip-mode `z.object()`: a misspelled key parsed green and vanished, so `FormFieldSchema.safeParse({ name, type, labell: 'oops' })` succeeded with `labell` gone while `@objectstack/spec` refused it by name. Every one is now `.passthrough()` (`z.looseObject`), like `BaseSchema` already was. The tolerant face keeps the key; the strict authoring face (`StrictAnyComponentSchema`, used by `objectui validate`) still refuses it by name, so the two faces disagree only on keep-or-refuse, never on silently dropping.
+  - **What a caller sees.** Nothing new is refused: every document that parsed before parses now. A parsed result now carries the unknown keys its input carried, and the inferred `z.input` / `z.infer` types of those objects gain zod's `[k: string]: unknown` index signature. A declared `interface` is not assignable to a type with that signature; if you assign an interface-typed value to a variable typed by one of these mirrors' `z.input`, type it through the interface or pass it to `parse()`.
+  - **Guard.** `zod-mirror-parity.test.ts` now fails on any strip-mode object in `ui/packages/types/src/zod/`.
+  
+  What to do: nothing, unless you relied on a mirror dropping keys from its parse result; strip them yourself or read only the keys you need.
+- 0b76a1f: feat(plugin-detail): the record activity timeline folds consecutive updates by one actor into one row with a count
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Before.** Every `sys_activity` update was its own feed row. When a flow, a rollup or a seed updated a record repeatedly, the system's rows buried the people's comments: a demo campaign showed thirteen consecutive "System · Updated Campaign …" rows in its discussion feed.
+  - **Now.** `RecordActivityTimeline` folds a run of adjacent `updated` entries by the same actor (`actor_id`, `null` for the system, and the same display name), each no more than 10 minutes after the one before it, into one row. The row shows the actor, the time of the latest entry, the entry count and the union of the changed fields, by their field labels where the page has the object schema and by machine name otherwise (`Updated Number Sent, Leads, Responses · 13 updates`). A toggle (`aria-expanded`) expands it to every entry.
+  - **Rendering only.** No entry is dropped or merged in the data, and the panel heading still counts every entry. Create, delete, assign, share, comment, completed and milestone rows never fold, and any of them between two updates ends the run. An entry without a summary still folds and still counts. Field names come from `sys_activity.changed_fields`, never from the recorded values.
+  - **`FeedItem` (`@object-ui/types`).** Four new optional members, set by `activityRowToFeedItem`: `activityType` (the row's own `sys_activity.type`), `activityKind` (`metadata.kind`, e.g. `'milestone'`), `actorId` and `changedFields`. A host item without them renders as before and never folds.
+  - **Strings.** `detail.foldedUpdates`, `detail.foldedUpdateCount`, `detail.foldedMoreFields`, `detail.expandFolded` and `detail.collapseFolded`, in all ten packs.
+- 6ea429d: chore(ui): every ui package whose `test` script calls `vitest` now declares `vitest` as a devDependency, so `pnpm --filter @object-ui/PKG test` runs from the repository root
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The package `test` scripts run `vitest run --root ../.. packages/PKG/`. A pnpm script resolves its binaries from the package's own `node_modules/.bin` and the workspace root's, and vitest was installed only under `ui/node_modules/.bin`, so 24 of the 41 ui packages with a `test` script failed with `vitest: not found` from both the repository root and `ui/`. Each of them now declares `vitest: ^4.1.10`, the range `ui/package.json` and the other 17 packages already declare; the lockfile resolves every new entry to the snapshot those packages already use, so no package gains a copy. Nothing a consumer installs changes: only the `devDependencies` field of the published `package.json` moves.
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [9494dd8]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/spec@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

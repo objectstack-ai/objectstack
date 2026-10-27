@@ -36,10 +36,11 @@ Working on the Console application (`apps/console/`), this repo's reference admi
 >
 > - **Look in `packages/app-shell` first.** Most symbols you want to change are
 >   there, not under `apps/console/src/`. Grep before you assume a path.
-> - **Third parties fork the template, not this app** — `examples/console-starter`
->   wires `ConsoleShell` + host routes in ~100 LOC. Adding a surface to
->   `apps/console` only benefits this repo's own deployment; adding it to
->   `app-shell` (or to an app's `navigation[]` metadata) benefits every host.
+> - **`apps/console` is the one host.** `@object-ui/app-shell` is a private
+>   workspace package (no longer published to npm) and there is no host
+>   template to fork, so a surface belongs in `app-shell` (or in an app's
+>   `navigation[]` metadata) when it is shell or view code, and in
+>   `apps/console` when it is this deployment's own wiring.
 
 ## Console architecture overview
 

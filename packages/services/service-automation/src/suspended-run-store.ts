@@ -172,7 +172,8 @@ function parseJson<T>(raw: unknown, fallback: T): T {
 export class InMemorySuspendedRunStore implements SuspendedRunStore {
   private readonly runs = new Map<string, SuspendedRun>();
   private readonly history = new Map<string, RunRecord>();
-  private readonly maxTerminalRunsPerFlow: number;
+  /** [#25235] The configured per-flow cap (`0` = disabled); public for {@link SuspendedRunStore.maxTerminalRunsPerFlow}. */
+  readonly maxTerminalRunsPerFlow: number;
 
   constructor(options?: { maxTerminalRunsPerFlow?: number }) {
     this.maxTerminalRunsPerFlow =
@@ -291,7 +292,8 @@ export interface ObjectStoreSuspendedRunStoreOptions {
  * in `organization_id` for scoping/observability).
  */
 export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
-  private readonly maxTerminalRunsPerFlow: number;
+  /** [#25235] The configured per-flow cap (`0` = disabled); public for {@link SuspendedRunStore.maxTerminalRunsPerFlow}. */
+  readonly maxTerminalRunsPerFlow: number;
   /**
    * [#14333] Whether this store has already said it cannot express the
    * conditional advance — see {@link claimSuspension}'s docblock.

@@ -15,6 +15,7 @@ export { DbJobAdapter } from './db-job-adapter.js';
 // `@objectstack/service-automation` records for its own store ports.
 export type {
     DbJobAdapterOptions,
+    JobArming,
     JobEngineLike,
     JobLoggerLike,
     ReplayGuard,

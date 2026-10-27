@@ -1,5 +1,525 @@
 # @objectstack/cli
 
+## 18.2.0
+
+### Minor Changes
+
+- 384bb7b: feat(spec,lint): an action's `confirmText`, `successMessage` and `errorMessage` are `template` slots over the roots the console's runner binds
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  - **Before.** On the page action rows (`action:button`, `action:icon`, an `action:group` / `action:menu` member) the three copy keys were plain `z.string()`s, and on a registered action `confirmText` / `successMessage` were `I18nLabel`s. None declared a hole. The console filled `${…}` in them (`${record.name}` in a confirm, `${result.email}` in a success toast), and the platform's own sentences were written that way.
+  - **Now.** Each is an ADR-0032 `template` slot (Decisions 2–3), the same mechanism as a bulk action's `confirmText`. A bare string is shorthand for `{ dialect: 'template', source }`, and the envelope is accepted too. Holes are `{{ path }}` and `{{ path | formatter[:arg] }}`, with formatters from the template engine's whitelist and no logic inside a hole. They read a closed scope, the one the console's action runner binds, declared in `@objectstack/spec/ui`:
+    - `confirmText`: `record`, the record the action runs against, and `params` only when the action's `params` is an object of static values (`actionConfirmTemplateRoots(action)`). An input list binds nothing, because its values are collected after the confirmation.
+    - `successMessage`: `result`, the payload the handler answered, then `record` (`ACTION_SUCCESS_TEMPLATE_ROOTS`).
+    - `errorMessage`, on the rows only: no root (`ACTION_ERROR_TEMPLATE_ROOTS`). The runner shows it as written.
+  - **Parsed shape.** A parsed copy key is now the `{ dialect: 'template', source }` envelope rather than a string. A reader of the parsed or served definition takes the text from `source` (`templateSlotSource` in `@objectstack/spec/automation` reads both forms). The console pinned by this release reads both. A registered action keeps its inline locale map, and a blank string still parses as itself.
+  - **Judged at the doors, as warnings.** `objectstack validate`, `objectstack compile` and the publish gate (on `action`, `object` and now `page` writes) judge every sentence through `closedScopeTemplateRefusal`, the template judge's closed-scope entry, then compile it as a template. A hole over a root the runner does not bind, a `${…}` or single-brace `{x}` token, a hole holding logic or an unknown formatter, and a blank sentence are each named. Each locale of an inline map is judged on its own. Every finding is a **warning**, an advisory at the publish gate and never a refusal, so no command's exit code changes: each of these texts parsed while the keys were plain strings.
+  - **`${…}` is prescribed its hole.** The judge reads a `${…}` token with its `$`, so `Delete ${record.name}?` is told to become `Delete {{ record.name }}?`. It no longer says `Delete ${{ record.name }}?`. A slot with no root names every hole and token in it as literal text.
+  - **The platform's sentences.** The `invite_user` success toast on `sys_invitation`, `sys_member`, `sys_organization` and `sys_user` (`Invitation sent to {{ result.email }}`) and the nine `sys_approval_request` decision toasts (`Approved "{{ result.request.record_title }}"`, …) now use `{{ }}` holes, in every shipped locale. The console fills them the same way.
+  - **Translation and extraction.** `translateAction` answers the authored envelope when no translation applies, and a translated sentence as a string. `os i18n extract` seeds an envelope-form `confirmText` / `successMessage` exactly like the bare string.
+  - **Unchanged.** `ActionSchema.errorMessage` and `outcomeMessages` are untouched (`outcomeMessages` still reads `${result.*}`), and so are `emptyText` and every other key. Producers measured at `e649c2d91e`: 13 authored copy sentences carried `${…}` (the 13 above) and none carried `{{`. After this change none carries `${…}`, and none in `examples/**`.
+- 42d9fe8: feat(spec,cli,lint): a form section entry's `label`, `placeholder` and `helpText` are translatable at `objects.<object>._sections.<section>.fields.<field>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A form section entry (`{ field, label, placeholder, helpText }` in a form view's `sections[].fields`) can override the object field's copy for that form. Before this change a translation pack had no key for those three strings, so a form's entry overrides stayed in the authoring language for every reader, the anonymous `GET /forms/:slug` visitor included.
+  
+  - **`@objectstack/spec`:** the `_sections.<section>` node of an object translation gains `fields`, keyed by the entry's `field`, each carrying `label`, `placeholder` and `helpText` (strict; `help`, `hint` and `tooltip` are refused with the rename to `helpText`). `translateView` overlays them onto a served form view's `config.sections[].fields[]` under the section rules: the key is the section's `name` and the entry's `field`, only copy the entry authors is translated, a missing key keeps the authored string, and a string edited on top of the packaged view keeps the edit (ADR-0029 D9.2a). An entry in a section with no `name`, and a bare field-name entry, have no key.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds the key for every entry string a form view's named section authors, and `os i18n check` / `os lint` coverage report a locale that leaves one untranslated, in the `section` bucket.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `_sections.<section>.fields.<field>` key that no form view section of that name declares as an entry object.
+  
+  Example (`zh-CN` bundle):
+  
+  ```ts
+  objects: {
+    crm_case: {
+      _sections: {
+        submitter: {
+          label: '关于您',
+          fields: { contact_name: { label: '您的姓名', placeholder: '张三', helpText: '与证件一致' } },
+        },
+      },
+    },
+  }
+  ```
+- 47af3dd: feat(spec,cli): positions and permission sets are translatable — `positions.<name>` and `permissions.<name>` in the translation bundle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An app authored in one language ships its positions (`positions[].label`) and permission sets (`permissions[].label`) in that language. Before this change the translation bundle had no key for them: a bundle carrying `positions` was refused by `os validate` as an unrecognized key, so those labels stayed in the authoring language next to translated object, app and flow labels, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `positions` and `permissions`, keyed by the position's and the permission set's `name`, each carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the group spellings `position`, `permission` and `permissionSets` with a message pointing at `positions` / `permissions`). Two new translators, `translatePosition` and `translatePermissionSet`, overlay them, and both are registered in the metadata-document dispatch, so `GET /meta/position` and `GET /meta/permission` — the lists the console's position and permission-set pickers draw — are served in the request's locale. A key the bundle does not carry keeps the authored string.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `positions.<name>` or `permissions.<name>` key that names no position or permission set a package of the stack declares (the audience anchors `everyone` and `guest` always resolve), as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `positions.<name>.label` / `.description` and `permissions.<name>.label` / `.description` from the stack's `positions[]` and `permissions[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-position`, `i18n/missing-permission`).
+  
+  Example (`en` bundle of a Chinese-authored app):
+  
+  ```ts
+  positions: { srm_legal_counsel: { label: 'Legal Counsel' } },
+  permissions: { srm_contract_reviewer: { label: 'Contract Review', description: 'Reads and approves supplier contracts' } },
+  ```
+- f00e8d5: feat: `demoStaff` — an application declares the demo accounts its seed data is dealt to, and the development boot creates them
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A stack may now declare `demoStaff: [{ name, email, position?, permissionSets? }]`. On a local development boot (`os dev`), `@objectstack/plugin-auth` creates each entry right after the development admin, through the same sign-up pipeline, with the development seed password (`os dev --admin-password`, default `admin123`); assigns the declared position and permission sets in the Default Organization (an account the membership policy left outside it is reported and gets none); and the application's seed then runs, so a seed row naming one of these people (`owner_id: 'Legal Counsel 1'`) resolves on the first boot. Idempotent: an address that already has an account is left exactly as it is, and only its missing assignments are added.
+  
+  Development only. `os build` leaves the key out of the artifact (`objectstack.json`), so a deployment booted from one has nothing to provision. Every other boot creates nothing and says why, with an ADR-0112 code: a boot that is not `NODE_ENV=development`, or a migrate-and-exit run (`PERMISSION_DENIED`, logged at `info` — the intended outcome there); and, on a development boot, logged at `warn` because the developer loses the accounts: a walled tenancy posture or an auth base URL that is not a loopback address (`PERMISSION_DENIED`), a database where nothing but a demo account could sign in, so a demo account would be promoted to platform admin (`PRECONDITION_REQUIRED`), or a credential store that could not be read (`SERVICE_UNAVAILABLE`).
+  
+  `defineStack` refuses an entry that names a position or permission set the stack does not declare (a platform set such as `admin_full_access` is never one), and two entries with one name or one address (`STACK_CROSS_REFERENCE_INVALID`).
+  
+  `@objectstack/runtime`: when the boot will create demo accounts, `AppPlugin` runs its inline seed at `kernel:bootstrapped` instead of inside `start()`. The seed source is declared as before, so the settlement tally and `app:seeded` behave as they do for a seed that overran its budget.
+  
+  What to do: nothing. A stack that declares no `demoStaff` boots, seeds and builds exactly as before. An application that creates its demo accounts with its own script can declare them here and delete the script.
+- 2163e80: feat(spec,metadata-protocol,service-storage,runtime,cli)!: a seed record can carry a file the package ships, `seedFile(path)`, and a file field's id that names no stored file is refused
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped. The narrowing is a seed load refusing a value it used to write: an id-shaped string in a file field that names no stored file. There is nothing for `objectstack migrate meta` to rewrite and no tombstone; the fix is the author's choice of the file the field should hold. -->
+  
+  A `file`, `image`, `avatar`, `video` or `audio` field stores the id of a stored file, and only an upload made one, so a seed could not fill a required file field at all. A seed record now names the file by the path the package ships it at:
+  
+  ```ts
+  import { defineSeed, seedFile } from '@objectstack/spec/data';
+  
+  defineSeed(ContractVersion, {
+    externalId: 'code',
+    records: [
+      { code: 'NDA-001-V1', file: seedFile('fixtures/nda-v1.pdf') },
+      { code: 'NDA-002-V1', file: seedFile('fixtures/nda-v2', { name: 'NDA v2.pdf', contentType: 'application/pdf' }) },
+    ],
+  });
+  ```
+  
+  - **The path** is relative to the directory holding `objectstack.config.ts`, uses `/`, and stays inside it: an absolute path, a drive letter, a `\`, or an empty, `.` or `..` segment is refused at parse. A `multiple: true` file field takes an array of `seedFile(...)` values. `defineSeed` refuses `seedFile(...)` in a field that does not store a file.
+  - **`os build` / `os compile`** reads each referenced file and writes its bytes into the dataset's new `files` map (`{ contentType, size, sha256, data }`, base64), so the compiled artifact carries them to every boot that loads it: `os dev`, `os serve`, a published package, an artifact URL. A path that names no file, or a file whose type is neither named with `contentType` nor known by its extension, fails the build, and `os validate` refuses the same paths. `os serve` / `os dev` booting a config rather than an artifact reads the files the same way, so both boots seed the same files.
+  - **The seed loader** stores the bytes through the new `field-files` service (`FIELD_FILE_SERVICE`, `IFieldFileService`, registered by `@objectstack/service-storage`), writes the file's id into the field, and makes the written record the file's owner, the (object, record, field) ownership an upload gets. Each row gets a file of its own. A replay that finds the row holding a file stored from the same path with the same bytes, name and type keeps it, so a restart does not store a new file for an unchanged fixture. A file stays `pending` until its row lands, so a file whose row is refused is reclaimed by the pending-upload retention.
+  - **Refused, by row, before the row is written**: a reference whose bytes the dataset does not carry, bytes that do not match their recorded size and SHA-256, a load with no `field-files` service, a field mixing `seedFile(...)` with other values, and several `seedFile(...)` values in a one-file field. Each is counted, reported in the load's errors and logged at `error`.
+  - **The inline boot seed** of an app whose datasets carry seed files runs at `kernel:bootstrapped` (as one with `demoStaff` already does), once the storage service has read its settings, so the files land in the store the deployment serves from.
+  - `SeedLoaderService` takes an optional fourth argument, `{ getFieldFiles }`; every platform caller passes the kernel's `field-files` service.
+  
+  **BREAKING** (a seed-load narrowing). A seed record whose file field holds an id-shaped string (letters, digits, `_` and `-`, at most 64 characters) that names no stored file in the row's organization is now refused, by row, with an error naming the field and the value. Before, it was written as given, and the field then read as holding no file. An external URL or an inline value is not an id and is written as before; so is any value on a deployment without `@objectstack/service-storage`.
+  
+  **What to do.** If a seed load now reports `… holds '<value>', which names no stored file`, replace the value with the file the field should hold, `seedFile('<path in the package>')`, or remove it.
+- dd5e355: feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  An app authored in one language listed its reports (`reports[].label`, `reports[].description`) in that language on the app's report index and the report page heading. Before this change the translation bundle had no key for them: `reports` was a retired object-first dialect key, so a bundle carrying it was refused by `os validate`, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `reports`, keyed by the report's `name`, carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the singular spelling `report` with a message pointing at `reports`). `reports` leaves `LEGACY_OBJECT_FIRST_KEYS`, so a stored translation row carrying it now loads through the authored-row sync instead of being skipped as a retired dialect; the key's measured footprint in the legacy dialect was zero (#3778). A new translator, `translateReport`, overlays the two strings and is registered in the metadata-document dispatch, so `GET /meta/report` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. A report is overlay-editable (ADR-0126 Regime O), so the translator honours the packaged base: a label or description an org re-authored is served as written (ADR-0029 D9.2a), and the strings it did not touch are still translated.
+  - **`@objectstack/metadata-protocol`:** `getPackagedReportBase(name)` returns the shipped report document beneath any overlay, the base the REST read path hands the translator.
+  - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+  - **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
+  
+  Example (`zh-CN` bundle of an English-authored app):
+  
+  ```ts
+  reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } },
+  ```
+
+### Patch Changes
+
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- f4860da: Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/cli`, `@objectstack/hono` and `@objectstack/plugin-dev` now depend on the other `@objectstack/*` packages at exactly their own release version, not at a caret range. Twenty-one dependencies were published as `^<version>`: eight of the CLI's (`core`, `driver-memory`, `driver-mongodb`, `driver-sql`, `driver-sqlite-wasm`, `objectql`, `observability`, `runtime`), the Hono adapter's `runtime`, and twelve of `plugin-dev`'s (`account`, `driver-memory`, `objectql`, `plugin-auth`, `plugin-hono-server`, `plugin-security`, `rest`, `runtime`, `service-i18n`, `service-realtime`, `service-storage`, `setup`).
+  
+  Every `@objectstack/*` package is released together on one version, so the range bought nothing. What it did was let an app that pins exact `@objectstack/*` versions still install a newer release of these packages, and of everything they depend on, through the CLI, which mixes two releases in one tree. They are now published exact, like the other `@objectstack/*` dependencies of these three packages.
+  
+  If you pinned exact versions and added `overrides` to hold these packages at your version, you can remove those overrides once you are on this release. Peer dependencies keep their caret ranges.
+- 1252db9: fix(cli): `os i18n check` reads a field's `inlineHelpText` as the default-locale text of its `help` key
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The field help key (`objects.OBJECT.fields.FIELD.help`) took its inline source from `help` then `description` only, while `FieldSchema` spells help text `inlineHelpText`. An app that authored `inlineHelpText` and translated `help` into one locale had its default locale reported as missing a translation. The inline source is now `help`, then `inlineHelpText`, then `description`, like an authored label; a non-default locale with no `help` is still reported as a gap.
+- 2a61f08: build(console): `@objectstack/console` is built in this workspace from `ui/apps/console`, and the Console no longer arrives through a pinned objectui commit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The package.** `@objectstack/console` ships the same `dist/` it shipped at 18.1.0: the built Console (`index.html`, `assets/`, the manifests it served). Two files leave the tarball: `dist/.objectui-sha`, which named the objectui commit the Console was built from, and `dist/.objectstack-injection.json`, which recorded the spec and client dists injected into that build. Both described a pin that no longer exists: the Console is built from the `ui/` tree of the same commit as the framework, so its version is the framework's version.
+  - **The CLI.** When a framework checkout has no built Console, `objectstack serve` / `objectstack dev` and the 503 at `/_console/` now name `pnpm console:build`, which builds `ui/apps/console` and copies its dist into `packages/console`. The remedy used to be `pnpm objectui:build`, which cloned objectui at the pinned commit.
+  - **One version.** The `@object-ui/*` packages and the private VS Code extension join the `@objectstack/*` fixed group, so every public package of both scopes publishes at one version and the extension ships at it.
+  
+  What to do: nothing as a consumer; install `@objectstack/console` as before. In a framework checkout, run `pnpm console:build` where you ran `pnpm objectui:build`.
+- 1ee1d1b: feat(cli): `objectstack build` lowers a hook handler that reads `ctx.provenance` instead of bundling it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The sandboxed hook body now carries `ctx.provenance` (see the `@objectstack/runtime` entry), so the lowerer no longer refuses a handler that reads it. Such a handler ships as a metadata-only body, and `os lint` no longer reports `hook-body/bundled-fallback` for that read. The CLI's published type surface does not change: `dist/index.d.ts`, `dist/hook-body.d.ts` and `dist/console.d.ts` are byte-identical before and after. Nothing to migrate: a handler that read `ctx.provenance` was bundled before and runs in-process, where it behaves the same. Rebuilding turns it into a body.
+- 21075ce: feat: `OS_CONSOLE_MAP_STYLE_URL` names a deployment's default map style, served on runtime-config and allowed by the Console's content-security-policy
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A map view that names no `mapStyle` falls back to a built-in style on a public demo host, so a deployment without public internet, or one whose policy forbids a third-party tile host, shows a grey map. An operator can now name the deployment's own style document once:
+  
+  ```sh
+  OS_CONSOLE_MAP_STYLE_URL=https://tiles.example.com/styles/basic/style.json
+  ```
+  
+  That one value does two things, both read at boot:
+  
+  - `GET /api/v1/runtime/config` serves it verbatim as the top-level `mapStyleUrl`, the deployment's default map style. Unset, the key is absent and every other key is unchanged.
+  - The Console document's `connect-src` gains the URL's origin. The default demo host stays allowed beside it.
+  
+  The value must be an absolute `https:` URL on a host name, with no user name, password or whitespace. Anything else stops the server at boot with a message naming the variable, the same way a malformed `OS_CONSOLE_CSP_CONNECT_SRC` entry does. The runtime-config door is anonymous, so the URL is public once set.
+  
+  It is an operator setting only: there is no Setup setting and no metadata key for it, so only the person who runs the deployment can widen the Console's content-security-policy. A style whose tiles, sprites or glyphs live on other hosts still needs those hosts in `OS_CONSOLE_CSP_CONNECT_SRC`.
+  
+  The Console's map renderer reads `mapStyleUrl` in a separate change; until then the served value and the policy are in place, and map views keep the built-in style.
+- 8fcdf52: fix(cli): the Console drift warning and refusal name `pnpm console:build` instead of the retired `pnpm objectui:build`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the Console build being served was stamped from a different objectui commit than the `.objectui-sha` pin above it, `os serve` printed a warning and `os dev` refused to mount the Console (and answered `503` at `/_console/`). Both told you to run `pnpm objectui:build`, and the refusal also mentioned `pnpm objectui:refresh`. Neither script exists any more: the objectui pin and its scripts were retired when the Console moved into this workspace, and the Console is now built with `pnpm console:build`.
+  
+  - **Now.** The warning ends with `rebuild it with 'pnpm console:build'.`, and the refusal (terminal and `503` body) says `Rebuild the console:` followed by `pnpm console:build`. The `objectui:refresh` line is gone. The SHAs, the `OS_ALLOW_CONSOLE_DRIFT=1` escape hatch and the status codes are unchanged.
+  - **Who sees it.** Only a tree that still carries its own `.objectui-sha` above a stamped Console build. The framework repository carries no pin, and `pnpm console:build` writes no stamp, so a framework checkout never reaches this message. A published install carries no pin either.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 8b7253c: fix(cli): `os dev` compiles the config before it boots, so the served connector `baseUrl` is the one dispatch calls
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `os dev` booted whatever `dist/objectstack.json` already held, and compiled only when it was missing or `--compile` was passed. A host config's dev boot serves the stack from two copies: the config module the server evaluates (what a provider-bound connector is materialized from, so what dispatch calls) and the artifact (what `/api/v1/meta/<type>` serves). A config value read from the environment, such as `examples/app-showcase`'s self URL built from `OS_PORT`, then differed between them. With `OS_PORT=41302` over an artifact built without it, `GET /api/v1/meta/connector/showcase_status_api` served `http://127.0.0.1:3000` while the connector called port 41302.
+  - **Now.** `--compile` is on by default: `os dev` compiles `objectstack.config.ts` into the artifact it serves, in its own environment, before the server starts, so both copies come from one evaluation. The watch loop already recompiled in that environment.
+  - **`--no-compile`** boots the existing artifact as built, as a bare `os dev` did before (it is still compiled when missing, and the startup warning still says when it is older than the sources). A pinned artifact (`--artifact`, `OS_ARTIFACT_URL`, a remote `OS_ARTIFACT_PATH`) is never rebuilt. With no `objectstack.config.ts`, an existing artifact boots as before.
+  - `os serve` and `os start` are unchanged.
+- f00cbe3: fix(cli,i18n,console): the hosted product reads "ObjectOS Cloud" everywhere a user reads it; the Community Console carries a "Powered by ObjectStack" mark
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ObjectOS is one product in three editions — Community (this repository's runtime and Console, open source), Cloud (cloud.objectos.ai) and Enterprise — and ObjectStack is the name of the protocol, SDK, CLI and framework. The hosted product is "ObjectOS Cloud" wherever a user reads it; it was still "ObjectStack Cloud" in the CLI and in the Console's cloud-install strings.
+  
+  - **`@objectstack/cli`.** `os cloud login`, `os cloud logout`, `os cloud whoami`, `os package publish` and `os plugin publish` say "ObjectOS Cloud" in their `--help` descriptions, their `--url` / `--server` / `--token` / `--visibility` flag descriptions, their headers and their "Not logged in" prescriptions; so do the `os serve` welcome page's link to the cloud console and the shared "Authentication required" message. The CLI README and the deployment CLI reference follow. Internal identifiers are unchanged: `~/.objectstack/cloud.json`, `OS_CLOUD_API_KEY`, `OS_CLOUD_URL`, the `os cloud …` command names.
+  - **`@object-ui/i18n`.** The cloud-connection "Connected to …" title and the three cloud-install dialog sentences ("You need to be signed into …", "… sign into … first") name "ObjectOS Cloud" in all ten locales, the product name kept untranslated inside each locale's sentence. New key `auth.shell.poweredBy` ("Powered by ObjectStack") in all ten locales.
+  - **`@object-ui/app-shell`.** New `isDefaultProductName()`: true while the deployment carries the default `branding.productName` ("ObjectOS"), false once a runtime has pushed its own.
+  - **`@object-ui/console`.** The sign-in layout (login, register, forgot/reset password, verify email, setup, consent, device, invitation) shows a small "Powered by ObjectStack" link to objectstack.ai under the form when `isDefaultProductName()` is true. A deployment that pushes its own product name — ObjectOS Cloud, Enterprise, a cloud-connected workspace — shows its own name and no second brand line. The default product name, `logo.svg`, `manifest.json` and `admin@objectos.ai` are unchanged.
+  
+  What to do: nothing. An operator who rebrands the Console through `branding.productName` keeps a single brand line, as before.
+- 69aa630: fix(cli,service-storage): the Console document's `connect-src` names the store the server presigns browser uploads to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  With S3 or an S3-compatible store (R2, MinIO), the Console uploads a file by `PUT`ting it straight to the URL `POST /api/v1/storage/upload/presigned` answers, on the store's host. The Console document's content-security-policy did not name that host, so the browser refused every such upload with `TypeError: Failed to fetch`.
+  
+  - **`@objectstack/service-storage`.** `S3StorageAdapter.getPresignedUploadOrigin()` answers the origin every presigned upload URL carries. It signs a probe upload with the same client options as every real presign, so a virtual-hosted bucket (`BUCKET.ENDPOINT-HOST`), a region-templated AWS host and a path-style endpoint come out exactly as the upload URL carries them. Signing is local and uses fixed probe credentials, so it never reaches the network or the AWS credential chain. `SwappableStorageService.getPresignedUploadOrigin()` answers the active adapter's origin, or `undefined` for an adapter without one (the local adapter's uploads go to the server itself).
+  - **`@objectstack/cli`.** The Console mount reads that origin off the kernel's `storage` service on every document and adds it to `connect-src`, after the error-reporting origin and before `OS_CONSOLE_CSP_CONNECT_SRC`. A storage settings change that swaps the adapter is followed on the next document, with no restart. Local storage, no storage service, or a store whose endpoint the presigner refuses adds nothing. The last case logs one `warn` that names the remedy. `OS_CONSOLE_CSP_CONNECT_SRC` still adds an operator's extra sources, and a deployment that named its store there as a stop-gap can drop it.
+- e2129cb: docs(cli): the README says the three code subpaths are ESM
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/cli`'s README now states that `.`, `./console` and `./hook-body` are ES modules: load them with `import`, and from CommonJS with `import()`, or with `require()` only on a Node that loads ES modules synchronously (22.12 and later). No export map or code changes.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- a8e7393: fix(cli): `os create plugin NAME --in-repo` scaffolds extend `tsconfig.base.json`, so `tsc` reaches the scaffold's own `src/`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The in-repo plugin's `tsconfig.json` extended the monorepo root `tsconfig.json`. That file is the type-check program for `scripts/`, and its `exclude` (`packages`, `apps`, `examples`, `ui`) resolves against the root, so a scaffold under `packages/plugins/` inherited it and matched none of its own files: `tsc` stopped with TS18003, "No inputs were found".
+  - **After.** The emitted `tsconfig.json` extends `tsconfig.base.json`, the file every package in the monorepo extends, declares `types: ["node"]` and its own `exclude: ["dist", "node_modules"]`, the same shape as a sibling such as `plugin-email`. `tsc --showConfig` for the scaffold and for `plugin-email` differs only in each package's own file list.
+  - The default (standalone) placement is unchanged.
+  
+  What to do: nothing for new scaffolds. An in-repo plugin scaffolded earlier: change its `tsconfig.json` `extends` from `../../../tsconfig.json` to `../../../tsconfig.base.json`, and add `"types": ["node"]` and `"exclude": ["dist", "node_modules"]`.
+- 6294157: fix(cli): a direct `os serve --dev` compiles the config before its dev artifact door serves it, so the served connector `baseUrl` is the one dispatch calls
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `os serve --dev` over an existing `dist/objectstack.json` served that file through the dev artifact door as found, while dispatch read the config module it evaluated. A config value read from the environment, such as `examples/app-showcase`'s self URL built from `OS_PORT`, then differed between them. With `OS_PORT=41302` over an artifact built without it, `GET /api/v1/meta/connector/showcase_status_api` served `http://127.0.0.1:3000` while the connector called port 41302. `os dev` had the same split until it began compiling at boot.
+  - **Now.** Before it composes that door, a direct dev boot compiles the config into the artifact in its own environment, using the same decision `os dev` uses (`devCompilesAtBoot`), so both copies come from one evaluation. A failed compile refuses the boot, as under `os dev`. This costs about 3 s per boot on the showcase.
+  - Under `os dev`, the `serve` child keeps its parent's decision and never compiles again, so `os dev --no-compile` still boots the artifact as built. A dev boot with no artifact on disk composes no door and compiles nothing, as before. A pinned artifact (`OS_ARTIFACT_URL`) is never rebuilt.
+  - Production `os serve` (no `--dev`, `NODE_ENV` not `development`) and `os start` are unchanged.
+- 9888008: fix(cli): `os dev -p N` and `os serve --port N` export the port as `OS_PORT`/`PORT`, so a config that reads the port sees the one the server listens on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The port flag reached the listener only. A config that builds a URL from `OS_PORT`/`PORT` while it loads, such as `examples/app-showcase`'s self URL, got the inherited value or the 3000 default. On the showcase with no `OS_PORT`/`PORT`, `os dev -p 41302` and `os serve --port 41303` both served `GET /api/v1/meta/connector/showcase_status_api` with `http://127.0.0.1:3000`, and the self-ping flow answered `400 FLOW_FAILED … fetch failed`.
+  - **Now.** `os dev` and `os serve` export the port the flag selected as both `OS_PORT` and `PORT` before anything loads the config, the way `os start` already handed it to its server. Under `os dev` that covers the compile, the watch recompiles and the server. The flag overrides an inherited `OS_PORT` for the config, as it already did for the listener. The same two boots now serve `:41302` / `:41303`, and the ping answers 200.
+  - With no port flag, the environment is left as it is. The exported value is the parsed port (`--port 3e3` exports `3`, the port it selects).
+- 583b024: fix(cli): when `os dev` shifts off a busy port, the config reads the port the server binds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The development auto-shift ran in the `serve` child, after `os dev`'s compile and the child's own config load had both read the requested port. On `examples/app-showcase` with 41310 held, `os dev -p 41310` printed `Port 41310 is in use — serving on 41311 instead`, yet `GET /api/v1/meta/connector/showcase_status_api` served `http://127.0.0.1:41310` and `showcase_declarative_connector_ping` answered `400 FLOW_FAILED`. The same held for a port from `OS_PORT`, and for a direct `os serve --dev` (or `os serve` under `NODE_ENV=development`), whose dispatch dialled the busy port.
+  - **Now.** `os dev` runs the same walk before it compiles. On a shift it prints the same notice, exports the port it landed on as `OS_PORT`/`PORT` (the channel a port flag already uses) for the compile, the watch recompiles and the server, and hands the server that port. `os serve` exports its shifted port the same way before it loads the config and before a direct `os serve --dev` compiles. The same boots now serve and ping the port they bound, and the ping answers 200.
+  - Not covered: a port taken between `os dev`'s probe and the server's bind makes the server shift once more. It says so and its own config reads the new port, but `/api/v1/meta` keeps the probed one until the next recompile.
+- 13e5c0e: fix(cli): an `os create plugin NAME --in-repo` scaffold passes its own `typecheck` and `build`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The in-repo plugin declared `typescript` as the standalone scaffold range (`^5.3.0`, installed as 5.9.3). It extends `tsconfig.base.json`, whose `ignoreDeprecations: "6.0"` only TypeScript 6 accepts, so `tsc` stopped with TS5103. With the workspace's TypeScript 6 it then stopped on the starter `init(context)` with TS6133, under the base's `noUnusedParameters`.
+  - **After.** The in-repo placement declares the workspace's TypeScript (`^6.0.3`, the range the repository root and every sibling plugin declare). The starter's `init` parameter is `_context`, with a comment saying what it is for. A fresh in-repo scaffold's `typecheck` and `build` both exit 0.
+  - The standalone (default) placement still declares `^5.3.0`, the documented TypeScript floor. Its starter `src/index.ts` takes the same `_context` rename, since both placements share one starter.
+  
+  What to do: nothing for new scaffolds. An in-repo plugin scaffolded earlier: set its `devDependencies.typescript` to `^6.0.3`, and rename `init(context)` to `init(_context)` unless `init` reads it.
+- 3c30afd: feat: the Console document is served with a nonce-based content-security-policy
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every HTML answer under `/_console/` (`os serve`, and so `os dev`, `os start` and the Docker image, which all run it) now carries a `content-security-policy` header. Each response draws a fresh nonce, and every `<script>` the Console build ships, plus the server's own react-pages disable script, is stamped with it. Other scripts may load only from the server's own origin.
+  
+  The policy, and why each part is there:
+  
+  - `script-src 'self' 'nonce-…' 'wasm-unsafe-eval'`. WebAssembly compilation is for the AI chat's code highlighter. `'unsafe-eval'` is added only while the `kind:'react'` page tier is on (ADR-0081, on unless `OS_PAGE_REACT=off`), because that runtime evaluates page source.
+  - `style-src 'self' 'unsafe-inline'`, for inline styles written by the UI libraries at run time.
+  - `img-src 'self' data: blob: https:`, for branding, avatars and image fields hosted elsewhere.
+  - `connect-src 'self'`, plus the default map style's host, plus the error-reporting endpoint's origin when the runtime serves a DSN.
+  - `object-src 'none'`, `base-uri 'self'`, and `frame-ancestors 'self'`. The public form page (`/_console/f/<slug>`) is the exception to `frame-ancestors`, because authors embed it on other sites.
+  
+  What an operator may notice:
+  
+  - **A map view whose `mapStyle` names another host** is refused that host until the operator lists it. Name it in the new `OS_CONSOLE_CSP_CONNECT_SRC`, a space-separated list of sources such as `https://tiles.example.com`. A malformed entry stops the server at boot with a message naming it.
+  - **Framing the Console from another origin is refused.** The public form page is the exception.
+  - **The Studio's code editor** loads its editor core from a public CDN, which the policy does not list. It shows its built-in plain-text editor instead.
+- 5e7cf63: feat: `kind:'react'` pages are off unless the deployment turns them on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **BREAKING**: the `kind:'react'` page tier, which runs page source in the Console, now defaults to **off** (ADR-0081, amended). A deployment that serves react pages turns the tier on with `OS_PAGE_REACT_ENABLED=true`, in the environment or the project's `.env` file. With it off, each react page shows a notice naming that switch instead of running, and the Console document's content-security-policy no longer allows `'unsafe-eval'`. `kind:'html'` pages are unaffected.
+  
+  To keep react pages running after the upgrade, set `OS_PAGE_REACT_ENABLED=true` on the deployment. Stored pages need no change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) an operator environment default moved; no spec key, export or stored row changed, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  The earlier name is still read while the new one is unset: `OS_PAGE_REACT=on` turns the tier on and `OS_PAGE_REACT=off` keeps it off, each with a one-time deprecation warning. `true`, `1`, `on`, `yes` and `enabled` turn it on; unset, `false`, `0`, `off`, `no` and `disabled` leave it off; any other value leaves it off and is reported once in the server log.
+  
+  The server now writes the Console's capability global in both directions, so a Console build with either default follows the server's setting. `examples/app-showcase` opts in through its `.env`, so its three react pages keep running. The `PageSchema.kind` description in `@objectstack/spec` now states the new default.
+  
+  Operators who collect content-security-policy reports may see one `script-src` eval refusal per Console load while the tier is off: the Console's schema library probes for `eval` once at boot and falls back without it. Nothing on the page is affected, and the probe is removed on the objectui side.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [92a0073]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [9657318]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [0dc4b5d]
+- Updated dependencies [50af6fa]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [dc6c7ee]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [431f065]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [2e6d446]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [d1e329e]
+- Updated dependencies [e2b40a2]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [ca80f05]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [2351c8d]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [f123f75]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [f9a1e93]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [e44a1ff]
+- Updated dependencies [6ad226a]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [6a6ebff]
+- Updated dependencies [07586f5]
+- Updated dependencies [43edf90]
+- Updated dependencies [5874d25]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [3761710]
+- Updated dependencies [3b8ea15]
+- Updated dependencies [b4199c9]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [2a61f08]
+- Updated dependencies [a4eae06]
+- Updated dependencies [b0384f3]
+- Updated dependencies [bb85f5f]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [69fa23d]
+- Updated dependencies [b00fc55]
+- Updated dependencies [ef1fc78]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [d284ff3]
+- Updated dependencies [be531f6]
+- Updated dependencies [de2b7e0]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [1cce9d8]
+- Updated dependencies [7a04ba2]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [e12d3f3]
+- Updated dependencies [39a78b1]
+- Updated dependencies [1d2a246]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [56a2346]
+- Updated dependencies [1ee1d1b]
+- Updated dependencies [3117289]
+- Updated dependencies [d5f4c2a]
+- Updated dependencies [e3e936e]
+- Updated dependencies [f6c6193]
+- Updated dependencies [3821ec8]
+- Updated dependencies [d12b0c1]
+- Updated dependencies [21075ce]
+- Updated dependencies [83a26c3]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [7e4af20]
+- Updated dependencies [d9e6ac2]
+- Updated dependencies [07bdecd]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [13136f7]
+- Updated dependencies [1d3ad39]
+- Updated dependencies [1a298dd]
+- Updated dependencies [c496886]
+- Updated dependencies [b7b04e5]
+- Updated dependencies [c51aed4]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [69aa630]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [88f22e0]
+- Updated dependencies [1f40201]
+- Updated dependencies [f871670]
+- Updated dependencies [17f8217]
+- Updated dependencies [5cf1b9d]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/plugin-security@18.2.0
+  - @objectstack/core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/rest@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/lint@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/plugin-approvals@18.2.0
+  - @objectstack/plugin-email@18.2.0
+  - @objectstack/verify@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - create-objectstack@18.2.0
+  - @objectstack/plugin-sharing@18.2.0
+  - @objectstack/mcp@18.2.0
+  - @objectstack/plugin-audit@18.2.0
+  - @objectstack/plugin-hono-server@18.2.0
+  - @objectstack/service-analytics@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/service-automation@18.2.0
+  - @objectstack/service-storage@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/driver-turso@18.2.0
+  - @objectstack/service-mailbox@18.2.0
+  - @objectstack/plugin-pinyin-search@18.2.0
+  - @objectstack/trigger-api@18.2.0
+  - @objectstack/console@18.2.0
+  - @objectstack/service-package@18.2.0
+  - @objectstack/cloud-connection@18.2.0
+  - @objectstack/driver-sql@18.2.0
+  - @objectstack/driver-mongodb@18.2.0
+  - @objectstack/formula@18.2.0
+  - @objectstack/account@18.2.0
+  - @objectstack/service-messaging@18.2.0
+  - @objectstack/setup@18.2.0
+  - @objectstack/trigger-record-change@18.2.0
+  - @objectstack/trigger-schedule@18.2.0
+  - @objectstack/client@18.2.0
+  - @objectstack/driver-memory@18.2.0
+  - @objectstack/driver-sqlite-wasm@18.2.0
+  - @objectstack/observability@18.2.0
+  - @objectstack/plugin-webhooks@18.2.0
+  - @objectstack/service-cache@18.2.0
+  - @objectstack/service-job@18.2.0
+  - @objectstack/service-queue@18.2.0
+  - @objectstack/service-realtime@18.2.0
+  - @objectstack/service-settings@18.2.0
+  - @objectstack/service-sms@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes
