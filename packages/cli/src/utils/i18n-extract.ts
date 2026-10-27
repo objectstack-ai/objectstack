@@ -84,12 +84,14 @@
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.disabledReason
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
+ *                          / .disabledReason
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -1452,6 +1454,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
+        pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1545,6 +1548,10 @@ export function collectExpectedEntries(
     pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], actionCopy(action.confirmText), kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], actionCopy(action.successMessage), kind, { objectName });
+    // [#26619] OPTIONAL-not-derived like `description`: an action that gives no
+    // reason shows the console's own default sentence, so there is no gap to
+    // seed for it.
+    pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

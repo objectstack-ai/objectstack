@@ -109,7 +109,7 @@ export interface ReadableIdsPermissionFormulaHost {
  * the read is REFUSED, loud (D5's envelope), ⛔ never composed partway and
  * never answered "no restriction".
  */
-const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
+export const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
 
 /** The body of `ObjectQL#composeReadableIdsChain`; the method's docblock there is its contract. */
 export async function composeReadableIdsChain<N>(

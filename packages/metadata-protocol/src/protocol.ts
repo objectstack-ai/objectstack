@@ -156,6 +156,7 @@ import {
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
     QueryPageWindowParamSchema,
+    QueryTransportParamsSchema,
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
@@ -417,6 +418,8 @@ import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-
 import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 // [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
 import { saveConflict } from './protocol-save-conflict.js';
+// [#25467 cut 25] The post-persistence mutation fan-out: projector, local listeners, cluster publish, publish listeners.
+import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -4620,6 +4623,73 @@ function pageWindowValue(value: unknown, param: string): number {
 }
 
 /**
+ * A refused query value as the refusal quotes it: JSON, so a blank or
+ * whitespace-only value is visible, and bounded, so a long one cannot bury
+ * the sentence around it.
+ */
+function quotedQueryValue(value: unknown): string {
+    // `String` for a number: `JSON.stringify(Infinity)` is `null`.
+    const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
+    return shown.length > 64 ? `${shown.slice(0, 64)}…` : shown;
+}
+
+/**
+ * [#26644] A projection (`fields`, spelled `$select` / `select` on the wire) as
+ * the list of field names the engine reads, or a refusal naming the parameter
+ * the caller wrote.
+ *
+ * A comma string is split and trimmed as it always was; what is refused is a
+ * value that names NO field — a blank or comma-only string, or an empty array.
+ * It used to become `[]`, which `assertProjectionFieldsExist` has nothing to
+ * check in and every driver serves as no projection: every column, under a
+ * 200. Absent means "every column"; an empty projection asks for none, so
+ * reading it as absent is the widening {@link pageWindowValue} refuses on the
+ * row axis (a blank `$top`), here on the column axis.
+ *
+ * One rule for both routes that read a projection: the list's `findData` and
+ * the by-id `getData`.
+ */
+function projectionFieldsValue(value: string | readonly unknown[], param: string): unknown[] {
+    const fields = typeof value === 'string'
+        ? value.split(',').map((s) => s.trim()).filter(Boolean)
+        : [...value];
+    if (fields.length > 0) return fields;
+    const err: any = new Error(
+        `Query parameter '${param}' names no field; got ${quotedQueryValue(value)}. The query was not run: `
+        + 'an empty projection was read as no projection, which answers every column. Name at least one '
+        + 'field, or leave the parameter out to read every column.',
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
+    err.param = param;
+    throw err;
+}
+
+/**
+ * [#26644] The response's total-count flag (`count`, spelled `$count` on the
+ * wire) as the boolean `findData` reads its opt-out from, or a refusal naming
+ * the parameter the caller wrote.
+ *
+ * The accept set is the spec's `QueryTransportParamsSchema.count`, parsed here
+ * rather than restated: the boolean, or the two strings a querystring carries
+ * it as (`null` is absent). Any other value used to stay as it was, so the
+ * `options.count === false` opt-out read it as "count anyway" — `?$count=maybe`
+ * reported a `total` exactly like `?$count=true`.
+ */
+function countFlagValue(value: unknown, param: string): boolean | null | undefined {
+    const flag = QueryTransportParamsSchema.shape.count.safeParse(value);
+    if (flag.success) return typeof flag.data === 'string' ? flag.data === 'true' : flag.data;
+    const err: any = new Error(
+        `Query parameter '${param}' must be true or false; got ${quotedQueryValue(value)}. The query was not `
+        + 'run: any other value was read as absent, which counts and reports a total.',
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
+    err.param = param;
+    throw err;
+}
+
+/**
  * [#7321] Refuse a repeated occurrence of any list-query parameter this
  * normalizer reads as single-valued, and normalise the benign one-element array
  * away so nothing below has to know the union existed.
@@ -7493,18 +7563,12 @@ export class ObjectStackProtocolImplementation implements
     private async runMutationProjector(
         evt: MetadataMutationEvent & { body?: unknown },
     ): Promise<MutationProjectionOutcome | undefined> {
-        const projector = this.mutationProjectors.get(evt.type);
-        if (!projector) return undefined;
-        try {
-            await projector(evt);
-            return { success: true };
-        } catch (e) {
-            const error = e instanceof Error ? e.message : String(e);
-            console.warn(
-                `[Protocol] mutation projector failed for ${evt.type}/${evt.name} (state=${evt.state}): ${error}`,
-            );
-            return { success: false, error };
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMutationProjectors = () => this.mutationProjectors;
+        const host: ThisParameterType<typeof runMutationProjector> = {
+            get mutationProjectors() { return readMutationProjectors(); },
+        };
+        return runMutationProjector.call(host, evt);
     }
 
     /**
@@ -7561,16 +7625,12 @@ export class ObjectStackProtocolImplementation implements
      * messages) could not stop the storm.
      */
     private notifyMutationListenersLocal(evt: MetadataMutationEvent): void {
-        for (const listener of this.metadataMutationListeners) {
-            try {
-                listener(evt);
-            } catch (e) {
-                console.warn(
-                    `[Protocol] metadata-mutation listener failed for ${evt.type}/${evt.name}: `
-                    + `${e instanceof Error ? e.message : String(e)}`,
-                );
-            }
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMetadataMutationListeners = () => this.metadataMutationListeners;
+        const host: ThisParameterType<typeof notifyMutationListenersLocal> = {
+            get metadataMutationListeners() { return readMetadataMutationListeners(); },
+        };
+        return notifyMutationListenersLocal.call(host, evt);
     }
 
     // ── [#13331] Cross-node registry convergence ────────────────────────────
@@ -7673,22 +7733,14 @@ export class ObjectStackProtocolImplementation implements
      * converge on a no-op.
      */
     private publishMetadataMutation(evt: MetadataMutationEvent): void {
-        if (!this.clusterPubSub) return;
-        if (evt.state === 'draft') return;
-        const payload: ClusterMetadataMutationPayload = {
-            originNode: this.clusterNodeId,
-            event: evt,
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readClusterPubSub = () => this.clusterPubSub;
+        const readClusterNodeId = () => this.clusterNodeId;
+        const host: ThisParameterType<typeof publishMetadataMutation> = {
+            get clusterPubSub() { return readClusterPubSub(); },
+            get clusterNodeId() { return readClusterNodeId(); },
         };
-        void this.clusterPubSub
-            .publish(METADATA_MUTATION_CLUSTER_CHANNEL, payload, {
-                partitionKey: `${evt.type}:${evt.name}`,
-            })
-            .catch((err) => {
-                console.warn(
-                    `[Protocol] cluster metadata-mutation publish failed for `
-                    + `${evt.type}/${evt.name}: ${err instanceof Error ? err.message : String(err)}`,
-                );
-            });
+        return publishMetadataMutation.call(host, evt);
     }
 
     /**
@@ -7862,21 +7914,12 @@ export class ObjectStackProtocolImplementation implements
      * this log.
      */
     private async emitMetaItemPublished(evt: MetaItemPublishedEvent): Promise<void> {
-        for (const listener of this.metaItemPublishedListeners) {
-            try {
-                await listener(evt);
-            } catch (e) {
-                console.warn(
-                    `[Protocol] the post-publish re-bind announce FAILED for ${evt.type}/${evt.name} — the item IS `
-                    + `published and stored, but boot-cached consumers keep the PRE-publish view until this process `
-                    + `restarts: a newly published record-triggered flow does not bind its trigger (it will not fire), `
-                    + `an edited schedule-triggered flow keeps running its old definition, and authored hooks, actions `
-                    + `and translations are not re-synced. Nothing retries this announce. Re-publish the item once the `
-                    + `cause below is resolved (it is idempotent), or restart the process to rebuild every subscriber `
-                    + `from storage. Cause: ${e instanceof Error ? e.message : String(e)}`,
-                );
-            }
-        }
+        // [#25467 cut 25] The body moved to `protocol-mutation-fan-out.ts` (see `MutationFanOutHost`).
+        const readMetaItemPublishedListeners = () => this.metaItemPublishedListeners;
+        const host: ThisParameterType<typeof emitMetaItemPublished> = {
+            get metaItemPublishedListeners() { return readMetaItemPublishedListeners(); },
+        };
+        return emitMetaItemPublished.call(host, evt);
     }
 
     /**
@@ -12961,10 +13004,14 @@ export class ObjectStackProtocolImplementation implements
         // querystring param arrives as a bare string — `?fields=name` or the
         // folded `?select=` / `$select` spellings — which drivers' `.map()`
         // calls over `query.fields` would otherwise throw on.
+        //
+        // [#26644] …and a value naming no field is refused rather than becoming
+        // `[]`, which every driver serves as no projection at all (see
+        // {@link projectionFieldsValue}).
         const projectionKey = slotParam('fields');
-        if (typeof options.fields === 'string') {
-            options.fields = options.fields.split(',').map((s: string) => s.trim()).filter(Boolean);
-        } else if (options.fields !== undefined && !Array.isArray(options.fields)) {
+        if (typeof options.fields === 'string' || Array.isArray(options.fields)) {
+            options.fields = projectionFieldsValue(options.fields, projectionKey);
+        } else if (options.fields !== undefined) {
             delete options.fields;
         }
         // [#4226] Unknown projection columns are refused rather than dropped —
@@ -13138,11 +13185,12 @@ export class ObjectStackProtocolImplementation implements
         );
         if (narrowedSearchFields) options.searchFields = narrowedSearchFields;
 
-        // Boolean fields
-        for (const key of ['distinct', 'count']) {
-            if (options[key] === 'true') options[key] = true;
-            else if (options[key] === 'false') options[key] = false;
-        }
+        // Boolean fields. [#26644] `count` is CHECKED, not merely lowered: a
+        // value that is neither true nor false is refused rather than left to
+        // read as "count anyway" below (see {@link countFlagValue}).
+        if (options.distinct === 'true') options.distinct = true;
+        else if (options.distinct === 'false') options.distinct = false;
+        if (options.count != null) options.count = countFlagValue(options.count, slotParam('count'));
 
         // [#2926 ⑩] Every supported OData-style `$` alias has been consumed and
         // deleted above ($top/$skip/$orderby/$select/$count/$search/
@@ -13536,9 +13584,13 @@ export class ObjectStackProtocolImplementation implements
         // widened projection would recreate, one route over, the very split
         // ("two routes, opposite answers for one input") this issue was filed
         // about.
-        if (request.select) {
-            queryOptions.fields = typeof request.select === 'string'
-                ? request.select.split(',').map((s: string) => s.trim()).filter(Boolean)
+        //
+        // [#26644] …including the empty projection: a blank `?select=` was
+        // falsy and skipped, a comma-only one became `[]` — both answered every
+        // column. Asked on any value present, as the list path asks it.
+        if (request.select != null) {
+            queryOptions.fields = typeof request.select === 'string' || Array.isArray(request.select)
+                ? projectionFieldsValue(request.select, 'select')
                 : request.select;
             this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
         }
