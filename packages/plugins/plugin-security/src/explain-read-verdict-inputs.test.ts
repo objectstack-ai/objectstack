@@ -181,7 +181,7 @@ interface Stack {
   readFilterContexts: any[];
 }
 
-async function makeStack(opts: { schema?: Record<string, unknown> } = {}): Promise<Stack> {
+async function makeStack(opts: { schema?: Record<string, unknown>; withoutHierarchyResolver?: boolean } = {}): Promise<Stack> {
   const schema = opts.schema ?? PRIVATE_SCHEMA;
   const engine = makeEngine(schema);
   const metadata = {
@@ -197,7 +197,16 @@ async function makeStack(opts: { schema?: Record<string, unknown> } = {}): Promi
     // Org scoping active, so Layer 0 contributes a real tenant predicate.
     'org-scoping': { name: 'org-scoping' },
     get sharing() { return sharing; },
+    // The enterprise hierarchy resolver, registered where the sharing plugin
+    // looks it up, so the kernel's answer to "is one mounted?" (asked by
+    // explain's depth cell, #26188) is the one the sharing service acts on.
+    'hierarchy-scope-resolver': {
+      resolveOwnerIds: async (input: { userId: string }, scope: string) =>
+        (scope === 'unit' && input.userId === U_LEAD ? [...UNIT_OWNERS] : [input.userId]),
+    },
   };
+  // The open edition: no resolver, so the sharing service fails closed to owner-only.
+  if (opts.withoutHierarchyResolver) delete services['hierarchy-scope-resolver'];
   const ctx: any = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     registerService: (name: string, impl: any) => { if (name === 'security') security = impl; },
@@ -214,10 +223,7 @@ async function makeStack(opts: { schema?: Record<string, unknown> } = {}): Promi
   sharing = new SharingService({
     engine: engine as any,
     securityService: () => security,
-    hierarchyResolver: () => ({
-      resolveOwnerIds: async (input: { userId: string }, scope: string) =>
-        (scope === 'unit' && input.userId === U_LEAD ? [...UNIT_OWNERS] : [input.userId]),
-    }) as any,
+    hierarchyResolver: () => services['hierarchy-scope-resolver'],
   });
   const sharingMw = buildSharingMiddleware(sharing, ctx.logger);
   const securityMw = engine._middlewares[0];
@@ -372,6 +378,17 @@ describe('the decider of a visible row: read depth or a share, through the real 
     expect(sharing.outcome).toBe('admitted');
     expect(sharing.detail).toBe('1 share(s) attached; access is granted for this record.');
     expect(sharing.rules[0]).toMatchObject({ kind: 'sharing_rule', name: 'rule_high_value', effect: 'admits' });
+  });
+
+  // [#26188] The open edition's posture of the same cell: no resolver, so the
+  // sharing service evaluates 'unit' as 'own' and the in-unit row is not
+  // returned. The depth cell names that cause, not the caller's unit.
+  it('no hierarchy resolver mounted: the in-unit row is not returned, and the depth cell names the absent resolver', async () => {
+    const decision = await expectCell(await makeStack({ withoutHierarchyResolver: true }), 'owned', LEAD_CTX, false);
+    const depth = layerRecord(decision, 'depth');
+    expect(depth.outcome).toBe('excluded');
+    expect(depth.detail).toMatch(/^Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'\./);
+    expect(depth.detail).not.toContain("outside the caller's");
   });
 
   it('a row outside the unit is excluded by the depth layer and the sharing layer alike', async () => {

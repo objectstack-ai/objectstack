@@ -49,7 +49,7 @@ model: opus
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
-   - `carrier:` = 卡号或人,⛔ 非下个碰 X 的 PR;无则「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
+   - `carrier:` = 卡号或人,⛔ 非下个 PR;涉 cloud 写 `carrier: cloud`;无则 `none`;皆无只进该节。
    - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
@@ -270,23 +270,23 @@ model: opus
 - driver/kernel 启动路径同此;那时跑 `--project integration` 并在报告里说明,否则写已声明给 CI。
 - 层是测出来的,不是列出来的:spawn CLI 或启动 driver 的测试按 `packages/cli/vitest-tiers.ts` 落。
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
-- 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
-- PR 开出后合 main 只因冲突、main 致 CI 红、出队,后只跑 §10 复检。
 - 全量 dogfood 只在终 head 跑一次,仅当标题带 `!` 或 `Clause-②:` 带 `(narrowing)` 臂(yes/no 皆算)。
 - 命令同 CI:按 ① 建闭包,锁下 `pnpm --filter @objectstack/dogfood test`;⛔ 无 `OS_TEST_SHARD`、无路径。
 - 红 = 本改动的后果(陈旧 fixture)同 PR 修,余照报;⛔ 永不跳过或收窄;计数记 `dogfood_battery`。
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
+- 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
-- 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 受管路径全在 `.claude/**` 者 Tier S,达档复核 PASS 在案即由席位入队落地;余皆 Tier H 等人批。
-- 受管面 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;两层同欠。
-- 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
+- 声明行后 `## 维护者速读` 六行,受管与否都带,中文、业务角度,不写席位意见。
+- 六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
+- 先看 ≤3 文件按风险排,点名风险 hunk;两分钟验证 = 一条命令或一次点击,写预期所见。
+- 需要你做的恰一个动作,非受管面写「无,席位落地」;席位定稿成评论。
+- 英文节序:What changes/Tests/Acceptance notes/Verification;日志读数每子题折进 details/summary 块。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。

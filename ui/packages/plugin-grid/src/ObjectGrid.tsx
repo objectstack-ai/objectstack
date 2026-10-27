@@ -22,12 +22,10 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, TableColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
+import type { ObjectGridSchema, DataSource, DependsOnInput, ListColumn, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, normalizeTableColumnType } from '@object-ui/types';
-import type { I18nLabel } from '@objectstack/spec/ui';
 import { parseFilterAST, resolveFieldScale, type FilterCondition } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, RelatedRecordActionsProvider, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata, isSameAuthoredFilter } from '@object-ui/react';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDataInvalidation, notifyDataChanged, useFilterScope, useMetadata } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -35,9 +33,8 @@ import { createSafeTranslation } from '@object-ui/i18n';
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering, gridCellRendererForFixedKey, linkCellRenderer, BADGE_PREFIX_RENDERER_KEY } from './cellRendererResolution';
 import { isMaskedGridColumn, isWithheldGridColumn } from './maskedColumn';
-import { formatCurrency, formatCompactCurrency, formatDate, formatDateTime, formatRelativeDate, formatPercent, percentCellScale, humanizeLabel, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES, resolveRecordPointer } from '@object-ui/fields';
-import { RecordPointerCell, type RecordPointerSource } from './RecordPointerCell';
-import { useLocalization, useDisplayLocale, resolveFieldCurrency, pickLocalized } from '@object-ui/i18n';
+import { formatCurrency, formatCompactCurrency, formatDate, formatDateTime, formatRelativeDate, formatPercent, percentCellScale, humanizeLabel, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -48,7 +45,7 @@ import { useLocalization, useDisplayLocale, resolveFieldCurrency, pickLocalized 
 // `string | I18nLabel` form `BaseSchema` has carried since objectui#4580: the
 // two reads below put the label in STRING positions, so a map-valued label used
 // to reach them as an object and the compiler could not say so.
-import { resolveI18nLabel as resolveInlineI18nLabel, PaginationConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { stateMachineNextValues, isFieldInlineEditable } from './inline-edit-options';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
@@ -61,7 +58,7 @@ import {
   toast,
 } from '@object-ui/components';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { resolveConditionalFormatting, resolveDependsOnFields, isDeadlineSettled, leadWithNameField, declaredNameField, buildExpandFields, buildExportFileName, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, resolveAffordance, resolveFieldAffordance, type SchemaLike, isProjectableField, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, toFilterNodeSafely, filterRefusalSubject, FilterOperatorError, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry, ROW_HEIGHT_TO_DENSITY_MODE, resolveRecordSourceConfig, resolveRecordSourceObjectName, resolveFilterPlaceholders, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate, type FilterTokenScope } from '@object-ui/core';
+import { resolveConditionalFormatting, resolveDependsOnFields, isDeadlineSettled, leadWithNameField, declaredNameField, buildExpandFields, buildExportFileName, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, resolveAffordance, resolveFieldAffordance, type SchemaLike, isProjectableField, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, toFilterNodeSafely, filterRefusalSubject, FilterOperatorError, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, buildCategoryOrder, buildCategoryRank, toDisplayDate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -82,88 +79,25 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { applyRelationalMeta } from './relationalMetaKeys';
-import { resolveBulkActions, describeUnusableBulkActionDefs, resolvePromotedBulkParams } from './resolveBulkActions';
+import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { partitionBulkRows } from './bulkEligibility';
-import { resolvesToDataColumn, describeUnresolvedColumns } from './columnSpellingDiagnostics';
+import { resolvesToDataColumn } from './columnSpellingDiagnostics';
 import { RowActionMenu, formatActionLabel, planRowActionMenu } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
-
-/**
- * The node's own authored filter: the canonical `filter`. Its deprecated alias
- * `defaultFilters` is not read: `@objectstack/spec` 18 retired it as a
- * tombstone that refuses by name (objectstack#11509), and the alias read went
- * with it (objectui#12030).
- */
-interface AuthoredGridFilters {
-  filter: ObjectGridSchema['filter'];
-}
-
-/** One resolution, remembered with the inputs it was computed from. */
-interface HeldGridFilters {
-  authored: AuthoredGridFilters;
-  currentUserId: FilterTokenScope['currentUserId'];
-  currentOrgId: FilterTokenScope['currentOrgId'];
-  recordId: FilterTokenScope['recordId'];
-  onUnresolved: FilterTokenScope['onUnresolved'];
-  resolved: AuthoredGridFilters;
-}
-
-function resolveGridFilters(authored: AuthoredGridFilters, scope: FilterTokenScope): HeldGridFilters {
-  return {
-    authored,
-    currentUserId: scope.currentUserId,
-    currentOrgId: scope.currentOrgId,
-    recordId: scope.recordId,
-    onUnresolved: scope.onUnresolved,
-    resolved: resolveFilterPlaceholders(authored, scope),
-  };
-}
-
-/**
- * objectui#10607 — resolve the node's own filter ONCE, through
- * `@object-ui/core`'s shared `resolveFilterPlaceholders`, against the session
- * scope the host provides (`useFilterScope`). Before this, a directly authored
- * `object-grid` with `filter: [['owner', '=', '{current_user_id}']]` sent the
- * literal token on `$filter`. `object-view` already resolves the filters it
- * hands this grid (objectui#10506); resolving that value again changes
- * nothing, because a resolved id no longer matches the whole-token pattern.
- *
- * ⛔ Not a second resolver, and no fallback: a token the scope cannot resolve
- * is whatever `resolveFilterPlaceholders` makes of it (left intact, with one
- * warning naming it).
- *
- * The result is HELD against its inputs, the shape `plugin-view`'s
- * `useResolvedFilterSegments` uses. The load effect keys on the filter this
- * grid lowers, so a resolved copy minted on every render would refetch on
- * every render; and a date macro such as `{now}` resolves to a new value at
- * every call, so comparing OUTPUTS cannot stop that. The key is the authored
- * filters, compared by structure (a host that rebuilds an equal filter inline
- * must not re-query), plus each scope member read one by one (`recordId`
- * among them, objectui#7297), never the scope object's identity (AGENTS.md
- * #10). The held pair lives in state,
- * so the value handed out is always the one React committed.
- */
-function useResolvedGridFilters(authored: AuthoredGridFilters, scope: FilterTokenScope): AuthoredGridFilters {
-  const [held, setHeld] = useState(() => resolveGridFilters(authored, scope));
-  if (
-    held.currentUserId !== scope.currentUserId
-    || held.currentOrgId !== scope.currentOrgId
-    || held.recordId !== scope.recordId
-    || held.onUnresolved !== scope.onUnresolved
-    || !isSameAuthoredFilter(held.authored, authored)
-  ) {
-    // React's documented "information from previous renders" shape: a set
-    // during render re-renders this component at once, before any child sees
-    // the discarded pass, and the re-render finds the inputs equal.
-    const next = resolveGridFilters(authored, scope);
-    setHeld(next);
-    return next.resolved;
-  }
-  return held.resolved;
-}
+import { findParamsSignature, useResolvedGridFilters } from './objectGridQuery';
+import { type ObjectGridColumn, type ObjectGridColumnDraft, isChipFieldType, normalizeColumns, resolveColumnLabel } from './objectGridColumns';
+import { LinkCell, recordPointerFace, rowRecordId } from './objectGridLinkCell';
+import { useGridTranslation } from './objectGridTranslations';
+import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_FETCH_BATCH_SIZE, DEFAULT_SELECTION_TYPE, NO_GROUPING_REFUSAL, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
+import { type BatchSaveOutcome, OCC_TOKEN_FIELD, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
+import { type ObjectGridColumnState, type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
+import { FooterSummaryReport } from './objectGridFooterSummaryReport';
+import { useObjectGridDiagnostics } from './objectGridDiagnostics';
+export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
+export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps } from './objectGridProps';
 
 /**
  * A declared `sort` → the `"field order"` join string THIS block sends as
@@ -240,431 +174,6 @@ export function parseSchemaSort(sort: unknown): TableSortItem[] {
     }
   }
   return items;
-}
-
-/**
- * The class list both faces of {@link LinkCell} wear — the anchor is a visual
- * no-op against the span it upgrades, so a list does not change appearance
- * depending on whether its host publishes record URLs.
- */
-/**
- * The field types whose grid cell draws chips: the ones `@object-ui/fields`
- * maps to `SelectCellRenderer` (a badge per selected option). Their column
- * carries `chips`, so `data-table` floors it at its widest drawn chip and a
- * single-word value is never ellipsized (objectui#12708).
- */
-const CHIP_FIELD_TYPES: ReadonlySet<string> = new Set(['select', 'status', 'multiselect', 'radio', 'checkboxes', 'tags']);
-
-function isChipFieldType(type: unknown): boolean {
-  return typeof type === 'string' && CHIP_FIELD_TYPES.has(type);
-}
-
-const LINK_CELL_CLASS =
-  'text-primary font-medium underline-offset-4 hover:underline cursor-pointer truncate block max-w-full';
-
-/**
- * The same list with the one-line clamp swapped for wrapping — what a cell in a
- * column carrying an authored `wrap: true` wears (objectui#6650).
- *
- * ⭐ DERIVED from {@link LINK_CELL_CLASS} rather than written out, so the two
- * cannot drift: every future edit to the link cell's appearance lands in both
- * faces of both variants, and the no-wrap variant stays byte-identical to what
- * `ObjectGrid.linkCellAnchor.test.tsx` pins as full markup.
- *
- * ⚠️ Why this exists at all — the outer read in `data-table.tsx` is NOT enough
- * on its own. `data-table` puts the wrap/truncate decision on the cell BODY it
- * owns, but a link column's content is this component, and its own `truncate`
- * clamps the text back to one line INSIDE a body that is willing to wrap. So
- * `wrap: true` on the record-link column — column one of almost every grid —
- * would have rendered as silently nothing: the very failure mode this card
- * exists to end, reproduced one element deeper. Measured, not reasoned: the
- * end-to-end pin in `ObjectGrid.columnWrapForward.test.tsx` failed on exactly
- * this, reading back `…cursor-pointer truncate block max-w-full` from a column
- * authored `wrap: true`.
- */
-const LINK_CELL_CLASS_WRAP = LINK_CELL_CLASS.replace('truncate', 'whitespace-normal break-words');
-
-/**
- * A row's primary key — the value the host's record-URL builder addresses.
- * Mirrors what `useNavigationOverlay.handleClick` reads off the same row, so
- * the anchor's href and the click path can never point at different records.
- */
-function rowRecordId(row: unknown): string | number | undefined {
-  const rec = row as Record<string, unknown> | null | undefined;
-  const id = rec?.id ?? rec?._id;
-  return typeof id === 'string' || typeof id === 'number' ? id : undefined;
-}
-
-// Clickable text cell that can safely contain other interactive content
-// (e.g., EmailCellRenderer's copy button). Using <button> here would
-// produce an invalid <button> > <button> nesting (hydration error +
-// breaks the inner copy click). role="link" + tabIndex + keyboard
-// handlers preserves accessibility while allowing arbitrary children.
-//
-// objectui#4490 — that span was the whole cell, so the list's link column had
-// none of a link's native affordances: no middle-click / ⌘-click open-in-new-
-// tab, no "copy link address", no hover status-bar URL, and `role="link"` with
-// no `href` is a weaker contract for assistive tech than a real anchor. PR
-// #4489 had just given detail-page and related-list lookup VALUES real anchors,
-// which left the list — the surface users open records from — as the weakest of
-// the three.
-//
-// So when the host publishes a record URL this renders a real `<a href>`, with
-// the split #4489 established:
-//   - plain left click → `preventDefault()` + the existing `onActivate`, so SPA
-//     navigation (drawer / modal / page, whatever the view configured) is
-//     completely unchanged;
-//   - modifier / non-primary click → NOT prevented, so the browser does what it
-//     does with any link.
-//
-// **The URL is not built here.** This package has no router and no business
-// knowing what a record route looks like; the host publishes its own builder
-// through `RelatedRecordActionsContext.recordHref` — the same seam #4489 used,
-// and for the console list surface the same builder its "open in new window"
-// action already navigates with. No host, or a host that cannot route to this
-// object, renders EXACTLY the span below: same markup, same behavior, nothing
-// to un-learn (the Studio designer, embedded renderers, standalone grids).
-const LinkCell: React.FC<{
-  testId: string;
-  onActivate: () => void;
-  /** Object whose record this row is — passed to the host's URL builder. */
-  objectName?: string;
-  /** This row's primary key. Absent (a row with no id) ⇒ no anchor. */
-  recordId?: string | number | null;
-  /**
-   * The column's authored `wrap` (objectui#6650). `true` ⇒ this cell drops its
-   * one-line clamp so long link text flows onto further lines, matching what
-   * `data-table` does to the body around it. Absent / `false` ⇒ unchanged.
-   */
-  wrap?: boolean;
-  children: React.ReactNode;
-}> = ({ testId, onActivate, objectName, recordId, wrap, children }) => {
-  const host = useRelatedRecordActions();
-  const cellClass = wrap ? LINK_CELL_CLASS_WRAP : LINK_CELL_CLASS;
-  const href =
-    objectName && recordId != null && recordId !== '' && host?.recordHref
-      ? host.recordHref(objectName, recordId)
-      : null;
-
-  if (href && host) {
-    // objectui#11817 — no anchor inside this anchor. A reference value in the
-    // cell (`LookupCellRenderer`'s `ReferencedRecordLink`) draws its own `a`
-    // whenever the host answers `recordHref` for the referenced object, so the
-    // children are rendered under the same host with no record destination:
-    // "the host cannot route to that object", which the context documents as
-    // render the plain value. The self-linking faces (`mailto:`, URL, `tel:`)
-    // never ask the host; the cell is handed their text face instead
-    // (`linkCellRenderer` in `./cellRendererResolution`).
-    const unlinkedHost = { ...host, recordHref: undefined, openRecord: undefined };
-    return (
-      <a
-        href={href}
-        data-testid={testId}
-        className={cellClass}
-        onClick={(e) => {
-          // The row underneath carries its own click handler (open the record,
-          // and on a modifier click open it in a new tab). Following this link
-          // must never ALSO fire that — on a modifier click that would open two
-          // tabs, one from the anchor and one from the row.
-          e.stopPropagation();
-          // Modifier and non-primary clicks belong to the browser (new tab, new
-          // window) — that is the entire point of rendering a real href.
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-          e.preventDefault();
-          onActivate();
-        }}
-        onKeyDown={(e) => {
-          // Enter is the anchor's OWN activation: the browser fires a click for
-          // it, which the handler above turns into the SPA path. Handling it
-          // here too would activate twice. Space is the one the span had that a
-          // link does not do natively, so it is carried over explicitly.
-          if (e.key === ' ') {
-            e.preventDefault();
-            e.stopPropagation();
-            onActivate();
-          }
-        }}
-      >
-        <RelatedRecordActionsProvider value={unlinkedHost}>{children}</RelatedRecordActionsProvider>
-      </a>
-    );
-  }
-
-  return (
-    <span
-      role="link"
-      tabIndex={0}
-      data-testid={testId}
-      className={cellClass}
-      onClick={(e) => {
-        e.stopPropagation();
-        onActivate();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onActivate();
-        }
-      }}
-    >
-      {children}
-    </span>
-  );
-};
-
-
-/**
- * objectui#12608 — the face a `referenceVia` pointer column draws its rows
- * with, or `null` when the field declares no pointer pair.
- *
- * The pair is resolved per row by `resolveRecordPointer` (`@object-ui/fields`),
- * the one rule the record details grid asks too; `referenceVia` is read off the
- * OBJECT field, where the spec declares it, and the type is the column's
- * declared one, so a view that re-types the column keeps its own face. A row
- * the rule answers `null` for (a half-addressed pair) is drawn by the column's
- * ordinary face: the returned function answers `null` and the caller falls
- * through to it. Inside a link cell the face is drawn under `LinkCell`'s
- * unlinked host, so it draws the name without a second anchor.
- */
-function recordPointerFace(
-  fieldName: string,
-  declaredType: string | null,
-  fieldDef: { referenceVia?: unknown } | null | undefined,
-  dataSource: RecordPointerSource | null | undefined,
-): ((row: any) => React.ReactElement | null) | null {
-  const referenceVia = fieldDef?.referenceVia;
-  if (typeof referenceVia !== 'string' || referenceVia === '') return null;
-  return (row: any) => {
-    const pointer = resolveRecordPointer({ name: fieldName, type: declaredType, referenceVia }, row);
-    return pointer ? <RecordPointerCell pointer={pointer} dataSource={dataSource} /> : null;
-  };
-}
-
-// Default English fallback translations for the grid
-const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
-  'grid.actions': 'Actions',
-  'grid.edit': 'Edit',
-  'grid.delete': 'Delete',
-  'grid.export': 'Export',
-  'grid.exportAs': 'Export as {{format}}',
-  'grid.loading': 'Loading grid…',
-  'grid.errorLoading': 'Error loading grid',
-  // objectui#9050 — the malformed-filter state, shared with `RelatedList`
-  // and `LineItemsPanel` because it is one sentence about one authored
-  // value, not three. Byte-identical to the `en` pack, which
-  // `defaults-maps-mirror-en-pack` enforces.
-  'view.malformedFilter': 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
-  'grid.pullToRefresh': 'Pull to refresh',
-  'grid.refreshing': 'Refreshing…',
-  'grid.openRecord': 'Open record',
-  'grid.empty': 'Empty',
-  'grid.yes': 'Yes',
-  'grid.no': 'No',
-  'grid.systemFields': 'System',
-  // The grouped grid's refusal over a data source that cannot answer the
-  // group header query (objectui#10881, ruling F). It must exist HERE as well
-  // as in the locale packs: a provider-less host (a standalone grid, this
-  // package's own tests) never reaches them, and it is the only thing such a
-  // grid draws.
-  'grid.grouping.needsHeaderQuery':
-    'This view is grouped, but its data source does not implement queryGroupHeaders, so the groups cannot be counted. Remove the grouping to show the records.',
-  // …and over rows a host handed in while declaring them one page of more.
-  'grid.grouping.needsWholeRows':
-    'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
-  // Reused by the grouped-view pager (falls back here when no I18nProvider).
-  'table.rowsPerPage': 'Rows per page',
-  'table.pageInfo': 'Page {{current}} of {{total}}',
-  // The grouped-view pager's four icon buttons are named by these
-  // (objectui#12143): the `data-table` pager's own keys, objectui#12124.
-  'table.firstPage': 'First page',
-  'table.previousPage': 'Previous page',
-  'table.nextPage': 'Next page',
-  'table.lastPage': 'Last page',
-  // The default inline-edit saves' success toast (objectui#12303), counted in
-  // the rows the server accepted — the `table.modified` unit the table's
-  // "Save All" bar counts in.
-  'table.saved': '{{count}} row saved',
-  'table.saved_one': '{{count}} row saved',
-  'table.saved_other': '{{count}} rows saved',
-  // The heading of an authored `emptyState` that declares no `title`
-  // (objectui#11068): the words the table's own empty row shows, so leaving the
-  // member out changes nothing a user reads.
-  'table.noResults': 'No results found',
-  // The empty state an empty grid draws when no authored `emptyState` and no
-  // search term are in force (objectui#13142). Borrowed from the `list.*`
-  // namespace `ListEmptyState` reads, so a grid and a list say the same thing
-  // about the same empty object; the rows exist HERE too for a provider-less
-  // host.
-  'list.firstRunTitle': 'Nothing here yet',
-  'list.firstRunMessage': 'Create your first record to get started.',
-  'list.noMatches': 'No matching records',
-  'list.viewFilterNoMatchesMessage': 'No records match this view’s filter.',
-  // objectstack#25898 — a grid filtered to the signed-in user, and an
-  // unfiltered grid for a caller who may not create (`ListEmptyState` says
-  // both in the same words).
-  'list.ownedNoneTitle': 'Nothing of yours yet',
-  'list.ownedNoneMessage': 'This view lists only records that are yours, and you don’t have any yet.',
-  'list.noneVisibleTitle': 'No records you can see',
-  'list.noneVisibleMessage': 'There are no records here that you have access to. If you expected to see some, ask your administrator for access.',
-  // Heading of the record-detail overlay this grid opens on row click
-  // (objectui#3426). Borrowed from the `detail.*` namespace rather than minted
-  // as `grid.recordDetail`: `NavigationOverlay` already resolves
-  // `detail.recordDetail` for hosts that pass no title, and one heading on one
-  // control should not get two translations that can drift apart. Both entries
-  // must exist HERE too — a provider-less host (a standalone grid, this
-  // package's own tests) never reaches the locale packs.
-  'detail.recordDetail': 'Record Detail',
-  'detail.recordDetailWithLabel': '{{label}} Detail',
-};
-
-/**
- * Safe wrapper for useObjectTranslation that falls back to English defaults
- * when I18nProvider is not available (e.g., standalone usage).
- *
- * Delegates to `@object-ui/i18n`'s `createSafeTranslation`; the local copy this
- * replaced wrapped the hook in try/catch (rules-of-hooks, objectui#2879).
- */
-const useGridTranslation = createSafeTranslation(GRID_DEFAULT_TRANSLATIONS, 'grid.actions');
-
-/**
- * Resolve a column header `label` (`ListColumnSchema.label`, the spec's
- * `I18nLabel`) to the string the header prints, in the viewer's `language`.
- *
- * A plain string passes through unchanged. An inline locale map
- * (`{ en: 'Amount', 'zh-CN': '金额' }`) is picked by `pickLocalized` — the one
- * locale pick the console uses for `I18nLabel`, with its own floor when the
- * viewer's locale is absent — rather than a second implementation here.
- * objectui#12358: this used to keep only a plain string and answer `undefined`
- * for a map, so an authored map header silently fell back to the field label.
- * A map with no usable entry still answers `undefined`, so the field-label
- * fallback at the call site applies exactly as for an absent label.
- */
-function resolveColumnLabel(label: string | I18nLabel | undefined, language: string | undefined): string | undefined {
-  if (label == null) return undefined;
-  if (typeof label === 'string') return label;
-  return pickLocalized(label, language) || undefined;
-}
-
-/**
- * The column layout ObjectGrid persists and reports back — the merged result of
- * a resize and a reorder, not either event on its own. Named so the state hook
- * below and the `onColumnStateChange` prop cannot drift apart.
- */
-export interface ObjectGridColumnState {
-  order?: string[];
-  widths?: Record<string, number>;
-}
-
-/**
- * One column summary as the grid's footer would draw it — `header: label`,
- * e.g. `Annual Revenue` and `Sum: 109,800,000.00` — handed to a host through
- * {@link ObjectGridComponentProps.onColumnSummaryChange} (objectui#12528).
- */
-export interface ObjectGridFooterSummary {
-  /** The column's accessor key. */
-  key: string;
-  /** The column's header text. */
-  header: string;
-  /** The formatted summary, scope included (`Sum: 109,800,000.00`). */
-  label: string;
-}
-
-/**
- * The HOST-DRIVEN ("external") mode of ObjectGrid — framework#2212.
- *
- * The ordinary authoring surface hands ObjectGrid a `schema` and a `dataSource`
- * and lets it fetch, page, sort and search for itself. In this mode a host
- * (ListView, a designer preview, an app screen with its own toolbar) has
- * already fetched one window of a larger collection and drives the controls
- * itself: it passes the window as `data` plus the real match total and the
- * page/sort/search state, and ObjectGrid forwards them straight to its
- * DataTable instead of client-slicing the window it was handed.
- *
- * Kept as its own named interface rather than flattened into `ObjectGridComponentProps`
- * (#4277 裁决 B, 2026-08-11): the two are different classes of contract, and a
- * dozen more members merged into the authoring surface would erase that
- * boundary. Until this existed, every member below was read out of `...rest`
- * through an `as any` cast and was declared nowhere at all.
- *
- * DERIVATION (#4277 裁决 §3, the anti-drift pin): this vocabulary is already
- * declared once, on `DataTableSchema` — which is exactly where ObjectGrid
- * forwards it — so the members that have a counterpart there are TYPE-DERIVED
- * from that declaration rather than hand-copied into a second enumeration. Two
- * hand-written copies of one vocabulary is how the next drift happens. The
- * `Partial<...>` wrapper is deliberate and is the only shape change: the whole
- * mode is opt-in, and `DataTableSchema['data']` is required because a table
- * always has rows, while a grid that was given no `data` fetches its own.
- *
- * `search` is read outside this mode too (objectui#11021): a host that passes
- * it owns the search term even where the grid fetches for itself, and the
- * grid's own queries carry it. `ListView` hands its toolbar term to a grid
- * that groups on the server that way, with no rows.
- */
-export interface ObjectGridExternalPaginationProps
-  extends Partial<
-    Pick<
-      DataTableSchema,
-      // The host's already-fetched window. Highest-priority data source: it
-      // wins over `schema.data` / `schema.bind` when present.
-      | 'data'
-      // Turns off client slicing. With `rowCount` + `onPageChange` it is what
-      // makes the mode active at all (see `externalManualPagination` below).
-      | 'manualPagination'
-      | 'rowCount'
-      | 'page'
-      | 'pageSize'
-      | 'onPageChange'
-      | 'onPageSizeChange'
-      | 'sort'
-      | 'onSortChange'
-      | 'search'
-      | 'onSearchChange'
-    >
-  > {
-  /**
-   * Grid-only: `DataTableSchema` has no counterpart to derive from.
-   *
-   * The table vocabulary reports column changes as separate per-event
-   * callbacks — `onColumnResize(columnKey, width)` and
-   * `onColumnReorder(newOrder)` — whereas this reports the MERGED, persisted
-   * `{ order, widths }` layout after ObjectGrid has folded either event into
-   * the state it also writes to `localStorage`, so a host can save one blob
-   * (the console stores it on the signed-in user's own list state). Deriving
-   * it from either table
-   * callback would misstate both the payload and when it fires.
-   */
-  onColumnStateChange?: (state: ObjectGridColumnState) => void;
-
-  /**
-   * Grid-only: `DataTableSchema` has no counterpart to derive from — a table is
-   * handed rows, it never issues a query.
-   *
-   * The params the host passed to `dataSource.find()` for the window it is
-   * handing down in `data` — the SAME shape this grid's own loader stores in
-   * `lastFindParamsRef` (`$filter` / `$orderby` / `$select` / `$search` /
-   * `$searchFields` / `$expand` / `$top` / `$skip`), so both paths feed one
-   * reader. `$top`/`$skip` may be present and are ignored: the fan-out windows
-   * the replay itself.
-   *
-   * Why a prop rather than a fallback inside the grid (objectui#4501): the
-   * cross-page "select all N matching" escalation re-issues the view's query to
-   * collect the whole match set, and the query has to come from whichever side
-   * owns the fetch. Under external pagination that is the host, and the grid's
-   * own ref is either empty or stale — replaying it asked the server for the
-   * WHOLE OBJECT (no `$filter`) and handed up to 5000 unmatched records to a
-   * destructive executor. A grid-side `?? {}` default is what produced that,
-   * which is why the missing case is not defaulted but REFUSED: with no params
-   * for the current data path the escalation is not offered at all (see
-   * `bulkFanoutParams` in the component body).
-   *
-   * A changed value is also the host's query-change signal: it resets the
-   * escalation, mirroring the `setSelectAllMatching(false)` the internal loader
-   * runs next to its own `lastFindParamsRef` write. Compared by CONTENT, so a
-   * host re-render that rebuilds an equal object does not drop the user's
-   * escalation.
-   */
-  findParams?: Record<string, unknown> | null;
 }
 
 /**
@@ -904,285 +413,6 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  */
 
 /**
- * Content signature of a host's find-params, used as the query-change signal for
- * the cross-page escalation (objectui#4501 clause 2).
- *
- * CONTENT and not identity: a host re-render that rebuilds an equal params
- * object must not drop an escalation the user just made, and identity is the
- * one thing a host cannot be relied on to keep stable. Top-level keys are
- * sorted so key ORDER — which differs between the host's literal and this
- * grid's own loader — never reads as a query change.
- */
-function findParamsSignature(params: Record<string, unknown> | null | undefined): string | null {
-  if (!params) return null;
-  return JSON.stringify(
-    Object.keys(params).sort().map((k) => [k, params[k] ?? null]),
-  );
-}
-
-/**
- * Helper to normalize columns configuration
- * Handles both string[] and ListColumn[] formats
- */
-function normalizeColumns(
-  columns: string[] | ListColumn[] | undefined
-): ListColumn[] | string[] | undefined {
-  if (!columns || columns.length === 0) return undefined;
-  
-  // Already in ListColumn format - check for object type with optional chaining
-  if (typeof columns[0] === 'object' && columns[0] !== null) {
-    return columns as ListColumn[];
-  }
-  
-  // String array format
-  return columns as string[];
-}
-
-/**
- * ⭐ WHAT THIS GRID'S COLUMN PRODUCER IS ALLOWED TO EMIT (objectui#6004).
- *
- * `generateColumns()` below builds the column array this component hands to
- * `data-table`, whose slot is `DataTableSchema.columns: TableColumn[]`. It had
- * no return annotation, so its four emit paths were inferred structurally and
- * nothing ever compared them to the slot's declaration — and all four call
- * sites re-widened to `any` on the way out, so even an annotation would have
- * been discarded one hop later.
- *
- * ## ⭐ Why this is not just `: TableColumn[]`
- *
- * objectui#6373 measured, at the sibling producer in `plugin-dashboard`, that a
- * bare `TableColumn` annotation raises no error on a `{ ...spread }` emit,
- * because TypeScript's excess-property check is a FRESHNESS check on the
- * properties an object literal WRITES OUT and spread properties are exempt.
- *
- * Measured again HERE before choosing this shape, because this seam is worse
- * than that one and the difference matters:
- *
- *   1. `generateColumns = useCallback((): TableColumn[] => {`, everything else
- *      unchanged  →  `tsc --noEmit` exit 0, ZERO diagnostics.
- *   2. Same, PLUS an undeclared key `wrapControl: true` WRITTEN OUT in the path-A
- *      column literal (not arriving through a spread)  →  exit 0, ZERO diagnostics.
- *
- * Run 2 is the one that fixes the mechanism. At objectui#6373's seam the object
- * literal sits in `enrich()`'s return position, so freshness still caught keys
- * written out longhand and only the spread escaped. Here every literal is the
- * return value of a `.map()` callback, so it is inferred into the callback's
- * return type FIRST and reaches the annotation as a non-fresh `X[]`. Freshness
- * is gone entirely: written-out keys escape too. A bare annotation at this seam
- * is not a weak instrument, it is an inert one — a green gate and no guard.
- *
- * The `?: never` members are what make the annotation able to fail. They are
- * ADR-0049 retirement tombstones — this repo's convention for a key that is
- * REFUSED rather than merely absent (`StaticTableColumn` in `@object-ui/types`)
- * — and they bite by ASSIGNABILITY, which survives `.map()` because it never
- * depended on freshness. Re-adding `...(col.summary && { summary: col.summary })`
- * to a column literal is a compile error naming `summary`.
- *
- * ## The rule (objectui#6373's, applied to this producer's key set)
- *
- * A producer may write into a `TableColumn[]` slot only keys the CONSUMER of
- * that slot reads, and the read set is MEASURED from the consumer's source,
- * never assumed. A key the consumer reads and `TableColumn` declares is
- * written; a key the consumer reads that `TableColumn` does not declare is HELD
- * where a ruling already holds it; a key nothing reads is RETIRED — never
- * declared, because declaring a key nothing reads is the same
- * `declared != enforced` defect facing the other way. Before retiring, prove
- * the value has a second road to its consumer.
- *
- * Consumers measured for THIS producer — two of them, because the array is read
- * twice before it reaches the slot:
- *
- *   - `data-table.tsx`, comments stripped, every `col.<key>` read — FOURTEEN:
- *     `accessorKey`, `width`, `align`, `header`, `className`, `cellClassName`,
- *     `sortable`, `resizable`, `editable`, `type`, `cell`, `headerIcon`,
- *     `fitContent`, `wrap`. ⚠️ It was THIRTEEN between objectui#7196 and
- *     objectui#6650, which added the `wrap` read this producer now feeds; it
- *     said fourteen before #7196 re-derived it:
- *     `name` was the fourteenth and was correct when written, but objectui#6963
- *     (2026-08-31) retired the `col.name` alias — the last undeclared spelling
- *     the adapter accepted — so the key left the consumer's read set that day.
- *   - THIS FILE's own downstream passes, which read the array before handing it
- *     on — TEN: `pinned` (the left/right reorder + the frozen-column verdict),
- *     `accessorKey`, `header`, `width`, `type`, `fitContent`, plus the four the
- *     chrome passes read in order to RE-EXPRESS them: `className` and
- *     `cellClassName` (`applyDensity`, and again in the right-pinned literal),
- *     `sortable` (`withSortability`), `cell` (the mobile card renderer).
- *     ⚠️ Those four were missing from this list from the day it was written —
- *     all three passes already existed at that commit — so this is an
- *     incompleteness, not drift. They change no verdict: each is declared on
- *     `TableColumn` and read by `data-table.tsx` as well. Recorded because a
- *     list presented as MEASURED has to be one.
- *     ⚠️ `col.wrap` is read ONE MORE TIME here since objectui#6650, at the
- *     `LinkCell` call sites, and that read is not a re-expression of the
- *     forward — it is a SECOND consumer of the same authored key. The record
- *     link wears its own `truncate`, so honouring `wrap` only downstream would
- *     have left column one of almost every grid wrapping its cell body around
- *     text still clamped to one line.
- *
- * Verdicts, each with the read-count behind it:
- *
- *   - `headerIcon` — DECLARED by `TableColumn`, so NOT held. Live:
- *     `data-table.tsx` renders it into the header cell (1 render site, 2
- *     syntactic reads), forwarded verbatim and never re-expressed. It WAS held
- *     here, on the "undeclared by `TableColumn`" premise; objectui#6615
- *     declared it and that premise expired with nothing going red at the moment
- *     of loss. objectui#6424 then removed the hold, MEASURED rather than
- *     derived: with the member deleted both emit types below are byte-identical
- *     (27 members, every member's resolved type unchanged), against a positive
- *     control that deleting `pinned` instead moves them to 26. Pinned in
- *     `columnHoldsExpiry-6424.test.ts` — which now also carries the claim the
- *     hold used to carry implicitly, that `TableColumn` DECLARES the key.
- *   - `pinned` — HELD. Live, and consumed BEFORE the slot: the reorder pass
- *     below reads it (5 reads in this file) and re-expresses it as the sticky
- *     `className` that `data-table` actually reads. `data-table` never reads
- *     `pinned` itself, and does not need to.
- *   - `wrap` — DECLARED by `TableColumn`, forwarded, and READ. This entry was
- *     "RETIRED (objectui#5453, 2026-08-28)" and the retirement was correct on
- *     its own measurement: `data-table.tsx` was then a two-way switch,
- *     `isFit ? 'w-full whitespace-nowrap' : 'truncate w-full'`, with a `title`
- *     tooltip as the only concession to overflow, so nothing read the key and
- *     the emit rule retired it. ⭐ What #5453 could not settle is what
- *     objectui#6650 escalated one level up: `@objectstack/spec` never stopped
- *     DECLARING `ListColumn.wrap`, and describes it to authors as "Allow text
- *     wrapping" — so retiring the forward left a promise made at authoring
- *     time and silently broken at render time. The maintainer ruled that
- *     promise is kept rather than withdrawn (2026-09-02, Option B): the
- *     consumer was BUILT, `TableColumn` now declares the key, and the forward
- *     returns WITH a reader. ⚠️ Note what moved and what did not — the emit
- *     rule is unchanged and still decided this: the key is written because the
- *     consumer reads it, which is the same test that retired it when the
- *     consumer did not exist.
- *   - `options` — RETIRED (see the enrichment pass below).
- *   - `type` — not adjudicated here; its VALUE set was settled by `fc62bb490`,
- *     whose fold still stands. It is the one member whose vocabulary differs between
- *     the two types below.
- *   - `name` — not emitted by this producer at all, so objectui#5120's alias
- *     never needed a hold here. Tombstoned only in the sense that nothing writes
- *     it — and since objectui#6963 (2026-08-31) nothing READS it either: the
- *     consumer-side alias is retired, so the key is absent from BOTH ends of
- *     this seam and the verdict now rests on two measurements, not one.
- *
- * `essential` is absent from both types on purpose: objectui#6004's suggested
- * key list named it, but it was READ off the authored column and turned into a
- * `className` — never emitted, and not a `ListColumn` member either. That read
- * is now RETIRED too (objectui#6458), so mobile visibility is decided purely
- * positionally (`colIndex === 0`) and nothing on either side of this producer
- * carries the key.
- */
-
-/**
- * The tombstoned keys — DERIVED from the authored input type, never hand-listed,
- * so a future `ListColumn` member is refused by default and has to be
- * adjudicated to escape.
- *
- * `ListColumn` is the right derivation source because it is where this
- * producer's drift comes from: every key the emit could wrongly grow is a key
- * the author wrote on the input and someone forwarded. `pinned` is the one that
- * escaped and stayed — adjudicated HELD above. `wrap` escaped too, was RETIRED
- * by objectui#5453, and has since been DECLARED on `TableColumn` by
- * objectui#6650, so the band lets it through again — ⭐ and it does so with no
- * edit to this line, which is the property that makes the derivation worth
- * having. The tombstone was never a carve-out to remember to remove; it was a
- * consequence of `TableColumn` not declaring the key, and it lifted the moment
- * that stopped being true. A key that never earns a declaration stays refused
- * by default, and re-adding its forward stays a compile error naming it.
- */
-export type RetiredListColumnKey = Exclude<keyof ListColumn, keyof TableColumn | 'pinned'>;
-
-/**
- * The undeclared-but-live keys this producer holds. See the docblock above.
- *
- * ⚠️ "Undeclared by `TableColumn`" is this interface's ENTRY CONDITION, and it
- * is a claim about ANOTHER package that can stop being true with nothing going
- * red here. So it is re-checked per key when the card owning that key closes,
- * never inherited: `headerIcon` sat here on exactly that premise until
- * objectui#6615 declared it on `TableColumn`, at which point the hold was
- * redundant rather than load-bearing, and objectui#6424 removed it.
- *
- * ⛔ A key whose ONLY declaration on the emit types is this interface is not in
- * that position — deleting it deletes the key from the emit. `pinned` is that
- * key today, which is why the two verdicts differ.
- */
-export interface ObjectGridColumnHolds {
-  /**
-   * HELD, load-bearing on BOTH counts — the pair that has to hold for a hold to
-   * be real, and the contrast that made `headerIcon`'s removal safe:
-   *
-   *   1. `TableColumn` does NOT declare it, and `RetiredListColumnKey` carves it
-   *      out of the derived tombstone band, so this member is its ONLY
-   *      declaration on both emit types. Deleting it drops the key from them
-   *      (measured: 27 members → 26).
-   *   2. It has a live consumer BEFORE the slot — this file's own reorder pass
-   *      reads it and re-expresses it as the sticky `className` that
-   *      `data-table` actually reads. That is the "second road" the emit rule
-   *      demands before a key may be retired. `wrap` failed it in 2026-08 and
-   *      was retired; objectui#6650 then BUILT its consumer rather than
-   *      reinstating a hold, which is why `wrap` is a plain declared key today
-   *      and `pinned` is still the only member here.
-   */
-  pinned?: 'left' | 'right';
-}
-
-/**
- * What `generateColumns()` returns: everything final EXCEPT `type`, which is
- * still the producer's raw inference vocabulary (`@objectstack/spec`'s
- * `FieldType`, 49 values) rather than the EIGHT-literal union `TableColumn`
- * declares (`TABLE_COLUMN_TYPES`: `text`, `number`, `date`, `datetime`,
- * `currency`, `percent`, `boolean`, `action`). `fc62bb490` folds it
- * downstream, in a pass that is deliberately separate from the enrichment map —
- * so the pre-fold shape needs a name, and this is it.
- *
- * ⚠️ This said "7-literal" until objectui#7196 re-derived it. `action` joined
- * the union at objectui#6370 on 2026-08-25 — a day BEFORE this docblock was
- * written, and that commit's own subject line reads "make the 8-literal union
- * the one canonical TableColumn.type" — so the count was never right here; it
- * was mis-copied, not drifted. Both numbers are now measured rather than
- * recited: `TABLE_COLUMN_TYPES` in `@object-ui/types` has 8 members and
- * `@objectstack/spec`'s `FieldType` enum has 49.
- */
-/**
- * ⭐ `options` — RETIRED at this emit (objectui#6004), and this explicit
- * tombstone is now the ONLY enforcement of that verdict. ⛔ Do not "tidy" it
- * away as redundant.
- *
- * Until objectui#6425 the key needed no tombstone: it was a member of NO part
- * of the emit types below, so TypeScript's excess-property check refused a
- * fresh literal writing it — refusal by non-membership. #6425's maintainer
- * ruling (2026-08-27) then declared `options` on `TableColumn` itself (the
- * `object-data-table` cell pipeline reads it off the AUTHORED column), which
- * made the key a member here through `Omit<TableColumn, …>` / `TableColumn`
- * and silently ended that enforcement. Nothing went red at the moment of
- * loss — the emit-boundary suite's directive merely turned TS2578-unused,
- * which is luck, not design. The general rule, recorded so the next seam can
- * check itself: **a pin enforced by a key's non-membership silently stops
- * enforcing the moment the key becomes a member.**
- *
- * objectui#6004's verdict itself is unchanged — nothing on either side of
- * THIS seam reads a column-level `options` (`data-table.tsx` has no such
- * read; `renderCellEditor` rebuilds the field from the object schema) — only
- * the refusal's mechanism moves, from freshness to assignability. It is
- * intersected into BOTH the pre-fold draft and the post-fold column, because
- * the retirement belongs to the seam, not to one of its two types; the key
- * cannot land in the DERIVED band (`RetiredListColumnKey`) because `options`
- * is not a `ListColumn` member, which is why this one is hand-written.
- */
-type ObjectGridRetiredOptionsTombstone = { options?: never };
-
-export type ObjectGridColumnDraft =
-  Omit<TableColumn, 'type'>
-  & { type?: string }
-  & ObjectGridColumnHolds
-  & ObjectGridRetiredOptionsTombstone
-  & { [K in RetiredListColumnKey]?: never };
-
-/** Post-fold: what actually reaches `DataTableSchema.columns: TableColumn[]`. */
-export type ObjectGridColumn =
-  TableColumn
-  & ObjectGridColumnHolds
-  & ObjectGridRetiredOptionsTombstone
-  & { [K in RetiredListColumnKey]?: never };
-
-/**
  * ⭐ THE SCHEMA SLOT THIS GRID FILLS (objectui#6459) — the receiver half of the
  * seam whose producer half #6004 typed. `dataTableSchema` below was
  * `const dataTableSchema: any`, so the ~46 keys assembled there were checked
@@ -1388,287 +618,6 @@ export type ObjectGridDataTableSchemaHolds = {
 export type ObjectGridDataTableSchema =
   DeclaredDataTableSchema & ObjectGridDataTableSchemaHolds;
 
-/** The row heights this grid styles — the five `RowHeight` values the spec admits. */
-type RowHeightMode = 'compact' | 'short' | 'medium' | 'tall' | 'extra_tall';
-
-/**
- * The ONE answer this component gives for a `rowHeight` it does not recognize
- * (objectui#4443).
- *
- * The seed used to be `schema.rowHeight ?? 'compact'`, which made the component
- * answer the same question two ways: an ABSENT `rowHeight` landed on `compact`,
- * an OFF-SPEC one fell through the density ternaries below to their terminal
- * `else` — the `medium` styling. That is the absent-vs-off-spec split #4440
- * removed from `ListView`, and a third answer to a question `@object-ui/core`
- * (`rowHeightToDensityMode`, which abstains) and the `@object-ui/react` spec
- * bridge (#4352, which abstains) had already settled. One metadata-driven
- * system, one answer: off-spec renders exactly like absent.
- *
- * The ternary chains are deliberately NOT touched — `medium` is a real value
- * with its own arm, and a leaf renderer's terminal `else` is legitimate styling.
- * Narrowing happens here, at the boundary, so nothing off-spec ever reaches it.
- *
- * Membership is tested against `ROW_HEIGHT_TO_DENSITY_MODE` rather than a local
- * list so the admitted values have one definition in the repo; that table is
- * typed `Record<RowHeight, DensityMode>`, so the build fails if the spec grows a
- * sixth row height and this resolver is not taught about it.
- *
- * `hasOwnProperty`, not `in`: `in` walks the prototype chain, so `'toString'`
- * would come back admitted. That is not hypothetical here — the toolbar's icon
- * map is looked up by the same key, and a prototype member reached
- * `Object.prototype.toString` and rendered it as a React component, while a
- * plain off-spec value produced `undefined` and threw outright.
- */
-function resolveRowHeightMode(rowHeight: unknown): RowHeightMode {
-  if (typeof rowHeight !== 'string') return 'compact';
-  if (!Object.prototype.hasOwnProperty.call(ROW_HEIGHT_TO_DENSITY_MODE, rowHeight)) return 'compact';
-  return rowHeight as RowHeightMode;
-}
-
-/**
- * The page size every display surface of this component falls back to when the
- * author declared none (objectui#9853, rulings 5749197629 and 5824040487): the
- * flat table, the server-paged table, the grouped view's page of groups, and a
- * server-grouped leaf's page of rows. Wherever there is a pager, this is its
- * page.
- *
- * READ from `@objectstack/spec`, not restated. The protocol's pagination config
- * declares `pageSize` with a default, and that declaration is the one answer an
- * author can look up; a literal here would be a second answer free to drift
- * from it. Parsing an empty object is the spec's own way of saying what an
- * undeclared member means, so this is the value the schema would fill in.
- *
- * ⚠️ There is deliberately no local fallback number behind this read. If a
- * future `@objectstack/spec` stops declaring the default (the same principle
- * `packages/types` applies at its own import boundary is that a validator does
- * not write values), this throws at module load instead of quietly
- * substituting a number nobody declared. The spec version is locked, so that
- * can only surface on a spec upgrade, where the pin
- * `ObjectGrid.displayPageSizeDefault-9853.test.tsx` reddens first.
- */
-function readSpecDisplayPageSize(): number {
-  const declared: unknown = PaginationConfigSchema.parse({}).pageSize;
-  if (typeof declared !== 'number' || !Number.isInteger(declared) || declared <= 0) {
-    throw new Error(
-      '[ObjectUI] ObjectGrid: @objectstack/spec no longer declares a positive default '
-      + `for pagination.pageSize (read ${String(declared)}); the grid has no display `
-      + 'page size to fall back to.',
-    );
-  }
-  return declared;
-}
-const DEFAULT_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
-
-/**
- * How many rows this grid FETCHES when it buckets a window into groups in the
- * browser and the author declared no page size (`bucketsFetchedWindow`). A
- * fetch batch, ⛔ not a page size: no display path reads it, and it does not
- * follow the display default (objectui#9853, ruling 5824040487, structure B).
- * Before ruling 5749197629 this number was named as a "server window" and also
- * sized the server-paged table's visible page, so one constant meant two
- * quantities.
- *
- * It stays a constant of this component rather than the protocol's value
- * because the protocol declares no fetch batch: it is how much of the result
- * set a client-grouped view holds, which is an implementation choice.
- */
-const DEFAULT_FETCH_BATCH_SIZE = 50;
-
-/**
- * The mode a `selection` object with no `type` member asks for (objectui#9837,
- * ruling A-prime: presence enables, an explicit off wins).
- *
- * ⚠️ Derived, not chosen freely. The ruling's first clause is that writing the
- * object turns selection ON, so the only values that satisfy it are the two
- * enabling ones — and `'multiple'` is already this renderer's own answer to
- * "selection is on, nothing said which kind": it is what the bulk-action
- * auto-enable arm resolves to, and what the legacy `selectable: true` means
- * (`packages/types/src/data-display.ts`, "boolean: Enable/disable selection
- * (true = multiple selection)"). `'single'` would be a third, unstated opinion.
- *
- * ⚠️ `@objectstack/spec`'s own `SelectionConfigSchema` declares `type` with
- * `.default('none')`, which this constant deliberately does NOT follow: honouring
- * it would make a written object mean OFF and contradict the ruling's first
- * clause outright. It is reachable only through a PARSE, and this repo's mirror
- * strips imported defaults at the import boundary
- * (`packages/types/src/zod/imported-defaults.ts`), so an omitted `type` stays
- * omitted on the way to this read — but metadata parsed by the spec bundle
- * itself arrives carrying `type: 'none'` and is then an EXPLICIT off here.
- * Handed back as a question on objectui#9837 rather than decided here.
- */
-const DEFAULT_SELECTION_TYPE = 'multiple' as const;
-
-/**
- * The ONE resolver for an authored page size, for the reason the `rowHeight`
- * resolver just above exists: one resolver at every entry is what keeps the
- * answer single (objectui#4443).
- *
- * Before objectui#9853 this value was spelled out separately at each of its
- * three read points, and the spellings disagreed about a non-positive number:
- * the flat site used `||`, so `0` was falsy and fell through to a default,
- * while both seeds used `??`, so `0` was not nullish and survived as a real
- * page size. It then divided the grouped pager and reached the wire as
- * `$top: 0`, so the grid asked the server for nothing and drew an empty table
- * — with no error, no warning and no empty state naming the cause.
- *
- * ## Why refusing `0` is not this renderer inventing a meaning
- *
- * `@objectstack/spec` has already answered what a `pageSize` of `0` means.
- * Its pagination config declares the member as a POSITIVE integer with a
- * default, and the spec's own suite pins that refusal under the names
- * `should reject zero pageSize` and `should reject negative pageSize`. The
- * `limit` that this block's `ElementDataSourceMapping` lowers
- * `pagination.pageSize` into is declared positive as well. So `0` is not a
- * spelling whose meaning a consumer may choose; it is a value the contract
- * refuses, and a renderer that quietly divides by it is the only party not
- * saying so.
- *
- * ⚠️ The refusal is FAIL-SOFT on purpose. Throwing would take out the whole
- * subtree for a declaration the flat path already tolerated, which is a worse
- * outcome than the defect. The value is dropped, the site's own default is
- * used, and `describeNonPositivePageSize` states it once through the channel
- * this component already uses for "you declared it, the renderer dropped it".
- *
- * Reads the canonical key first and the deprecated flat shorthand second, in
- * that precedence, with `??` so an explicit `0` is SEEN by the guard instead
- * of skipped by falsiness — that skipping is the defect, not the fix.
- */
-function readAuthoredPageSize(schema: {
-  pagination?: unknown;
-  pageSize?: unknown;
-}): unknown {
-  const fromObject = (schema.pagination as { pageSize?: unknown } | undefined)?.pageSize;
-  return fromObject ?? schema.pageSize;
-}
-
-function isUsablePageSize(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0;
-}
-
-function resolvePageSize(
-  schema: { pagination?: unknown; pageSize?: unknown },
-  fallback: number,
-): number {
-  const authored = readAuthoredPageSize(schema);
-  return isUsablePageSize(authored) ? authored : fallback;
-}
-
-/**
- * The diagnostic half. `null` means "nothing to say" — an absent key is not a
- * mistake, and a usable page size is not either, so the message is CONDITIONAL
- * and a control asserting its silence is what keeps it from being an
- * always-on marker that states nothing.
- */
-function describeNonPositivePageSize(
-  schema: { pagination?: unknown; pageSize?: unknown },
-  context: { blockType?: unknown; objectName?: unknown },
-): string | null {
-  const authored = readAuthoredPageSize(schema);
-  if (authored === undefined || authored === null) return null;
-  if (isUsablePageSize(authored)) return null;
-  const where = [
-    typeof context.blockType === 'string' ? context.blockType : 'object-grid',
-    typeof context.objectName === 'string' ? context.objectName : undefined,
-  ]
-    .filter(Boolean)
-    .join(' on ');
-  return (
-    `[ObjectUI] ObjectGrid pagination: ${where} declared pageSize: ${String(authored)}, `
-    + 'which is not a positive integer. A page size must be a positive integer '
-    + '(the spec refuses zero and negative values), so it was ignored and this '
-    + 'grid fell back to its default page size.'
-  );
-}
-
-/**
- * The grouping-refusal signature when no entry is refused (objectui#10583,
- * objectui#10657): the authored grouping config is then handed on as it is.
- */
-const NO_GROUPING_REFUSAL = JSON.stringify({ refused: [], warned: [] });
-
-/**
- * The row key that carries a record's optimistic-concurrency token
- * (objectui#12292): `updated_at`, the key the record surfaces send as
- * `If-Match`.
- */
-const OCC_TOKEN_FIELD = 'updated_at';
-
-/**
- * The concurrency token a row carries, read exactly as the record surfaces read
- * it (`occVersionOf` in `plugin-form`, the save in `plugin-detail`'s
- * `InlineEditSaveBar`): a non-empty string `updated_at`. Anything else (a
- * backend without timestamps, a row read without the column) answers
- * `undefined`, and the write goes out unguarded, as it did before.
- */
-function rowVersionOf(row: unknown): string | undefined {
-  const v = (row as Record<string, unknown> | null | undefined)?.[OCC_TOKEN_FIELD];
-  return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
-
-/** What this grid remembers about its last landed write to one record. */
-interface WrittenRowVersion {
-  /** The token the row carried when that write was made: the read it superseded. */
-  readVersion: string;
-  /** The token of the record the server answered that write with. */
-  version: string;
-}
-
-/**
- * The `ifMatch` a row save sends: the rule `plugin-form`'s `versionToSend`
- * applies to a form that stays open (objectui#10565), applied to a row.
- *
- * A saved row keeps the token it was READ with until the grid re-reads it, and
- * that token stopped being current the moment this grid's own write landed. So
- * while the row still carries the read a landed write superseded, the version
- * that write answered with is sent. A row carrying any other token is a newer
- * read, and its token wins. A row with no token stays unguarded.
- */
-function rowVersionToSend(
-  written: WrittenRowVersion | undefined,
-  readVersion: string | undefined,
-): string | undefined {
-  if (!readVersion) return undefined;
-  return written && written.readVersion === readVersion ? written.version : readVersion;
-}
-
-/** The three ways out of `ConcurrentUpdateDialog`, by its own button names. */
-type RowConflictChoice = 'reload' | 'overwrite' | 'cancel';
-
-/**
- * The per-row outcome the table's `onBatchSave` slot reads, derived from the
- * slot's declared return rather than restated here.
- */
-type BatchSaveOutcome = Exclude<
-  Awaited<ReturnType<NonNullable<DataTableSchema['onBatchSave']>>>,
-  void
->;
-
-/**
- * [objectui#12528] Reports the grid's column summaries to a host that draws
- * them in its own footer row (`onColumnSummaryChange`). Renders nothing.
- *
- * Keyed on the summaries' TEXT, never on the array's identity (AGENTS.md #10):
- * every grid render builds a new array, and an equal one must send nothing.
- * Unmounting — whatever stops the grid drawing the row — reports `null`.
- */
-function FooterSummaryReport({
-  summaries,
-  onChange,
-}: {
-  summaries: ObjectGridFooterSummary[];
-  onChange: (summaries: readonly ObjectGridFooterSummary[] | null) => void;
-}) {
-  const key = JSON.stringify(summaries);
-  const onChangeRef = React.useRef(onChange);
-  useEffect(() => {
-    onChangeRef.current = onChange;
-  });
-  useEffect(() => {
-    onChangeRef.current(JSON.parse(key) as ObjectGridFooterSummary[]);
-  }, [key]);
-  useEffect(() => () => onChangeRef.current(null), []);
-  return null;
-}
 
 /**
  * [objectui#13234] The face a date-family CELL paints, for one grouping field:
@@ -1688,7 +637,9 @@ interface TemporalGroupFace {
  * empty key, the stored text otherwise.
  *
  * The formatting CALLS are the cells' own, with the cells' arguments:
- * `DateCellRenderer` paints `formatDate(value, format || 'relative', …)`;
+ * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)
+ * paints `formatDate(value, format || undefined, …)`, the absolute default
+ * face when no `format` is declared;
  * `DateTimeCellRenderer` paints `formatRelativeDate` for `'relative'`, the
  * compact face for no format and for `'short'`, and `formatDateTime` with the
  * authored word otherwise (the compact face's string is the cell's two halves
@@ -1713,7 +664,7 @@ function temporalGroupHeading(
   if (!key) return undefined;
   // The cells' validity guard, the shared parse step.
   if (isNaN(toDisplayDate(key).getTime())) return undefined;
-  if (face.rendererType === 'date') return formatDate(key, face.format || 'relative', { locale });
+  if (face.rendererType === 'date') return formatDate(key, face.format || undefined, { locale });
   // A `datetime` cell renders an INSTANT, from the engine's parse.
   const instant = new Date(key);
   const style = !face.format || face.format === 'short' ? 'compact' : face.format;
@@ -3674,84 +2625,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wholeSetSummary.row,
   );
 
-  // An authored column the renderer cannot read now says so, instead of just
-  // not being there (objectui#5349 — the Q2 objectui#5068 deferred).
-  //
-  // #5068 made `ListColumnSchema`'s `field` / `label` the only spelling read
-  // here, which is right; what it left behind was the receipt. A column
-  // authored `{ accessorKey, header }` (or with no `field` at all) is dropped
-  // by `resolvesToDataColumn` above, and until this effect landed the author
-  // saw no error, no warning and no empty header — just a grid with its
-  // row-number column and no data columns. Same defect shape #5068 exists to
-  // fix, one level down: renderer and author disagree, author gets a success
-  // receipt.
-  //
-  // Scope, deliberately narrow: this reads the `columns` INPUT and nothing
-  // else. It never asks whether the grid found ROWS, because a grid legitimately
-  // draws them from five different places (inline `data` array, `data.provider:
-  // 'value'`, legacy `staticData`, `bind`, or a host that owns the fetch and
-  // passes the window down as a `data` React prop). A predicate that consulted
-  // those would eventually paint a configuration error over a working grid.
-  // `hidden: true` is authored intent and is never reported.
-  //
-  // Channel: the same one `ObjectGrid` already uses for "you declared it, the
-  // renderer dropped it" — a `useEffect` keyed on the schema slice and one
-  // `console.warn` prefixed `[ObjectUI] ObjectGrid <topic>:` (see the export
-  // format warning below) — rather than a second, differently-shaped one.
-  const columnDiagnosticBlockType = (schema as { type?: unknown }).type;
-  const columnDiagnosticLabel = schema.label ?? (schema as { title?: unknown }).title;
-  useEffect(() => {
-    const message = describeUnresolvedColumns(schema.columns, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [schema.columns, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#8730] The same channel, for the sibling failure on
-  // `bulkActionDefs`. A member that is not a usable def (a bare action name —
-  // the OTHER key's vocabulary — or `null`, a number, `{}`, `{ name: '' }`) is
-  // skipped by `resolveBulkActions`; before that guard it reached the bar and
-  // `formatActionLabel(undefined)` threw during render, so the author's first
-  // multi-row selection lost the whole selection bar.
-  //
-  // The skip alone would only relocate the failure into silence — which is what
-  // the mirror direction already does (`bulkActions: [{ name: 'approve' }]`,
-  // stepped over by the `typeof name !== 'string'` guard). Saying which member
-  // was dropped, and that a bare name belongs in `bulkActions`, is what makes
-  // this a diagnosis rather than a quieter version of the same defect. One
-  // `console.warn` per authored array, keyed on it — NOT a second guard: the
-  // predicate lives once, in `resolveBulkActions`, and this reads it.
-  const bulkDefsDiagnosticSlice = (schema as { bulkActionDefs?: unknown }).bulkActionDefs;
-  useEffect(() => {
-    const message = describeUnusableBulkActionDefs(bulkDefsDiagnosticSlice, {
-      blockType: columnDiagnosticBlockType,
-      objectName: schema.objectName,
-      label: columnDiagnosticLabel,
-    });
-    if (message) console.warn(message);
-  }, [bulkDefsDiagnosticSlice, columnDiagnosticBlockType, schema.objectName, columnDiagnosticLabel]);
-
-  // [objectui#9853] The same channel again, for a `pagination.pageSize` (or the
-  // deprecated flat shorthand) that is not a positive integer. `resolvePageSize`
-  // drops such a value at all three read points and uses the site's default; on
-  // its own that is a quieter version of the defect, because substituting a
-  // number the author never wrote is exactly what the flat site already did in
-  // silence. This is the half that makes it a diagnosis.
-  //
-  // Keyed on the authored slice, so it is one warning per declaration and not
-  // one per render. NOT a second guard — the predicate lives once, in
-  // `isUsablePageSize`, and this reads it.
-  const pageSizeDiagnosticObject = schema.pagination;
-  const pageSizeDiagnosticFlat = schema.pageSize;
-  useEffect(() => {
-    const message = describeNonPositivePageSize(
-      { pagination: pageSizeDiagnosticObject, pageSize: pageSizeDiagnosticFlat },
-      { blockType: columnDiagnosticBlockType, objectName: schema.objectName },
-    );
-    if (message) console.warn(message);
-  }, [pageSizeDiagnosticObject, pageSizeDiagnosticFlat, columnDiagnosticBlockType, schema.objectName]);
+  // The authored-input diagnostics (`columns`, `bulkActionDefs`, page size),
+  // three `console.warn` effects, run here in hook order (`./objectGridDiagnostics`).
+  useObjectGridDiagnostics(schema);
 
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's
@@ -3759,6 +2635,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // one helper in `@object-ui/core`, with the scope and relation collapse
     // this grid's conditional formatting uses; a field that is not a declared
     // deadline answers `false` before any predicate runs.
+    //
+    // objectstack#25884 — every column cell built below also carries
+    // `inGridColumn`, so a `date` field with no declared `format` reads in
+    // one absolute face down the column (`CellRendererProps.inGridColumn`).
+    // The record panel and the mobile card's slots draw their cells without
+    // it, outside this function.
     const settledFor = (field: unknown, row: Record<string, unknown> | undefined): boolean =>
       isDeadlineSettled(field as Parameters<typeof isDeadlineSettled>[0], row, { scope: predicateScope, fields: objectFields });
     // Map field type to column header icon (Airtable-style)
@@ -4082,7 +2964,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Both link and action: link takes priority for navigation, action executes on secondary interaction
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -4100,7 +2982,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // Link column: clicking navigates to the record detail
               cellRenderer = (value: any, row: any) => {
                 const displayContent = pointerFace?.(row) ?? (LinkContentRenderer
-                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                  ? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
                   : (value != null && value !== '' ? String(value) : <EmptyValue />));
                 return (
                   <LinkCell
@@ -4140,7 +3022,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // `dependentValues` for a cell whose value only means something
               // beside a sibling column (objectui#12613).
               cellRenderer = (value: any, row: any) => (
-                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />
+                pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />
               );
             } else {
               // Default renderer with empty value handling
@@ -4321,7 +3203,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
           if (isPrimaryField && LinkContentRenderer) {
             cellRenderer = (value: any, row: any) => {
-              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+              const displayContent = pointerFace?.(row) ?? <LinkContentRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
               return (
                 <LinkCell
                   testId="primary-field-link"
@@ -4345,7 +3227,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               </LinkCell>
             );
           } else if (CellRenderer) {
-            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />;
+            cellRenderer = (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />;
           }
 
           return {
@@ -4510,7 +3392,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             ...(schema.showColumnTypeIcons && rendererType && { headerIcon: getTypeIcon(rendererType) }),
             ...(inferredAlign && { align: inferredAlign }),
             ...(CellRenderer && {
-              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} />,
+              cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldMeta as any} dependentValues={row} deadlineSettled={settledFor(fieldMeta, row)} inGridColumn />,
             }),
             sortable: fieldDef?.sortable !== false,
           };
@@ -4618,7 +3500,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // Aligned on the RENDERER key, like paths A-C: a `text` column with
         // `format: 'currency'` renders as currency, so it aligns as currency.
         ...(!!rendererType && numericTypes.includes(rendererType) && { align: 'right' as const }),
-        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} />,
+        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
         sortable: field.sortable !== false,
       });
     });

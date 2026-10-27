@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type {
   AttachFileInput,
+  FieldFileSlot,
+  IFieldFileService,
   IFileAttachmentService,
   IStorageService,
   StorageFileInfo,
@@ -8,6 +10,7 @@ import type {
 } from './storage-service';
 import {
   DEFAULT_STORAGE_LIST_LIMIT,
+  FIELD_FILE_SERVICE,
   FILE_ATTACHMENT_SERVICE,
   decodeStorageListCursor,
   encodeStorageListCursor,
@@ -397,5 +400,49 @@ describe('File Attachment Service Contract (#23306)', () => {
     });
     expect(out).toEqual({ fileId: 'f1', attachmentId: 'a1', size: 5 });
     expect(seen[0].organizationId).toBeNull();
+  });
+});
+
+describe('Field File Service Contract (#25779)', () => {
+  it('names its own registry slot, beside the attach verb', () => {
+    expect(FIELD_FILE_SERVICE).toBe('field-files');
+  });
+
+  it('stores a file no record owns, describes it, and hands it to one slot', async () => {
+    const files = new Map<string, { owner: FieldFileSlot | null; status: 'pending' | 'committed' }>();
+    const service: IFieldFileService = {
+      storeFile: async (input) => {
+        files.set('f1', { owner: null, status: 'pending' });
+        return { fileId: 'f1', size: input.data.byteLength };
+      },
+      describeFiles: async (ids) => new Map(
+        ids.filter((id) => files.has(id)).map((id) => [id, {
+          fileId: id,
+          name: 'nda.pdf',
+          mimeType: 'application/pdf',
+          status: files.get(id)!.status,
+          owner: files.get(id)!.owner,
+          metadata: {},
+        }]),
+      ),
+      claimFiles: async (slot, ids) => {
+        for (const id of ids) files.set(id, { owner: slot, status: 'committed' });
+      },
+    };
+    const stored = await service.storeFile({
+      organizationId: null,
+      filename: 'nda.pdf',
+      mimeType: 'application/pdf',
+      data: Buffer.from('%PDF'),
+      metadata: { seedFile: 'fixtures/nda.pdf' },
+    });
+    expect(stored).toEqual({ fileId: 'f1', size: 4 });
+    await service.claimFiles({ object: 'clm_contract_version', recordId: 'r1', field: 'file' }, ['f1'], null);
+    const described = await service.describeFiles(['f1', 'missing'], null);
+    expect([...described.keys()]).toEqual(['f1']);
+    expect(described.get('f1')).toMatchObject({
+      status: 'committed',
+      owner: { object: 'clm_contract_version', recordId: 'r1', field: 'file' },
+    });
   });
 });

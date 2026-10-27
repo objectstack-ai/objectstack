@@ -376,6 +376,27 @@ never deadlock against itself. The exemption is keyed on run identity rather tha
 elevation, so a `runAs:'user'` run stays row-level-security scoped while it
 writes — it does not become a system write.
 
+**Reading the lock.** Anyone who can read the record can ask whether it is
+locked, including a member who is not on the approval and so is served no
+request row:
+
+```bash
+curl -b cookies.txt \
+  "https://your-app.example.com/api/v1/approvals/records/expense/rec_123/lock"
+# → { "success": true, "data": { "locked": true } }
+```
+
+The answer is `locked` and nothing else: no request, approvers or history,
+which stay behind the object's `approvalsVisibleToReaders` switch. `locked` is
+`true` while a pending request's node has `lockRecord` other than `false`. That
+is the same check the server applies when it refuses an edit with `409
+RECORD_LOCKED`, so a page that reads it never offers an edit the server will
+refuse. The record is read as the caller: a record they cannot read answers
+`404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets. The
+SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
+member is `IApprovalService.getRecordLock`. An approvals service without that
+member answers `501`.
+
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
@@ -544,9 +565,13 @@ or that report the decision to anyone but the submitter.
 **The decision tells the submitter.** When a decision ends the approval, the
 submitter of the request it decides gets one notification: `approval.approved`
 ("Request approved") or `approval.rejected` ("Request rejected"). Its body
-names the record (`Deal D_123`) and the outcome, followed by the decider's
-comment when they wrote one, and it links to that request in the Approvals
-Inbox. There is one topic per outcome, so a delivery preference can mute
+names the record and the outcome, followed by the decider's comment when they
+wrote one, and it links to that request in the Approvals Inbox. Like every
+approval notification, it names the record by its object's label and its
+title as that recipient may read it (`Deal Acme renewal`), and by its id
+(`Deal D_123`) when the title is empty or the recipient's field-level security
+hides the title field. The one-tap email action pages always name the record
+by its id, because they are opened with a token rather than a session. There is one topic per outcome, so a delivery preference can mute
 approvals and keep rejections.
 
 "Ends the approval" means the process, not the step. A co-sign vote that

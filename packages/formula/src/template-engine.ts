@@ -272,10 +272,9 @@ export const templateEngine: DialectEngine = {
     if (!check.ok) return check as EvalResult<T>;
 
     const scope = buildScope(ctx);
-    const locale =
-      (ctx.extra && typeof ctx.extra.locale === 'string' && ctx.extra.locale) ||
-      (typeof (ctx as { locale?: string }).locale === 'string' && (ctx as { locale?: string }).locale) ||
-      'en-US';
+    // Formatter locale: the context's reserved `locale` channel only, never a
+    // root — a root named `locale` is a value like any other (#26232).
+    const locale = typeof ctx.locale === 'string' && ctx.locale !== '' ? ctx.locale : 'en-US';
     // Reference timezone for `datetime` rendering (ADR-0053 Phase 2). Unset →
     // Intl uses the runtime zone, matching pre-Phase-2 behavior.
     const timeZone = typeof ctx.timezone === 'string' ? ctx.timezone : undefined;
@@ -285,7 +284,7 @@ export const templateEngine: DialectEngine = {
       if (!parsed) return _match; // compile already validated; defensive
       const value = resolvePath(scope, parsed.path);
       if (parsed.filter) {
-        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale as string, timeZone);
+        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale, timeZone);
       }
       return baseString(value);
     });

@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.1.0"
+  version: "18.2.0"
   domain: api
   tags: rest, endpoint, auth, realtime, server
 ---
@@ -100,6 +100,15 @@ organization to offer it again. For the full contract, read
 `node_modules/@objectstack/spec/src/ui/view.zod.ts` (`FormViewSchema`) and
 `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` (`SharingConfigSchema`
 with `enabled` / `allowAnonymous` / `publicLink`).
+
+A form open to anonymous intake declares no file field. A section field whose
+object type is in `FILE_REFERENCE_TYPES` (`image`, `file`, `avatar`, `video`,
+`audio`) is refused by the gating lint rule `public-form-file-field` — at
+`os validate` / `os build` / `os lint`, and at the view's publish — because a
+visitor has no upload door to mint a `sys_file` id. A form published before that
+rule meets the same refusal at submit: a file value answers the flat `400
+VALIDATION_FAILED` with `fields[].code: 'invalid_value'`. Collect the file on a
+signed-in form instead.
 
 ---
 
@@ -257,6 +266,14 @@ eight extra verbs are never declared in `apiMethods`:
 derive — the trash surface is retired. Declaring any derived verb in
 `apiMethods` is stripped at parse with a FROM → TO warning.
 
+`POST /data/{object}/import` takes `mapping` as `{ Column: field }` or as
+`FieldMappingEntry[]` (`api/export.zod.ts`); only the entry form carries
+`applyOn`. `'always'` (default) writes the column on every row the import
+creates or updates; `'create'` writes it only when the row is created, so a
+re-run `upsert` refreshes the `always` columns and leaves a value an admin set
+since (an owner, a stage) as it is. A create-only column is still read for
+matching. Any other value is `400 INVALID_REQUEST`.
+
 ---
 
 ## Discovery & Health
@@ -351,6 +368,16 @@ That ledger takes **framework packages only**. A downstream repo keeps its OWN
 ledger and composes the two checks itself — `envelopeViolations(body)` for the
 SHAPE, `makeApiErrorSchema(yourCodes)` for the VOCABULARY (both in
 `api/contract.zod.ts`). What no repo may do is emit a code in no ledger at all.
+
+A flow door — `POST /api/v1/automation/{name}/trigger`, resume, `/actions`, a
+declared `type: 'flow'` endpoint — answers a failed run with `400 FLOW_FAILED`;
+its `error.details` is `FlowFailureDetailsSchema` (`api/automation-api.zod.ts`):
+`errorMessage?` (the flow author's text), `summary?` (which node failed) and
+`innerRefusal?`, the `{ code, message }` a node's write was refused with, `code`
+in its wire spelling (`UNIQUE_VIOLATION`, `VALIDATION_FAILED`,
+`PERMISSION_DENIED`). Render it as a record form renders a refused save:
+top-level `userMessage`, then `details.innerRefusal`, then `message`. Absent
+keys mean the run produced none — never invent an empty.
 
 ---
 

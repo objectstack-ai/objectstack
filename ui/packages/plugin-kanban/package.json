@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-kanban",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Kanban board plugin for Object UI, powered by dnd-kit",
@@ -57,8 +57,8 @@
   },
   "devDependencies": {
     "@object-ui/data-objectstack": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
     "@object-ui/test-support": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -67,7 +67,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3"
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectui",

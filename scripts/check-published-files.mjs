@@ -292,6 +292,10 @@ const EXTRA_ENTRIES = {
     'protocol-upgrade-guide.md':
       'The protocol upgrade guide, generated from the ADR-0087 registries at publish (it is not in the tree) so an upgrading agent reads the guide for the version it installed, offline. scripts/release-spec-changes.sh --verify refuses an artifact that ships without it.',
   },
+  '@objectstack/sdui-parser': {
+    'LICENSE-MIT':
+      'The MIT permission notice for body-dialect.ts, provenance.ts and retired-visibility-dialects.ts, which moved in from @object-ui/sdui-parser (#25712) and keep the licence they were written under; MIT requires the notice to travel with every copy, and the bundled dist carries only a pointer to it.',
+  },
 };
 
 // Content that must never reach a consumer, whatever admits it. Each entry is

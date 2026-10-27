@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-editor",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Rich text editor plugin for Object UI, powered by Monaco Editor",
@@ -52,7 +52,8 @@
     "@vitejs/plugin-react": "^6.0.5",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3"
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectui",

@@ -235,6 +235,9 @@ export * from './driver-nosql.zod';
 // policy, shared by the seed dataset column (`seed.zod`) and the import
 // mapping entry (`api/export.zod`), so neither door spells it twice.
 export * from './column-apply-on.zod';
+// [#25779] A file the package ships, written into a file field by a seed:
+// `seedFile(path)`, and the bytes `os build` bundles under `Seed.files`.
+export * from './seed-file.zod';
 export * from './seed.zod';
 
 // Form Layouts

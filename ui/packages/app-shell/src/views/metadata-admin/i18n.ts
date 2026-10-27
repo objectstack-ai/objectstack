@@ -252,9 +252,16 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': 'Permission sets',
   'engine.position.holders.unknown': 'The server did not count the holders for you (no active organization, or no read on position assignments).',
   'engine.position.grants.none': 'None',
-  'engine.position.grants.byName': '(by name)',
-  'engine.position.grants.byNameHint':
-    'Granted because this permission set has the same name as the position. The position does not list it, but holders get it.',
+  // objectstack#26187 — the Setup position page's read-only previews of the
+  // permission sets the position names (`PositionPermissionSetsSection.tsx`).
+  'engine.position.sets.title': 'Permission sets',
+  'engine.position.sets.hint':
+    'What each permission set this position names grants, in the order it names them. Open a set to change it.',
+  'engine.position.sets.empty': 'This position names no permission sets.',
+  'engine.position.sets.loading': 'Loading…',
+  'engine.position.sets.notFound': 'Permission set "{name}" was not found.',
+  'engine.position.sets.readFailed': 'Permission set "{name}" could not be read.',
+  'engine.position.sets.open': 'Open this permission set',
   'engine.list.emptyType': 'No {type} items registered',
   'engine.list.emptyQuery': 'No matches for "{query}"',
   'engine.list.createHint': 'Click "New" above to create the first {type}.',
@@ -2577,6 +2584,18 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'perm.bulk.crud': 'CRUD',
   'perm.bulk.all': 'All',
   'perm.bulk.none': 'None',
+  // objectstack#26187 — the record-scope pickers (ADR-0057 D1 access depth).
+  'perm.scope.unset': 'Not set',
+  'perm.scope.value.own': 'Own',
+  'perm.scope.value.own_and_reports': 'Own and reports',
+  'perm.scope.value.unit': 'My unit',
+  'perm.scope.value.unit_and_below': 'My unit and below',
+  'perm.scope.value.org': 'Whole org',
+  'perm.scope.hierarchyHint': 'requires enterprise; otherwise owner-only',
+  'perm.scope.readTip': 'Read scope: which records this set’s read reaches, by where the user sits in the org.',
+  'perm.scope.writeTip': 'Write scope: which records this set’s edit and delete reach, by where the user sits in the org.',
+  'perm.scope.lockedByViewAll': 'View All Records already grants org-wide read, so no read scope applies. Untick View All to set one.',
+  'perm.scope.lockedByModifyAll': 'Modify All Records already grants org-wide read and write, so no scope applies. Untick Modify All to set one.',
   'perm.filter.placeholder': 'Filter objects…',
   'perm.filter.onlyGranted': 'Only granted',
   'perm.filter.empty': 'No objects match the filter.',
@@ -2681,6 +2700,19 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'perm.admin.manageAssignments': 'Manage assignments',
   'perm.admin.assignableSets': 'Assignable permission sets',
   'perm.admin.noSets': 'No permission sets loaded.',
+  // The grants a scope's holder needs beside the scope itself before they can
+  // act on it: enter Setup, pick people and units, write the assignment rows.
+  'perm.admin.companions.title': 'What a delegate also needs',
+  'perm.admin.companions.help':
+    'The scope says what its holders may administer; it does not let them in. A delegate also needs to enter Setup, to read people and business units so the lookups can pick them, and to create, read, edit and delete position assignments. These grants may sit on this set or on another set the delegate holds.',
+  'perm.admin.companions.setupAccess': 'Enter Setup',
+  'perm.admin.companions.read': 'Read',
+  'perm.admin.companions.crud': 'Create, read, edit and delete',
+  'perm.admin.companions.granted': 'On this set',
+  'perm.admin.companions.missing': 'Not on this set',
+  'perm.admin.companions.grant': 'Grant the missing ones',
+  'perm.admin.companions.packageNote':
+    'Under a package, grant these on an environment permission set in Setup, one the delegate holds: this editor saves only the package’s own objects.',
   'perm.loading': 'Loading permission set {name}…',
   // objectui#9420 — the package door refuses rather than PUTs when the
   // save-time layered re-read REJECTS: without it the merge base falls back
@@ -4048,8 +4080,13 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.list.col._grantedPermissionSets': '权限集',
   'engine.position.holders.unknown': '服务器未为你统计持有人数（没有当前组织，或无权读取岗位分配）。',
   'engine.position.grants.none': '无',
-  'engine.position.grants.byName': '（同名）',
-  'engine.position.grants.byNameHint': '因与岗位同名而授予。岗位定义未列出它，但持有人会获得它。',
+  'engine.position.sets.title': '权限集',
+  'engine.position.sets.hint': '此岗位列出的每个权限集授予的权限，按列出顺序显示。打开权限集可修改它。',
+  'engine.position.sets.empty': '此岗位未列出任何权限集。',
+  'engine.position.sets.loading': '加载中…',
+  'engine.position.sets.notFound': '未找到权限集"{name}"。',
+  'engine.position.sets.readFailed': '无法读取权限集"{name}"。',
+  'engine.position.sets.open': '打开此权限集',
   'engine.list.emptyType': '暂无 {type} 条目',
   'engine.list.emptyQuery': '没有匹配 "{query}" 的结果',
   'engine.list.createHint': '点击上方"新建"创建第一个 {type}。',
@@ -6200,6 +6237,18 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'perm.bulk.crud': '增改删',
   'perm.bulk.all': '全选',
   'perm.bulk.none': '清空',
+  // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
+  'perm.scope.unset': '未设置',
+  'perm.scope.value.own': '本人',
+  'perm.scope.value.own_and_reports': '本人及下属',
+  'perm.scope.value.unit': '本部门',
+  'perm.scope.value.unit_and_below': '本部门及下级',
+  'perm.scope.value.org': '全组织',
+  'perm.scope.hierarchyHint': '需要企业版；否则仅限本人',
+  'perm.scope.readTip': '读取范围：本权限集的读取按用户在组织中的位置覆盖哪些记录。',
+  'perm.scope.writeTip': '写入范围：本权限集的编辑与删除按用户在组织中的位置覆盖哪些记录。',
+  'perm.scope.lockedByViewAll': '“查看所有记录”已授予全组织读取，读取范围不再适用。取消勾选“查看所有记录”后可设置。',
+  'perm.scope.lockedByModifyAll': '“修改所有记录”已授予全组织读写，范围不再适用。取消勾选“修改所有记录”后可设置。',
   'perm.filter.placeholder': '筛选对象…',
   'perm.filter.onlyGranted': '只看已授权',
   'perm.filter.empty': '没有匹配的对象。',
@@ -6299,6 +6348,17 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'perm.admin.manageAssignments': '管理分配',
   'perm.admin.assignableSets': '可分配权限集',
   'perm.admin.noSets': '未加载权限集。',
+  'perm.admin.companions.title': '委派管理员还需要的授权',
+  'perm.admin.companions.help':
+    '范围只规定持有者可以管理什么，并不能让其进入。委派管理员还需要：进入 Setup，读取人员与业务单元（供查找字段选择），以及对职位分配的创建、读取、编辑和删除。这些授权可以放在本权限集上，也可以放在委派管理员持有的其他权限集上。',
+  'perm.admin.companions.setupAccess': '进入 Setup',
+  'perm.admin.companions.read': '读取',
+  'perm.admin.companions.crud': '创建、读取、编辑和删除',
+  'perm.admin.companions.granted': '本权限集已授予',
+  'perm.admin.companions.missing': '本权限集未授予',
+  'perm.admin.companions.grant': '授予缺少的项',
+  'perm.admin.companions.packageNote':
+    '在包中时，请在 Setup 中把这些授权放到委派管理员持有的环境权限集上：此编辑器只保存本包自己的对象。',
   'perm.loading': '加载权限集 {name}…',
   // objectui#9420 — 见 EN 表同键注释。
   'perm.save.rereadFailed':

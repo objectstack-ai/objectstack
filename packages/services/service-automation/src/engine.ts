@@ -602,6 +602,19 @@ export interface FlowTrigger {
     readonly type: string;
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void;
     stop(flowName: string): void;
+    /**
+     * [#25235] Optional. Called when the engine refuses to arm `flowName` ON
+     * PURPOSE before ever reaching {@link start} — the scheduled-work policy is
+     * off — so a trigger that keeps arming state outside this process can
+     * disarm what an earlier kernel left armed, whether or not this one bound
+     * it. {@link stop} cannot: it tears down only this process's own binding.
+     *
+     * The schedule trigger is the one that needs it: its `sys_job` row still
+     * `active` is how the next kernel tells "the kernel stopped ticking" from
+     * "the flow was refused", and a refusal that left the row armed would read
+     * as a silence and record every due time of it as `missed`.
+     */
+    release?(flowName: string): void;
 }
 
 // ─── Connector Registry (Plugin Extension Point) ────────────────────
@@ -810,7 +823,8 @@ export type FlowRecordExpander = (
 
 /**
  * Default ceiling on the in-memory execution-log ring buffer. Execution logs are
- * process-local and diagnostic only (launch-readiness.md P1-2); the buffer keeps
+ * process-local and diagnostic only (launch-readiness P1-2, in
+ * `docs/launch-readiness.md` as of commit df8aac41); the buffer keeps
  * the most recent N entries and evicts the oldest, so memory is bounded
  * regardless of throughput. Operators tune the window via
  * {@link AutomationServicePluginOptions.maxLogSize}. Durable, queryable run
@@ -1244,6 +1258,16 @@ export function buildRunTrigger(
 }
 
 /**
+ * The run id of a `missed` entry ({@link AutomationEngine.recordMissedRun}):
+ * one per (flow, due time), the same on every replica, so a silence two
+ * replicas both detect is one history row.
+ */
+export function missedRunId(flowName: string, dueAt: string): string {
+    const ms = Date.parse(dueAt);
+    return `run_missed_${flowName}_${Number.isFinite(ms) ? ms : dueAt}`;
+}
+
+/**
  * Internal sentinel thrown by {@link AutomationEngine.executeNode} when a node
  * signals `suspend`. It unwinds the synchronous DAG recursion up to
  * `execute()` / `resume()`, which converts it into a persisted continuation
@@ -1637,8 +1661,14 @@ export interface SuspendedRun {
  * sites widen together, in this change. ⛔ A refusal is NOT a failure: nothing
  * threw, the flow evaluated successfully and said no, and the authored reason
  * rides beside the status as `refusalMessage` rather than in `error`.
+ *
+ * [#25235] `missed` joins them on the same terms, in the same change as its one
+ * producer ({@link AutomationEngine.recordMissedRun}): a scheduled due time
+ * that passed while the kernel was not ticking, recorded by the next kernel.
+ * It is a terminal that never started — nothing ran and nothing will — so it
+ * is history, aged out like the rest, and ⛔ never a failure either.
  */
-export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out', 'refused'] as const;
+export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out', 'refused', 'missed'] as const;
 
 /** One member of {@link TERMINAL_RUN_STATUSES}. */
 export type TerminalRunStatus = (typeof TERMINAL_RUN_STATUSES)[number];
@@ -2165,6 +2195,13 @@ export interface SuspendedRunStore {
      * so "open a past failed run" works after a restart.
      */
     loadTerminal?(runId: string): Promise<RunRecord | null>;
+    /**
+     * [#25235] The per-flow cap on terminal history rows this store enforces
+     * at write time, as configured; `0` when the cap is disabled. Optional — a
+     * store that does not say is read as declaring none. Read by
+     * {@link AutomationEngine.missedRunLimit}.
+     */
+    readonly maxTerminalRunsPerFlow?: number;
 }
 
 /** What a claimed dispatch turned into (#14501). */
@@ -2190,6 +2227,33 @@ export interface FlowDispatchClaim {
     /** When the outcome was recorded (ISO-8601), or `null` while unsettled. */
     settledAt: string | null;
 }
+
+/**
+ * One scheduled due time that passed while the kernel was not ticking, as the
+ * schedule trigger hands it to {@link AutomationEngine.recordMissedRun}.
+ */
+export interface MissedScheduledRun {
+    readonly flowName: string;
+    /** The due time that passed (ISO-8601). */
+    readonly dueAt: string;
+    /** When the next kernel found it undelivered (ISO-8601). */
+    readonly detectedAt: string;
+    /**
+     * The `(flow, tick-window)` dispatch key a fire at {@link dueAt} would
+     * have claimed — the trigger computes it, the engine never learns how.
+     */
+    readonly dispatchKey: string;
+    /** The acting organization the flow declares, when it declares one. */
+    readonly organization?: string | null;
+}
+
+/**
+ * What {@link AutomationEngine.recordMissedRun} did with one due time:
+ * `recorded` — a `missed` entry is in the run history; `dispatched` — the
+ * ledger holds a claim for its window, so it was not missed; `unverifiable` —
+ * no ledger reading could be made, so nothing was recorded.
+ */
+export type MissedRunOutcome = 'recorded' | 'dispatched' | 'unverifiable';
 
 /**
  * Persisted claim ledger for trigger dispatch idempotency (#10220), extended
@@ -2982,6 +3046,88 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#25235] How many missed due times one detection may record for one
+     * flow, or `null` when it may record none.
+     *
+     * `null` without a persisted dispatch ledger: "no claim for this window"
+     * is then not evidence that nothing ran, so the detection is skipped
+     * rather than inferred (the trigger says so, naming the flow).
+     *
+     * Otherwise the run history's own per-flow cap
+     * ({@link SuspendedRunStore.maxTerminalRunsPerFlow}): the store keeps only
+     * that many newest terminal rows per flow and deletes the rest in the same
+     * write, so recording more would be writing rows it removes at once. A
+     * store that declares no cap (or `0`, cap disabled) leaves the engine's
+     * own run buffer (`maxLogSize`) as the history bound, and that is read
+     * instead — never a number of this method's own.
+     */
+    missedRunLimit(): number | null {
+        const ledger = this.flowDispatchStore;
+        if (!ledger || typeof ledger.read !== 'function') return null;
+        const cap = this.store?.maxTerminalRunsPerFlow;
+        return typeof cap === 'number' && cap > 0 ? cap : this.maxLogSize;
+    }
+
+    /**
+     * Record one scheduled due time that passed while the kernel was not
+     * ticking as a `missed` entry in the flow's run history — and run nothing
+     * for it. Record only, no replay: the ruling this implements is
+     * objectstack-ai/cloud#3149 item 5, filed here as #25235.
+     *
+     * The schedule trigger decides WHICH due times passed in the silence (it
+     * owns the schedule and the window math); this method decides whether one
+     * of them was really missed, against the dispatch ledger: a window whose
+     * key is claimed was dispatched — a fire that landed, or one that died in
+     * flight, which the replay door owns — and is not recorded.
+     *
+     * ⛔ It records nothing it cannot verify. With no persisted ledger, or a
+     * ledger read that throws, "unclaimed" would be a guess, and a `missed`
+     * entry for a window that actually ran is a false statement in the one
+     * place an operator goes to learn what ran. The trigger reports the
+     * `unverifiable` count instead.
+     *
+     * The entry's id is derived from the flow and the due time, so two
+     * replicas finding the same silence write one history row (the store's
+     * terminal write is an upsert by id). On the entry `startedAt` is the due
+     * time and `completedAt` the detection instant — `ExecutionStatus`
+     * documents that reading of the two for `missed`; no step ran, so `steps`
+     * is empty.
+     */
+    async recordMissedRun(missed: MissedScheduledRun): Promise<MissedRunOutcome> {
+        const store = this.flowDispatchStore;
+        if (!store || typeof store.read !== 'function') return 'unverifiable';
+        try {
+            if (await store.read(missed.dispatchKey)) return 'dispatched';
+        } catch (err) {
+            this.logger.warn(
+                `[automation] missed-run check for flow '${missed.flowName}' due ${missed.dueAt} could not read ` +
+                    `the dispatch ledger — NOT recording it as missed, since an unread claim may be a run that ` +
+                    `landed. The store failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
+            return 'unverifiable';
+        }
+        const context: AutomationContext = {
+            event: 'schedule',
+            ...(missed.organization ? { tenantId: missed.organization } : {}),
+        };
+        this.recordLog(
+            {
+                id: missedRunId(missed.flowName, missed.dueAt),
+                flowName: missed.flowName,
+                flowVersion: this.flows.get(missed.flowName)?.version,
+                status: 'missed',
+                startedAt: missed.dueAt,
+                completedAt: missed.detectedAt,
+                trigger: buildRunTrigger(context),
+                steps: [],
+            },
+            context,
+        );
+        return 'recorded';
+    }
+
+    /**
      * Generate a process-unique run id. Includes a random component so ids do
      * not collide with runs persisted by a previous process lifetime (a plain
      * incrementing counter would reissue `run_1` after a restart, clashing with
@@ -3545,6 +3691,22 @@ export class AutomationEngine implements IAutomationService {
                 this.logger.info(
                     `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${reason}`,
                 );
+            }
+            // [#25235] A refusal on purpose disarms what a previous kernel left
+            // armed — see {@link FlowTrigger.release}. On every pass, not once:
+            // the trigger may register after the flow, and a cancel by name of
+            // an already-disarmed job changes nothing.
+            const refusing = this.triggers.get(resolved.triggerType);
+            if (refusing && typeof refusing.release === 'function') {
+                try {
+                    refusing.release(flowName);
+                } catch (err) {
+                    this.logger.warn(
+                        `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}', and disarming what ` +
+                            `an earlier start left armed for it failed. The failure is in this record's meta.`,
+                        describeThrownForLog(err),
+                    );
+                }
             }
             return;
         }

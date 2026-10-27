@@ -43,7 +43,7 @@
  *   2. the job id still exists in it;
  *   3. its `name:` is EXACTLY the registered literal — the pin proper;
  *   4. the job declares no `strategy.matrix`. A matrix job's check-run name is
- *      the name with the matrix values appended (`Test Core (1/3)`), so a bare
+ *      the name with the matrix values appended (`Test Core (1/N)`), so a bare
  *      registered name would never report. Worse, per #5617's audit a SKIPPED
  *      matrix job publishes the name UNEXPANDED, so the two spellings are not
  *      even stable across runs;
@@ -78,7 +78,7 @@
  *      Two jobs with one name publish one context whose conclusion is whichever
  *      finished last, so an unrelated job could satisfy a required gate. This
  *      is live ammunition here rather than a hypothetical: ci.yml's sharded
- *      `test` job is named `Test Core (${{ matrix.shard }}/3)` and its gate is
+ *      `test` job is named `Test Core (${{ matrix.shard }}/N)` and its gate is
  *      named `Test Core`; deleting the suffix collides them.
  *
  * ## The required SET: readable, diffable, and deliberately not merge-blocking
@@ -194,6 +194,7 @@ import { fileURLToPath } from 'node:url';
 // the same narrow reading for the same defect one flag over (#10889).
 import { invokes, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { shardTotal } from './ci-shard-matrix.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -545,7 +546,7 @@ export const REQUIRED_CONTEXTS = [
  * registry EXACTLY, so the NEXT enrolment cannot land without following the
  * sentence. RESIDUALS, recorded rather than implied covered: paraphrase
  * drift (naming a context loosely, e.g. "Lint & Type Check" in
- * docs/launch-readiness.md) is invisible to both halves; and after a
+ * docs/launch-readiness.md as of commit df8aac41) is invisible to both halves; and after a
  * SHORTENING rename (new name a substring of the old), an old-literal mention
  * satisfies the new name's `mustName` by substring — the budget half still
  * tracks the old name, so staleness stays bounded; and the COUNT WORD that
@@ -639,7 +640,6 @@ export const INSTRUCTION_SURFACES = [
     mustName: [],
   },
   // Release/maintenance checklists that name individual contexts ⇒ scan-only.
-  { file: 'docs/launch-readiness.md', mustName: [] },
   { file: 'docs/releases-maintenance.md', mustName: [] },
 ];
 
@@ -2066,13 +2066,16 @@ async function selfTest() {
   );
 
   // ── (9) the shadowing collision, on the live specimen ────────────────────
-  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/8)`
+  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/N)`
   // and its aggregate gate is named `Test Core`. Dropping the suffix makes two
   // jobs publish one context, and the surviving conclusion is whichever
-  // finished last — a shard could satisfy the aggregate's required gate.
+  // finished last — a shard could satisfy the aggregate's required gate. N is
+  // the matrix's own size, read from the workflow (scripts/ci-shard-matrix.mjs),
+  // so a resized matrix moves this anchor with it.
   battery('(9) the shadowing collision, on the live specimen');
+  const TEST_CORE_SHARD_NAME = `name: Test Core (\${{ matrix.shard }}/${shardTotal(sources['ci.yml'], 'test')})`;
   const collided = fixture('collide the shard name with the gate name', 'ci.yml', (s) =>
-    s.replace('name: Test Core (${{ matrix.shard }}/8)', 'name: Test Core'),
+    s.replace(TEST_CORE_SHARD_NAME, 'name: Test Core'),
   );
   assert(
     collided.problems.some((p) => p.includes("job 'test'") && p.includes("published by ci.yml:test-gate")),
@@ -2081,7 +2084,7 @@ async function selfTest() {
   // The suffixed spelling is NOT a collision — the guard must not read a
   // prefix as a clash, or ci.yml is red on main today.
   assert(
-    baseline.problems.length === 0 && sources['ci.yml'].includes('name: Test Core (${{ matrix.shard }}/8)'),
+    baseline.problems.length === 0 && sources['ci.yml'].includes(TEST_CORE_SHARD_NAME),
     'the real suffixed shard name coexists with the bare gate name (assertion 9 compares whole names, not prefixes)',
   );
 

@@ -312,10 +312,11 @@ describe('ObjectView view-config `titleField` — the middle rung is gone (objec
 });
 
 describe('the seven seams share ONE expression shape (objectui#6557)', () => {
-  const SOURCE = readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), 'ObjectView.tsx'),
-    'utf8',
-  );
+  // This face spans `ObjectView.tsx` and the view-options family it imports
+  // from `objectViewOptions.ts` (objectstack#25992 slice 2), so the scan reads both.
+  const SOURCE = ['ObjectView.tsx', 'objectViewOptions.ts', 'objectViewListRenderer.tsx']
+    .map((file) => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), file), 'utf8'))
+    .join('\n');
 
   /** Every `titleField:` / `labelField:` assignment in the file. */
   const seamLines = SOURCE.split('\n').filter((l) => /^\s*(titleField|labelField):/.test(l));

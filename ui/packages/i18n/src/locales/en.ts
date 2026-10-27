@@ -322,6 +322,12 @@ const en = {
     update: 'Update',
     createSuccess: '{{object}} created successfully',
     updateSuccess: '{{object}} updated successfully',
+    // The console's record-save toasts when the saved record has a display
+    // name (ADR-0079): `{{object}}` is the object label, `{{title}}` the
+    // record's name. A record with no name keeps `createSuccess` /
+    // `updateSuccess` above.
+    createdNamed: '{{object}} "{{title}}" created',
+    updatedNamed: '{{object}} "{{title}}" updated',
     // plugin-form's own feedback chrome (objectui#11039): the success toast
     // a form raises when the author declared no `successMessage` (`created`
     // after a create, `saved` after an edit), the master-detail form's edit
@@ -1575,6 +1581,16 @@ const en = {
     edited: '(edited)',
     via: 'via {{source}}',
     viewSource: 'View source',
+    // objectstack#25959 — a run of consecutive updates folded into one feed row.
+    foldedUpdates: 'Updated {{fields}}',
+    foldedUpdateCount: '{{count}} updates',
+    foldedUpdateCount_one: '{{count}} update',
+    foldedUpdateCount_other: '{{count}} updates',
+    foldedMoreFields: '{{count}} more',
+    foldedMoreFields_one: '{{count}} more',
+    foldedMoreFields_other: '{{count}} more',
+    expandFolded: 'Show each update',
+    collapseFolded: 'Hide updates',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -3183,6 +3199,7 @@ const en = {
     },
     shell: {
       tenantHostHint: 'You are signing in to this system',
+      poweredBy: 'Powered by ObjectStack',
     },
     // These were previously supplied only as inline `defaultValue:` args at the
     // SetPasswordPage call sites, so `zh` was the only pack that could carry a
@@ -4552,7 +4569,7 @@ const en = {
       cancel: 'Cancel',
     },
     bound: {
-      title: 'Connected to ObjectStack Cloud',
+      title: 'Connected to ObjectOS Cloud',
       runtime: 'Runtime',
       organization: 'Organization',
       approvedBy: 'Approved by',
@@ -4655,13 +4672,13 @@ const en = {
       install: {
         dialogTitle: 'Install {{name}}',
         dialogDescCurrent: 'Install into this environment ({{host}}).',
-        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectOS Cloud.',
         environment: 'Environment',
         environmentPlaceholder: 'Pick an environment',
         includeSampleData: 'Include sample data',
         noEnvs: 'No environments found in your active organization.',
         noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
-        signInFirst: 'You need to sign into ObjectStack Cloud first. Click "Open on cloud" below.',
+        signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
         success: 'Installed successfully. Open the environment to see the new app.',
         localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
         // objectui#12098 — the install answered `hotLoaded: false`: installed, and
@@ -4708,7 +4725,7 @@ const en = {
       update: {
         dialogTitle: 'Update {{name}}',
         dialogDescCurrent: 'Update the copy installed in this environment ({{host}}).',
-        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectOS Cloud.',
         majorNotice: 'This is a major version update (v{{fromMajor}} → v{{toMajor}}), which may include breaking changes.',
         releaseNotes: 'Read the v{{version}} release notes',
         success: 'Updated to v{{version}}.',
@@ -5420,13 +5437,15 @@ const en = {
     },
     map: {
       sourceUnresolved: 'This map’s data source could not be resolved',
-      // objectstack#25889 — the map view's own notices. Both style failures
-      // fill `{{reason}}` with MapLibre's message, or `styleFailedUnknownReason`
-      // when it gave none; the excluded count reads "Label: N" so no key needs
+      // objectstack#25889 — the map view's own notices. The three style
+      // failures (the view's own style, the deployment's default style —
+      // objectstack#26163 — and the public default) fill `{{reason}}` with
+      // MapLibre's message, or `styleFailedUnknownReason` when it gave none; the excluded count reads "Label: N" so no key needs
       // a plural family.
       invalidCoordinatesExcluded: 'Records excluded from the map for missing or invalid coordinates: {{excluded}}',
       styleFailedConfigured: 'Map failed to load ({{reason}}). The records are listed below; check the map style URL set on this view.',
       styleFailedDefault: 'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
+      styleFailedDeployment: 'Map failed to load ({{reason}}). The records are listed below; the default map style set for this deployment could not be loaded here, so ask your administrator to check it.',
       styleFailedUnknownReason: 'the map style or tiles could not be loaded',
       webgl2Unavailable: 'Map failed to load (this browser does not provide WebGL2, which the map needs). The records are listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.',
       retry: 'Try the map again',

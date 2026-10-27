@@ -148,6 +148,12 @@ export const drawableUnderGrownOnceExplained: Record<
  * for — under the resolved spec AND under `main`'s. This is what makes the
  * change a re-spelling rather than a re-definition: the published type does not
  * move, only the way it is derived.
+ *
+ * Exact on purpose: ui draws this union exhaustively. A view kind the spec adds
+ * lands in `ListViewVisualization` unless `UndrawableViewKind` names it, and
+ * then `LIST_VIEW_KINDS` in `normalize-list-view.ts` (a total `Record` over the
+ * union) fails the build there first. That record and `ListView`'s `case` list
+ * are where the new kind is drawn; this list follows them.
  */
 export type _VisualizationUnionIsTheNineDrawnKinds = Expect<
   Equal<

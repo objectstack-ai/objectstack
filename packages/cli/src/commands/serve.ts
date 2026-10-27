@@ -11,6 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
@@ -89,6 +90,7 @@ import {
   parseRequestedPort,
   formatInvalidPortNotice,
   portTextReadNotice,
+  portFlagEnv,
   MAX_PORT,
   type PortInputSource,
 } from '../utils/port-contract.js';
@@ -463,6 +465,26 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
     + chalk.dim('     certainly fail with a raw EADDRINUSE from the kernel, and this notice\n')
     + chalk.dim('     is the only place that says why.\n')
     + chalk.dim(`     Free a port in ${startPort}–${lastPort}, or pick another via PORT=<port> (or --port <port>).`)
+  );
+}
+
+/**
+ * The notice for a development auto-shift that succeeded (#12543): the port
+ * asked for, that it could not be had, and the port taken instead.
+ *
+ * One function because two processes print it (#26270): `os serve` when its
+ * own walk shifts, and the `os dev` parent, which runs the same walk before it
+ * compiles so the config reads the port the server will bind. Whichever shifts
+ * says so in these words; the other never shifts on that boot.
+ */
+export function formatDevPortShiftNotice(requestedPort: number, port: number): string {
+  return (
+    '\n'
+    + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
+    + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
+    + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
+    + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
+    + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`)
   );
 }
 
@@ -2173,6 +2195,9 @@ export default class Serve extends Command {
     // An operator who never exported NODE_ENV is booting a real deployment,
     // not asking to be treated as development — this is `os serve` agreeing
     // with `os start` on that, one line, for the whole gate family at once.
+    // #26242 — the value before this command sets its own, for the one child a
+    // dev boot may start (`compileForDevBoot`), which must not inherit the write.
+    const launchNodeEnv = process.env.NODE_ENV;
     if (flags.dev) {
       if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
     } else if (!process.env.NODE_ENV) {
@@ -2209,6 +2234,14 @@ export default class Serve extends Command {
       this.exit(1);
     }
     const requestedPort = parsedPort;
+    // ── A `--port` on argv is the port the config reads (#26243) ──────────
+    // The config is loaded in this process further down, and a config may read
+    // `OS_PORT`/`PORT` at module evaluation (the showcase's self URL does). The
+    // flag reached only the listener before: `os serve --port 41303` with no
+    // `OS_PORT` served and dispatched `http://127.0.0.1:3000`. Exported here
+    // the way `os dev` and `os start` export theirs (`portFlagEnv`); a port
+    // that came from the environment or the default is left as it is.
+    if (metadata.flags.port?.setFromDefault !== true) Object.assign(process.env, portFlagEnv(requestedPort));
 
     // ── The TLS pair, refused here for the same reason the port is (#16804) ──
     // Ahead of every socket and every import that branches on the protocol, and
@@ -2331,14 +2364,16 @@ export default class Serve extends Command {
         // line cannot be swallowed, and it survives a boot that dies later. A
         // drifted port is a plausible CAUSE of such a death, so the notice has
         // to outlive it.
-        printDiagnostic(
-          '\n'
-          + chalk.yellow(`  ⚠ Port ${requestedPort} is in use — serving on ${port} instead.\n`)
-          + chalk.dim(`     Development auto-shift: ${requestedPort} was not free, so this server took\n`)
-          + chalk.dim(`     the next one that was (${port}). Anything still pointed at ${requestedPort} — a\n`)
-          + chalk.dim('     proxy, an OAuth callback URL, another terminal, a test harness — is\n')
-          + chalk.dim(`     talking to whatever holds ${requestedPort}, not to this server.`),
-        );
+        printDiagnostic(formatDevPortShiftNotice(requestedPort, port));
+        // ── …and the shifted port is the port the config reads (#26270) ──
+        // The config is loaded further down in this process, and it may read
+        // `OS_PORT`/`PORT` at module evaluation (the showcase's self URL does),
+        // as may the dev compile a direct `os serve --dev` runs. Without this
+        // they read the port that was busy: measured on the showcase,
+        // `/api/v1/meta/connector/showcase_status_api` named the held port and
+        // the self-ping flow answered `400 FLOW_FAILED`. Exported on the same
+        // two names a port flag is (`portFlagEnv`), so nothing restates them.
+        Object.assign(process.env, portFlagEnv(port));
       }
     } else if (!(await isPortAvailable(requestedPort))) {
       // One write, for the reason spelled out at the "Nothing to serve" exit
@@ -2804,6 +2839,22 @@ export default class Serve extends Command {
           if (placed.packages !== (config as any).packages) config = { ...config, packages: placed.packages };
         } catch {
           /* docs are additive — never block boot on collection */
+        }
+      }
+
+      // [#25779] Seed files, mirrored the same way. `os build` reads each file
+      // a seed record names with `seedFile(path)` into its dataset's `files`
+      // map (compile.ts step 4a), and the seed loader stores it from there.
+      // `defineStack(...)` carries the reference and not the bytes, so a config
+      // boot without this would refuse every such row that an artifact boot of
+      // the same project seeds. A path it cannot read is reported and left out;
+      // the loader then refuses that row, by name, and the boot goes on.
+      if (!useArtifactFallback) {
+        const { collectSeedFiles, placeSeedFiles } = await import('../utils/bundle-seed-files.js');
+        const seedFiles = collectSeedFiles(absolutePath, config as Record<string, unknown>);
+        placeSeedFiles(seedFiles);
+        for (const issue of seedFiles.issues) {
+          console.warn(chalk.yellow(`  ⚠ ${issue.location}: ${issue.message}`));
         }
       }
 
@@ -3503,6 +3554,41 @@ export default class Serve extends Command {
                 + '\n    boot without a door.',
               ));
             } else {
+              // #26242 — the door is about to serve THIS file's copy of the
+              // stack while the wrap below serves the config module's, so a
+              // config that reads the environment at module evaluation (the
+              // showcase's `OS_PORT` self URL) gives `/meta` the value of
+              // whichever environment last compiled the file. `os dev` closed
+              // that by compiling before it boots (#26130); a direct dev boot
+              // reads the same decision, `devCompilesAtBoot`. Under a
+              // supervising `os dev` (its channel answered) the parent already
+              // made it, `--no-compile` included, so the child never compiles
+              // again. Only an artifact on disk reaches this branch: with none,
+              // no door composes and the wrap is the one copy.
+              //
+              // The compile runs in THIS process's environment, the one the
+              // module above was evaluated in, with the launch `NODE_ENV` put
+              // back (`compileForDevBoot` says why), so both copies are one
+              // evaluation's answer exactly as under `os dev`. A failed compile
+              // refuses the boot, as it does there.
+              if (!supervisorArtifact && devCompilesAtBoot({
+                compile: true,
+                pinned: Boolean(pinnedArtifact),
+                configExists,
+                artifactExists: true,
+              })) {
+                printDiagnostic(chalk.dim(`  Compiling ${relativeConfig} → ${path.relative(process.cwd(), hmrArtifactPath) || hmrArtifactPath}...`));
+                const compiled = compileForDevBoot({ configPath: absolutePath, outputPath: hmrArtifactPath, launchNodeEnv });
+                if (compiled.status !== 0) {
+                  console.error(
+                    `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`
+                    + chalk.red(`  ✗ Compile failed — fix errors above before starting the dev server.\n`)
+                    + chalk.dim(`    A dev boot over ${hmrArtifactPath} compiles ${relativeConfig} into it first, so the`)
+                    + chalk.dim('\n    metadata it serves is the config this boot evaluates.'),
+                  );
+                  process.exit(1);
+                }
+              }
               const { MetadataPlugin } = await import('@objectstack/metadata');
               // Mirror the standalone stack's dev config exactly
               // (packages/runtime/src/standalone-stack.ts): declarative
@@ -6223,7 +6309,7 @@ export function createUnknownHostnameGuardPlugin(
     <div class="host">${safeHost}</div>
     <p class="muted" style="margin-top:24px">
       If you own this domain, bind it to an environment in the
-      <a href="https://cloud.objectos.ai/">ObjectStack Cloud console</a>.
+      <a href="https://cloud.objectos.ai/">ObjectOS Cloud console</a>.
     </p>
   </main>
 </body>

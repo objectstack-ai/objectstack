@@ -53,6 +53,10 @@ Create `tsconfig.json`:
 }
 ```
 
+### Module resolution
+
+The published `@objectstack/*` packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. Set `moduleResolution` to `bundler` (as above), `node16` or `nodenext`. TypeScript's legacy `node10` resolution (spelled `"node"`, and the default when `module` is `commonjs`) is not supported: it ignores `exports`, so every subpath import fails to resolve its types while the root entry still appears to work. The packages ship no `typesVersions` fallback for it.
+
 ---
 
 ## Step 2: Define the Package Manifest

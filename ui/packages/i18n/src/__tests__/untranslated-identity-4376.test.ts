@@ -101,6 +101,7 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   // failed on a leftover entry — dead (no identity left to excuse) and unknown
   // (no such key in `en`) — which is that guard doing its job.
   'publicForm.poweredBy': 'Powered by ObjectStack — product attribution; ja keeps the English wordmark line.',
+  'auth.shell.poweredBy': 'Powered by ObjectStack — the Community Console sign-in page attribution; ja keeps the English wordmark line, as publicForm.poweredBy does.',
   'console.studio.title': 'Studio — the product name, which every pack writes in Latin script in its own Studio strings (objectui#11863).',
   'connectAgent.apiKey.badge': 'headless — the literal mode name the CLI and API use.',
   // `marketplace.pricing.freemium` sat here until objectui#8754 retired the

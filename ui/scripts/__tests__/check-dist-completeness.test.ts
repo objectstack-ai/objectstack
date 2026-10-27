@@ -269,7 +269,7 @@ describe('this repository', () => {
   const tscPackages = discoverTscPackages(repoRoot) as Array<{ name: string; dir: string }>;
 
   it('finds the tsc-built packages', () => {
-    expect(tscPackages.length).toBeGreaterThanOrEqual(12);
+    expect(tscPackages.length).toBeGreaterThanOrEqual(11);
   });
 
   it.each(tscPackages.map((p) => [p.name, p.dir] as const))(

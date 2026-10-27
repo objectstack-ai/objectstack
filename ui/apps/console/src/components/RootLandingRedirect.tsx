@@ -66,6 +66,24 @@ function isPlatformSetupApp(app: LandingApp): boolean {
 }
 
 /**
+ * The ONE segment that addresses `app` among `apps` (ADR-0048 option A): its
+ * package id whenever that resolves back to this very app, else its name — a
+ * package shipping several apps leaves the name as the only address that
+ * reaches the later ones. The same answer as app-shell's `appAddressSegment`,
+ * spelled out here for the reason rule 1 below gives for not importing the
+ * chrome's policy; `landingHomeParity-7256.test.ts` holds the two equal.
+ *
+ * Landing on the name used to leave the whole session on the name alias while
+ * the sidebar built every link on the package id (objectstack-ai/objectstack#26183).
+ */
+function landingSegment(apps: readonly LandingApp[], app: LandingApp & { name: string }): string {
+  const pkg = app._packageId;
+  if (!pkg) return app.name;
+  const resolved = apps.find((a) => a?._packageId === pkg) ?? apps.find((a) => a?.name === pkg);
+  return resolved === app ? pkg : app.name;
+}
+
+/**
  * The path `/` should redirect to, resolved purely from the App list. Extracted
  * from the component so the policy is unit-testable without a router/render.
  */
@@ -84,7 +102,7 @@ export function resolveLandingPath(apps: readonly LandingApp[] | null | undefine
   //    chrome-free hand-rolled mock, so importing the policy from there would
   //    make the fixture, not the shipped function, the thing under test.
   const defaultApp = list.find((a) => a.isDefault === true);
-  if (defaultApp) return `/apps/${defaultApp.name}`;
+  if (defaultApp) return `/apps/${landingSegment(apps ?? [], defaultApp)}`;
 
   // 2. A single-app deployment lands straight in that App (no one-tile
   //    launcher) — but Setup alone is NOT a one-app deployment.
@@ -111,7 +129,7 @@ export function resolveLandingPath(apps: readonly LandingApp[] | null | undefine
   //    deployment from `/home` into the product app — a far larger change than
   //    this card asks for, and one nobody measured.
   const visible = list.filter((a) => a.active !== false && a.hidden !== true);
-  if (visible.length === 1 && !isPlatformSetupApp(visible[0])) return `/apps/${visible[0].name}`;
+  if (visible.length === 1 && !isPlatformSetupApp(visible[0])) return `/apps/${landingSegment(apps ?? [], visible[0])}`;
 
   // 3. Multi-app default: the workspace launcher.
   return '/home';

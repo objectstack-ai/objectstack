@@ -387,9 +387,9 @@ export interface BaseSchema {
    * `SchemaRenderer.tsx:382` calls `evaluator.evaluateCondition(schema.visible)`,
    * and `evaluateCondition` is declared
    * `(condition: string | boolean | undefined, context?) => boolean`. The
-   * sibling keys `visibleWhen` and the deprecated `visibleOn` are `string` for
-   * the same reason; this one simply under-reported the capability, and
-   * fixtures exercising it had to cast past the declaration.
+   * sibling key `visibleWhen` is a predicate for the same reason; this one
+   * simply under-reported the capability, and fixtures exercising it had to
+   * cast past the declaration.
    *
    * Accepts the CEL ENVELOPE OBJECT as well (objectui#7530, ruled 2026-09-04,
    * option A -- on all three of `visible` / `hidden` / `disabled` at once):
@@ -409,8 +409,9 @@ export interface BaseSchema {
 
   /**
    * Canonical conditional-visibility predicate (ADR-0089) — the element is shown
-   * when this evaluates truthy. The spec folds the deprecated `visibleOn` /
-   * `visibility` aliases into this key at parse.
+   * when this evaluates truthy. The ONE node-level show predicate: the
+   * objectui dialect `visibleOn` is a retired spelling of it (the `?: never`
+   * tombstone below), and the spec's page component never declared it.
    *
    * Typed BY REFERENCE as the spec's own input type for an evaluated slot,
    * `EvaluatedExpressionInput` (objectui#8347, ruled Q6 = B): a predicate
@@ -429,12 +430,27 @@ export interface BaseSchema {
   visibleWhen?: EvaluatedExpressionInput;
 
   /**
-   * Expression for conditional visibility.
-   * Evaluated against the current data context.
-   * @deprecated ADR-0089 — use `visibleWhen`.
-   * @example "${data.role === 'admin'}"
+   * RETIRED — a `?: never` tombstone, refused by name (ADR-0049, ADR-0089).
+   *
+   * `visibleOn` was objectui's own pre-ADR-0089 spelling of the show
+   * predicate. The spec made `visibleWhen` the single canonical name across
+   * every layer and tombstoned its own form-field `visibleOn`; this node-level
+   * twin kept reading the old spelling as a third leg of `SchemaRenderer`'s
+   * chain, and the published skill taught it as protocol. Retired at both
+   * faces at once, with no alias window: `tsc` refuses the key in a fresh
+   * typed literal, the zod mirror (`../zod/base.zod.ts`) refuses an authored
+   * value with `invalid_type` at this path and names `visibleWhen`, and the
+   * renderer no longer consults it. A document that still carries it is
+   * refused by `objectui validate` / `objectui check`, never silently kept:
+   * `BaseSchemaCore` ends `.passthrough()`, so a DELETED member would have
+   * been accepted and inert, which is the state this tombstone exists to end.
+   *
+   * Migration: `visibleOn: EXPR` → `visibleWhen: EXPR`. Same evaluator, same
+   * polarity (shown when truthy), same scope.
+   *
+   * @deprecated Retired spelling of `visibleWhen` — author `visibleWhen`.
    */
-  visibleOn?: string;
+  visibleOn?: never;
 
   /**
    * Controls whether the component is hidden.
@@ -472,13 +488,12 @@ export interface BaseSchema {
    * `evaluateVisibilityPredicate(newSchema.hidden, 'hidden')` in
    * `SchemaRenderer.tsx` (the `hidden` leg, :1236 as of d04e79a80 -- re-derive
    * the line, do not trust it) -- and the evaluator underneath is declared
-   * `(condition: string | boolean | undefined, ...) => boolean`. The sibling
-   * key `hiddenOn` is `string` for the same reason, and its existence was NOT
-   * taken to mean this key should stay boolean -- exactly as it was not taken
-   * that way for `visibleWhen` / `visibleOn` beside `visible`, or `disabledOn`
-   * beside `disabled`. The declaration simply under-reported a shipped, pinned
-   * capability (`SchemaRenderer.hiddenDeclaredGate.test.tsx`), and the fixtures
-   * exercising it had to cast past it.
+   * `(condition: string | boolean | undefined, ...) => boolean`. The
+   * declaration simply under-reported a shipped, pinned capability
+   * (`SchemaRenderer.hiddenDeclaredGate.test.tsx`), and the fixtures
+   * exercising it had to cast past it. The `hiddenOn` dialect that once sat
+   * beside this key is retired (the tombstone below): this key IS the hide
+   * predicate, so a second spelling of it had nothing left to say.
    *
    * ADR-0089 -- "The boolean `visible` (Tab on/off) is a different type and
    * concept and is explicitly out of scope" -- governs `packages/spec`'s keys,
@@ -505,10 +520,22 @@ export interface BaseSchema {
   hidden?: boolean | ExpressionWire;
 
   /**
-   * Expression for conditional hiding.
-   * @example "${!data.isActive}"
+   * RETIRED — a `?: never` tombstone, refused by name (ADR-0049).
+   *
+   * `hiddenOn` was a second spelling of `hidden`: the same hide polarity, the
+   * same evaluator, consulted only after an undeclared `hidden`. `hidden`
+   * takes a predicate string and the CEL envelope itself, so the dialect
+   * carried nothing the canonical key does not. Retired at both faces with no
+   * alias window, the same shape as `visibleOn` above: refused by `tsc` in a
+   * fresh typed literal, refused by the zod mirror with `invalid_type` at this
+   * path naming `hidden`, and no longer read by the renderer.
+   *
+   * Migration: `hiddenOn: EXPR` → `hidden: EXPR`. Same polarity (hidden when
+   * truthy); the value is unchanged.
+   *
+   * @deprecated Retired spelling of `hidden` — author `hidden`.
    */
-  hiddenOn?: string;
+  hiddenOn?: never;
 
   /**
    * Controls whether the component is disabled.
@@ -520,9 +547,10 @@ export interface BaseSchema {
    * `evaluator.evaluateCondition(newSchema.disabled)`, and `evaluateCondition`
    * is declared
    * `(condition: string | boolean | undefined, context?) => boolean`. The
-   * sibling key `disabledOn` is `string` for the same reason. The asymmetry
-   * with `visible` was accidental rather than deliberate (#4580 ruling Q3-A);
-   * the two fixtures exercising it had been casting past the declaration.
+   * asymmetry with `visible` was accidental rather than deliberate (#4580
+   * ruling Q3-A); the two fixtures exercising it had been casting past the
+   * declaration. The `disabledOn` dialect that once sat beside this key is
+   * retired (the tombstone below): this key IS the enablement predicate.
    *
    * Accepts the CEL ENVELOPE OBJECT as well (objectui#7530, ruled 2026-09-04,
    * option A -- on all three of `visible` / `hidden` / `disabled` at once). The
@@ -541,10 +569,23 @@ export interface BaseSchema {
   disabled?: boolean | ExpressionWire;
 
   /**
-   * Expression for conditional disabling.
-   * @example "${data.status === 'locked'}"
+   * RETIRED — a `?: never` tombstone, refused by name (ADR-0049).
+   *
+   * `disabledOn` was a second spelling of `disabled`: the same greyed-out
+   * polarity, the same evaluator, consulted only after an undeclared
+   * `disabled`. `disabled` takes a predicate string and the CEL envelope
+   * itself, so the dialect carried nothing the canonical key does not.
+   * Retired at both faces with no alias window, the same shape as `visibleOn`
+   * above: refused by `tsc` in a fresh typed literal, refused by the zod
+   * mirror with `invalid_type` at this path naming `disabled`, and no longer
+   * read by the renderer.
+   *
+   * Migration: `disabledOn: EXPR` → `disabled: EXPR`. Same polarity (disabled
+   * when truthy); the value is unchanged.
+   *
+   * @deprecated Retired spelling of `disabled` — author `disabled`.
    */
-  disabledOn?: string;
+  disabledOn?: never;
 
   /**
    * Test ID for automated testing.

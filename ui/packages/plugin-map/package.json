@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-map",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Map visualization plugin for Object UI",
@@ -51,13 +51,14 @@
   },
   "devDependencies": {
     "@object-ui/plugin-list": "workspace:*",
-    "@object-ui/sdui-parser": "workspace:*",
+    "@objectstack/sdui-parser": "workspace:*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "^6.0.5",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3"
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectui",

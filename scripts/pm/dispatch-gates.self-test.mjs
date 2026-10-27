@@ -57,6 +57,7 @@ import {
   CHANGESET_PROBE_PATH,
   CHANGE_KIND_GATES,
   bindChangeKindRows,
+  ciJobRunsRunner,
   bindMandatoryTierRows,
   bindSuspectTierRows,
   COMPOUND_ANCHOR_KEYS,
@@ -279,6 +280,8 @@ import {
   withoutAnchor,
   workflowEnvValues,
   zeroSegmentForms,
+  readByUiScriptsSuite,
+  UI_SCRIPTS_SUITE_ROOTS,
 } from './dispatch-gates.mjs';
 import {
   COMPOUND_ANCHOR_LEDGER,
@@ -463,6 +466,14 @@ export function selfTest({ tier = 'full' } = {}) {
       'control — no PHANTOM root key is minted beside them: a `scripts/…` TAIL keyed as a path in its own '
         + 'right names a file this ROOT does not hold, and every audit downstream then passes for the wrong reason',
       !pkgInvs.some((i) => String(i.script ?? i.check).startsWith('scripts/')),
+    );
+    t(
+      'the root program\'s `typecheck:root` is read as a family, so the root change kind can name it',
+      extractCheckInvocations('    - run: pnpm typecheck:root\n', 'lint.yml').some((i) => i.check === 'typecheck:root' && !i.direct),
+    );
+    t(
+      'control — that exception is the one script name, not every `typecheck` spelling',
+      extractCheckInvocations('    - run: pnpm typecheck\n    - run: pnpm typecheck:rooted\n    - run: pnpm --filter ./examples/x run typecheck\n', 'x.yml').length === 0,
     );
     t(
       'control — a CLIMBING spelling is refused rather than resolved: `..` is not a prefix segment, because '
@@ -1488,7 +1499,12 @@ export function selfTest({ tier = 'full' } = {}) {
   //    resolve.
   const rootScriptsMap = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
+  // `typecheck:root` is the one other zero-file family, by construction: it is a
+  // tsc program over the root config, not a script file, and the cards it owes
+  // are named by the root-program change kind (`root-ts-program`), never by a
+  // path read out of a script.
   const unexplained = zeroFile
+    .filter(([check]) => check !== 'typecheck:root')
     .map(([check]) => [check, rootScriptsMap[check] ?? ''])
     .filter(([, cmd]) => !/\bpnpm\b[^&|]*?(?:--filter|--recursive|-r)\b[^&|]*?\brun\b/.test(cmd))
     .map(([check, cmd]) => `${check} (${cmd || 'no root script'})`);
@@ -4423,10 +4439,12 @@ export function selfTest({ tier = 'full' } = {}) {
   // rename, which is the one rot class the STALE branch exists to report.
   const rootKind = changeKindLines(['scripts/bench/runtime-publish-gate.bench.mts'], resolved);
   t('a root-program path emits the convention section', rootKind.length === 2 && rootKind[0].includes('ROOT tsc program'));
-  t('and it names the RATCHET half — the invocation that re-measures', rootKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
-  const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
-  t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
-  t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
+  // The root graduated from the DEBT ledger (#26236), so the gate that reads
+  // this program is its own `typecheck:root` script, which lint.yml runs.
+  t('and it names the root program\'s own type check', rootKind.some((l) => l.includes('- pnpm typecheck:root   —')));
+  const rootLine = rootKind.find((l) => l.includes('- pnpm typecheck:root   —')) ?? '';
+  t('the root-program line refuses an exclude or a returning ledger entry and states the real repair', /never to add an exclude/.test(rootLine) && /make the file typecheck/.test(rootLine));
+  t('and says it needs no build, unlike the ratchet lines', /needs no build/.test(rootLine) && !/closure BUILT/.test(rootLine));
   // Re-pointed rather than deleted (#12074). This case pinned one property —
   // a `.mjs` checker script is NOT in the ROOT tsc program, unlike the `.mts`
   // bench file above — and the gate-script kind below now makes the same path
@@ -4436,7 +4454,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // hiding inside a `length` this case no longer checks.
   const checkerKind = changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved);
   t('a checker script is still outside the ROOT tsc program', !checkerKind.some((l) => l.includes('ROOT tsc program')));
-  t('…and the root ratchet is not named for it', !checkerKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  t('…and the root type check is not named for it', !checkerKind.some((l) => l.includes('- pnpm typecheck:root   —')));
   t('…and the ONE section it does emit is the gate-script kind', checkerKind.length === 3 && checkerKind[0].includes('GATE SCRIPT'));
 
   // -- The GATE SCRIPT entry (#12074) --------------------------------------
@@ -4815,6 +4833,76 @@ export function selfTest({ tier = 'full' } = {}) {
   const seamStale = changeKindLines([SEAM_SPECIMEN], () => null, seamEntry);
   t('an undiscoverable durability guard renders STALE for this entry',
     seamStale.filter((l) => l.includes(`⚠ ${DURABILITY_SEAM_GATE}: STALE`)).length === 1);
+
+  // ── The ui/scripts/__tests__ suite (#26318) ─────────────────────────────────
+  //
+  // The 178 files run only in CI's Test UI shards, so no family named them and a
+  // card under ui package source or skills/objectui learned of a red one CI round
+  // later. The entry stands in for that CI JOB (`ciJobRunsRunner`): pinned here
+  // are the predicate on all four roots and outside them, the rendering and the
+  // runnable union through the whole table, the `--ran` verdict without it, the
+  // STALE branch, and the binding against the live workflows.
+  const UI_SUITE = 'pnpm --dir ui exec vitest run scripts/';
+  const UI_SUITE_SPECIMENS = Object.freeze({
+    'ui/packages/**/src': 'ui/packages/sdui-parser/src/expression-carriage.ts',
+    'ui/apps/**': 'ui/apps/console/src/App.tsx',
+    'skills/objectui/**': 'skills/objectui/SKILL.md',
+    'ui/scripts/**': 'ui/scripts/check-skill-examples.mjs',
+  });
+  const UI_SUITE_CONTROLS = Object.freeze([
+    'packages/core/src/x.ts',
+    'ui/packages/core/package.json',
+    'skills/objectstack/SKILL.md',
+    'scripts/pm/dispatch-gates.mjs',
+  ]);
+  const uiEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === UI_SUITE));
+  t('exactly one entry in the table names the ui/scripts suite, bound to the Test UI job',
+    uiEntry.length === 1 && uiEntry[0].matches('ui/scripts/x.mjs') && uiEntry[0].gates[0].ciJob === 'Test UI' && UI_SUITE.startsWith(`${uiEntry[0].gates[0].ciRunner} `));
+  t('the roots are the card\'s four, in the trigger language', ['ui/packages/**/src/**', 'ui/apps/**', 'skills/objectui/**', 'ui/scripts/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
+  for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
+    t(`a path under ${root} is read by the ui/scripts suite (${specimen})`, readByUiScriptsSuite(specimen));
+  }
+  t('a dispatch surface given as a ui package\'s src DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts'));
+  for (const control of UI_SUITE_CONTROLS) {
+    t(`CONTROL: ${control} is outside the four roots`, !readByUiScriptsSuite(control));
+  }
+  // A resolver that resolves a family by its `pnpm` spelling and a CI-job gate by
+  // its own name — the shape `derive`'s resolver has.
+  const uiResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const throughTableUi = (p) => changeKindLines([p], uiResolved).some((l) => l.includes(`- ${UI_SUITE}   —`));
+  for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
+    t(`through the whole table, a diff under ${root} derives the suite, anchored on the delimiter`, throughTableUi(specimen));
+    t(`…and the runnable union carries it for ${specimen}`, commandsFor({ kindGroups: changeKindGates([specimen], uiResolved) }).includes(UI_SUITE));
+  }
+  for (const control of UI_SUITE_CONTROLS) {
+    t(`…and ${control} derives no suite line and no suite command`,
+      !throughTableUi(control) && !commandsFor({ kindGroups: changeKindGates([control], uiResolved) }).includes(UI_SUITE));
+  }
+  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['skills/objectui/**']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
+  t('the suite line states its build prerequisite, runnably', /seven @objectstack packages/.test(uiLine) && uiLine.includes('turbo run build') && uiLine.includes('--filter=@objectstack/sdui-parser...'));
+  t('…and says it is the whole suite, never a subset', /The whole suite, never a subset/.test(uiLine));
+  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['ui/apps/**']], uiResolved) });
+  const uiWithout = runReconciliation({
+    derived: uiDerived,
+    record: parseRunRecord(uiDerived.filter((c) => c !== UI_SUITE).map((c) => `${c} :: exit 0`).join('\n')),
+  });
+  t('⭐ a run record carrying every derived command BUT the suite is NOT ok, and names the suite unrun', !uiWithout.ok && uiWithout.unrun.some((u) => u.command === UI_SUITE));
+  const uiWith = runReconciliation({ derived: uiDerived, record: parseRunRecord(uiDerived.map((c) => `${c} :: exit 0`).join('\n')) });
+  t('CONTROL: the same record WITH the suite is ok', uiWith.ok);
+  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['ui/scripts/**']], () => null, uiEntry);
+  t('an unresolvable binding renders STALE, naming the job and the runner it lost',
+    uiStale.filter((l) => l.includes(`⚠ ${UI_SUITE}: STALE`) && l.includes("job named 'Test UI…'") && l.includes("'pnpm --dir ui exec vitest run'")).length === 1);
+  // The binding itself, against fixtures and then the LIVE workflows.
+  const uiJobFixture = (name, run) => [{ file: 'ci.yml', text: `on: pull_request\njobs:\n  test-ui:\n    name: ${name}\n    runs-on: ubuntu-latest\n    steps:\n      - name: Run\n        run: |\n          ${run}\n` }];
+  const uiBinding = uiEntry[0]?.gates[0] ?? {};
+  t('the binding resolves where the job runs the runner', ciJobRunsRunner(uiBinding, uiJobFixture('Test UI (${{ matrix.shard }}/16)', 'pnpm --dir ui exec vitest run --shard=1/16 "${filters[@]}"')));
+  t('…and not once the job is renamed', !ciJobRunsRunner(uiBinding, uiJobFixture('UI tests (${{ matrix.shard }}/16)', 'pnpm --dir ui exec vitest run --shard=1/16')));
+  t('…nor once the runner is respelled', !ciJobRunsRunner(uiBinding, uiJobFixture('Test UI (${{ matrix.shard }}/16)', 'pnpm --dir ui run test --shard=1/16')));
+  t('⭐ the binding resolves against the LIVE workflows — the census guard for a gate no family carries', ciJobRunsRunner(uiBinding, discoverFamilies().workflowEntries));
+  t('a half-declared CI-job binding REFUSES at load',
+    (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'x y', ciJob: 'Test UI', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
+  t('…and so does one whose name does not narrow its runner',
+    (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'pnpm vitest run', ciJob: 'Test UI', ciRunner: 'pnpm --dir ui exec vitest run', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
@@ -5471,8 +5559,8 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   // The complement, so the zero above cannot be the union quietly hiding a
   // member: a family reached by NO PR-time event at all must come from a
-  // workflow that declares no `schedule` either. Today that is `cut-rc.yml`,
-  // the human release lane, which is `workflow_dispatch`-only.
+  // workflow that declares no `schedule` either (a `workflow_dispatch`-only
+  // lane, say); the set may be empty.
   const noPRTime = triggerFamilies.filter((e) => !reachesPRTime(e.workflows));
   t(
     `the complement agrees: all ${noPRTime.length} famil(ies) reached by no PR-time event at all come from workflows that declare no schedule`,
@@ -5813,11 +5901,12 @@ export function selfTest({ tier = 'full' } = {}) {
   // Seven, not six, since #10542 added check:cross-package-test-inputs to the
   // test-file kind. `a.test.ts` is a root-level TypeScript file, so it is BOTH
   // a test file and inside the root tsc program and legitimately hits two
-  // kinds. The ratchet therefore renders twice, under a different `why` each
-  // time — pinned just below, because a bare count cannot tell that apart from
-  // one kind rotting away.
+  // kinds. Each kind renders its own gate as STALE (the ratchet under the test
+  // kind, `typecheck:root` under the root kind since the root graduated) —
+  // pinned just below, because a bare count cannot tell that apart from one
+  // kind rotting away.
   t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 7);
-  t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
+  t('a root-level test file hits both kinds: the ratchet renders STALE under the test kind, the root type check under the root kind', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 1 && stale.filter((l) => l.includes('\u26a0 typecheck:root: STALE')).length === 1);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
   // one of the two is dropped from the table and something else is added, and a
@@ -5851,7 +5940,9 @@ export function selfTest({ tier = 'full' } = {}) {
     }
   }
   t('the live workflows discover a farm at all (the guard is not vacuous)', liveFamilies.size > 20);
-  const declared = CHANGE_KIND_GATES.flatMap((k) => k.gates.map((g) => g.name));
+  // A CI-job-subset gate (#26318) is no family by construction; its census is
+  // the live-binding case under the ui/scripts entry, so it is left out here.
+  const declared = CHANGE_KIND_GATES.flatMap((k) => k.gates.filter((g) => !g.ciJob).map((g) => g.name));
   const missing = declared.filter((n) => !liveFamilies.has(n));
   t(`every convention gate named in the table is a live family (missing: ${missing.join(', ') || 'none'})`, missing.length === 0);
   // The two gates this card moved out of the closing prose, pinned individually
@@ -7458,7 +7549,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 131 -> 133 (#22998): the header gained two lines naming the full-battery-only jobs.
       // 133 -> 137 (#25867): the header gained four lines on the ui jobs' queue-diff outputs.
       'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:736 inherited-population',
+      // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
+      'scripts/pm/dispatch-gates.mjs:738 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
@@ -7927,10 +8019,13 @@ export function selfTest({ tier = 'full' } = {}) {
   // LIVE: the classification against the real derivation, in BOTH directions.
   // The positive alone would pass on a rule that classified everything; the
   // negative alone would pass on a rule that classified nothing.
+  // Two invocations of the one queue guard read the payload: the judgment, and
+  // the `pull_request` leg's `--toolchain-needed` install gate.
   const liveCiOnly = [...liveDiscovery.byCheck].filter(([, e]) => e.ciOnly);
+  const QUEUE_GUARD_CI_FAMILIES = ['scripts/pm/check-governed-queue-guard.mjs', 'scripts/pm/check-governed-queue-guard.mjs --toolchain-needed'];
   t(
-    `LIVE: exactly one family classifies CI-measured, and it is the queue guard (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
-    liveCiOnly.length === 1 && liveCiOnly[0][0] === 'scripts/pm/check-governed-queue-guard.mjs',
+    `LIVE: exactly the queue guard's two payload-reading invocations classify CI-measured (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
+    liveCiOnly.map(([c]) => c).sort().join('|') === QUEUE_GUARD_CI_FAMILIES.join('|'),
   );
   t(
     'LIVE: an ordinary local family on the same card is NOT classified — the rule discriminates rather than sweeping',

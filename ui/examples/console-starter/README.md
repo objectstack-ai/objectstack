@@ -66,7 +66,7 @@ pnpm dev                      # Vite; no server.port is set, so the default 5173
 **`pnpm dev` needs no prior build.** Every workspace package the app reaches is on
 the alias list, so Vite serves all of them from `src`. This was not always true:
 five packages the aliased sources import — `@object-ui/mobile`,
-`@object-ui/providers`, `@object-ui/sdui-parser`, `@object-ui/plugin-editor`,
+`@object-ui/providers`, `@objectstack/sdui-parser`, `@object-ui/plugin-editor`,
 `@object-ui/react-runtime` — were missing from the list, fell back to node
 resolution onto `packages/*/dist`, and produced 500s behind an empty `#root` with
 nothing on the page to say why (objectui#3528).

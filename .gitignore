@@ -148,3 +148,7 @@ examples/app-crm/storage/
 # committed (#22449 B′, #22485); `files[]` ships whatever the lane wrote.
 packages/spec/spec-changes.json
 packages/spec/protocol-upgrade-guide.md
+
+# #23181 slice 14: written by packages/cli/test/helpers/oclif-manifest.global-setup.ts for a test run and removed at its teardown; never committed, never published
+packages/cli/oclif.manifest.json
+packages/cli/oclif.manifest.json.*.tmp

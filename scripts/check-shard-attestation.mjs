@@ -227,6 +227,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { readShardMatrix, shardTotal } from './ci-shard-matrix.mjs';
 
 /** Artifact-name prefix shared by every shard credential. */
 const ARTIFACT_PREFIX = 'shard-attest-';
@@ -253,9 +254,53 @@ export function artifactName(job, shard, total) {
   return `${ARTIFACT_PREFIX}${attestationId(job, shard, total)}`;
 }
 
-/** Every attestation id a leg is required to produce when it actually runs. */
-function rosterFor(job, total) {
-  return Array.from({ length: total }, (_, i) => attestationId(job, i + 1, total));
+/**
+ * Every attestation id a leg is required to produce when it actually runs:
+ * the shards it was PLANNED to start (#26084), or 1..total when no plan
+ * names it.
+ *
+ * @param {string} job
+ * @param {number} total
+ * @param {number[]} [shards] the planned shard indices, as `parsePlannedRoster()` returns them
+ */
+function rosterFor(job, total, shards) {
+  const planned = Array.isArray(shards) ? shards : Array.from({ length: total }, (_, i) => i + 1);
+  return planned.map((shard) => attestationId(job, shard, total));
+}
+
+/**
+ * A planned roster (#26084), read from the value the gate is handed: the SAME
+ * expression the leg's `strategy.matrix.shard` reads through `fromJSON`, so
+ * it is the list of shards the matrix created. Pure.
+ *
+ * Only a JSON array of distinct, ascending integers in 1..total is a roster.
+ * Anything else is refused with a reason rather than read as "no plan": a
+ * matrix GitHub built from a value this cannot read is a matrix nobody can
+ * count, and the fallback to 1..total is the workflow expression's job (its
+ * `|| '[1, …, N]'`), never this function's.
+ *
+ * @param {string} text
+ * @param {number} total
+ * @returns {{ shards: number[] } | { error: string }}
+ */
+export function parsePlannedRoster(text, total) {
+  let value;
+  try {
+    value = JSON.parse(String(text ?? ''));
+  } catch {
+    return { error: `the planned roster ${JSON.stringify(text)} is not JSON` };
+  }
+  if (!Array.isArray(value)) return { error: `the planned roster ${JSON.stringify(text)} is not a JSON array` };
+  for (let i = 0; i < value.length; i += 1) {
+    const shard = value[i];
+    if (!Number.isInteger(shard) || shard < 1 || shard > total) {
+      return { error: `the planned roster ${JSON.stringify(text)} names ${JSON.stringify(shard)}, which is not a shard of 1..${total}` };
+    }
+    if (i > 0 && shard <= value[i - 1]) {
+      return { error: `the planned roster ${JSON.stringify(text)} is not strictly ascending — a repeated or reordered shard is not a plan` };
+    }
+  }
+  return { shards: value };
 }
 
 /**
@@ -330,14 +375,17 @@ export const CANCEL_CAUSE_SUPERSEDED = 'Canceling since a higher priority waitin
  *   qualifying shards, keyed by attestation id — the key `cancelCauses` uses
  */
 export function shardsNeedingCancelCause(legs, present) {
-  const attestedAny = (leg) => rosterFor(leg.job, leg.total).some((id) => present.has(id));
+  const attestedAny = (leg) => rosterFor(leg.job, leg.total, leg.shards).some((id) => present.has(id));
   const asked = [];
   for (const leg of legs) {
     if (leg.result !== 'cancelled' || !Number.isInteger(leg.total) || leg.total < 1) continue;
     const askable =
       leg.total > 1 ? attestedAny(leg) : !attestedAny(leg) && legs.some((other) => other.job !== leg.job && attestedAny(other));
     if (!askable) continue;
-    for (let shard = 1; shard <= leg.total; shard += 1) {
+    // Only a shard the matrix created can have been cancelled (#26084): an
+    // unplanned shard never existed, so it has no check run to ask.
+    const shards = Array.isArray(leg.shards) ? leg.shards : Array.from({ length: leg.total }, (_, i) => i + 1);
+    for (const shard of shards) {
       const id = attestationId(leg.job, shard, leg.total);
       if (!present.has(id)) asked.push({ id, job: leg.job, shard, total: leg.total });
     }
@@ -379,7 +427,7 @@ export function classifyCancelAnnotations(annotations) {
  *
  * @param {{
  *   gate: string,
- *   legs: { job: string, total: number, result: string }[],
+ *   legs: { job: string, total: number, result: string, shards?: number[], planResult?: string }[],
  *   filterResult: string,
  *   present: Map<string, Record<string, unknown>>,
  *   runId: string,
@@ -388,7 +436,9 @@ export function classifyCancelAnnotations(annotations) {
  *   cancelCauses?: Map<string, { kind: 'timeout' | 'superseded' | 'other' | 'unreadable', detail: string }>,
  * }} input `cancelCauses` answers `shardsNeedingCancelCause()` per attestation
  *   id (#22606, #22653); a qualifying shard with no entry is judged as an
- *   unreadable cause.
+ *   unreadable cause. A leg's `shards` is its PLANNED roster (#26084) and
+ *   `planResult` the planning job's result; without `shards` the roster is
+ *   1..total, exactly as before.
  * @returns {{ ok: boolean, log: string[], errors: string[] }}
  */
 export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome, cancelCauses }) {
@@ -442,8 +492,12 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
   }
 
   for (const leg of legs) {
-    const roster = rosterFor(leg.job, leg.total);
-    const label = leg.total > 1 ? `${leg.job} (declared roster 1..${leg.total}/${leg.total})` : `${leg.job} (single leg)`;
+    const roster = rosterFor(leg.job, leg.total, leg.shards);
+    const label = Array.isArray(leg.shards)
+      ? `${leg.job} (planned roster ${JSON.stringify(leg.shards)} of ${leg.total}, plan result: ${leg.planResult || '(unreadable)'})`
+      : leg.total > 1
+        ? `${leg.job} (declared roster 1..${leg.total}/${leg.total})`
+        : `${leg.job} (single leg)`;
 
     if (!leg.result) {
       errors.push(`${gate}: leg ${leg.job} has an empty aggregate result — refusing to guess (see #4690).`);
@@ -524,6 +578,14 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     }
 
     if (leg.result === 'skipped') {
+      // #26084: a plan job that SUCCEEDED and planned no shard skipped the
+      // matrix on purpose — its positive statement that the package set is
+      // empty, independent of the filter's result. Only `success` with `[]`
+      // reads so; every other plan state falls through to the #4928 guard.
+      if (Array.isArray(leg.shards) && leg.shards.length === 0 && leg.planResult === 'success') {
+        log.push(`    satisfied (skipped on an empty plan — the planning job found no package to test, #26084; expected attestations: 0)`);
+        continue;
+      }
       if (filterResult === 'cancelled') {
         for (const id of roster) allowed.add(id);
         log.push(`    satisfied (skipped while the run was cancelled — #3668; expected attestations: 0)`);
@@ -672,6 +734,43 @@ export function readAttestations(dir) {
 
 /** `--leg <job>/<total>:<result>` as the gate spells it. */
 const LEG_TOKEN = /--leg\s+['"]?([A-Za-z0-9_-]+)\/(\d+):/g;
+
+/**
+ * A PLANNED matrix (#26084): `shard: ${{ fromJSON(needs.PLAN.outputs.KEY ||
+ * '[1, …, N]') }}`. The planning job publishes the shards to start; the
+ * literal after `||` is the full roster the matrix falls back to when that job
+ * published nothing. Pure: the parsed `strategy.matrix.shard` value in, the
+ * pieces out — or `null` when the value is not this shape at all, or
+ * `{ problem }` when it is this shape with a fallback that is not 1..N.
+ *
+ * @param {unknown} value
+ * @returns {null | { problem: string } | { expression: string, plan: string, key: string, total: number }}
+ */
+export function plannedMatrix(value) {
+  if (typeof value !== 'string') return null;
+  const outer = /^\$\{\{\s*fromJSON\((.+)\)\s*\}\}$/.exec(value.trim());
+  if (!outer) return null;
+  const expression = outer[1].trim();
+  const inner = /^needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+) \|\| '(\[[^']*\])'$/.exec(expression);
+  if (!inner) {
+    return {
+      problem:
+        `its matrix reads ${JSON.stringify(value)}, which is not \`\${{ fromJSON(needs.PLAN.outputs.KEY || '[1, …, N]') }}\` — ` +
+        'a planned matrix must carry its full roster as the fallback literal, or a dead plan job leaves a matrix nobody can count (#26084)',
+    };
+  }
+  let fallback;
+  try {
+    fallback = JSON.parse(inner[3]);
+  } catch {
+    fallback = undefined;
+  }
+  const total = Array.isArray(fallback) ? fallback.length : 0;
+  if (total < 1 || !fallback.every((shard, i) => shard === i + 1)) {
+    return { problem: `its planned matrix falls back to ${inner[3]}, which is not the full roster 1..N (#26084)` };
+  }
+  return { expression, plan: inner[1], key: inner[2], total };
+}
 
 /**
  * One `run:` block, split into the individual commands a shell would execute.
@@ -962,11 +1061,16 @@ export async function scanWorkflow(root) {
    */
   const jobInvokes = (job, flag) => stepsOf(job).some((step) => invokesScript(step?.run, flag));
 
-  /** The shard count a job DECLARES: a matrix's length, or 1 for a single job. */
+  /**
+   * The shard count a job DECLARES: a matrix's length, a planned matrix's
+   * fallback roster (#26084), or 1 for a single job.
+   */
   const declaredTotal = (job) => {
     const shard = job?.strategy?.matrix?.shard;
     if (shard === undefined) return 1;
-    return Array.isArray(shard) ? shard.length : NaN;
+    if (Array.isArray(shard)) return shard.length;
+    const planned = plannedMatrix(shard);
+    return planned && 'total' in planned ? planned.total : NaN;
   };
 
   const gates = new Map();
@@ -1067,9 +1171,48 @@ export async function scanWorkflow(root) {
         problems.push(`gate '${id}' counts leg '${leg.job}' but does not list it in needs:, so it cannot read its result.`);
       }
       const total = declaredTotal(target);
+      const planned = plannedMatrix(target?.strategy?.matrix?.shard);
+      if (planned && 'problem' in planned) {
+        problems.push(`job '${leg.job}': ${planned.problem}.`);
+        continue;
+      }
       if (!Number.isInteger(total)) {
         problems.push(`job '${leg.job}' declares a strategy.matrix.shard that is not a list — the roster cannot be derived.`);
         continue;
+      }
+      // #26084: a planned matrix is counted against the PLANNED roster, so the
+      // gate must be handed the very expression the matrix reads, and the plan
+      // job's result beside it.
+      const verifyStep = stepsOf(job).find((step) => invokesScript(step?.run, '--verify'));
+      const verifyRun = typeof verifyStep?.run === 'string' ? verifyStep.run : '';
+      const verifyEnv = verifyStep?.env && typeof verifyStep.env === 'object' ? verifyStep.env : {};
+      const plannedToken = new RegExp(`--planned\\s+['"]?${leg.job}=\\$\\{?([A-Za-z_][A-Za-z0-9_]*)`).exec(verifyRun);
+      if (planned) {
+        const targetNeeds = Array.isArray(target.needs) ? target.needs : target.needs ? [target.needs] : [];
+        if (!targetNeeds.includes(planned.plan)) {
+          problems.push(`job '${leg.job}' builds its matrix from needs.${planned.plan} but does not list '${planned.plan}' in needs: (#26084).`);
+        }
+        if (!needs.includes(planned.plan)) {
+          problems.push(`gate '${id}' counts the planned leg '${leg.job}' but does not list its plan job '${planned.plan}' in needs:, so it cannot read the roster (#26084).`);
+        }
+        const wanted = `\${{ ${planned.expression} }}`;
+        if (!plannedToken) {
+          problems.push(
+            `gate '${id}' counts '${leg.job}', whose matrix is planned by '${planned.plan}', without --planned "${leg.job}=…" — ` +
+              `it would count 1..${total} against a matrix that created only the planned shards (#26084).`,
+          );
+        } else if (verifyEnv[plannedToken[1]] !== wanted) {
+          problems.push(
+            `gate '${id}' hands --planned "${leg.job}=$${plannedToken[1]}" the value ${JSON.stringify(verifyEnv[plannedToken[1]] ?? null)}, ` +
+              `not the matrix's own expression ${JSON.stringify(wanted)} — the gate and the matrix would count different rosters (#26084).`,
+          );
+        }
+        const resultToken = /--plan-result\s+['"]?\$\{?([A-Za-z_][A-Za-z0-9_]*)/.exec(verifyRun);
+        if (!resultToken || verifyEnv[resultToken[1]] !== `\${{ needs.${planned.plan}.result }}`) {
+          problems.push(`gate '${id}' must pass --plan-result "$VAR" with VAR set to \`\${{ needs.${planned.plan}.result }}\` for the planned leg '${leg.job}' (#26084).`);
+        }
+      } else if (plannedToken) {
+        problems.push(`gate '${id}' passes --planned for '${leg.job}', whose matrix is a literal list — there is no plan to narrow it (#26084).`);
       }
       if (total !== leg.total) {
         problems.push(
@@ -1417,7 +1560,28 @@ async function verify() {
     const [job, total] = (at === -1 ? token : token.slice(0, at)).split('/');
     return { job, total: Number(total), result: at === -1 ? '' : token.slice(at + 1).trim() };
   });
-  const { present, problems } = readAttestations(dir);
+  // #26084: `--planned <job>=<roster>` narrows a leg's roster to the shards its
+  // matrix created; `--plan-result` is the planning job's result.
+  const planProblems = [];
+  const planResult = argValue('--plan-result', '');
+  for (const token of argValues('--planned')) {
+    const at = token.indexOf('=');
+    const job = at === -1 ? token : token.slice(0, at);
+    const leg = legs.find((l) => l.job === job);
+    if (!leg) {
+      planProblems.push(`--planned names '${job}', which no --leg declares`);
+      continue;
+    }
+    const parsed = parsePlannedRoster(at === -1 ? '' : token.slice(at + 1), leg.total);
+    if ('error' in parsed) {
+      planProblems.push(`leg ${job}: ${parsed.error} — refusing to count against a roster it cannot read (#26084)`);
+      continue;
+    }
+    leg.shards = parsed.shards;
+    leg.planResult = planResult;
+  }
+  const { present, problems: readProblems } = readAttestations(dir);
+  const problems = [...readProblems, ...planProblems];
   const runId = process.env.GITHUB_RUN_ID ?? '';
   // Read from the environment for the same reason the run id is (#11998):
   // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
@@ -1529,11 +1693,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#22606 the static guard pins the cause read where the verdict needs it': 13,
   '#22653 the static guard pins the cause read on every matrix leg, test-gate included': 19,
   '#6589: a shard job is not a gate because a step says `--verify`': 23,
+  '#26084 a planned roster: only the shards the plan started are counted': 16,
+  '#26084 the static guard holds the planned matrix and the gate to one expression': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2088,8 +2254,11 @@ async function selfTest() {
   // The runs replayed below (38036705318, 34007386254) ran the SIX-shard matrix,
   // which #25376 widened to eight, so they are read against the live workflow
   // with the shard name as it stood then. The live names are pinned on their own
-  // at the end of this battery.
-  const LIVE_TEST_NAME = 'name: Test Core (${{ matrix.shard }}/8)';
+  // at the end of this battery, at the sizes the live matrices declare (read
+  // through scripts/ci-shard-matrix.mjs, so no size is copied here).
+  const LIVE_TEST_TOTAL = shardTotal(CI_TEXT, 'test');
+  const LIVE_DOGFOOD_TOTAL = shardTotal(CI_TEXT, 'dogfood');
+  const LIVE_TEST_NAME = `name: Test Core (\${{ matrix.shard }}/${LIVE_TEST_TOTAL})`;
   const CI_TEXT_SIX_SHARDS = CI_TEXT.replace(LIVE_TEST_NAME, 'name: Test Core (${{ matrix.shard }}/6)');
   assert(CI_TEXT_SIX_SHARDS !== CI_TEXT, `#22653: the live ci.yml no longer carries \`${LIVE_TEST_NAME}\` — the six-shard replays below would read the live roster`);
   const PARTIAL_JOBS = /\/repos\/o\/r\/actions\/runs\/38036705318\/attempts\/1\/jobs\?per_page=100&page=1$/;
@@ -2184,8 +2353,9 @@ async function selfTest() {
     '#22653: a matrix name with no shard expression cannot locate a shard ⇒ unreadable, naming the shard',
   );
 
-  assert([1, 2, 3, 4, 5, 6, 7, 8].every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/8)`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
-  assert([1, 2, 3].every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/3)`), '#22653: …and each dogfood shard');
+  const oneTo = (total) => Array.from({ length: total }, (_, i) => i + 1);
+  assert(oneTo(LIVE_TEST_TOTAL).every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/${LIVE_TEST_TOTAL})`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
+  assert(oneTo(LIVE_DOGFOOD_TOTAL).every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/${LIVE_DOGFOOD_TOTAL})`), '#22653: …and each dogfood shard');
   assert(workflowJobDisplayName(CI_TEXT, 'dogfood-verify') === 'Dogfood Verify CLI', "#22653 control: the single leg's literal name reads as before");
   assert(workflowJobDisplayName(CI_TEXT, 'test') === undefined, '#22653: a matrix template asked WITHOUT a shard is still unresolvable ⇒ undefined');
   assert(workflowJobDisplayName('jobs:\n  m:\n    runs-on: x\n', 'm', 1) === undefined, '#22653: a nameless matrix job is not guessed at — GitHub appends the matrix values itself');
@@ -2198,6 +2368,36 @@ async function selfTest() {
       expandMatrixShardName('M ${{ matrix.shard }}', '1') === undefined,
     '#22653 expandMatrixShardName: every occurrence expands; no expression, no template or a non-integer shard ⇒ undefined',
   );
+
+  // ── #26084: a planned roster ─────────────────────────────────────────────
+  // The test-plan job starts only the shards whose bin holds work, so the
+  // roster the gate counts is the planned list. Every guard above still holds
+  // over that list; only the shards that were never created leave the count.
+  battery('#26084 a planned roster: only the shards the plan started are counted');
+  const planned = (result, ids, { shards = [2, 5], planResult = 'success', filterResult = 'success' } = {}) =>
+    judge({ gate: 'Test Core', legs: [{ job: 'test', total: 8, result, shards, planResult }], filterResult, present: new Map(ids), runId: '99' });
+  const both = planned('success', [attest('test', 2, 8), attest('test', 5, 8)]);
+  assert(both.ok, '#26084: both planned shards attested ⇒ green');
+  assert(both.log.some((l) => l.includes('all 2 declared shard(s)')), '#26084: the gate counts the 2 planned shards, not 8');
+  assert(both.log.some((l) => l.includes('planned roster [2,5] of 8')), '#26084: the log names the planned roster');
+  const short = planned('success', [attest('test', 2, 8)]);
+  assert(!short.ok && short.errors.some((e) => e.includes('test-5-of-8')), '#26084: a planned shard with no credential ⇒ red, naming it');
+  assert(!short.errors.some((e) => /test-[13467]-of-8/.test(e)), '#26084: an unplanned shard is never named missing');
+  assert(!planned('success', [attest('test', 2, 8), attest('test', 5, 8), attest('test', 3, 8)]).ok, '#26084: a credential from a shard the plan did not start ⇒ red (unexpected)');
+  assert(!planned('failure', [attest('test', 2, 8), attest('test', 5, 8)]).ok, '#26084: a declared failure still vetoes a full planned roster');
+  assert(planned('skipped', [], { shards: [], filterResult: 'failure' }).ok, '#26084: an empty plan from a plan job that SUCCEEDED skips with zero expected, whatever the filter result');
+  assert(!planned('skipped', [], { shards: [], planResult: 'failure', filterResult: 'failure' }).ok, '#26084: an empty roster from a FAILED plan job buys nothing — the #4928 guard decides, and reds');
+  assert(planned('skipped', [], { shards: [1, 2, 3, 4, 5, 6, 7, 8], planResult: 'skipped' }).ok, '#26084: a filter-skipped run (plan skipped, fallback roster) is the #4928 pass, unchanged');
+  assert(!planned('skipped', [attest('test', 2, 8)], { shards: [] }).ok, '#26084: a credential beside an empty plan is a contradiction ⇒ red');
+  assert(planned('cancelled', []).ok, '#26084: #3668 still holds over a planned roster — cancelled, zero credentials ⇒ green');
+  assert(
+    JSON.stringify(shardsNeedingCancelCause([{ job: 'test', total: 8, result: 'cancelled', shards: [2, 5] }], new Map([attest('test', 2, 8)])).map(({ id }) => id)) === '["test-5-of-8"]',
+    '#22653 × #26084: a partially attested planned matrix asks only about its planned unattested shard',
+  );
+  assert('shards' in parsePlannedRoster('[2,5]', 8) && parsePlannedRoster('[]', 8).shards.length === 0, '#26084 parsePlannedRoster: a compact list and the empty plan read');
+  assert(parsePlannedRoster('[1, 2, 3, 4, 5, 6, 7, 8]', 8).shards.length === 8, "#26084 parsePlannedRoster: the matrix's spaced fallback literal reads as 1..8");
+  const refusals = ['', 'not json', '{"a":1}', '[0]', '[9]', '[2,2]', '[5,2]', '[1.5]', '["1"]'].filter((t) => !('error' in parsePlannedRoster(t, 8)));
+  assert(refusals.length === 0, `#26084 parsePlannedRoster: every unreadable roster is refused — accepted ${JSON.stringify(refusals)}`);
 
   // ── foreign / stale credentials ───────────────────────────────────────────
   battery('foreign / stale credentials');
@@ -2487,8 +2687,16 @@ async function selfTest() {
     // `String.replace` takes the first match. A short anchor would silently
     // start mutating dogfood's matrix instead — still red, still for a
     // plausible-looking reason, and no longer the assertion written here.
-    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3, 4, 5, 6, 7, 8]', 'shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]'))).problems.some((p) => p.includes('declares 9 shard')), 'growing the matrix without the gate ⇒ red');
-    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/8', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
+    // Since #26084 the test matrix is planned, and its full roster is the
+    // fallback literal after `||`; growing THAT is growing the matrix. The
+    // roster is the one the live matrix declares, spelled as ci.yml spells it.
+    const liveTest = readShardMatrix(good, 'test');
+    const N = liveTest.total;
+    const ROSTER = JSON.stringify(liveTest.values).replaceAll(',', ', ');
+    assert(liveTest.form === 'planned', `ci.yml's test matrix reads as ${liveTest.form}, not planned — the #26084 anchors below assume the planned shape`);
+    const TEST_MATRIX = `shard: \${{ fromJSON(needs.test-plan.outputs.shards || '${ROSTER}') }}`;
+    assert((await fixture('grow the matrix', (s) => s.replace(TEST_MATRIX, TEST_MATRIX.replace(`${N}]`, `${N}, ${N + 1}]`)))).problems.some((p) => p.includes(`declares ${N + 1} shard`)), 'growing the matrix without the gate ⇒ red');
+    assert((await fixture('shrink the roster', (s) => s.replace(`--leg "test/${N}:`, '--leg "test/2:'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
     assert((await fixture('uncounted intruder', (s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
     assert((await fixture('rename test-gate', (s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
     assert((await fixture('typo the artifact name', (s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');
@@ -2506,6 +2714,46 @@ async function selfTest() {
       (await fixture('if: on the credential step', (s) => s.replace('      - name: Attest this shard ran and passed\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test', '      - name: Attest this shard ran and passed\n        if: always()\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test'))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
       'an `if:` on the credential step ⇒ red (the credential would stop meaning "every earlier step passed")',
     );
+
+    // ── #26084: the planned matrix and the gate read one expression ─────────
+    battery('#26084 the static guard holds the planned matrix and the gate to one expression');
+    const GATE_PLAN = `          OS_TEST_PLAN: \${{ needs.test-plan.outputs.shards || '${ROSTER}' }}\n`;
+    const planProblem = async (label, mutate, ...needles) => hasPlanProblem(await fixture(label, mutate), ...needles);
+    const hasPlanProblem = (result, ...needles) => result.problems.some((p) => needles.every((needle) => p.includes(needle)));
+    assert(
+      await planProblem('the gate reads another fallback', (s) => s.replace(GATE_PLAN, GATE_PLAN.replace(`, ${N}]`, ']')), 'not the matrix', '#26084'),
+      '#26084: a gate roster expression that differs from the matrix by one byte ⇒ red',
+    );
+    assert(
+      await planProblem('the gate loses --planned', (s) => s.replace(' \\\n            --planned "test=$OS_TEST_PLAN"', ''), 'without --planned', '#26084'),
+      '#26084: a gate that counts a planned leg against its full 1..N roster ⇒ red',
+    );
+    assert(
+      await planProblem('the gate loses --plan-result', (s) => s.replace(' \\\n            --plan-result "$OS_TEST_PLAN_RESULT"', ''), '--plan-result', '#26084'),
+      '#26084: a gate that is not handed the plan result ⇒ red',
+    );
+    assert(
+      await planProblem('the gate loses the plan job from needs', (s) => s.replace('    needs: [test, filter, test-plan]\n', '    needs: [test, filter]\n'), "plan job 'test-plan'", '#26084'),
+      '#26084: a gate that cannot read the plan job ⇒ red',
+    );
+    assert(
+      await planProblem('the test job loses the plan job from needs', (s) => s.replace('    needs: [filter, test-plan]\n', '    needs: filter\n'), "does not list 'test-plan'", '#26084'),
+      '#26084: a matrix built from a job it does not need ⇒ red',
+    );
+    assert(
+      await planProblem('a fallback that is not 1..N', (s) => s.replace(TEST_MATRIX, TEST_MATRIX.replace('[1, 2, 3', '[1, 3')), 'not the full roster', '#26084'),
+      '#26084: a fallback literal that skips a shard ⇒ red',
+    );
+    assert(
+      await planProblem('a planned matrix with no fallback', (s) => s.replace(TEST_MATRIX, 'shard: ${{ fromJSON(needs.test-plan.outputs.shards) }}'), 'fallback literal', '#26084'),
+      '#26084: a planned matrix with no full-roster fallback ⇒ red',
+    );
+    assert(
+      await planProblem('--planned on a literal matrix', (s) => s.replace(TEST_MATRIX, `shard: ${ROSTER}`), 'literal list', '#26084'),
+      '#26084: --planned beside a literal matrix ⇒ red (nothing to narrow)',
+    );
+    assert(plannedMatrix("${{ fromJSON(needs.p.outputs.s || '[1, 2]') }}")?.total === 2 && plannedMatrix('[1, 2]') === null, '#26084 plannedMatrix: reads the planned shape, ignores a literal list');
+    assert('problem' in (plannedMatrix('${{ fromJSON(steps.x.outputs.y) }}') ?? {}), '#26084 plannedMatrix: any other fromJSON is a problem, never a pass');
 
     // ── #22606: the cause read's prerequisites, declared where it is needed ──
     battery('#22606 the static guard pins the cause read where the verdict needs it');
@@ -2580,29 +2828,30 @@ async function selfTest() {
       hasProblem(await fixture('drop the token (test-gate)', inJob('test-gate', TOKEN_LINE, '')), "gate 'test-gate'", 'GITHUB_TOKEN'),
       "#22653: test-gate's verify step without GITHUB_TOKEN ⇒ red",
     );
-    const TEST_NAME = '    name: Test Core (${{ matrix.shard }}/8)\n';
+    const TEST_NAME = `    name: Test Core (\${{ matrix.shard }}/${N})\n`;
+    const DOGFOOD_NAME = `    name: Dogfood Regression Gate (\${{ matrix.shard }}/${shardTotal(good, 'dogfood')})\n`;
     assert(
       hasProblem(await fixture('a matrix name without the shard expression', (s) => s.replace(TEST_NAME, '    name: Test Core shards\n')), '#22653', "job 'test' is named"),
       '#22653: a matrix name with no `${{ matrix.shard }}` ⇒ red — the platform would append the values itself, a name the reader cannot rebuild',
     );
     assert(
-      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, '    name: Test Core (${{ matrix.shard }}/8) ${{ github.event_name }}\n')), '#22653', "job 'test' is named"),
+      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, TEST_NAME.replace('\n', ' ${{ github.event_name }}\n'))), '#22653', "job 'test' is named"),
       '#22653: any expression besides the shard ⇒ red — the text reading cannot evaluate it',
     );
     assert(
       hasProblem(
-        await fixture('the dogfood matrix name on another matrix key', (s) => s.replace('    name: Dogfood Regression Gate (${{ matrix.shard }}/3)\n', '    name: Dogfood Regression Gate (${{ matrix.os }}/3)\n')),
+        await fixture('the dogfood matrix name on another matrix key', (s) => s.replace(DOGFOOD_NAME, DOGFOOD_NAME.replace('matrix.shard', 'matrix.os'))),
         '#22653',
         "job 'dogfood' is named",
       ),
       "#22653: dogfood's matrix leg is held to the same name rule — it is asked on a partial cancel too",
     );
     assert(
-      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, '    name: "Test Core (${{ matrix.shard }}/8)"\n'))).problems.length === 0,
+      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, `    name: "Test Core (\${{ matrix.shard }}/${N})"\n`))).problems.length === 0,
       '#22653 positive limb: a quoted template reads the same from text and from YAML ⇒ green',
     );
     assert(
-      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, '    name: Test Core (${{matrix.shard}}/8)\n'))).problems.length === 0,
+      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, TEST_NAME.replace('${{ matrix.shard }}', '${{matrix.shard}}')))).problems.length === 0,
       '#22653 positive limb: `${{matrix.shard}}` is the same expression ⇒ green',
     );
     assert(baseline.problems.length === 0 && baseline.gateIds.includes('test-gate'), '#22653: the checked-in test-gate carries every prerequisite — the baseline is green with it counted as a gate');

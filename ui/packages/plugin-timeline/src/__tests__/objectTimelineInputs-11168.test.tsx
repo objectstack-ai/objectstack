@@ -51,7 +51,7 @@ import {
   SchemaRendererProvider,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
-import { manifestFromConfigs, validateTree } from '@object-ui/sdui-parser';
+import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import { safeValidateSchema } from '@object-ui/types/zod';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers `object-timeline` and `view:timeline` through this package's own

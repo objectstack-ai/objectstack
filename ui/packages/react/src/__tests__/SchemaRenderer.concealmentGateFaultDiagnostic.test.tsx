@@ -14,11 +14,12 @@
  *
  * `evaluateCondition` answers an unevaluable predicate with `true` on every one
  * of its paths. `SchemaRenderer`'s visibility chain NEGATES that answer on four
- * of its six legs (`visibleWhen` / `visible` / `visibleOn` / `visibility`; the
- * last was retired by objectui#12654, leaving three of five), so
+ * of its six legs (`visibleWhen` / `visible` / `visibleOn` / `visibility`;
+ * `visibility` was retired by objectui#12654 and `visibleOn` / `hiddenOn` since,
+ * leaving two SHOW legs and one HIDE leg of three), so
  * there the fail-soft default SHOWS the node and the reporter's sentence — "the
  * gate did NOT bite" — is exactly right. The chain returns it UN-negated on the
- * other two (`hidden` / `hiddenOn`): the same `true` sets `_hidden` and
+ * other two (`hidden` / `hiddenOn`, now `hidden` alone): the same `true` sets `_hidden` and
  * `SchemaRenderer` returns `null`. The gate bit, and bit harder than on either
  * sibling gate — the node is not on screen at all — and those two legs were
  * handed the sentence that says the opposite.
@@ -114,7 +115,7 @@ const TYPE = 'element:probe-6503';
 /** What a VANISHED node's author must now read (objectui#6503). */
 const CONCEALMENT_CONSEQUENCE =
   'The node was treated as its safe default, which on THIS leg is the one\n' +
-  'that BITES: `hidden` / `hiddenOn` are NOT negated, so that default\n' +
+  'that BITES: `hidden` is NOT negated, so that default\n' +
   'REMOVED the node - it is not on the page at all, and an absent node is\n' +
   'indistinguishable from metadata that meant to hide it. Nothing is broken\n' +
   'in the renderer: the block is missing because the predicate above could\n' +
@@ -163,10 +164,8 @@ const ROW = { id: 'r1', status: 'open' };
  */
 const FAULT_BARE = 'nosuchroot6503.locked == true';
 const FAULT_HIDDEN_DEV = 'devbadroot6503hidden.locked == true';
-const FAULT_HIDDENON_DEV = 'devbadroot6503hiddenon.locked == true';
 const FAULT_VISIBLEWHEN_DEV = 'devbadroot6503vw.locked == true';
 const FAULT_VISIBLE_DEV = 'devbadroot6503v.locked == true';
-const FAULT_VISIBLEON_DEV = 'devbadroot6503von.locked == true';
 const FAULT_DISABLED_DEV = 'devbadroot6503dis.locked == true';
 const FAULT_TEMPLATE_HIDDEN = '${tmplbadroot6503.locked == true}';
 const FAULT_CEL_HIDDEN = { dialect: 'cel', source: 'record.bad6503(' };
@@ -393,7 +392,6 @@ describe('#6503 group 2 — the NEGATED legs are withheld and say so (flipped by
   const NEGATED: Array<[string, string]> = [
     ['visibleWhen', FAULT_VISIBLEWHEN_DEV],
     ['visible', FAULT_VISIBLE_DEV],
-    ['visibleOn', FAULT_VISIBLEON_DEV],
   ];
 
   for (const [key, source] of NEGATED) {
@@ -415,34 +413,6 @@ describe('#6503 group 2 — the NEGATED legs are withheld and say so (flipped by
       });
     });
   }
-});
-
-/* -------------------------------------------------------------------------- *
- * Group 3 — `hiddenOn`, the second non-negated leg.
- * -------------------------------------------------------------------------- */
-
-describe('#6503 group 3 — `hiddenOn` is the same gate and gets the same sentence', () => {
-  it('a faulting `hiddenOn` prints the concealment paragraph and the node vanishes', async () => {
-    await inProduction((mount) => {
-      const warn = spyWarn();
-      mount([{ id: 'n1', hiddenOn: FAULT_BARE }]);
-      expect(shownCount()).toBe(0);
-      const line = reports(warn)[0];
-      expect(line).toBeDefined();
-      expect(line).toContain('hiddenOn');
-      expect(line).toContain(CONCEALMENT_CONSEQUENCE);
-      expect(line).not.toContain(THE_FALSE_CLAUSE);
-    });
-  });
-
-  it('development agrees on `hiddenOn` too', async () => {
-    await inDevelopment((mount) => {
-      const warn = spyWarn();
-      mount([{ id: 'n1', hiddenOn: FAULT_HIDDENON_DEV }]);
-      expect(shownCount()).toBe(0);
-      expect(reports(warn)[0]).toContain(CONCEALMENT_CONSEQUENCE);
-    });
-  });
 });
 
 /* -------------------------------------------------------------------------- *

@@ -102,7 +102,7 @@
     "marketplace/Package:translations",
     "marketplace/Package:updatedAt",
     "marketplace/Package:visibility",
-    "marketplace/PackageDependency:optional",
+    "marketplace/PackageDependency:optional [RETIRED]",
     "marketplace/PackageDependency:packageId",
     "marketplace/PackageDependency:versionRange",
     "marketplace/PackageManifest:configurationSchema",

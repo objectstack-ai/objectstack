@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/react-runtime",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
@@ -35,5 +35,7 @@
   "peerDependencies": {
     "react": "^19.0.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
 }

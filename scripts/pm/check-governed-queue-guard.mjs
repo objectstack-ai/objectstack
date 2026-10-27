@@ -627,6 +627,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
   'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
+  '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -637,7 +638,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 25 → 26 with the B′-with-C face battery (ruling record 6159870311): one battery, one row.
 // Raised 26 → 27 with the CODEOWNERS mirror battery: one battery, one row.
 // Raised 27 → 28 with the ENQUEUE leg battery (maintainer ruling 2026-10-26): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 28;
+// Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2401,6 +2403,19 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
 }
 
 /**
+ * Does any row touch a register path the lift would RECOMPUTE? Pure, and THE
+ * one predicate for it: `liftGeneratedExceptions` consults the recompute iff
+ * this answers true, and the `pull_request` leg acquires the generator
+ * toolchain iff `--toolchain-needed` answers it true — so the workflow can
+ * never skip an install the lift was going to need. Membership is the
+ * register's own `generatedExceptionFor`; ⛔ never a path list restated here or
+ * in the YAML.
+ */
+export function toolchainNeededFor(rows) {
+  return (Array.isArray(rows) ? rows : []).some((row) => (row?.paths ?? []).some((p) => generatedExceptionFor(p) !== null));
+}
+
+/**
  * Drop a registered generated-artifact path from a row's path list when — and
  * only when — this build's own recomputation certifies it as a pure
  * regeneration. Everything else about the row is untouched, so a row that never
@@ -2429,7 +2444,7 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
 export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor, repo = undefined) {
   assertGovernedRepo(repo, 'liftGeneratedExceptions');
   const registered = (row) => row.paths.filter((p) => generatedExceptionFor(p) !== null);
-  if (!rows.some((row) => registered(row).length > 0)) return rows;
+  if (!toolchainNeededFor(rows)) return rows;
   const cache = new Map();
   const out = [];
   for (const row of rows) {
@@ -2517,6 +2532,10 @@ export function installStepAudit(source) {
     selfTestIndex === -1 || judgmentIndex === -1 ? [] : blocks.filter((_b, i) => i > selfTestIndex && i < judgmentIndex);
   return {
     steps: blocks.map(nameOf),
+    // Each step's own YAML with comment lines dropped: a comment above a step
+    // belongs to the block BEFORE it, so a pin on `if:` or `with:` text must
+    // never read prose.
+    stepBodies: blocks.map((b) => ({ name: nameOf(b), body: b.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n') })),
     selfTestIndex,
     judgmentIndex,
     installIndex,
@@ -2677,35 +2696,43 @@ export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, per
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
-async function main() {
-  const env = process.env;
+/**
+ * The event, the repository and the diff's first-parent rows, read ONE way for
+ * both questions the CLI answers — the live judgment and `--toolchain-needed` —
+ * so the two can never disagree about which paths a diff touches. Synchronous:
+ * every read here is the event file or the local git object store, and none of
+ * them needs a file's CONTENT (commits and trees only), which is what lets the
+ * `pull_request` leg run on a blobless, sparse checkout. Returns
+ * `{ ok: true, context, where, mergeBase, rows }`, or `{ ok: false, message }`
+ * carrying the full ⛔ text the caller prints.
+ */
+function readEventDiff(env) {
   const eventName = env.GITHUB_EVENT_NAME;
   let payload;
   try {
     payload = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH ?? '', 'utf8'));
   } catch (error) {
-    console.error(
-      `⛔ ${CHECK_CONTEXT_NAME}: could not read GITHUB_EVENT_PATH (${String(error?.message ?? error).split('\n')[0]}).\n` +
+    return {
+      ok: false,
+      message:
+        `⛔ ${CHECK_CONTEXT_NAME}: could not read GITHUB_EVENT_PATH (${String(error?.message ?? error).split('\n')[0]}).\n` +
         '   This guard reads the workflow event payload and nothing else; without it there is no diff to judge,\n' +
         '   and "could not look" must never exit 0 here.',
-    );
-    return EXIT_CANNOT_RUN;
+    };
   }
 
   const context = resolveEventContext({ eventName, payload });
-  if (!context.ok) {
-    console.error(`⛔ ${CHECK_CONTEXT_NAME}: ${context.reason}.`);
-    return EXIT_CANNOT_RUN;
-  }
+  if (!context.ok) return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: ${context.reason}.` };
 
   for (const rev of [context.baseSha, context.headSha]) {
     if (!hasRev(repoRoot, rev)) {
-      console.error(
-        `⛔ ${CHECK_CONTEXT_NAME}: ${rev} is not in this checkout, so the diff cannot be read.\n` +
+      return {
+        ok: false,
+        message:
+          `⛔ ${CHECK_CONTEXT_NAME}: ${rev} is not in this checkout, so the diff cannot be read.\n` +
           '   The job must check out with `fetch-depth: 0`; a truncated history answers a governed-surface\n' +
           '   question with silence, and silence reads as compliance (#9902).',
-      );
-      return EXIT_CANNOT_RUN;
+      };
     }
   }
 
@@ -2713,18 +2740,66 @@ async function main() {
   // read, because the lift step below already asks the register a scoped
   // question. A repository the register does not know is a refusal here.
   const where = guardRepository(env);
-  if (where.error) {
-    console.error(`⛔ ${CHECK_CONTEXT_NAME}: ${where.error}`);
+  if (where.error) return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: ${where.error}` };
+
+  try {
+    const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
+    const rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
+    return { ok: true, context, where, mergeBase, rows };
+  } catch (error) {
+    return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).` };
+  }
+}
+
+/**
+ * `--toolchain-needed`: the `pull_request` leg's install gate, as a pure
+ * decision over what `readEventDiff` read. It decides an INSTALL, never a
+ * verdict, so the CLI always exits 0 on it. `false` only when the diff was READ
+ * on the `pull_request` leg and touches no register path the lift recomputes
+ * (`toolchainNeededFor`); every other answer is `true` — the queue leg always
+ * installs (the workflow does not even ask there), and a diff that could not be
+ * read keeps the install. The two errors are not symmetric: a wrong `true`
+ * costs the install time this gate exists to save, a wrong `false` would print
+ * a forecast of a refusal the queue will not make.
+ */
+export const TOOLCHAIN_NEEDED_FLAG = '--toolchain-needed';
+
+export function toolchainNeededAnswer({ eventName, read }) {
+  if (eventName !== EVENT_PULL_REQUEST) {
+    return { needed: true, why: `the ${eventName ?? '(none)'} leg always installs; only the ${EVENT_PULL_REQUEST} leg asks` };
+  }
+  if (!read?.ok) {
+    return { needed: true, why: `the diff could not be read, so the install is kept — ${String(read?.message ?? '(no reading)').split('\n')[0]}` };
+  }
+  if (toolchainNeededFor(read.rows)) {
+    const hits = [...new Set(read.rows.flatMap((r) => r.paths).filter((p) => generatedExceptionFor(p) !== null))];
+    return { needed: true, why: `the diff touches ${hits.length} register path(s) the lift recomputes: ${hits.join(', ')}` };
+  }
+  return { needed: false, why: `${read.rows.length} commit(s) in range touch no register path the lift recomputes` };
+}
+
+async function main() {
+  const env = process.env;
+  if (process.argv.includes(TOOLCHAIN_NEEDED_FLAG)) {
+    const { needed, why } = toolchainNeededAnswer({ eventName: env.GITHUB_EVENT_NAME, read: readEventDiff(env) });
+    // stdout carries ONLY the output line the workflow appends to $GITHUB_OUTPUT.
+    console.error(`${CHECK_CONTEXT_NAME} — generator toolchain ${needed ? 'NEEDED' : 'not needed'}: ${why}`);
+    console.log(`needed=${needed}`);
+    return EXIT_CLEAR;
+  }
+
+  const read = readEventDiff(env);
+  if (!read.ok) {
+    console.error(read.message);
     return EXIT_CANNOT_RUN;
   }
+  const { context, where, mergeBase } = read;
   const repo = where.repo;
 
   const notes = [];
-  let rows;
+  let rows = read.rows;
   let lifted = [];
   try {
-    const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
-    rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
     const beforeLift = rows;
     rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes, recomputeProvenanceFor, repo);
     lifted = liftedPathsBetween(beforeLift, rows);
@@ -4320,6 +4395,106 @@ export async function selfTest() {
     );
   } catch (error) {
     assert('the-workflow-file-is-readable', false, String(error?.message ?? error).split('\n')[0]);
+  }
+
+  // ── ⭐ the cheap early-warning leg: commits and trees, toolchain on demand ─
+  //
+  // The `pull_request` leg re-fires on `ready_for_review`, which is the moment
+  // an approver taps merge, and a required context `in_progress` refuses that
+  // merge for the run's whole wall. So that leg checks out without blobs and
+  // installs only when the lift would recompute. Two halves are pinned: the
+  // ONE predicate the install gate and the lift share, and the YAML that wires
+  // it — a gate spelled `== 'true'` would skip the install whenever the
+  // question failed, and a queue-leg checkout that lost its tree would starve
+  // the refusing leg's recompute.
+  battery('⭐ the cheap early-warning leg: commits and trees, toolchain on demand');
+  {
+    const SAMPLES = ['skills/objectstack-ui/references/_index.md', 'skills/objectstack-ui/references/react-blocks.md'];
+    assert(
+      'the-samples-cover-every-register-row-so-a-new-row-without-one-reds-here',
+      GENERATED_SURFACE_EXCEPTIONS.every((e) => SAMPLES.some((p) => generatedExceptionFor(p) === e)),
+      JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.id)),
+    );
+    for (const p of SAMPLES) {
+      assert(`a-register-path-needs-the-toolchain: ${p}`, toolchainNeededFor([row(1, ['AGENTS.md', p])]) === true);
+    }
+    assert('no-rows-need-no-toolchain', toolchainNeededFor([]) === false && toolchainNeededFor(undefined) === false);
+    assert(
+      'a-governed-diff-with-no-register-path-needs-no-toolchain',
+      toolchainNeededFor([row(1, ['.github/workflows/governed-surface-guard.yml', 'AGENTS.md', 'skills/objectstack-ui/SKILL.md'])]) === false,
+    );
+    assert('a-register-path-in-a-LATER-row-still-needs-it', toolchainNeededFor([row(1, ['AGENTS.md']), row(2, [SAMPLES[0]])]) === true);
+    // The lift consults the recompute on exactly the diffs the gate installs
+    // for — measured with a spy, not read off the source.
+    let recomputeCalls = 0;
+    const countingRecompute = async (_root, hits) => {
+      recomputeCalls += 1;
+      return new Map([...hits.values()].flat().map((p) => [p, { pureRegeneration: false, reason: 'spy' }]));
+    };
+    await liftGeneratedExceptions('/w', 'base', [row(1, ['AGENTS.md'])], [], countingRecompute, REPO);
+    assert('⭐ the-lift-skips-the-recompute-exactly-where-the-gate-skips-the-install', recomputeCalls === 0, `${recomputeCalls} call(s)`);
+    await liftGeneratedExceptions('/w', 'base', [row(1, ['AGENTS.md', SAMPLES[0]])], [], countingRecompute, REPO);
+    assert('⭐ and-runs-it-exactly-where-the-gate-installs', recomputeCalls === 1, `${recomputeCalls} call(s)`);
+
+    const clearRead = { ok: true, rows: [row(1, ['AGENTS.md'])] };
+    assert('the-queue-leg-always-installs', toolchainNeededAnswer({ eventName: EVENT_MERGE_GROUP, read: clearRead }).needed === true);
+    assert('an-unknown-event-installs', toolchainNeededAnswer({ eventName: undefined, read: clearRead }).needed === true);
+    const unread = toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: { ok: false, message: '⛔ x: could not read the diff (boom).\n   more' } });
+    assert('an-unreadable-diff-KEEPS-the-install-and-says-why', unread.needed === true && /could not be read/.test(unread.why) && !unread.why.includes('\n'), unread.why);
+    assert('a-read-diff-with-no-register-path-skips-it', toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: clearRead }).needed === false);
+    const hit = toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: { ok: true, rows: [row(1, ['AGENTS.md', SAMPLES[1]])] } });
+    assert('a-read-diff-with-a-register-path-installs-and-names-it', hit.needed === true && hit.why.includes(SAMPLES[1]), hit.why);
+
+    let wf = '';
+    try {
+      wf = readFileSync(join(repoRoot, '.github', 'workflows', CHECK_WORKFLOW), 'utf8');
+    } catch (error) {
+      assert('the-workflow-file-is-readable-for-the-cheap-leg-pins', false, String(error?.message ?? error).split('\n')[0]);
+    }
+    const { stepBodies } = installStepAudit(wf);
+    const checkouts = stepBodies.filter((s) => /^\s*uses:\s*actions\/checkout@/m.test(s.body));
+    assert('exactly-two-checkout-steps-one-per-leg', checkouts.length === 2, JSON.stringify(checkouts.map((s) => s.name)));
+    const queueCheckout = checkouts.find((s) => /^\s*if:\s*github\.event_name != 'pull_request'\s*$/m.test(s.body));
+    const prCheckout = checkouts.find((s) => /^\s*if:\s*github\.event_name == 'pull_request'\s*$/m.test(s.body));
+    assert(
+      'the-queue-leg-checkout-is-the-full-tree-at-full-history-unchanged',
+      queueCheckout !== undefined && /^\s*fetch-depth:\s*0\s*$/m.test(queueCheckout.body) && !/^\s*(filter|sparse-checkout):/m.test(queueCheckout.body),
+      queueCheckout?.body ?? '(no queue-leg checkout)',
+    );
+    assert(
+      'the-pull_request-leg-checkout-is-full-history-blobless-and-sparse-on-scripts-and-.github',
+      prCheckout !== undefined &&
+        /^\s*fetch-depth:\s*0\s*$/m.test(prCheckout.body) &&
+        /^\s*filter:\s*blob:none\s*$/m.test(prCheckout.body) &&
+        /sparse-checkout:\s*\|\n\s+scripts\n\s+\.github\s*$/m.test(prCheckout.body),
+      prCheckout?.body ?? '(no pull_request-leg checkout)',
+    );
+    const question = stepBodies.find((s) => /--toolchain-needed\b/.test(s.body));
+    assert(
+      'the-toolchain-question-runs-on-the-pull_request-leg-only-and-feeds-GITHUB_OUTPUT',
+      question !== undefined &&
+        /^\s*id:\s*toolchain\s*$/m.test(question.body) &&
+        /^\s*if:\s*github\.event_name == 'pull_request'\s*$/m.test(question.body) &&
+        /run: node scripts\/pm\/check-governed-queue-guard\.mjs --toolchain-needed >> "\$GITHUB_OUTPUT"\s*$/m.test(question.body),
+      question?.body ?? '(no toolchain question step)',
+    );
+    const gate = "steps.toolchain.outputs.needed != 'false'";
+    const installChain = stepBodies.filter((s) => /setup-pnpm|pnpm store path|actions\/cache(?:\/restore)?@|pnpm install\b/.test(s.body));
+    assert(
+      '⭐ every-install-step-is-gated-on-NOT-FALSE-so-a-skipped-or-failed-question-installs',
+      installChain.length === 4 && installChain.every((s) => s.body.includes(`if: ${gate}`)) && !/outputs\.needed == 'true'/.test(wf),
+      JSON.stringify(installChain.map((s) => s.name)),
+    );
+    const restore = stepBodies.find((s) => /^\s*run:\s*git sparse-checkout disable\s*$/m.test(s.body));
+    assert(
+      'the-full-tree-is-restored-before-the-install-on-the-pull_request-leg-whenever-it-installs',
+      restore !== undefined &&
+        restore.body.includes(`if: github.event_name == 'pull_request' && ${gate}`) &&
+        stepBodies.indexOf(restore) < stepBodies.indexOf(installChain[0] ?? restore),
+      restore?.body ?? '(no restore step)',
+    );
+    const judgment = stepBodies.find((s) => /run: node scripts\/pm\/check-governed-queue-guard\.mjs\s*$/m.test(s.body));
+    assert('the-live-judgment-runs-on-both-legs-unconditionally', judgment !== undefined && !/^\s*if:/m.test(judgment.body), judgment?.body ?? '(no judgment step)');
   }
 
 

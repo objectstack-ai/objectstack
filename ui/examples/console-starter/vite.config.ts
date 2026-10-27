@@ -51,7 +51,7 @@ const workspaceAliases: Record<string, string> = {
   // anything scanning this file, and that decoy already fooled one scan.)
   '@object-ui/react': path.resolve(__dirname, '../../packages/react/src'),
   '@object-ui/react-runtime': path.resolve(__dirname, '../../packages/react-runtime/src'),
-  '@object-ui/sdui-parser': path.resolve(__dirname, '../../packages/sdui-parser/src'),
+  '@objectstack/sdui-parser': path.resolve(__dirname, '../../../packages/sdui-parser/src'),
   // Subpath before bare package — see the note in `apps/console/vite.config.ts`.
   '@object-ui/types/zod': path.resolve(__dirname, '../../packages/types/src/zod/index.zod.ts'),
   '@object-ui/types': path.resolve(__dirname, '../../packages/types/src'),

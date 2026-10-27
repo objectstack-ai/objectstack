@@ -315,7 +315,7 @@ function asIdList(id: unknown): Array<string | number> | null {
 
 /** The pending request gating a record, plus its snapshotted node config. */
 async function pendingRequestFor(
-  engine: MinimalEngine,
+  engine: Pick<MinimalEngine, 'find'>,
   objectName: string,
   recordId: string,
 ): Promise<any | null> {
@@ -333,7 +333,7 @@ async function pendingRequestFor(
 
 /** Pending requests gating any of the records a write names by id. */
 async function pendingRequestsForRecords(
-  engine: MinimalEngine,
+  engine: Pick<MinimalEngine, 'find'>,
   objectName: string,
   recordIds: ReadonlyArray<string | number>,
 ): Promise<any[]> {
@@ -386,6 +386,57 @@ async function pendingRequestsForObject(
   } catch {
     return null;
   }
+}
+
+/**
+ * THE lock judgement: does a pending request whose node snapshotted `config`
+ * lock its target record against edits?
+ *
+ * `lockRecord` defaults to `true` (`ApprovalNodeConfigSchema`), so a node locks
+ * unless it explicitly opted out. This is the one place that reading lives
+ * (#26314): the record-lock hook below enforces it, the request row mirrors it
+ * as `lock_record` (`rowFromRequest` in `approval-service.ts`), and the
+ * record-anchored read ({@link recordHeldByLockingApproval}) answers it — so
+ * what a client is told and what the server refuses can never drift. ⛔ Never
+ * re-spell `lockRecord !== false` at a call site.
+ */
+export function nodeConfigLocksRecord(config: unknown): boolean {
+  return (config as { lockRecord?: unknown } | null | undefined)?.lockRecord !== false;
+}
+
+/**
+ * The approvals plugin's own bookkeeping objects are never locked: the hook
+ * skips them with this cheap prefix test (it is a `beforeUpdate` guard, and
+ * the delete linkage below excludes them at registration instead).
+ */
+function isApprovalBookkeepingObject(objectName: string): boolean {
+  return String(objectName).startsWith('sys_approval');
+}
+
+/**
+ * [#26314] Is `recordId` of `objectName` held by a LOCKING pending approval —
+ * would an ordinary edit of it be refused `RECORD_LOCKED`?
+ *
+ * Asked exactly as the record-lock hook asks it of a by-id write: the same
+ * pending-request lookup ({@link pendingRequestsForRecords}, read as SYSTEM, so
+ * the bookkeeping is never narrowed by a caller's visibility) and the same
+ * judgement ({@link nodeConfigLocksRecord}). What it leaves out is what belongs
+ * to a WRITE, not to the record: the opening run's own writes (#3456) and a
+ * write touching only the status mirror are exempt there because of who writes
+ * and what, and neither is a property of the record.
+ *
+ * ⚠️ It answers for the record, not for a caller, and reads nothing as one.
+ * Whether the asker may learn the answer — may read the record at all — is the
+ * caller's question to settle first (`ApprovalService.getRecordLock`).
+ */
+export async function recordHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find'>,
+  objectName: string,
+  recordId: string,
+): Promise<boolean> {
+  if (isApprovalBookkeepingObject(objectName)) return false;
+  const gating = await pendingRequestsForRecords(engine, objectName, [recordId]);
+  return gating.some((pending) => nodeConfigLocksRecord(parseJson<unknown>(pending?.node_config_json, {})));
 }
 
 /**
@@ -487,7 +538,7 @@ export function bindApprovalLockHook(
   engine.registerHook('beforeUpdate', async (ctx: any) => {
     const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
     // No object name (shouldn't happen) or our own bookkeeping objects → skip.
-    if (!object || String(object).startsWith('sys_approval')) return;
+    if (!object || isApprovalBookkeepingObject(object)) return;
 
     const data = (ctx?.input?.data ?? {}) as Record<string, unknown>;
     const changedFields = Object.keys(data).filter((k) => k !== 'id' && k !== 'updated_at');
@@ -538,7 +589,7 @@ export function bindApprovalLockHook(
       if (writerRun && pending?.flow_run_id && String(writerRun) === String(pending.flow_run_id)) continue;
 
       const config = parseJson<any>(pending?.node_config_json, {});
-      if (config?.lockRecord === false) continue;
+      if (!nodeConfigLocksRecord(config)) continue;
 
       // Allow when every changed field is the approval status mirror.
       const mirror = config?.approvalStatusField;

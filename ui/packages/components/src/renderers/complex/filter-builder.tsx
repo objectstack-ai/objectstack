@@ -7,7 +7,7 @@
  */
 
 import { ComponentRegistry } from '@object-ui/core';
-import type { FilterBuilderSchema } from '@object-ui/types';
+import type { FilterBuilderSchema, FilterGroup } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
 // Aliased on import, following PR #4169's convention (and `AppSchemaRenderer`'s
 // use of it): this repo has its OWN `resolveKeyedI18nLabel` over a DIFFERENT
@@ -18,7 +18,10 @@ import { FilterBuilder } from '../../custom/filter-builder';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('filter-builder',
-  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; [key: string]: unknown } & RendererHostProps) => {
+  // `value` is declared because it is read by name: a host that binds the node
+  // (a form field) forwards the group it holds, the same authored `FilterGroup`
+  // the node's own `value` is.
+  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; value?: FilterGroup; [key: string]: unknown } & RendererHostProps) => {
     // Read-time resolution against the display locale (objectui#4580 revised
     // Q1-A). `BaseSchema.label` accepts `string | I18nLabel`; rendering the map
     // straight into a text node THREW "Objects are not valid as a React child".
@@ -42,13 +45,8 @@ ComponentRegistry.register('filter-builder',
           </label>
         )}
         <FilterBuilder
-          fields={(schema.fields || []) as any}
-          // `schema.value` is the AUTHORED `FilterGroup`; the builder edits its
-          // own `FilterBuilderRowGroup`, and the two rows are assignable in
-          // neither direction (see `FilterBuilderRow`). The `any` index
-          // signature this renderer's props carried hid that gap; with it gone
-          // the read is cast here, once and visibly, instead (#25918).
-          value={(schema.value || props.value) as any}
+          fields={schema.fields || []}
+          value={schema.value || props.value}
           onChange={handleChange}
           className={className}
           {...props}

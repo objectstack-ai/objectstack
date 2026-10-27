@@ -401,6 +401,13 @@ export async function explainAccessForCaller(
               actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
           }
         : {}),
+      // [#26188 · ADR-0057] Asked by the depth layer's record cell: with no
+      // resolver mounted a hierarchy read depth is evaluated as 'own', and the
+      // cell names that instead of the depth. The kernel's own answer, read
+      // per explain; no reader of the service, no answer.
+      ...(this.resolveKernelService
+        ? { hierarchyResolverMounted: () => this.resolveKernelService?.('hierarchy-scope-resolver') != null }
+        : {}),
       ...(sharing && typeof sharing.listShares === 'function'
         // [ADR-0111 D5] listShares is now management-gated in the sharing
         // service, but explain's own caller authorization already ran
@@ -409,6 +416,13 @@ export async function explainAccessForCaller(
         // share attribution when the EXPLAINED principal isn't a share
         // manager — the exact behaviour this binding had before the gate.
         ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
+        : {}),
+      // [#26180] The pending approval requests that grant the EXPLAINED
+      // principal read of the record — the same answer the sharing read filter
+      // ORs in, asked with the explained context, so the attribution names the
+      // request the filter admitted the row through.
+      ...(sharing && typeof sharing.listApprovalReadGrants === 'function'
+        ? { listApprovalReadGrants: (o: string, rid: string, c: any) => sharing.listApprovalReadGrants(o, rid, c) }
         : {}),
       ...(sharing && typeof sharing.canEdit === 'function'
         ? { canEditRecord: delegatedWriteGate((o, rid, c) => sharing.canEdit(o, rid, c)) }

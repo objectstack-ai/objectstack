@@ -1,5 +1,249 @@
 # Changelog
 
+## 18.2.0
+
+### Minor Changes
+
+- f00e8d5: feat: `demoStaff` — an application declares the demo accounts its seed data is dealt to, and the development boot creates them
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A stack may now declare `demoStaff: [{ name, email, position?, permissionSets? }]`. On a local development boot (`os dev`), `@objectstack/plugin-auth` creates each entry right after the development admin, through the same sign-up pipeline, with the development seed password (`os dev --admin-password`, default `admin123`); assigns the declared position and permission sets in the Default Organization (an account the membership policy left outside it is reported and gets none); and the application's seed then runs, so a seed row naming one of these people (`owner_id: 'Legal Counsel 1'`) resolves on the first boot. Idempotent: an address that already has an account is left exactly as it is, and only its missing assignments are added.
+  
+  Development only. `os build` leaves the key out of the artifact (`objectstack.json`), so a deployment booted from one has nothing to provision. Every other boot creates nothing and says why, with an ADR-0112 code: a boot that is not `NODE_ENV=development`, or a migrate-and-exit run (`PERMISSION_DENIED`, logged at `info` — the intended outcome there); and, on a development boot, logged at `warn` because the developer loses the accounts: a walled tenancy posture or an auth base URL that is not a loopback address (`PERMISSION_DENIED`), a database where nothing but a demo account could sign in, so a demo account would be promoted to platform admin (`PRECONDITION_REQUIRED`), or a credential store that could not be read (`SERVICE_UNAVAILABLE`).
+  
+  `defineStack` refuses an entry that names a position or permission set the stack does not declare (a platform set such as `admin_full_access` is never one), and two entries with one name or one address (`STACK_CROSS_REFERENCE_INVALID`).
+  
+  `@objectstack/runtime`: when the boot will create demo accounts, `AppPlugin` runs its inline seed at `kernel:bootstrapped` instead of inside `start()`. The seed source is declared as before, so the settlement tally and `app:seeded` behave as they do for a seed that overran its budget.
+  
+  What to do: nothing. A stack that declares no `demoStaff` boots, seeds and builds exactly as before. An application that creates its demo accounts with its own script can declare them here and delete the script.
+
+### Patch Changes
+
+- e8de8a7: Clause-②: no
+  Metadata-protocol: none
+  
+  A new organization now gets its default currency from its creator's language or region. When an organization is created through `POST /api/v1/auth/organization/create`, the server reads the creator's stored language (`sys_user.locale`), or else the creating request's `Accept-Language`. It writes that region's ISO 4217 currency as the organization's `localization.currency`: `zh-CN` gives `CNY`, `ja` gives `JPY`, `en-GB` gives `GBP`. The value is an ordinary tenant setting, so Setup → Localization shows it and can change it. Amounts in `currencyMode: 'dynamic'` fields then show that currency instead of a plain number.
+  
+  When there is nothing to derive from (no stored language, no `Accept-Language`, or a tag with no country such as `es-419`), nothing is written and the setting stays unset, as before. There is no fallback to the `default_country` or `locale` platform defaults. A value already set on any rung (the organization's own, a global row, or an `OS_LOCALIZATION_CURRENCY` override) is never overwritten. A host's own `onOrganizationCreated` callback still runs, before this step.
+  
+  The `os dev` seed does the same for its admin's workspace from the host's POSIX locale (`LC_ALL`, then `LC_MONETARY`, then `LANG`), beside its time-zone seeding. `C`, `POSIX`, and a host with no locale set write nothing.
+  
+  The region-to-currency table is a checked-in snapshot of CLDR 48 `currencyData`.
+- 431f065: feat(plugin-auth): the platform OIDC provider emits the standard `locale` claim at userinfo, so an environment signing in through it follows the user's language
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **Before.** The OIDC provider plugin-auth composes (`oauthProvider`) passed no `customUserInfoClaims`, so `/oauth2/userinfo` never carried `locale`. An environment signing in through an ObjectStack OP (a hosted environment through the cloud) reads the claim off userinfo to set its JIT user's language (`idp-locale-claim.ts`), and so never received it.
+  - **Now.** Userinfo carries `locale` (OIDC Core §5.1) when the access token's scopes include `profile` and the user's `sys_user.locale`, read through the data engine in system context, is a BCP-47 tag the platform's column reader accepts (`normalizeRecipientLocale`). Otherwise the key is absent. Every ObjectStack OP emits it; there is no new configuration key, column or better-auth `additionalField`.
+  - **Userinfo only.** The ID token is unchanged: the provider keeps the standard profile claims out of it.
+  - **A failed read never fails userinfo.** The claim is omitted and the failure is logged once per request at `warn` through the host logger, naming the user.
+- d284ff3: fix(plugin-auth,plugin-email)!: the invitation mail says when its role label stayed English, and states when the invitation expires
+  
+  **The role label.** The organization invitation mail names the invitee's role by its `sys_member.role` option label in the mail's locale (`成员`, `メンバー`, `Miembro`). When the i18n service answered without a translation for that locale, the mail named the English label (`Member`) inside a Chinese, Japanese or Spanish sentence, and logged nothing. Only a read that threw was reported. That happens when there is no i18n service, when the service holds no bundle for the locale, or when its reported locales (`i18n.supportedLocales`, when declared) do not name the locale as the bundles spell it. Now one `warn` is logged for the send: `[AuthManager] invitation mail: no 'zh-CN' label was found for the membership role(s) 'member'; …`. It names the locale, the roles and what to check. The mail is still sent as before. A mail in English, or a read that already warned because it threw, logs nothing extra.
+  
+  **The expiry.** The `auth.invitation` mail never said when its link stops working (better-auth's window, 48 hours by default), so an invitation opened late failed at the accept page with no warning. The sender now passes `invitation.expiresAt` as a new template variable, `expiresAt`, as an ISO-8601 instant. Each of the four built-in bodies, HTML and text, ends with one sentence that renders it with the `datetime:long` formatter. The date reads in the mail's locale and the send's reference timezone, with the zone named: 「此邀请将于 2031年3月4日 UTC 05:06:07 过期。」 / "This invitation expires on March 4, 2031 at 5:06:07 AM UTC.". The template engine has no conditionals, so every body states the expiry, and the built-in rows declare `expiresAt` **required**. A send without it is refused (`MISSING_VARIABLES: expiresAt`) and is never sent with a dangling sentence. The built-in sender always has better-auth's expiry. If the value does not read as a date, the sender leaves it out and logs one `warn` naming the invitation id and saying the mail will be refused, so the invitation can be resent. A tenant or app override of `auth.invitation` keeps its own bodies and variables, and can use `{{ expiresAt | datetime:long }}`.
+  
+  Clause-②: no (narrowing: the built-in `auth.invitation` rows declare a new required variable, `expiresAt`, so a `sendTemplate` of `auth.invitation` that names no `expiresAt` is now refused with `MISSING_VARIABLES` where it used to be sent)
+  
+  Metadata-protocol: none (a built-in template row's declared variables, read by the email service at send time; no spec key, authorable spelling or stored shape moves)
+  
+  **BREAKING** for code that sends `auth.invitation` itself (the built-in organization-invitation sender already passes the value).
+  
+  - **Before.** `auth.invitation` declared no expiry, and a send naming `inviter`, `organization`, `role`, `acceptUrl` and `appName` was delivered.
+  - **Now.** The same send is refused with `MISSING_VARIABLES: expiresAt`.
+  - **Fix (one line).** Add the invitation's expiry instant to the send's `data` as `expiresAt`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a send-time refusal of an `auth.invitation` mail that names no `expiresAt`: no authorable key, spelling or stored shape moves, the email-template schema is unchanged, and no stored row is read, rewritten or converted. The repair is a value only the sender holds (the invitation's expiry), which no ledger entry can derive. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a template row's declaration, not a TS interface (not runtime-interface-only). -->
+- 1d2a246: fix(plugin-auth)!: admin create-user refuses a password outside the deployment's length range, as set-user-password does
+  
+  `POST /api/v1/auth/admin/create-user` saved an explicit password of any length up to the maximum: better-auth's own `createUser` checks only `maxPasswordLength`, never `minPasswordLength`. An administrator could create a user with a 1-character password and `mustChangePassword: false`, and the user signed in with it, while `POST /api/v1/auth/admin/set-user-password` and the user's own change-password refuse the same value. Both admin doors now resolve a password through one check of the deployment's `minPasswordLength` / `maxPasswordLength` (the `auth.password_min_length` / `password_max_length` settings, ADR-0069):
+  
+  - **An explicit password outside the range** is refused with `400 INVALID_REQUEST`, "Password must be at least N characters" (or "at most N"), the answer set-user-password already gave. No new error code. The refusal comes before anything is written: no account, no membership, no permission-set grant, no audit row.
+  - **A generated password** (`generatePassword: true` with no password typed) is 16 characters, raised to the minimum when the minimum is above 16 and capped at the maximum when the maximum is below 16. Before, it was always 16, so on a deployment with a minimum above 16, set-user-password refused the password it had just generated, and create-user saved it below the minimum.
+  
+  A password inside the range is applied exactly as before.
+  
+  Clause-②: no (narrowing) — admin create-user refuses one request shape it used to run: an explicit `password` shorter than the deployment's `minPasswordLength` (one longer than `maxPasswordLength` was already refused by better-auth, now with set-user-password's code). Nothing is widened.
+  
+  Metadata-protocol: none (an admin REST door's handling of a request body; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the admin create-user door handles a request body's explicit password: a value outside the deployment's configured length range is refused, as the set-user-password door already refused it. The remedy is a request edit (send a password inside the range, or `generatePassword: true`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that created users with passwords shorter than the deployment's minimum, or that matched the error code of a too-long one.
+  
+  - **Before.** `POST /api/v1/auth/admin/create-user` with `password: 'a'` answered `200` and saved the password. A password longer than `maxPasswordLength` answered `400 PASSWORD_TOO_LONG`.
+  - **Now.** The short one answers `400 INVALID_REQUEST`, "Password must be at least 8 characters" (the deployment's minimum), and creates no user. The too-long one answers `400 INVALID_REQUEST`, "Password must be at most 128 characters" (the deployment's maximum), set-user-password's answer.
+  - **Fix.** Send a password inside the deployment's `minPasswordLength` / `maxPasswordLength` range, or send `generatePassword: true` and hand the user the returned temporary password. A client that matched `PASSWORD_TOO_LONG` on this door matches `INVALID_REQUEST` instead.
+- e3e936e: fix(plugin-auth)!: admin import-users sizes a generated temporary password to the deployment's length range, as create-user does
+  
+  `POST /api/v1/auth/admin/import-users` minted every temporary password at 16 characters, whatever the deployment's `minPasswordLength` / `maxPasswordLength` (the `auth.password_min_length` / `password_max_length` settings, ADR-0069). With a minimum above 16, an imported row got a password below that minimum and the user signed in with it. With a maximum below 16, better-auth refused the 16-character password and the row failed. This covers the `temporary` policy and the `auto` policy's fallback for a row with no deliverable channel. A generated temporary password is now 16 characters, raised to the minimum when the minimum is above 16 and capped at the maximum when the maximum is below 16: the same sizing create-user's `generatePassword` uses, read from the same better-auth context. With the default range it is still 16 characters. Nothing else about the import changes.
+  
+  The import reads the range once, before any row is written. If the context cannot be read, the request is refused (`500 INTERNAL_ERROR`, `import-users failed`) and no account is created, the same mapping create-user uses for the same read.
+  
+  Clause-②: no (narrowing) — the exported `IdentityImportDeps` gains a required member, `getAuthContext()`, so a deps object without it no longer type-checks against `runAdminImportUsers`. No request shape is widened or refused.
+  
+  Metadata-protocol: none (an admin REST door's handling of a request; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/admin-import-users.ts#IdentityImportDeps) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped. The one exported declaration that changes is the runtime deps interface `IdentityImportDeps`, which gains a required member; it has no Zod schema, no spec declaration and no stored form, so there is nothing for `objectstack migrate meta` to rewrite, and the compiler names every host that must supply the new member. -->
+  
+  **BREAKING** for a host that calls `runAdminImportUsers` itself (the `AuthPlugin` route is already wired).
+  
+  - **Before.** `IdentityImportDeps` had no auth-context member, and every temporary password was 16 characters.
+  - **Now.** `IdentityImportDeps.getAuthContext()` is required. It answers better-auth's `$context`, whose `password.config` holds the range. A JavaScript host that omits it has every import refused with `500 INTERNAL_ERROR` before anything is written.
+  - **Fix.** Pass `getAuthContext` in the deps, wired to the same reader create-user uses, for example `AuthManager.getAuthContext()`.
+- 83a26c3: feat(plugin-auth): a signed-out invitation preview read, so the invitation landing page can name the inviting organization and the inviter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **New route.** `GET /api/v1/auth/organization/invitation-preview?id=INVITATION_ID` answers a caller with no session. For a `pending` invitation that has not expired it returns exactly `{ success: true, data: { organizationName, inviterName, email } }`. `email` is the invited address masked to its first character and its domain (`alice@acme.com` becomes `a***@acme.com`), and `inviterName` is `null` when the inviter's account no longer exists.
+  - **One not-found.** An unknown, expired, accepted, rejected or cancelled id answers the same `404` with code `RESOURCE_NOT_FOUND` and the same body, so the answer does not tell those states apart.
+  - **The same answer for everyone.** The route never reads the session: a signed-in caller gets the identical three keys.
+  - **Rate-limited.** At most 10 previews per client address per 60 seconds, counted before the request is parsed; the 11th answers `429` `RATE_LIMIT_EXCEEDED` with `Retry-After`. The window counts in the kernel `cache` service when one is registered and per process otherwise, with a one-time warning naming the budget.
+  - **Closed query set.** `id`, once. Any other parameter, a repeated `id` and a missing `id` each answer a located `400` `VALIDATION_ERROR`.
+  - **Unchanged.** better-auth's own `GET /organization/get-invitation` still answers `401` without a session, and an invitation-link sign-up still owes the verification mail.
+  - **Governance.** ADR-0138 D2 admits the route as a class-2-shaped door (the invitation id is the capability token) by a dated note, and `auth-route-ledger.ts` books it `public`.
+  - **`@objectstack/rest`** now exports `unknownQueryParamRefusalMessage`, the pure half of the closed query-parameter rule, for a door outside the package that writes its own envelope.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 495fa07: feat(plugin-security,spec,plugin-auth)!: a delegated admin's write outside their own scope answers `403 DELEGATION_SCOPE_VIOLATION` with the gate's reason
+  
+  When a delegated administrator's write on `sys_user_position` or `sys_user_permission_set` fell outside their own `adminScope`, the delegated-administration gate knew exactly why ("business unit … is outside the delegated subtree", "… is not in the scope's allowlist"), but threw it as a plain `403 PERMISSION_DENIED`. A client could not tell it from a denial whose reason must stay hidden, so the console showed only its fixed "no permission" line.
+  
+  Clause-②: yes (widening: the ADR-0112 ledger registers `DELEGATION_SCOPE_VIOLATION` under `@objectstack/plugin-security`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the error code three of the gate's refusal reasons answer with: every write that was refused is still refused, with the same 403 status and the same reason, and every write that was admitted is still admitted. The remedy is on the consumer's side, reading `code`; never a rewrite of a package source or a stored row. The other categories are closed on facts: all three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/plugin-security`.** Three reasons describe the caller's own delegated scope: a business unit outside the delegated subtree (the new row's or the existing row's), a permission set not in the scope's allowlist (one the position distributes, or one granted directly), and a target user outside the subtree. They now throw `DelegationScopeViolationError`: status `403`, code `DELEGATION_SCOPE_VIOLATION`, and the message `[Security] Outside your delegated scope: delegated 'OP' on OBJECT rejected — REASON (scope from 'SET').` Every other refusal of the gate keeps `403 PERMISSION_DENIED`, unchanged: the audience anchor, principal-less writes, `sys_member` being tenant-only, the organization boundary, plain CRUD with no scope, filter writes, delegation of duty, a scope without `manageAssignments`, an unanchored assignment, adminScope containment, a stored grant whose set is unnamed or not in the catalog, a grant naming no target user, and a target user with no business unit.
+  - The message does not open with `[Security] Access denied`, which `mapDataError`, `isPermissionDeniedError` and the explain route read as `PERMISSION_DENIED`. The REST door (`mapDataError`) and the runtime dispatcher (`resolveThrownHttpError`) carry the new code as it was thrown.
+  - **`@objectstack/spec`.** One ADR-0112 ledger row, `DELEGATION_SCOPE_VIOLATION`, registered as its own meaning. It is not a synonym of `PERMISSION_DENIED`, and no waiver is needed.
+  - **`@objectstack/plugin-auth`.** The invitation door reads the new code as the gate's verdict too, so an invitation placed outside the issuer's scope still answers `403 INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`, not the `503` read-fault answer.
+  - For a client: a `403` with code `DELEGATION_SCOPE_VIOLATION` carries a message about the caller's own scope, which is safe to show. A `403 PERMISSION_DENIED` stays opaque. A client that matched `PERMISSION_DENIED` to catch these three refusals should also match the new code.
+- 3b480e0: docs: TypeScript's legacy `node10` module resolution is unsupported for packages with subpath exports
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  These fifteen packages declare their entry points only through `exports`, including subpaths such as `@objectstack/spec/kernel`. TypeScript's legacy `node10` resolution (`moduleResolution: "node"`, the default when `module` is `commonjs`) ignores `exports`, so a project configured that way cannot resolve the types of any subpath import, while the root entry still appears to work. Each package's README now says so in one line, and the plugin development guide gains a "Module resolution" paragraph. No `exports` map changes and no `typesVersions` fallback is added.
+  
+  What to do: set `moduleResolution` to `node16`, `nodenext` or `bundler` in the consuming project's `tsconfig.json`.
+- 17f8217: feat(plugin-auth): in multi-org mode, Create User adds the new user to the administrator's current organization
+  
+  Clause-②: yes (narrowing): under a walled posture `POST /api/v1/auth/admin/create-user` now refuses `400 NO_ACTIVE_ORGANIZATION` when the calling administrator has no current organization, where it used to create a member-less account; a request from an administrator in an organization now also adds the new user to it (widening)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What narrows is one admin route's answer for an administrator who has no current organization under a walled posture; the caller's migration is the one the refusal names: switch to an organization, then create the user. -->
+  
+  **BREAKING** — under a walled tenancy posture (`group` / `isolated`), `/admin/create-user` no longer creates a user with no organization. The administrator's current (active) organization is the new user's organization, the way mainstream admin consoles add people to the workspace you are standing in. ADR-0093 D3 gains an amendment for this one route.
+  
+  - **The join.** The new user joins the calling administrator's current organization as `member`, through better-auth's own `addMember`, the same act as Add Member, inside the account's transaction. A refused join (a membership limit) refuses the call with the vendor's status and code, and no user is created. A membership already there is kept and reported as `membershipCreated: false`. The response and the audit row carry `organizationId` and `membershipCreated` as before.
+  - **No choice to make.** The dialog and the route take no organization. To add a user to another organization, switch to it first.
+  - **No current organization.** FROM a member-less account TO `400 NO_ACTIVE_ORGANIZATION`, before any account exists. The fix is to switch to the organization the user belongs to, then create them.
+  - **Policy.** Under `membershipPolicy: 'invite-only'` the user still joins: creating a user inside your organization is an explicit act, like Add Member (ADR-0093 D1).
+  - **Capability.** A walled server without the organization plugin, or without a unit of work for the creation, answers `501` before any account exists.
+  - **Error code.** `NO_ACTIVE_ORGANIZATION` is registered in `@objectstack/spec`'s error-code ledger under `@objectstack/plugin-auth`. It is better-auth's own code for the same condition on Add Member.
+  - **Unchanged.** The `single` posture (a degraded wall included), self sign-up, bulk import, SSO sign-in and invitations.
+- 5cf1b9d: Clause-②: no
+  Metadata-protocol: none
+  
+  The single posture's Default Organization now takes its first owner's default currency. That organization is created at boot with no creator, so it never passed through organization creation, and a new self-hosted install showed code-less amounts as plain numbers until an administrator set Setup → Localization → Default currency by hand. When the default-organization bootstrap first binds (or promotes) its owner, the organization gets `localization.currency` by the same rule a new organization's creator gets: the owner's stored `sys_user.locale`, else the binding request's `Accept-Language` (on a first sign-up, the sign-up request), mapped through the CLDR region table. Nothing derivable means nothing is written, and a value already set on any rung is never overwritten. `EnsureDefaultOrganizationResult` gains an optional `ownerUserId`, set when the call bound or promoted the owner.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [50af6fa]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [e2b40a2]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [f123f75]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [1ac2bb5]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [83a26c3]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [2409c9c]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/rest@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/service-messaging@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

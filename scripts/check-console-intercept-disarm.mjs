@@ -89,7 +89,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // Why this gate reads `maskCommentsAndLiterals` — the tree's one
@@ -171,6 +171,27 @@ function projectTestBlocks(masked) {
   }
   return blocks;
 }
+// The shared preset at the repo root. A package-root config whose ONLY
+// statement re-exports it (`export { default } from '<rel>/vitest.preset.mts'`)
+// takes its whole effective config from the preset, so the gate judges the
+// preset's source in that config's place: one disarm, read once, covering every
+// re-exporter, and a preset that loses it reds every one of them by name.
+// Deliberately narrow: a config that imports the preset and merges or wraps it
+// is NOT recognised (what it exports is no longer the preset's object), so it
+// carries the setting itself, as before.
+const PRESET_NAME = 'vitest.preset.mts';
+const PRESET_REEXPORT_RE = /^\s*export\s*\{\s*default\s*\}\s*from\s*(['"])([^'"]+)\1\s*;?\s*$/;
+
+/**
+ * @returns {string | null} the repo-relative preset path when `source` is the
+ * bare re-export of THIS workspace's root preset, else null.
+ */
+function presetReexport(root, dir, source) {
+  const m = PRESET_REEXPORT_RE.exec(maskComments(source));
+  if (!m) return null;
+  return resolve(dir, m[2]) === join(root, PRESET_NAME) ? PRESET_NAME : null;
+}
+
 /** A script that runs vitest — `vitest run`, `vitest --coverage`, a bare `vitest`. */
 const VITEST_SCRIPT_RE = /(?:^|\s|&&|;)vitest(?:\s|$)/;
 
@@ -254,10 +275,13 @@ export function scan(root) {
       );
       continue;
     }
-    const masked = maskCommentsAndLiterals(readFileSync(join(dir, configName), 'utf8'));
+    const source = readFileSync(join(dir, configName), 'utf8');
+    const preset = presetReexport(root, dir, source);
+    const masked = maskCommentsAndLiterals(preset ? readFileSync(join(root, preset), 'utf8') : source);
+    const via = preset ? ` (via its re-export of ${preset}, which the gate judges in its place)` : '';
     if (REARM_RE.test(masked)) {
       findings.push(
-        `${rel(root, dir)}/${configName}: sets disableConsoleIntercept: FALSE — this ` +
+        `${rel(root, dir)}/${configName}${via}: sets disableConsoleIntercept: FALSE — this ` +
           `re-arms the #10374 teardown race at the package root. The only sanctioned ` +
           `home for that value is a fixture config BELOW the package root (the ` +
           `teardown-race pin's positive control). Set it to true, or move the config ` +
@@ -267,7 +291,7 @@ export function scan(root) {
     }
     if (!DISARM_RE.test(masked)) {
       findings.push(
-        `${rel(root, dir)}/${configName}: does not set disableConsoleIntercept: true ` +
+        `${rel(root, dir)}/${configName}${via}: does not set disableConsoleIntercept: true ` +
           `(a comment about it does not count) — this suite pays a console RPC per ` +
           `write and any late console.log can fail its fully green run ` +
           `(EnvironmentTeardownError: [vitest-worker]: Closing rpc while ` +
@@ -280,7 +304,7 @@ export function scan(root) {
       const undisarmed = blocks.filter((b) => !DISARM_RE.test(b));
       if (blocks.length === 0 || undisarmed.length > 0) {
         findings.push(
-          `${rel(root, dir)}/${configName}: defines inline projects, and ` +
+          `${rel(root, dir)}/${configName}${via}: defines inline projects, and ` +
             `${blocks.length === 0 ? 'no project test block could be read' : `${undisarmed.length} of ${blocks.length} project test block(s) lack the setting`} ` +
             `— a ROOT-level disableConsoleIntercept is INERT for project runs ` +
             `(measured on vitest 4.1.10: a probe project's console write still ` +
@@ -335,9 +359,10 @@ function main() {
 // invisible (case 6): those are the two silent-in-the-green-direction bugs a
 // textual gate can grow.
 
-function buildWorkspace(caseDir, packages) {
+function buildWorkspace(caseDir, packages, rootFiles = {}) {
   mkdirSync(join(caseDir, 'packages'), { recursive: true });
   writeFileSync(join(caseDir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+  for (const [file, content] of Object.entries(rootFiles)) writeFileSync(join(caseDir, file), content);
   for (const [name, files] of Object.entries(packages)) {
     const dir = join(caseDir, 'packages', name);
     mkdirSync(dir, { recursive: true });
@@ -353,6 +378,7 @@ const QUIET_MANIFEST = JSON.stringify({ name: 'x', scripts: { build: 'tsup' } })
 const DISARMED = `import { defineConfig } from 'vitest/config';
 export default defineConfig({ test: { disableConsoleIntercept: true } });
 `;
+const REEXPORT = `// nothing of its own\nexport { default } from '../../vitest.preset.mts';\n`;
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
@@ -382,7 +408,7 @@ const SELF_TEST_VERDICT = 'check-console-intercept-disarm self-test reached its 
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-console-intercept-disarm self-test': 11,
+  'check-console-intercept-disarm self-test': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -528,13 +554,57 @@ function selfTest() {
       expectFindings: 1,
       expectText: 'does not set disableConsoleIntercept',
     },
+    {
+      name: 'a bare re-export of a disarmed root preset passes',
+      rootFiles: { 'vitest.preset.mts': DISARMED },
+      packages: { a: { 'package.json': TEST_MANIFEST, 'vitest.config.ts': REEXPORT } },
+      expectFindings: 0,
+    },
+    {
+      name: 'a re-export of a preset that does not disarm fails, naming the preset',
+      rootFiles: { 'vitest.preset.mts': `export default { test: { globals: true } };\n` },
+      packages: { a: { 'package.json': TEST_MANIFEST, 'vitest.config.ts': REEXPORT } },
+      expectFindings: 1,
+      expectText: 'via its re-export of vitest.preset.mts',
+    },
+    {
+      name: 'a re-export of a preset that re-arms fails',
+      rootFiles: { 'vitest.preset.mts': `export default { test: { disableConsoleIntercept: false } };\n` },
+      packages: { a: { 'package.json': TEST_MANIFEST, 'vitest.config.ts': REEXPORT } },
+      expectFindings: 1,
+      expectText: 'FALSE',
+    },
+    {
+      name: 'a re-export of some OTHER file is judged as the config itself (fails)',
+      rootFiles: { 'vitest.preset.mts': DISARMED, 'other.mts': DISARMED },
+      packages: {
+        a: { 'package.json': TEST_MANIFEST, 'vitest.config.ts': `export { default } from '../../other.mts';\n` },
+      },
+      expectFindings: 1,
+      expectText: 'does not set disableConsoleIntercept',
+    },
+    {
+      name: 'a config that imports the preset and wraps it is not the preset (fails without its own setting)',
+      rootFiles: { 'vitest.preset.mts': DISARMED },
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'vitest.config.ts':
+            `import preset from '../../vitest.preset.mts';\n` +
+            `export { default } from '../../vitest.preset.mts';\n` +
+            `export const extra = { test: { globals: true }, preset };\n`,
+        },
+      },
+      expectFindings: 1,
+      expectText: 'does not set disableConsoleIntercept',
+    },
   ];
 
   let failures = 0;
   for (const testCase of cases) {
     const caseDir = mkdtempSync(join(tmpdir(), 'ci-disarm-'));
     try {
-      buildWorkspace(caseDir, testCase.packages);
+      buildWorkspace(caseDir, testCase.packages, testCase.rootFiles);
       const { findings, vitestPackages } = scan(caseDir);
       const problems = [];
       if (findings.length !== testCase.expectFindings) {

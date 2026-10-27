@@ -16,8 +16,10 @@
  *
  *  - the composer: `feedComment`, the create grant on `sys_comment`;
  *  - the reaction control: `feedReactionAdd`, the create grant on
- *    `sys_comment_reaction`, with a take-back asking `feedReactionRemove`, its
- *    delete grant, per click;
+ *    `sys_comment_reaction`, with a take-back asking `feedReactionRemove` per
+ *    click: the same create grant, since the take-back goes through the
+ *    unreact door (`DELETE /api/v1/comments/reactions/:id`), which removes the
+ *    caller's own row with no `delete` grant;
  *  - on a deployment with no `sys_comment_reaction` (the column store), the
  *    reaction control: `feedReactionColumn`, the update grant on `sys_comment`.
  *
@@ -36,10 +38,13 @@ import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/pe
 import { DETAIL_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-detail';
 import { effectiveOperationsArray, resolveEffectiveApiMethods } from '@objectstack/spec/data';
 
+/** The page's authenticated fetch: the unreact door is called through it. */
+const authFetch = vi.hoisted(() => vi.fn());
+
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'u1', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  createAuthenticatedFetch: () => authFetch,
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -69,6 +74,7 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { RecordDetailView } from './RecordDetailView';
+import { toast } from 'sonner';
 
 const COMMENT = 'sys_comment';
 const REACTION = 'sys_comment_reaction';
@@ -127,8 +133,11 @@ function answer(feed: { [COMMENT]?: Bits; [REACTION]?: Bits }): MePermissionsRes
   } as MePermissionsResponse;
 }
 
-/** One comment by another member; the caller (`u1`) has already reacted 👍 on it. */
-function makeDataSource() {
+/**
+ * One comment by another member; `reactor` (the caller `u1` unless named) has
+ * already reacted 👍 on it.
+ */
+function makeDataSource(reactor = 'u1') {
   const comment = {
     id: COMMENT_ID,
     thread_id: THREAD,
@@ -136,9 +145,9 @@ function makeDataSource() {
     author_name: 'u3',
     body: COMMENT_BODY,
     created_at: '2026-10-10T08:00:00.000Z',
-    reactions: JSON.stringify({ '👍': ['u1'] }),
+    reactions: JSON.stringify({ '👍': [reactor] }),
   };
-  const ownReaction = { id: 'r1', comment_id: COMMENT_ID, emoji: '👍', user_id: 'u1', created_at: '2026-10-10T09:00:00.000Z' };
+  const ownReaction = { id: 'r1', comment_id: COMMENT_ID, emoji: '👍', user_id: reactor, created_at: '2026-10-10T09:00:00.000Z' };
   return {
     find: vi.fn(async (objectName: string) => {
       if (objectName === COMMENT) return { data: [{ ...comment }] };
@@ -210,7 +219,23 @@ const thumbsChip = (view: View) =>
     (b) => !!b.getAttribute('aria-label') && b.children.length === 2 && b.children[0].textContent === '👍',
   );
 
+/** The unreact door's answer to a removal of the caller's own row. */
+const unreacted = (id: string) =>
+  new Response(JSON.stringify({ success: true, data: { id, deleted: true } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
+/** The calls that reached the unreact door: `[url, init]`. */
+const unreactCalls = () =>
+  authFetch.mock.calls.filter(([url]) => String(url).includes('/api/v1/comments/reactions/'));
+
 beforeEach(() => {
+  authFetch.mockImplementation(async (url: string) =>
+    String(url).includes('/api/v1/comments/reactions/')
+      ? unreacted(String(url).split('/').pop() as string)
+      : new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+  );
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -267,19 +292,22 @@ describe("the record feed's reaction control reads feedReactionAdd / feedReactio
     expect((thumbsChip(view) as HTMLButtonElement).disabled).toBe(!offered);
   });
 
-  it('a take-back asks the delete grant: with create but not delete, clicking the own reaction writes nothing and keeps it shown', async () => {
+  it('a take-back reads no delete grant: with create but not delete, clicking the own reaction removes it through the unreact door', async () => {
     const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.createOnly }));
     fireEvent.click(thumbsChip(view)!);
     await act(async () => {});
+    expect(unreactCalls()).toEqual([['/api/v1/comments/reactions/r1', { method: 'DELETE', credentials: 'include' }]]);
     expect(dataSource.delete).not.toHaveBeenCalled();
-    expect(thumbsChip(view)!.children[1].textContent).toBe('1');
+    expect(thumbsChip(view)).toBeUndefined();
   });
 
-  it('CONTROL — with the delete grant the same click takes the reaction back by deleting the own row', async () => {
+  it('CONTROL — with the delete grant the same click takes the reaction back through the same door, never the data door', async () => {
     const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.full }));
     fireEvent.click(thumbsChip(view)!);
     await act(async () => {});
-    expect(dataSource.delete.mock.calls).toEqual([[REACTION, 'r1']]);
+    expect(unreactCalls()).toEqual([['/api/v1/comments/reactions/r1', { method: 'DELETE', credentials: 'include' }]]);
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    expect(thumbsChip(view)).toBeUndefined();
   });
 
   it('adding through the picker creates the own row where create is held', async () => {
@@ -288,6 +316,51 @@ describe("the record feed's reaction control reads feedReactionAdd / feedReactio
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '🎉' }));
     await act(async () => {});
     expect(dataSource.create.mock.calls).toEqual([[REACTION, { comment_id: COMMENT_ID, emoji: '🎉' }]]);
+  });
+});
+
+describe("a take-back goes through the unreact door, and only on the caller's own reaction (objectstack#26346)", () => {
+  it('a member with no grant beyond create on sys_comment_reaction adds a reaction and takes it back', async () => {
+    const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.readOnly, [REACTION]: SHAPE.createOnly }));
+    fireEvent.click(addReaction(view)!);
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '🎉' }));
+    await act(async () => {});
+    const party = () =>
+      (view.queryAllByRole('button') as HTMLElement[]).find(
+        (b) => !!b.getAttribute('aria-label') && b.children.length === 2 && b.children[0].textContent === '🎉',
+      );
+    expect(party()).toBeDefined();
+    fireEvent.click(party()!);
+    await act(async () => {});
+    expect(dataSource.create.mock.calls).toEqual([[REACTION, { comment_id: COMMENT_ID, emoji: '🎉' }]]);
+    expect(unreactCalls()).toEqual([['/api/v1/comments/reactions/new-row', { method: 'DELETE', credentials: 'include' }]]);
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    expect(party()).toBeUndefined();
+  });
+
+  it("another member's reaction offers no take-back: a click on their chip adds the caller's own row and reaches no door that removes", async () => {
+    const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.full }), makeDataSource('u2'));
+    fireEvent.click(thumbsChip(view)!);
+    await act(async () => {});
+    expect(dataSource.create.mock.calls).toEqual([[REACTION, { comment_id: COMMENT_ID, emoji: '👍' }]]);
+    expect(unreactCalls()).toEqual([]);
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    expect(thumbsChip(view)!.children[1].textContent).toBe('2');
+  });
+
+  it('a take-back the door refuses puts the reaction back and says it was not saved', async () => {
+    authFetch.mockImplementation(async () =>
+      new Response(JSON.stringify({ success: false, error: { code: 'PERMISSION_DENIED' } }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const { view } = await mount(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.createOnly }));
+    fireEvent.click(thumbsChip(view)!);
+    await act(async () => {});
+    expect(unreactCalls().map(([url]) => url)).toEqual(['/api/v1/comments/reactions/r1']);
+    expect(thumbsChip(view)!.children[1].textContent).toBe('1');
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -336,7 +409,8 @@ describe('against the registered feed schemas in the page objects (objectui#1208
     expect(addReaction(view)).not.toBeNull();
     fireEvent.click(thumbsChip(view)!);
     await act(async () => {});
-    expect(dataSource.delete.mock.calls).toEqual([[REACTION, 'r1']]);
+    expect(unreactCalls().map(([url]) => url)).toEqual(['/api/v1/comments/reactions/r1']);
+    expect(dataSource.delete).not.toHaveBeenCalled();
   });
 });
 

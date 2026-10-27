@@ -74,6 +74,13 @@ import {
   DialogTitle,
 } from '@object-ui/components';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@object-ui/components';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -113,10 +120,14 @@ import type { PermissionSetCloned } from './permission-set-clone.js';
 import {
   mergePermissionSlice,
   scopePermissionSet,
+  OBJECT_ACCESS_SCOPES,
+  isHierarchyScope,
   type ObjectPerm,
+  type ObjectPermFlag,
   type FieldPerm,
   type PermissionSetDraft,
 } from './permission-slice.js';
+import type { ObjectAccessScope } from '@objectstack/spec/security';
 
 /**
  * objectui#13113 — a refused save, in the author's words where the refusal
@@ -278,9 +289,108 @@ function withFieldBits(cur: FieldPerm | undefined, readable: boolean, editable: 
   return next;
 }
 
+/**
+ * objectstack#26187 — the #16870 pairs, in the direction the matrix needs: a
+ * super-user bit already answers `org` before the resolver reads a scope, so
+ * the BASE schema (`checkScopeAgainstSuperUserBits`) refuses `readScope`
+ * beside View All or Modify All, and `writeScope` beside Modify All. Applied
+ * where the matrix GRANTS a bit (the per-checkbox cascade and the "All" arm),
+ * so no save from the matrix carries a refused pair. Mutates `row`.
+ */
+function dropScopesBypassedBySuperUserBits(row: ObjectPerm): void {
+  if (row.viewAllRecords === true || row.modifyAllRecords === true) delete row.readScope;
+  if (row.modifyAllRecords === true) delete row.writeScope;
+}
+
+/**
+ * The same pairs, read for the pickers: the catalogue row naming the bit that
+ * greys this axis's picker, or `null` when the picker is open. The UI mirrors
+ * the server's refusal; it does not decide it.
+ */
+function scopeLockKey(perm: ObjectPerm, axis: ScopeAxis): string | null {
+  if (perm.modifyAllRecords === true) return 'perm.scope.lockedByModifyAll';
+  if (axis === 'readScope' && perm.viewAllRecords === true) return 'perm.scope.lockedByViewAll';
+  return null;
+}
+
+type ScopeAxis = 'readScope' | 'writeScope';
+
+/** The two scope columns, in column order: the catalogue row each header reads (shared with the preview). */
+const SCOPE_AXES: ReadonlyArray<{ axis: ScopeAxis; testId: string; labelKey: string; tipKey: string }> = [
+  { axis: 'readScope', testId: 'read', labelKey: 'engine.permissionPreview.readScope', tipKey: 'perm.scope.readTip' },
+  { axis: 'writeScope', testId: 'write', labelKey: 'engine.permissionPreview.writeScope', tipKey: 'perm.scope.writeTip' },
+];
+
+/** Item tokens that are not scope values: `SelectItem` refuses `''`, so "Not set" needs a token of its own. */
+const SCOPE_UNSET = 'unset';
+const SCOPE_OUTSIDE = 'outside';
+
+/**
+ * objectstack#26187 — one row's read or write scope, drawn with the shared
+ * `Select` the facet pickers use (objectui#11865). Lists "Not set" and the
+ * spec's five values; the three hierarchy values say they need the enterprise
+ * resolver and stay selectable (the open runtime resolves them to the owner
+ * alone). A stored value outside the spec's list is shown as stored, and
+ * picking it writes nothing. Disabled where the row is read-only or a
+ * super-user bit already decides this axis ({@link scopeLockKey}), with the
+ * reason as the trigger's title.
+ */
+function ScopePicker({
+  objectName,
+  perm,
+  axis,
+  writable,
+  t,
+  onChange,
+}: {
+  objectName: string;
+  perm: ObjectPerm;
+  axis: (typeof SCOPE_AXES)[number];
+  writable: boolean;
+  t: (key: string) => string;
+  onChange: (objectName: string, axis: ScopeAxis, value: ObjectAccessScope | undefined) => void;
+}) {
+  const value: string | undefined = perm[axis.axis];
+  const known = value === undefined || (OBJECT_ACCESS_SCOPES as readonly string[]).includes(value);
+  const label = (v: string | undefined) => (v === undefined ? t('perm.scope.unset') : t(`perm.scope.value.${v}`));
+  const hint = t('perm.scope.hierarchyHint');
+  const lock = scopeLockKey(perm, axis.axis);
+  const title = lock ? t(lock) : isHierarchyScope(value) ? `${t(axis.tipKey)} (${hint})` : t(axis.tipKey);
+  return (
+    <Select
+      value={value === undefined ? SCOPE_UNSET : known ? value : SCOPE_OUTSIDE}
+      onValueChange={(token) => {
+        if (token === SCOPE_OUTSIDE) return;
+        onChange(objectName, axis.axis, token === SCOPE_UNSET ? undefined : (token as ObjectAccessScope));
+      }}
+      disabled={!writable || lock !== null}
+    >
+      <SelectTrigger
+        data-testid={`perm-scope-${axis.testId}-${objectName}`}
+        aria-label={`${objectName} ${t(axis.labelKey)}`}
+        title={title}
+        className="h-7 w-full gap-1 px-2 text-xs"
+      >
+        {/* The trigger shows the bare label; the hint lives on the items. */}
+        <SelectValue>{known ? label(value) : value}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {!known && <SelectItem value={SCOPE_OUTSIDE}>{value}</SelectItem>}
+        <SelectItem value={SCOPE_UNSET}>{label(undefined)}</SelectItem>
+        {OBJECT_ACCESS_SCOPES.map((s) => (
+          <SelectItem key={s} value={s} title={isHierarchyScope(s) ? hint : undefined}>
+            {label(s)}
+            {isHierarchyScope(s) && <span className="ml-1.5 text-[11px] text-muted-foreground">· {hint}</span>}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function getObjectActions(
   locale: string,
-): Array<{ key: keyof ObjectPerm; short: string; tip: string }> {
+): Array<{ key: ObjectPermFlag; short: string; tip: string }> {
   return [
     { key: 'allowCreate', short: 'C', tip: translate('perm.action.create', locale) },
     { key: 'allowRead', short: 'R', tip: translate('perm.action.read', locale) },
@@ -961,7 +1071,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   }
 
   /* ── Mutators ───────────────────────────────────────────── */
-  function updateObjectPerm(objectName: string, action: keyof ObjectPerm, value: boolean) {
+  function updateObjectPerm(objectName: string, action: ObjectPermFlag, value: boolean) {
     setDraft((prev) => {
       const cur = prev.objects[objectName] ?? {};
       const nextObj: ObjectPerm = { ...cur, [action]: value };
@@ -971,6 +1081,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         nextObj.allowEdit = true;
         nextObj.allowRead = true;
       }
+      // objectstack#26187 — granting a super-user bit drops the scope it
+      // already overrides (the #16870 pairs), so the row never holds a pair
+      // the BASE schema refuses.
+      if (value && (action === 'viewAllRecords' || action === 'modifyAllRecords')) {
+        dropScopesBypassedBySuperUserBits(nextObj);
+      }
       return {
         ...prev,
         objects: { ...prev.objects, [objectName]: nextObj },
@@ -978,11 +1094,29 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     });
   }
 
+  /**
+   * objectstack#26187 — a row's read or write scope from its picker. `undefined`
+   * ("Not set") deletes the key, so the row reads exactly as one never given a
+   * scope. Every other key of the row rides through, as in `updateObjectPerm`.
+   */
+  function updateObjectScope(
+    objectName: string,
+    axis: ScopeAxis,
+    value: ObjectAccessScope | undefined,
+  ) {
+    setDraft((prev) => {
+      const next: ObjectPerm = { ...(prev.objects[objectName] ?? {}) };
+      if (value === undefined) delete next[axis];
+      else next[axis] = value;
+      return { ...prev, objects: { ...prev.objects, [objectName]: next } };
+    });
+  }
+
   function bulkSetObject(objectName: string, action: 'all' | 'none' | 'crud' | 'read') {
     setDraft((prev) => {
       // `none` REPLACES the row with `{}` — deliberately, unlike the three
       // granting arms below (#6605). The defect those arms had was a GRANT
-      // that silently dropped a narrowing: "All" deleting a `readScope: 'own'`
+      // that silently dropped a narrowing: "CRUD" deleting a `readScope: 'own'`
       // widens effective read access with no diff and no error. `none` grants
       // nothing, so nothing survives for a scope to narrow; merging here would
       // instead leave `allowExport: true` (and the scopes) alive after a click
@@ -994,25 +1128,30 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         return { ...prev, objects: { ...prev.objects, [objectName]: {} } };
       }
       // The granting arms MERGE (#6605): start from the current row, reset the
-      // keys this matrix authors (`OBJECT_ACTIONS`), then set the granted
-      // ones. Keys the matrix does not model — `allowExport`, `readScope`,
-      // `writeScope`, anything an older or newer editor wrote — ride through
-      // exactly as they do on the per-checkbox path (`updateObjectPerm`'s
-      // spread). Replacing the row wholesale is what silently deleted them,
-      // and both save doors persist the row as-is: the environment door writes
-      // the whole record, and at package scope `mergePermissionSlice` takes
-      // in-scope rows entirely from `edited` (ADR-0086 P0), so `base` cannot
-      // restore what a bulk click dropped.
+      // boolean columns this matrix authors (`OBJECT_ACTIONS`), then set the
+      // granted ones. Keys the matrix does not model — `allowExport`, anything
+      // an older or newer editor wrote — ride through exactly as they do on
+      // the per-checkbox path (`updateObjectPerm`'s spread), and so do the
+      // scopes on "CRUD" and "R". Replacing the row wholesale is what silently
+      // deleted them, and both save doors persist the row as-is: the
+      // environment door writes the whole record, and at package scope
+      // `mergePermissionSlice` takes in-scope rows entirely from `edited`
+      // (ADR-0086 P0), so `base` cannot restore what a bulk click dropped.
       const cur = prev.objects[objectName] ?? {};
       const next: ObjectPerm = { ...cur };
       for (const a of OBJECT_ACTIONS) delete next[a.key];
-      const grants: Array<keyof ObjectPerm> =
+      const grants: ObjectPermFlag[] =
         action === 'all'
           ? OBJECT_ACTIONS.map((a) => a.key)
           : action === 'crud'
           ? ['allowCreate', 'allowRead', 'allowEdit', 'allowDelete']
           : ['allowRead'];
       for (const key of grants) next[key] = true;
+      // objectstack#26187 — "All" grants View All and Modify All, which the
+      // BASE schema refuses beside either scope (#16870): the same clearing
+      // rule as the per-checkbox cascade. Effective access is unchanged — the
+      // resolvers answer `org` on the super-user bits before reading a scope.
+      dropScopesBypassedBySuperUserBits(next);
       return {
         ...prev,
         objects: { ...prev.objects, [objectName]: next },
@@ -1892,6 +2031,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   t={t}
                   onToggleExpand={toggleExpand}
                   onObjectPerm={updateObjectPerm}
+                  onObjectScope={updateObjectScope}
                   onFieldPerm={updateFieldPerm}
                   onBulkSet={bulkSetObject}
                   onFieldBulk={bulkSetFields}
@@ -1919,6 +2059,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 onCelErrorsChange={setCelErrorCount}
                 t={t}
                 only={facetTab}
+                packageBound={!!packageId}
               />
             </div>
           </div>
@@ -2070,6 +2211,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             t={t}
             onToggleExpand={toggleExpand}
             onObjectPerm={updateObjectPerm}
+            onObjectScope={updateObjectScope}
             onFieldPerm={updateFieldPerm}
             onBulkSet={bulkSetObject}
             onFieldBulk={bulkSetFields}
@@ -2088,6 +2230,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             loadObjectFields={loadObjectFields}
             onCelErrorsChange={setCelErrorCount}
             t={t}
+            packageBound={!!packageId}
           />
         </div>
         {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
@@ -2119,7 +2262,9 @@ interface PermissionTableProps {
   objectActions: ReturnType<typeof getObjectActions>;
   t: (key: string) => string;
   onToggleExpand: (objectName: string) => void;
-  onObjectPerm: (objectName: string, action: keyof ObjectPerm, value: boolean) => void;
+  onObjectPerm: (objectName: string, action: ObjectPermFlag, value: boolean) => void;
+  /** objectstack#26187 — a row's read / write scope; `undefined` clears it. */
+  onObjectScope: (objectName: string, axis: ScopeAxis, value: ObjectAccessScope | undefined) => void;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
   /** objectui#2600 B4 — field-level bulk over the filtered field set. */
@@ -2142,6 +2287,7 @@ function PermissionTable({
   t,
   onToggleExpand,
   onObjectPerm,
+  onObjectScope,
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
@@ -2155,7 +2301,8 @@ function PermissionTable({
     // squishing the CRUD grid and clipping the Bulk column off the right edge.
     // The min-width is deliberately unchanged by the two columns objectui#6595
     // retired: it is a floor, so the grid simply has more room to breathe.
-    <table className="w-full min-w-[960px] text-sm">
+    // objectstack#26187 adds the two scope pickers (~2 × 9rem) to the floor.
+    <table className="w-full min-w-[1248px] text-sm">
       <thead className="sticky top-0 bg-background border-b z-10">
         <tr>
           <th className="text-left px-4 py-2 font-medium w-72">{t('perm.col.object')}</th>
@@ -2168,13 +2315,18 @@ function PermissionTable({
               {a.short}
             </th>
           ))}
+          {SCOPE_AXES.map((s) => (
+            <th key={s.axis} className="px-2 py-2 font-medium text-left w-36" title={t(s.tipKey)}>
+              {t(s.labelKey)}
+            </th>
+          ))}
           <th className="px-2 py-2 font-medium w-44 text-right">{t('perm.col.bulk')}</th>
         </tr>
       </thead>
       <tbody>
         {objects.length === 0 && (
           <tr>
-            <td colSpan={objectActions.length + 2} className="px-4 py-8 text-center text-muted-foreground">
+            <td colSpan={objectActions.length + SCOPE_AXES.length + 2} className="px-4 py-8 text-center text-muted-foreground">
               {t('perm.filter.empty')}
             </td>
           </tr>
@@ -2247,6 +2399,11 @@ function PermissionTable({
                     />
                   </td>
                 ))}
+                {SCOPE_AXES.map((s) => (
+                  <td key={s.axis} className="px-2 py-1.5">
+                    <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+                  </td>
+                ))}
                 <td className="px-2 py-1.5 text-right space-x-1">
                   <Button
                     variant="ghost"
@@ -2288,7 +2445,7 @@ function PermissionTable({
               </tr>
               {open && (
                 <tr className="bg-muted/10">
-                  <td colSpan={objectActions.length + 2} className="px-12 py-3">
+                  <td colSpan={objectActions.length + SCOPE_AXES.length + 2} className="px-12 py-3">
                     <FieldsSubTable
                       objectName={o.name}
                       fields={fieldsByObject[o.name]}
@@ -2405,6 +2562,7 @@ function StudioObjectMatrix({
   t,
   onToggleExpand,
   onObjectPerm,
+  onObjectScope,
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
@@ -2415,7 +2573,7 @@ function StudioObjectMatrix({
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
   const divider = (i: number) => (i === 0 || i === sharingStart ? 'border-l' : '');
   return (
-    <table className="w-full min-w-[960px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
+    <table className="w-full min-w-[1248px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
           <th className="pl-6 pr-3 text-left font-medium">{t('perm.col.object')}</th>
@@ -2423,6 +2581,11 @@ function StudioObjectMatrix({
           {objectActions.map((a, i) => (
             <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
               {a.short}
+            </th>
+          ))}
+          {SCOPE_AXES.map((s, i) => (
+            <th key={s.axis} title={t(s.tipKey)} className={cn('w-36 px-2 text-left font-medium', i === 0 && 'border-l')}>
+              {t(s.labelKey)}
             </th>
           ))}
           <th className="w-56 border-l px-3 font-medium">
@@ -2433,7 +2596,7 @@ function StudioObjectMatrix({
       <tbody>
         {objects.length === 0 && (
           <tr>
-            <td colSpan={objectActions.length + 3} className="px-6 py-8 text-center text-muted-foreground">
+            <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="px-6 py-8 text-center text-muted-foreground">
               {t('perm.filter.empty')}
             </td>
           </tr>
@@ -2452,6 +2615,7 @@ function StudioObjectMatrix({
             t={t}
             onToggleExpand={onToggleExpand}
             onObjectPerm={onObjectPerm}
+            onObjectScope={onObjectScope}
             onFieldPerm={onFieldPerm}
             onBulkSet={onBulkSet}
             onFieldBulk={onFieldBulk}
@@ -2477,6 +2641,7 @@ function StudioObjectRow({
   t,
   onToggleExpand,
   onObjectPerm,
+  onObjectScope,
   onFieldPerm,
   onBulkSet,
   onFieldBulk,
@@ -2494,7 +2659,8 @@ function StudioObjectRow({
   divider: (i: number) => string;
   t: (key: string) => string;
   onToggleExpand: (objectName: string) => void;
-  onObjectPerm: (objectName: string, action: keyof ObjectPerm, value: boolean) => void;
+  onObjectPerm: (objectName: string, action: ObjectPermFlag, value: boolean) => void;
+  onObjectScope: (objectName: string, axis: ScopeAxis, value: ObjectAccessScope | undefined) => void;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
   onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
@@ -2591,6 +2757,11 @@ function StudioObjectRow({
             />
           </td>
         ))}
+        {SCOPE_AXES.map((s, i) => (
+          <td key={s.axis} className={cn('px-2 py-1 align-middle', i === 0 && 'border-l')}>
+            <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+          </td>
+        ))}
         <td className="border-l px-3 py-1 align-middle">
           {active && (
             <span className="flex items-center gap-1" data-testid={`perm-bulk-${o.name}`}>
@@ -2611,7 +2782,7 @@ function StudioObjectRow({
       </tr>
       {open && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={objectActions.length + 3} className="py-3 pl-12 pr-6">
+          <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="py-3 pl-12 pr-6">
             <FieldsSubTable
               objectName={o.name}
               fields={fields}

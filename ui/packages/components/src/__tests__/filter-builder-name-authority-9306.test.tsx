@@ -20,7 +20,7 @@
  *
  *   - `operator` — `FilterBuilderOperator`, the protocol's ids plus the opt-in
  *     `exists` / `notExists` (objectui#9559 ruling B);
- *   - `value` — required and narrowed to what this builder edits.
+ *   - `value` — the spec rule's value, by reference (#26306).
  *
  * Everything else comes from the authority, and the group restates only
  * `conditions` (to hold this package's row), so its `id` is optional here as it
@@ -41,7 +41,7 @@ import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import type { ViewFilterOperator } from '@objectstack/spec/ui';
+import type { ViewFilterOperator, ViewFilterRule } from '@objectstack/spec/ui';
 import type {
   FilterBuilderCondition as AuthorityCondition,
   FilterGroup as AuthorityGroup,
@@ -97,12 +97,23 @@ const offVocabulary: FilterBuilderRow = {
   value: 1,
 };
 
-// The value extension: the builder's own scalar-or-list union, REQUIRED —
-// ruled over the authority's `value?: any`, which would switch the typing of
-// every exported value helper off in silence.
-expectType<Equal<FilterBuilderRow['value'], string | number | boolean | (string | number | boolean)[]>>();
-// @ts-expect-error `value` is required on the builder's row
-const rowWithoutValue: FilterBuilderRow = { id: 'c1', field: 'a', operator: 'equals' };
+// The value extension: the SPEC rule's value, by reference (#26306), and
+// nothing wider since #26348 — never the
+// authority's `value?: any`, which would switch the typing of every exported
+// value helper off in silence. Optional, as the spec's is: a value-less
+// operator is authored with no value, and a required member refused the
+// authored group the renderer hands over. The per-case pins live in
+// `filter-builder-spec-row-26306.test.tsx`.
+expectType<Equal<FilterBuilderRow['value'], ViewFilterRule['value']>>();
+const rowWithoutValue: FilterBuilderRow = { id: 'c1', field: 'a', operator: 'is_null' };
+// …and still not `any`: a value the spec refuses is refused here.
+const objectValue: FilterBuilderRow = {
+  id: 'c1',
+  field: 'a',
+  operator: 'equals',
+  // @ts-expect-error `value` is the spec rule's value, not an object
+  value: { $gt: 1 },
+};
 
 /* ── The group: only `conditions` is restated ─────────────────────────────── */
 
@@ -123,7 +134,8 @@ describe('objectui#9306 — the builder derives its row and group from @object-u
   it('the type-level pins above compile (see `tsc -p tsconfig.test.json`); the fixtures are live values', () => {
     expect(rowWithoutId.field).toBe('a');
     expect(offVocabulary.id).toBe('c1');
-    expect(rowWithoutValue.operator).toBe('equals');
+    expect(rowWithoutValue.operator).toBe('is_null');
+    expect(objectValue.id).toBe('c1');
     expect(groupWithoutId.conditions).toEqual([]);
     expect(nested.logic).toBe('and');
   });

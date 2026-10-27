@@ -35,7 +35,7 @@ const ROWS = [
     _holderCount: 1,
     _grantedPermissionSets: [
       { name: 'crm_sales_user', via: 'definition' },
-      { name: 'sales_manager', via: 'name' },
+      { name: 'forecasting', via: 'definition' },
     ],
   },
 ];

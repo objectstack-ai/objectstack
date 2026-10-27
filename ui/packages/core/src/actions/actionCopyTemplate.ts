@@ -77,8 +77,19 @@ export function hasTemplateHoles(text: string): boolean {
  * unbalanced delimiter, logic inside a hole) is returned as written: the
  * publish gate refuses it on the server side, and the user still reads the
  * author's sentence rather than nothing.
+ *
+ * `locale` is the viewer's display locale (a BCP-47 tag) the formatters render
+ * in, passed by the caller that already has it — ⛔ never resolved here. It
+ * rides the engine's reserved `locale` channel, apart from `roots`, so a root
+ * named `locale` (a param of that name) is a value a hole prints, not the
+ * locale of the whole sentence (objectstack#26232). Omitted, the engine
+ * formats in `en-US`.
  */
-export function fillTemplateHoles(source: string, roots: Record<string, unknown>): string {
-  const filled = templateEngine.evaluate<string>({ dialect: 'template', source }, { extra: roots });
+export function fillTemplateHoles(
+  source: string,
+  roots: Record<string, unknown>,
+  locale?: string,
+): string {
+  const filled = templateEngine.evaluate<string>({ dialect: 'template', source }, { extra: roots, locale });
   return filled.ok && typeof filled.value === 'string' ? filled.value : source;
 }

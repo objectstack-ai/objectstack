@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: four CLI spawns, `os validate` json and text over three fixtures, every one a distinct triple; slowest CI reading 20.34 s (run 40392443783) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * [#20331] `os validate` refuses a `views:` container whose own `name`

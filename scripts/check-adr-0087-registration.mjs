@@ -399,6 +399,10 @@ import { readClause2Line, readMetadataProtocolLine } from './pm/clause2-line.mjs
 // this gate into a sandbox (`objectui-changeset-digest.mjs`), because two hand
 // lists for one graph is how one of them goes stale unnoticed.
 import { stageFirstPartyClosure } from './first-party-closure.mjs';
+// #26220 — the workspace's package globs, through the repo's ONE parse of
+// `pnpm-workspace.yaml` rather than a hand-kept list of roots (see
+// `workspaceGlobsAt`).
+import { WORKSPACE_FILE, WorkspaceEnumerationError, isExclusionGlob, parseWorkspaceGlobs } from './workspace-enumerator.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -457,6 +461,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'REX-N: the predicate set is pinned BY NAME, never by count': 3,
   'REX-U: unit pins on the operand grammar and the FROM-side reader': 24,
   'REX-L: the compiler is loaded only when a marker names the category': 6,
+  'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
+  'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -489,7 +495,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 55;
+const SELF_TEST_BATTERY_FLOOR = 57;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -533,8 +539,6 @@ export const MIGRATION_LEDGER_ENTRY_DIRS = [
 const WITNESS_GENERATOR = 'packages/spec/scripts/build-spec-changes.ts';
 const WITNESS_INPUTS = ['packages/spec/src', 'packages/spec/scripts', 'packages/spec/package.json'];
 
-/** Package roots holding workspace manifests, for the `unpublished` precondition. */
-const PACKAGE_ROOTS = ['packages', 'apps', 'examples'];
 
 /**
  * The closed disposition vocabulary. Adding a category is a deliberate act.
@@ -2664,20 +2668,81 @@ export function assertInputs({ cwd, head, witness = generatedWitness }) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The workspace's package globs at a rev -- `pnpm-workspace.yaml` read from git and
+ * parsed by `workspace-enumerator.mjs`, the repo's one parse of it (#26220).
+ *
+ * This gate used to carry its own `PACKAGE_ROOTS = ['packages', 'apps', 'examples']`.
+ * That list predates the objectui import, so every `@object-ui/*` package (the
+ * `ui/packages/*`, `ui/apps/*` and `ui/examples/*` globs) had no workspace manifest
+ * here, and every disposition that reads one -- `unpublished`, `type-surface-only`
+ * predicate 1, `runtime-export-retired` predicate 1 -- refused a true claim about
+ * them. A hand-kept copy of the workspace's membership is the same drift #14378
+ * found in a different file; the workspace's own declaration cannot drift from
+ * itself. Read at the REV being judged, never from the working tree, so the gate
+ * stays a pure function of its two revs.
+ *
+ * A missing file, an empty or duplicate `packages:` block and a glob richer than
+ * `<dir>` / `<dir>/*` are REFUSED with `WorkspaceEnumerationError`, never read as an
+ * empty workspace: every disposition above would then answer "no workspace
+ * manifest" about a package that has one.
+ *
+ * @returns {string[]} the inclusion globs; an exclusion (`!pattern`) enumerates nothing
+ */
+export function workspaceGlobsAt(rev, cwd) {
+  const source = `${WORKSPACE_FILE} at ${rev.slice(0, 12)}`;
+  const text = showOrNull(rev, WORKSPACE_FILE, cwd);
+  if (text === null) {
+    throw new WorkspaceEnumerationError(
+      `${source} is missing -- the workspace's package globs cannot be read, so no package can be\n` +
+        '      matched to its manifest. Refused rather than read as an empty workspace (#4690).',
+    );
+  }
+  const globs = parseWorkspaceGlobs(text, { source }).filter((g) => !isExclusionGlob(g));
+  for (const g of globs) {
+    if (g.replace(/\/\*$/, '').includes('*')) {
+      throw new WorkspaceEnumerationError(
+        `${source}: pattern ${JSON.stringify(g)} is richer than \`<dir>\` or \`<dir>/*\`, the two shapes\n` +
+          '      `workspace-enumerator.mjs` expands. Teach both readers the new shape in one edit;\n' +
+          '      matching fewer manifests would refuse true claims about the packages left out.',
+      );
+    }
+  }
+  return globs;
+}
+
+/**
+ * Is `manifest` (a repo-relative `<dir>/package.json`) a workspace member's
+ * manifest under `globs`? `<dir>` names that directory; `<dir>/*` names each
+ * directory directly under it -- the expansion `expandWorkspaceGlob` performs on a
+ * working tree, applied here to a path listed from a rev.
+ */
+export function isWorkspaceManifest(manifest, globs) {
+  if (!manifest.endsWith('/package.json') || manifest.includes('node_modules/')) return false;
+  const dir = manifest.slice(0, -'/package.json'.length);
+  const parent = posix.dirname(dir);
+  const leaf = posix.basename(dir);
+  return globs.some((g) => (g.endsWith('/*')
+    ? parent === g.slice(0, -2) && !leaf.startsWith('.')
+    : dir === g));
+}
+
+/**
  * name -> { private, file } for every workspace package at a rev.
  *
  * Read from git rather than the working tree so the whole gate is a pure function
  * of two revs, which is what lets the self-test drive the shipping code path with
- * real temp repositories instead of an imitation of it.
+ * real temp repositories instead of an imitation of it. The members are the ones
+ * the rev's own `pnpm-workspace.yaml` declares (`workspaceGlobsAt`).
  */
 export function workspacePackagesAt(rev, cwd) {
   const pkgs = new Map();
+  const globs = workspaceGlobsAt(rev, cwd);
   let out;
   try { out = git(['ls-tree', '-r', '--name-only', rev], cwd); } catch { return pkgs; }
   const manifests = out
     .split('\n')
     .map((s) => s.trim())
-    .filter((p) => p.endsWith('/package.json') && !p.includes('node_modules/') && PACKAGE_ROOTS.some((r) => p.startsWith(`${r}/`)));
+    .filter((p) => isWorkspaceManifest(p, globs));
   for (const [p, raw] of showManyOrNull(rev, manifests, cwd)) {
     try {
       const json = JSON.parse(raw);
@@ -3598,6 +3663,134 @@ export function resolveMemberPath(text, segments) {
 }
 
 /**
+ * The declaration of an exported `interface` -- or a `type` alias whose RHS is ONE
+ * object type literal -- split into what predicate 4's index-signature limb
+ * compares: its heritage (type parameters, `extends` clause) and its top-level
+ * members, each normalised. `null` for any other shape, which the limb refuses.
+ *
+ * @returns {{ kind: string, heritage: string, members: string[] }|null}
+ */
+export function structuralDeclarationParts(text, symbol) {
+  const masked = maskComments(text);
+  const exported = exportedTypeDeclaration(masked, symbol);
+  if (!exported || (exported.kind !== 'interface' && exported.kind !== 'type')) return null;
+  const structural = maskCommentsAndLiterals(text);
+  let open;
+  let heritageEnd;
+  if (exported.kind === 'interface') {
+    open = declarationBodyStart(structural, exported.restStart);
+    heritageEnd = open;
+  } else {
+    const eq = aliasEqualsIndex(structural, exported.restStart);
+    if (eq === -1) return null;
+    open = eq + 1;
+    while (open < structural.length && /\s/.test(structural[open])) open++;
+    if (structural[open] !== '{') return null;
+    heritageEnd = eq;
+    // ONE object type literal and nothing else: `{ ... } & X` is not this shape.
+    const close = matchBracket(structural, open);
+    if (close === -1 || structural.slice(close + 1, aliasRhsEnd(structural, eq)).trim() !== '') return null;
+  }
+  if (open === -1) return null;
+  const close = matchBracket(structural, open);
+  if (close === -1) return null;
+  return {
+    kind: exported.kind,
+    heritage: normaliseSurface(masked.slice(exported.restStart, heritageEnd)),
+    members: splitTopLevelMembers(masked.slice(open + 1, close), structural.slice(open + 1, close)),
+  };
+}
+
+/**
+ * The top-level members of a brace body's INSIDE, normalised, separators dropped.
+ * Depth is walked on the literal-masked projection, and the `>` of an `=>` is not
+ * a closer -- counting it would end a nested literal early and hand a nested index
+ * signature to the caller as a top-level one.
+ */
+function splitTopLevelMembers(inside, structural) {
+  const members = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < structural.length; i++) {
+    const c = structural[i];
+    if (c === '{' || c === '[' || c === '(' || c === '<') depth++;
+    else if (c === '}' || c === ']' || c === ')' || (c === '>' && structural[i - 1] !== '=')) { if (depth > 0) depth--; }
+    else if (depth === 0 && (c === ';' || c === ',')) {
+      const m = normaliseSurface(inside.slice(from, i));
+      if (m !== '') members.push(m);
+      from = i + 1;
+    }
+  }
+  const last = normaliseSurface(inside.slice(from));
+  if (last !== '') members.push(last);
+  return members;
+}
+
+// `[key: K]: V`, optionally `readonly`: the key part and the value type. A mapped
+// type (`[P in K]`) and a computed member name (`[Symbol.iterator]()`) do not match.
+const INDEX_SIGNATURE_RE = /^((?:readonly\s+)?\[\s*[A-Za-z_$][\w$]*\s*:\s*[^\]]+\])\s*:\s*([\s\S]+)$/;
+
+/** A normalised member as an index signature `{ key, value }`, or null. */
+export function readIndexSignature(member) {
+  const m = INDEX_SIGNATURE_RE.exec(member);
+  return m ? { key: normaliseSurface(m[1]), value: normaliseSurface(m[2]) } : null;
+}
+
+/**
+ * Predicate 4's index-signature limb (ADR-0087 D8, amended 2026-10-27, #26220).
+ *
+ * For a bare reference to an exported `interface`, or a `type` alias whose RHS is
+ * one object type literal, the limb holds when ALL of:
+ *   1. at the merge base at least one index signature's value type is `any`;
+ *   2. at HEAD at least one of THOSE carries another value type (`unknown`
+ *      counts as narrowed here, and only here);
+ *   3. everything else is identical: the kind, the heritage, and every member,
+ *      position by position. Only the value types of base-`any` index signatures
+ *      are set aside -- a non-`any` index signature that changes is a re-typed
+ *      member like any other, so this reads no wider than the ADR's text.
+ * #6048 (a member removed beside a concrete surface) fails 3 and keeps its
+ * founding-case refusal. ⛔ Never widen a condition here without the ADR first.
+ *
+ * @returns {{ ok: true, from: string, to: string } | { ok: false, reason: string }}
+ */
+export function indexSignatureLimb(baseText, headText, symbol) {
+  const before = structuralDeclarationParts(baseText, symbol);
+  const after = structuralDeclarationParts(headText, symbol);
+  if (!before || !after) {
+    return { ok: false, reason: 'it reads only an exported `interface`, or a `type` alias whose right-hand side is one object type literal, at both revs' };
+  }
+  if (before.kind !== after.kind || before.heritage !== after.heritage) {
+    return { ok: false, reason: `the declaration's heritage moved (\`${before.kind}${before.heritage ? ` ${before.heritage}` : ''}\` -> \`${after.kind}${after.heritage ? ` ${after.heritage}` : ''}\`)` };
+  }
+  if (before.members.length !== after.members.length) {
+    return { ok: false, reason: `the member count moved (${before.members.length} -> ${after.members.length}): a member was added or removed` };
+  }
+  const narrowed = [];
+  let anyAtBase = 0;
+  for (let i = 0; i < before.members.length; i++) {
+    const b = before.members[i];
+    const a = after.members[i];
+    const bi = readIndexSignature(b);
+    if (bi && bi.value === 'any') {
+      anyAtBase++;
+      const ai = readIndexSignature(a);
+      if (ai && ai.key === bi.key) {
+        if (ai.value !== 'any') narrowed.push({ from: b, to: a });
+        continue;
+      }
+    }
+    if (a !== b) return { ok: false, reason: `member ${i + 1} moved (\`${b}\` -> \`${a}\`)` };
+  }
+  if (anyAtBase === 0) return { ok: false, reason: 'no index signature is typed `any` at the merge base' };
+  if (narrowed.length === 0) return { ok: false, reason: 'every index signature typed `any` at the merge base is still `any` at HEAD' };
+  return {
+    ok: true,
+    from: narrowed.map((n) => n.from).join('; '),
+    to: narrowed.map((n) => n.to).join('; '),
+  };
+}
+
+/**
  * What predicate 4 can read about ONE parsed reference, or why it is refused.
  *
  * A bare reference is `readDeclaredTypeSurface` verbatim -- unchanged behaviour,
@@ -4106,6 +4299,13 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       continue;
     }
     if (!before.erased) {
+      // The 2026-10-27 amendment (#26220): an `any` INDEX SIGNATURE is the one member
+      // that can be erased inside a concrete declaration. A bare reference only.
+      const limb = parsedRef.dotted ? { ok: false, reason: 'it does not apply to a dotted member path' } : indexSignatureLimb(baseText, headText, parsedRef.symbol);
+      if (limb.ok) {
+        verified.push({ ref, from: limb.from, to: limb.to });
+        continue;
+      }
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4: narrowed-from-erased] is FALSE: at the merge base\n` +
         `      ${before.shape} was already CONCRETE (${before.type === null
@@ -4118,6 +4318,7 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
         '      exempt from it. Predicate 4 is what pays for that exemption: a surface that was already\n' +
         '      concrete did not move off `any`, and a member removed from it is exactly the class the\n' +
         '      ledger DOES serve.\n' +
+        `      The index-signature limb (ADR-0087 D8, amended 2026-10-27) does not hold either: ${limb.reason}.\n` +
         '      fix: register the migration.',
       );
       continue;
@@ -4181,7 +4382,9 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
 //      is located through the package's `exports` map -- `resolveTypesEntry`,
 //      imported from the readme-exports gate, never re-implemented -- and tsup's
 //      convention: its declaration entry `dist/index.d.ts` (or the `.d.mts` /
-//      `.d.cts` twin tsup writes beside it) is generated from `src/index.ts`. A
+//      `.d.cts` twin tsup writes beside it) is generated from `src/index.ts` -- or,
+//      since the 2026-10-27 amendment (#26220), from `src/index.tsx`, the entry
+//      vite-plugin-dts builds the `ui/` packages from; exactly one of the two. A
 //      published package whose entry cannot be mapped that way is REFUSED, loudly
 //      and by name, never guessed.
 //   2. no-metadata-surface -- at the merge base no operand is declared in a
@@ -4464,6 +4667,8 @@ export async function loadExportReader() {
 
 /** tsup's declaration entry, and the `.d.mts` / `.d.cts` twins it writes beside it. */
 const TSUP_DTS_ENTRY_RE = /^dist\/index\.d\.[cm]?ts$/;
+/** The source files that entry may be generated from: exactly one must exist (D9, amended 2026-10-27, #26220). */
+const SOURCE_ENTRY_NAMES = Object.freeze(['src/index.ts', 'src/index.tsx']);
 /** Where a rev's blobs live inside the compiler's file system. Never a real path. */
 const VIRTUAL_ROOT = '/__adr0087__/';
 const TS_SOURCE_RE = /\.(?:d\.)?[cm]?tsx?$/;
@@ -4472,9 +4677,12 @@ const TS_SOURCE_RE = /\.(?:d\.)?[cm]?tsx?$/;
  * The repo-relative SOURCE entry of a workspace package at a rev, or a refusal.
  *
  * Only the mapping the ruling names: the package's `exports` map, read by
- * `resolveTypesEntry`, lands on tsup's `dist/index.d.ts` (or its twin), which tsup
- * generates from `src/index.ts`. Anything else -- no types entry, another file
- * name, no `src/index.ts` -- is refused by name rather than guessed.
+ * `resolveTypesEntry`, lands on `dist/index.d.ts` (or its tsup twin), generated
+ * from the package's ONE source entry, `src/index.ts` or `src/index.tsx` (the
+ * 2026-10-27 amendment, #26220: vite-plugin-dts builds the `ui/` packages from
+ * the `.tsx`). Anything else -- no types entry, another file name, neither
+ * source, BOTH sources -- is refused by name rather than guessed. The build tool
+ * is never asked: the source file's name is the fact read here.
  */
 function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
   const info = pkgs.get(pkgName);
@@ -4489,17 +4697,25 @@ function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
   try { manifest = JSON.parse(showOrNull(rev, info.file, cwd) ?? ''); } catch { return { refusal: `${info.file} does not parse at ${rev.slice(0, 12)}` }; }
   const declared = kit.resolveTypesEntry(manifest, '.').entry?.replace(/^\.\//, '') ?? null;
   const dir = info.file.slice(0, -'package.json'.length);
-  const entry = `${dir}src/index.ts`;
-  if (declared === null || !TSUP_DTS_ENTRY_RE.test(declared) || showOrNull(rev, entry, cwd) === null) {
+  const present = SOURCE_ENTRY_NAMES.map((name) => `${dir}${name}`).filter((p) => showOrNull(rev, p, cwd) !== null);
+  if (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) && present.length > 1) {
+    return {
+      refusal: `the published entry of \`${pkgName}\` is AMBIGUOUS at ${rev.slice(0, 12)}: its \`exports\` map names \`${declared}\`,\n` +
+        `      and the package carries BOTH ${present.join(' and ')}. The mapping reads ONE source entry\n` +
+        '      (ADR-0087 D9, amended 2026-10-27), and which one the build compiles is the build tool\'s\n' +
+        '      answer, which this gate never asks. Delete the stale one. Refused, never guessed',
+    };
+  }
+  if (declared === null || !TSUP_DTS_ENTRY_RE.test(declared) || present.length === 0) {
     return {
       refusal: `the published entry of \`${pkgName}\` cannot be mapped to its source at ${rev.slice(0, 12)}: its \`exports\` map\n` +
-        `      names ${declared === null ? 'no types entry' : `\`${declared}\``}, and the only mapping this gate reads is tsup's\n` +
-        `      \`dist/index.d.ts\` (or its \`.d.mts\` / \`.d.cts\` twin) -> \`src/index.ts\`` +
-        (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) ? `, whose source ${entry} does not exist there` : '') + '.\n' +
+        `      names ${declared === null ? 'no types entry' : `\`${declared}\``}, and the only mapping this gate reads is\n` +
+        `      \`dist/index.d.ts\` (or its \`.d.mts\` / \`.d.cts\` twin) -> \`src/index.ts\` or \`src/index.tsx\`` +
+        (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) ? `, and neither ${dir}src/index.ts nor ${dir}src/index.tsx exists there` : '') + '.\n' +
         '      An entry this gate cannot map is refused, never guessed',
     };
   }
-  return { entry, dir };
+  return { entry: present[0], dir };
 }
 
 /**
@@ -4537,6 +4753,7 @@ function readExportSurface(rev, cwd, pkgName, pkgs, kit) {
   const fromVirtual = (f) => (f.startsWith(VIRTUAL_ROOT) ? f.slice(VIRTUAL_ROOT.length) : null);
   const options = {
     noEmit: true, skipLibCheck: true, types: [], lib: ['lib.es2022.d.ts'],
+    jsx: ts.JsxEmit.Preserve,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
   };
   const real = ts.createCompilerHost(options, true);
@@ -5587,7 +5804,16 @@ function selfTest() {
     '# ADR-0087 (fixture)\n\n' +
     cats.map((c) => `<!-- adr-0087: not-required (${c}) ... -->\n`).join('');
 
-  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null }) => {
+  // The fixture's `pnpm-workspace.yaml` (#26220): the real file's glob shapes,
+  // `ui/packages/*` among them, so a fixture package is a member exactly when it
+  // would be one in this repository. `workspace: null` writes none.
+  const WORKSPACE_YAML =
+    'packages:\n  - packages/*\n  - packages/apps/*\n  - packages/drivers/*\n  - packages/plugins/*\n' +
+    '  - packages/qa/*\n  - packages/triggers/*\n  - packages/services/*\n  - packages/adapters/*\n' +
+    '  - packages/connectors/*\n  - apps/*\n  - examples/*\n' +
+    '  # the objectui tree\n  - ui\n  - ui/packages/*\n  - ui/apps/*\n  - ui/examples/*\n';
+
+  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null, workspace = WORKSPACE_YAML }) => {
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-'));
     const w = (rel, text) => {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
@@ -5601,6 +5827,7 @@ function selfTest() {
     w(LEDGER_SOURCES[1], CONV(['a-conversion']));
     w(WITNESS_GENERATOR, WITNESS_GEN());
     w(ADR_0087, ADR_DOC());
+    if (workspace !== null) w(WORKSPACE_FILE, workspace);
     // stock: one declared-breaking changeset -- realistic mid-cycle stock for
     // the inherited-changeset cases. (No longer needed to satisfy assertInputs:
     // since #8658 its convention-rot control is synthetic and phase-independent.)
@@ -7531,6 +7758,233 @@ function selfTest() {
     assert(unloaded.needsExportReader === true, 'REX-L4: ...and sets `needsExportReader`, which is what makes the entry point load and re-scan');
     assert(rexR1.needsExportReader === false && run(mk({ files: {} })).needsExportReader === false,
       'REX-L5: a scan with the reader loaded, or with no such marker, never asks for it');
+  }
+
+  // ---- WS (#26220): a ui workspace package, read through the workspace file --
+  //
+  // The gate's package globs are the rev's own `pnpm-workspace.yaml`, so an
+  // `@object-ui/*` package under `ui/packages/*` has a manifest here like any
+  // other. And its export reader compiles `.tsx`: the ui entries re-export from
+  // `.tsx` modules -- directly, through an alias, and through a `.ts` shim -- and
+  // without the `jsx` option every such module failed to resolve (TS6142), so
+  // predicate 2 could not locate a single declaration behind one.
+  battery('WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims');
+  {
+    const UI_PKG = '@object-ui/app-shell';
+    const UI_DIR = 'ui/packages/app-shell';
+    const uiPath = (rel) => `${UI_DIR}/${rel}`;
+    const UI_PKGS = {
+      '@objectstack/spec': { dir: 'packages/spec', private: false },
+      '@objectstack/platform-objects': { dir: 'packages/platform-objects', private: false },
+      '@object-ui/console': { dir: 'ui/apps/console', private: true },
+    };
+    const UI_INDEX_HEAD = "export { AppShell } from './AppShell.js';\n";
+    const UI_BASE_FILES = {
+      [uiPath('package.json')]: JSON.stringify({
+        name: UI_PKG, version: '1.0.0', types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } },
+      }),
+      [uiPath('src/index.ts')]:
+        `${UI_INDEX_HEAD}` +
+        "export { useExpressionContext } from './providers/ExpressionProvider.js';\n" +
+        "export { PageShell as MetadataPageShell } from './views/PageShell.js';\n" +
+        "export type { RecentItemInput } from './hooks/useRecentItems.js';\n",
+      [uiPath('src/AppShell.tsx')]: 'export const AppShell = () => <div className="shell" />;\n',
+      [uiPath('src/providers/ExpressionProvider.tsx')]:
+        'export function useExpressionContext() {\n  return <span>{1}</span>;\n}\n',
+      [uiPath('src/views/PageShell.tsx')]: 'export function PageShell() {\n  return <main />;\n}\n',
+      [uiPath('src/hooks/useRecentItems.ts')]:
+        "export { useRecentItems, type RecentItemInput } from '../context/RecentItemsProvider.js';\n",
+      [uiPath('src/context/RecentItemsProvider.tsx')]:
+        'export interface RecentItemInput { id: string }\nexport function useRecentItems() {\n  return <ul />;\n}\n',
+      'packages/platform-objects/src/audit/sys-email-template.object.ts':
+        "export const SysEmailTemplate = { name: 'sys_email_template' };\n",
+    };
+    const UI_OPERANDS = ['useExpressionContext', 'MetadataPageShell', 'RecentItemInput'];
+    const UI_CS = CS({
+      bumps: [[UI_PKG, 'patch']],
+      body:
+        'refactor(app-shell)!: retire three root-entry exports\n\n**BREAKING**: retired exports.\n\n' +
+        UI_OPERANDS.map((o) => `- FROM \`${o}\` TO nothing: delete the import.`).join('\n') +
+        `\n\n<!-- adr-0087: not-required (runtime-export-retired${UI_OPERANDS.map((o) => ` ${UI_PKG}#${o}`).join(',')}) ` +
+        'the retired names are runtime exports; the compiler reports each at its importer, and no stored shape moves -->\n',
+    });
+    const UI_FIXTURE = (over = {}) => ({
+      pkgs: UI_PKGS,
+      baseFiles: UI_BASE_FILES,
+      files: { [uiPath('src/index.ts')]: UI_INDEX_HEAD, '.changeset/x.md': UI_CS },
+      ...over,
+    });
+
+    const wsG1 = run(mk(UI_FIXTURE()));
+    green('WS-G1 a `ui/packages/*` package retires a `.tsx` export, an alias of one and a type behind a `.ts` shim', wsG1);
+    const detail = wsG1.judged[0]?.detail ?? '';
+    assert(
+      /useExpressionContext \(export, ui\/packages\/app-shell\/src\/providers\/ExpressionProvider\.tsx\)/.test(detail) &&
+        /MetadataPageShell \(export, ui\/packages\/app-shell\/src\/views\/PageShell\.tsx\)/.test(detail) &&
+        /RecentItemInput \(export, ui\/packages\/app-shell\/src\/context\/RecentItemsProvider\.tsx\)/.test(detail),
+      'WS-G1b: predicate 2 must locate each declaration where the compiler resolves it -- the `.tsx` module, ' +
+      `the ALIASED declaration, and the module BEHIND the shim. Got: ${detail}`,
+    );
+
+    // The membership comes from the workspace file and nowhere else: the same tree
+    // with the `ui/packages/*` glob dropped has no manifest named the package.
+    red('WS-R1 a package whose directory no workspace glob names has no workspace manifest', run(mk(UI_FIXTURE({
+      workspace: WORKSPACE_YAML.replace('  - ui/packages/*\n', ''),
+    }))), [/no workspace manifest at [0-9a-f]{12} is named `@object-ui\/app-shell`/]);
+
+    let thrown = null;
+    try { run(mk(UI_FIXTURE({ workspace: null }))); } catch (e) { thrown = e; }
+    assert(thrown instanceof WorkspaceEnumerationError && /pnpm-workspace\.yaml at [0-9a-f]{12} is missing/.test(thrown.message),
+      `WS-R2: a rev with no workspace file is REFUSED, never read as an empty workspace (got ${thrown?.message ?? 'no throw'})`);
+
+    green('WS-G2 `unpublished` on a private `ui/apps/*` package', run(mk({
+      pkgs: UI_PKGS,
+      files: {
+        '.changeset/x.md': CS({
+          bumps: [['@object-ui/console', 'major']],
+          body: '**BREAKING** x\n\n<!-- adr-0087: not-required (unpublished) the console app is private and publishes to no registry -->\n',
+        }),
+      },
+    })));
+
+    const GLOBS = ['packages/*', 'ui', 'ui/packages/*'];
+    assert(isWorkspaceManifest('ui/packages/app-shell/package.json', GLOBS), 'WS-U1: `<dir>/*` names a directory directly under `<dir>`');
+    assert(isWorkspaceManifest('ui/package.json', GLOBS), 'WS-U2: a bare `<dir>` glob names that directory itself');
+    assert(!isWorkspaceManifest('ui/packages/app-shell/test/fixture/package.json', GLOBS),
+      'WS-U3: a manifest nested below a member is not a member -- a fixture package.json cannot shadow a real one');
+    assert(!isWorkspaceManifest('ui/node_modules/x/package.json', ['ui/*']) && !isWorkspaceManifest('ui/.cache/package.json', ['ui/*']),
+      'WS-U4: `node_modules` and dot-directories are never members (the enumerator\'s rule)');
+    let rich = null;
+    const richDir = mk({ files: {}, workspace: 'packages:\n  - packages/**\n' }).dir;
+    try { workspaceGlobsAt('HEAD', richDir); } catch (e) { rich = e; }
+    assert(rich instanceof WorkspaceEnumerationError && /richer than/.test(rich.message),
+      `WS-U5: a glob richer than \`<dir>\` / \`<dir>/*\` is refused, never matched against nothing (got ${rich?.message ?? 'no throw'})`);
+  }
+
+  // ---- IX (#26220): the 2026-10-27 amendments, predicate 4 and the entry -----
+  //
+  // Two limbs the maintainer's decision A put in ADR-0087 before any code here:
+  // D8's predicate 4 reads an `any` INDEX SIGNATURE inside a concrete declaration
+  // (#26293's `ComponentRendererProps`), and D9's entry mapping reads ONE source
+  // entry, `src/index.ts` or `src/index.tsx` (21 of 38 published ui packages build
+  // from the `.tsx`). Every green here has a red beside it that differs in the one
+  // thing the limb must not admit.
+  battery('IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`');
+  {
+    const IX_PKGS = {
+      '@objectstack/spec': { dir: 'packages/spec', private: false },
+      '@object-ui/types': { dir: 'ui/packages/types', private: false },
+    };
+    const IX_PATH = 'ui/packages/types/src/base.ts';
+    const IX_REF = `${IX_PATH}#ComponentRendererProps`;
+    const IX_BASE = 'export interface ComponentRendererProps<TSchema = unknown> {\n  schema: TSchema;\n  [key: string]: any;\n}\n';
+    const IX_HEAD = IX_BASE.replace('[key: string]: any;', '[key: string]: unknown;');
+    const IX_CS = (ref = IX_REF) => CS({
+      bumps: [['@object-ui/types', 'minor']],
+      body: 'refactor(types)!: forwarded renderer props are `unknown`\n\n**BREAKING**: narrow a forwarded key before use.\n\n' +
+        `<!-- adr-0087: not-required (type-surface-only ${ref}) ${TSO_WHY} -->\n`,
+    });
+    const ix = (base, head, ref = IX_REF) => run(mk({
+      pkgs: IX_PKGS,
+      baseFiles: { [IX_PATH]: base },
+      files: { [IX_PATH]: head, '.changeset/x.md': IX_CS(ref) },
+    }));
+    const P4_FALSE = /predicate 4: narrowed-from-erased\] is FALSE/;
+
+    const g1 = ix(IX_BASE, IX_HEAD);
+    green('IX-G1 THE #26293 SHAPE: an `any` index signature becomes `unknown`, every other member and the heritage unchanged', g1);
+    assert(/ComponentRendererProps \(\[key: string\]: any -> \[key: string\]: unknown\)/.test(g1.judged[0]?.detail ?? ''),
+      `IX-G1b: the verdict names the index signature that moved, both sides. Got: ${g1.judged[0]?.detail}`);
+    green('IX-G2 an object-literal `type` alias, `readonly` index signature, narrowed to a concrete type', ix(
+      'export type ComponentRendererProps = { id: string; readonly [k: string]: any };\n',
+      'export type ComponentRendererProps = { id: string; readonly [k: string]: string };\n',
+    ));
+
+    red('IX-R1 a member REMOVED beside the narrowed index signature (the #6048 class)', ix(
+      IX_BASE, IX_HEAD.replace('  schema: TSchema;\n', ''),
+    ), [P4_FALSE, /#6048/, /index-signature limb .* does not hold either: the member count moved \(2 -> 1\)/]);
+    red('IX-R2 a member RE-TYPED beside it', ix(IX_BASE, IX_HEAD.replace('schema: TSchema;', 'schema: string;')),
+      [P4_FALSE, /member 1 moved \(`schema: TSchema` -> `schema: string`\)/]);
+    red('IX-R3 a member made OPTIONAL beside it', ix(IX_BASE, IX_HEAD.replace('schema: TSchema;', 'schema?: TSchema;')),
+      [P4_FALSE, /member 1 moved/]);
+    red('IX-R4 the HERITAGE moved: a type-parameter default changed', ix(IX_BASE, IX_HEAD.replace('<TSchema = unknown>', '<TSchema = object>')),
+      [P4_FALSE, /heritage moved/]);
+    red('IX-R5 an `extends` clause added', ix(IX_BASE, IX_HEAD.replace('<TSchema = unknown> {', '<TSchema = unknown> extends Base {')),
+      [P4_FALSE, /heritage moved/]);
+    red('IX-R6 the base index signature was NOT `any`: a concrete value type re-typed is no narrowing off erased', ix(
+      IX_BASE.replace('[key: string]: any;', '[key: string]: string;'), IX_HEAD.replace('[key: string]: unknown;', '[key: string]: number;'),
+    ), [P4_FALSE, /member 2 moved/]);
+    red('IX-R7 base index signature `unknown` (not `any`) is outside the limb', ix(
+      IX_BASE.replace('[key: string]: any;', '[key: string]: unknown;'), IX_HEAD.replace('[key: string]: unknown;', '[key: string]: string;'),
+    ), [P4_FALSE, /member 2 moved/]);
+    red('IX-R8 still `any` at HEAD: nothing narrowed', ix(IX_BASE, `${IX_BASE}// touched\n`),
+      [P4_FALSE, /still `any` at HEAD/]);
+    red('IX-R9 the KEY of the index signature moved with it', ix(IX_BASE, IX_HEAD.replace('[key: string]', '[key: number]')),
+      [P4_FALSE, /member 2 moved/]);
+    red('IX-R10 a `type` alias that is an INTERSECTION is not the shape the limb reads', ix(
+      'export type ComponentRendererProps = { id: string; [k: string]: any } & Base;\n',
+      'export type ComponentRendererProps = { id: string; [k: string]: unknown } & Base;\n',
+    ), [P4_FALSE, /reads only an exported `interface`, or a `type` alias whose right-hand side is one object type literal/]);
+    red('IX-R11 a NESTED `any` index signature is a member re-typed, never a top-level one (the `=>` is not a closer)', ix(
+      'export interface ComponentRendererProps {\n  meta: { cb: () => void; [k: string]: any; };\n}\n',
+      'export interface ComponentRendererProps {\n  meta: { cb: () => void; [k: string]: unknown; };\n}\n',
+    ), [P4_FALSE, /member 1 moved/]);
+    red('IX-R12 a DOTTED member path keeps reading a return annotation alone', ix(
+      'export class Registry {\n  props(): { [k: string]: any } {\n    return {};\n  }\n}\n',
+      'export class Registry {\n  props(): { [k: string]: unknown } {\n    return {};\n  }\n}\n',
+      `${IX_PATH}#Registry.props`,
+    ), [P4_FALSE, /does not apply to a dotted member path/]);
+
+    assert(readIndexSignature('readonly [k: string]: any')?.value === 'any' && readIndexSignature('[key: string]: unknown')?.key === '[key: string]',
+      'IX-U1: an index signature reads as its key part and value type, `readonly` kept in the key');
+    assert(readIndexSignature('[P in Keys]: string') === null && readIndexSignature('[Symbol.iterator](): Iterator<T>') === null,
+      'IX-U2: a mapped type and a computed member name are not index signatures');
+    assert(JSON.stringify(structuralDeclarationParts(IX_BASE, 'ComponentRendererProps')) ===
+      JSON.stringify({ kind: 'interface', heritage: '<TSchema = unknown>', members: ['schema: TSchema', '[key: string]: any'] }),
+    `IX-U3: the parts the limb compares (got ${JSON.stringify(structuralDeclarationParts(IX_BASE, 'ComponentRendererProps'))})`);
+    assert(indexSignatureLimb(ACTOR_BASE, ACTOR_BASE.replace('  roles: string[];\n', ''), 'ActorUser').ok === false,
+      'IX-U4: THE #6048 SHAPE fails the limb -- it has no `any` index signature and it lost a member');
+
+    // D9: the entry is `src/index.tsx`.
+    const TX_PKG = '@object-ui/plugin-x';
+    const txPath = (rel) => `ui/packages/plugin-x/${rel}`;
+    const TX_INDEX_HEAD = "export { Widget } from './Widget.js';\n";
+    const TX_BASE = {
+      [txPath('package.json')]: JSON.stringify({
+        name: TX_PKG, version: '1.0.0', types: 'dist/index.d.ts',
+        exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } },
+      }),
+      [txPath('src/index.tsx')]: `${TX_INDEX_HEAD}export { Gone } from './Gone.js';\nexport const Root = () => <div />;\n`,
+      [txPath('src/Widget.tsx')]: 'export const Widget = () => <span />;\n',
+      [txPath('src/Gone.tsx')]: 'export function Gone() {\n  return <p />;\n}\n',
+      'packages/platform-objects/src/audit/sys-email-template.object.ts': "export const SysEmailTemplate = { name: 'sys_email_template' };\n",
+    };
+    const TX_CS = CS({
+      bumps: [[TX_PKG, 'minor']],
+      body: 'refactor(plugin-x)!: retire `Gone`\n\n**BREAKING**: retired export.\n\n- FROM `Gone` TO nothing: delete the import.\n\n' +
+        `<!-- adr-0087: not-required (runtime-export-retired ${TX_PKG}#Gone) a React component; the compiler reports it at its importer, and no stored shape names it -->\n`,
+    });
+    const tx = (baseOver = {}, headOver = {}) => run(mk({
+      pkgs: { '@objectstack/spec': { dir: 'packages/spec', private: false } },
+      baseFiles: { ...TX_BASE, ...baseOver },
+      files: { [txPath('src/index.tsx')]: `${TX_INDEX_HEAD}export const Root = () => <div />;\n`, '.changeset/x.md': TX_CS, ...headOver },
+    }));
+    const t1 = tx();
+    green('IX-T1 a package whose ONE source entry is `src/index.tsx` (the vite-plugin-dts shape) retires an export', t1);
+    assert(/Gone \(export, ui\/packages\/plugin-x\/src\/Gone\.tsx\)/.test(t1.judged[0]?.detail ?? ''),
+      `IX-T1b: the export is read through the \`.tsx\` entry to its declaration. Got: ${t1.judged[0]?.detail}`);
+    // The `.ts` twin exports the same names, so a reader that silently PICKED one
+    // would read a clean retirement here: only the ambiguity refusal holds it red.
+    const TX_TWIN_BASE = `${TX_INDEX_HEAD}export { Gone } from './Gone.js';\n`;
+    red('IX-T2 BOTH `src/index.ts` and `src/index.tsx`: ambiguous, refused rather than picked', tx(
+      { [txPath('src/index.ts')]: TX_TWIN_BASE },
+      { [txPath('src/index.ts')]: TX_INDEX_HEAD },
+    ), [/published entry of `@object-ui\/plugin-x` is AMBIGUOUS/, /BOTH ui\/packages\/plugin-x\/src\/index\.ts and ui\/packages\/plugin-x\/src\/index\.tsx/]);
+    red('IX-T3 NEITHER source entry: unmappable, by name', tx(
+      { [txPath('src/main.tsx')]: TX_BASE[txPath('src/index.tsx')] },
+      { [txPath('src/index.tsx')]: null, [txPath('src/main.tsx')]: `${TX_INDEX_HEAD}export const Root = () => <div />;\n` },
+    ), [/cannot be mapped to its source/, /neither ui\/packages\/plugin-x\/src\/index\.ts nor ui\/packages\/plugin-x\/src\/index\.tsx exists there/]);
   }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------

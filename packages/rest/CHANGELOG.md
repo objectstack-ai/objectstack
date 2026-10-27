@@ -1,5 +1,254 @@
 # @objectstack/rest
 
+## 18.2.0
+
+### Minor Changes
+
+- b77bb37: feat(spec,core,rest): an import column can be written only when its row is created (`applyOn`), and `matchFields` takes ordered key sets
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Two additions to the import contract (`POST /data/:object/import` and the async import job), both honoured by the import runner:
+  
+  - **`FieldMappingEntry.applyOn: 'create' | 'always'`** (default `always`, today's behaviour). An inline mapping entry marked `create` is written when the import creates the row and left out when an `upsert` updates an existing one; an `update` import never writes it. One upsert can then be re-run safely: master-data columns refresh, while a column the app has changed since the first run (a status, a flag) keeps its current value. A create-only column is still read for matching, and the key a row was found by stays in that row's update. An `applyOn` value outside `create` / `always` refuses the request with `400 INVALID_REQUEST`.
+  - **`matchFields` accepts ordered key sets** (`string[][]`) beside one key set (`string[]`, unchanged). Each row is matched by the first set whose fields are all non-blank on it, and only by that set, so one sheet can identify domestic suppliers by `credit_code` and overseas ones by `country` + `registration_no`. A row blank on every set fails with `BLANK_MATCH_KEY` (`ok: false`, `action: 'failed'`) instead of being created or skipped; `skipBlankMatchKey: true` with key sets is refused with `400 INVALID_REQUEST`, as are malformed key sets (an empty set or name, or names mixed with sets). A set that matches more than one record fails the row with `AMBIGUOUS_MATCH`, as before.
+  
+  ```json
+  {
+    "writeMode": "upsert",
+    "matchFields": [["credit_code"], ["country", "registration_no"]],
+    "mapping": [
+      { "sourceField": "Code", "targetField": "credit_code" },
+      { "sourceField": "Country", "targetField": "country" },
+      { "sourceField": "Reg. no.", "targetField": "registration_no" },
+      { "sourceField": "Name", "targetField": "name" },
+      { "sourceField": "Status", "targetField": "status", "applyOn": "create" }
+    ]
+  }
+  ```
+  
+  `@objectstack/spec` also exports `isMatchKeySets(matchFields)`, which tells the two `matchFields` spellings apart. `RunImportOptions` in `@objectstack/core` gains `createOnlyFields` and accepts both `matchFields` spellings.
+- dd5e355: feat(spec,cli): reports are translatable — `reports.<name>` in the translation bundle
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  An app authored in one language listed its reports (`reports[].label`, `reports[].description`) in that language on the app's report index and the report page heading. Before this change the translation bundle had no key for them: `reports` was a retired object-first dialect key, so a bundle carrying it was refused by `os validate`, and `os i18n check` could not report the gap.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `reports`, keyed by the report's `name`, carrying `label` and `description` (strict: any other key is refused — `name` or `title` with a message pointing at `label`, and the singular spelling `report` with a message pointing at `reports`). `reports` leaves `LEGACY_OBJECT_FIRST_KEYS`, so a stored translation row carrying it now loads through the authored-row sync instead of being skipped as a retired dialect; the key's measured footprint in the legacy dialect was zero (#3778). A new translator, `translateReport`, overlays the two strings and is registered in the metadata-document dispatch, so `GET /meta/report` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. A report is overlay-editable (ADR-0126 Regime O), so the translator honours the packaged base: a label or description an org re-authored is served as written (ADR-0029 D9.2a), and the strings it did not touch are still translated.
+  - **`@objectstack/metadata-protocol`:** `getPackagedReportBase(name)` returns the shipped report document beneath any overlay, the base the REST read path hands the translator.
+  - **`@objectstack/rest`:** the meta read path supplies that base for `report`, as it does for `dashboard` and `view`.
+  - **`@objectstack/lint`:** `translation-target-unknown` reports a `reports.<name>` key that names no report a package of the stack declares, as an error with the nearest declared name.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `reports.<name>.label` / `.description` from the stack's `reports[]`, and `os i18n check` / `os lint` coverage report an untranslated one in its own bucket (`i18n/missing-report`).
+  - **`@object-ui/app-shell`, `@object-ui/i18n`:** the translation designer's preview draws the `reports` group (a "Reports" / 「报表」 category beside the others), and the console's translation loader recognises a payload that carries only `reports`.
+  
+  Example (`zh-CN` bundle of an English-authored app):
+  
+  ```ts
+  reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } },
+  ```
+
+### Patch Changes
+
+- 48e84a9: fix(objectql,types,rest)!: a database NOT NULL refusal on a declared field is the record validator's `ValidationError` at every door, named by the field's label
+  
+  A field declared `storage: { notNull: true }` without `required` is ADR-0113's engine-populated column: the record validator judges `required` only, so a write with no value for it reaches the driver and the database refuses it. The engine let the driver's error out, and each HTTP door classified it from the driver's text its own way. For the same refused write, the runtime dispatcher's `/data` POST and PATCH answered `500 INTERNAL_ERROR`, the actions door answered `400 VALIDATION_ERROR` with the driver's text and `declaredCode: 'SQLITE_CONSTRAINT_NOTNULL'`, and `RestServer` answered `400 VALIDATION_FAILED` relabelled by a second object read on its own `POST` / `PATCH` only.
+  
+  Clause-②: yes (narrowing: `@objectstack/types` adds the export `notNullViolationSite` and retires `notNullRefusalSite` and `relabelNotNullRefusal`; the HTTP doors' answer for this refusal moves to the record validator's envelope)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/types#notNullRefusalSite, @objectstack/types#relabelNotNullRefusal) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What retires is two function exports of `@objectstack/types`' published entry, whose only consumer was `@objectstack/rest`'s door-side relabel, retired in this same change; no other consumer was found in this repository (its `ui/` and `examples/` included) or in hotcrm. The affected party is a TypeScript caller, and the compiler at that call site delivers the break. -->
+  
+  **BREAKING** (an export retirement and a wire-answer change), shipped as `patch`: no metadata protocol kind moves.
+  
+  - **`@objectstack/objectql`.** The write doors' driver exits (single-row and batch insert, the autonumber retry, by-id and predicate update) translate a driver NOT NULL refusal on a field the object's field map holds into the record validator's own `ValidationError` (`code: 'VALIDATION_FAILED'`), built by the validator's own builder with the validator's message context: one field error, `code: 'required'`, the field named by its label (translation bundle, then declared `label`, then API name) in the caller's locale, with the sentence the validator gives the same verb (`required` on insert, `required_cleared` on update). The driver's error rides `cause`, and the doors' log line still carries the database's own diagnosis. Left as the driver threw it: a column no field declares, a refusal the driver attributes to another table, and a NOT NULL code whose column the driver did not name. `required` and `storage.notNull` stay apart (ADR-0113 D1 / D2): no pre-write check reads `storage.notNull`.
+  - **Every door answers it alike**, because every door already answers that class alike: the dispatcher `/data` POST and PATCH now answer `400 VALIDATION_FAILED` (was `500 INTERNAL_ERROR`), the actions door `400 VALIDATION_FAILED` with the field envelope (was `400 VALIDATION_ERROR` with the driver's text), and `RestServer`'s `POST` / `PATCH` and its `/data/:object/batch` rows answer the validator's envelope and sentence. Import rows, the public form submit and MCP write through the same engine doors and answer the same class through the same arms; they were not driven separately. On `RestServer` the body is now exactly the validator's `required` shape: `fields[0]` carries `label`, there is no `hint`, and a `PATCH` writing null reads the clear-out sentence.
+  - **`@objectstack/types`.** New export `notNullViolationSite(error)`: the column (and table, where the dialect names it) of a driver's NOT NULL refusal, read from the error's codes (better-sqlite3 `SQLITE_CONSTRAINT_NOTNULL`; libsql `extendedCode` / `rawCode: 1299`; node-postgres `23502` with its `column` / `table` fields; mysql2 `ER_BAD_NULL_ERROR` / `errno: 1048`), then its text (all sql.js gives), then one step down its `cause` chain. An error whose code names another refusal is not read for NOT NULL text. `mapDataError`'s NOT NULL branch is unchanged, and answers the column no field declares.
+  - **`@objectstack/rest`.** The `/data` create and update doors' NOT NULL relabel (`not-null-refusal-label.ts`) retires: every path it served is an engine write.
+  
+  Migration, for a TypeScript caller of the retired exports:
+  
+  - FROM `notNullRefusalSite(answer)` TO `notNullViolationSite(error)`: ask the driver's error, not `mapDataError`'s answer.
+  - FROM `relabelNotNullRefusal(answer, { message, declaresNotNull })` TO nothing (no replacement): write through the engine, which answers a declared field's NOT NULL refusal as a labelled `ValidationError` itself.
+- 50af6fa: fix(rest)!: an inline import mapping entry's `transform`, `defaultValue` and `required` are applied, not dropped
+  
+  `POST /api/v1/data/:object/import`, the async import job and plugin-auth's admin user import (`POST /api/v1/auth/admin/import-users`) all parse their body through the same request parser, which accepts `mapping` as a `FieldMappingEntry[]`, whose entries carry `transform`, `defaultValue` and `required`. The request parser kept only the column each entry names with `sourceField` and the field it names with `targetField` and dropped the rest, so a request asking for `transform: 'uppercase'` validated, ran, and stored the cell unchanged. Each entry's rules now run on its column before the cells are coerced:
+  
+  - `trim`, `uppercase` and `lowercase` rewrite a string cell. `none` and `lookup` copy it; a `lookup` cell is resolved to a record id by the import's reference resolution, as before.
+  - `defaultValue` fills a cell that is blank (absent, empty, whitespace or one of the request's `nullValues`).
+  - `required: true` refuses the request with `400 MISSING_REQUIRED_FIELD` when a row still leaves that column blank, naming the column and the rows. The refusal comes before any row is written, on the dry run and the commit alike.
+  - `transform: 'date_format'` refuses the request with `400 UNSUPPORTED_TRANSFORM`: an entry carries no date format for it to apply. A cell mapped to a date or datetime field is already parsed as a date, so drop the transform. A transform name outside the declared set is refused the same way.
+  
+  A plain `{ sourceField, targetField }` entry, and the compact `{ column: field }` record, map columns exactly as before.
+  
+  Clause-②: no (narrowing) — the import doors (the sync import, the async import job and plugin-auth's admin user import) refuse two request shapes they used to run: an inline mapping entry declaring `transform: 'date_format'` (or a transform name outside the declared set), and an entry marked `required: true` whose column a row leaves blank. Nothing is widened.
+  
+  Metadata-protocol: none (a REST import request's handling; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the REST import doors handle a request body's inline mapping entries: their declared per-cell rules now run, and two shapes those rules make unanswerable are refused. The remedy is a request edit (drop `date_format`, fill the required cells or give the entry a `defaultValue`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a caller that relied on either request running.
+  
+  - **Before.** An inline entry's `transform`, `defaultValue` and `required` were ignored; the import ran with the rename alone.
+  - **Now.** They are applied; `date_format` and a blank `required` cell refuse the request with `400`.
+  - **Fix.** Drop `transform: 'date_format'` from the entry (the date field's own parse still applies), and fill a required column or give its entry a `defaultValue`.
+- e2b40a2: fix(rest)!: an anonymous public-form submission carries no file
+  
+  `POST /api/v1/forms/:slug/submit` (and its environment-scoped twin) now refuses a submission that carries a value in a field whose declared type is a file type (`file`, `image`, `avatar`, `video` or `audio`, the spec's `FILE_REFERENCE_TYPES`). The refusal comes before anything is written. It is the door's existing envelope, `400 VALIDATION_FAILED`, with one `fields[]` entry per file field, coded `invalid_value` (the ADR-0114 field catalog) and naming the field by its label. A missing `required` field in the same submission is reported in the same envelope. An empty or absent file field submits exactly as before. Only the fields the form declares are judged, so the refusal names nothing the form does not already publish.
+  
+  This is the server half of the rule "an anonymous public-form submission carries no file". A visitor who needs to provide a file registers and signs in, then submits through a signed-in surface that uploads through the authenticated upload doors. The anonymous door has no upload door of its own, and none is added. The protocol half, refusing at publish a guest-facing form that declares a file field, is separate. This door also judges forms published before that refusal exists.
+  
+  `@objectstack/service-storage`: the file-reference claim path now looks a referenced file up within the organization the write acts in. It uses the same channel that already stamps a copied file for that organization, so the driver's tenant scope for the posture in force decides what the lookup sees. A referenced file id outside that scope is kept as written and is neither claimed nor copied, exactly as an id the platform does not manage. A write that carries no organization, and the `single` posture, look files up as before.
+  
+  Clause-②: no (narrowing) — the anonymous public-form submit door refuses a request shape it used to accept (a value in a declared file field), and the file-reference claim path reaches only files within the writing organization's tenant scope. Nothing is widened.
+  
+  Metadata-protocol: none (a request's handling at an anonymous door and a write path's file bookkeeping; nothing a metadata author writes changes. The publish-time refusal of a guest-facing form with a file field is the protocol half, and ships separately)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is how the anonymous public-form submit door handles a request body (a value in a declared file field is refused) and which files the file-reference claim path can reach for a write (those within the writing organization's tenant scope). The remedy is a change of how a visitor submits (register and sign in to provide a file), never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** for a public form that collected files anonymously, shipped as `patch` because the metadata protocol does not move.
+  
+  - **Before.** A value in a file field the form declares was written with the anonymous submission.
+  - **Now.** That submission is refused with `400 VALIDATION_FAILED`, naming each file field that carries a value. A submission that leaves every file field empty is accepted as before.
+  - **Fix.** A public form that collected files: have the submitter register and sign in, then provide the file from their account. Remove the file field from the guest-facing form, or leave it for the visitor to leave empty.
+- f123f75: Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/data/:object/import`: a cell the request declares null through `nullValues` now stays blank whatever case `transform` its inline mapping entry declares. The blank test reads the raw cell and a blank cell is not transformed, so an `uppercase` or `lowercase` entry no longer rewrites a sentinel such as `n/a` into a stored value (`N/A`): the cell is stored unset, takes the entry's `defaultValue`, or is refused by `required` as blank. A non-blank cell is transformed as before.
+- 7cd2ebf: fix(deps): the declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and `postal-mime` and `nodemailer` move to their patched releases
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`zod` `^4.6.5` → `^4.6.6`** in every package that depends on it. zod 4.6.5 and earlier can exhaust memory validating an oversized array against an array schema with no length limit ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)). 4.6.6 also changed zod's `v4/core` type declarations, so a project that had already moved its own zod to 4.6.6 or later could get a second, older zod under these packages whose types do not assign to its own; with both ranges at `^4.6.6` the two can resolve to one copy. If your project pins zod below 4.6.6, raise it to `^4.6.6`.
+  - **`@objectstack/service-mailbox`: `postal-mime` `^4.0.5` → `^4.0.8`.** Decoding a header made of many joined RFC 2047 encoded words took quadratic time, so one crafted message could block the event loop for seconds ([GHSA-f2hq-32vh-53cc](https://github.com/advisories/GHSA-f2hq-32vh-53cc)).
+  - **`@objectstack/plugin-email`: `nodemailer` `^10.0.2` → `^10.1.4`**, for three moderate advisories fixed in 10.1.4 (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h).
+  
+  No API, schema or behaviour of these packages changes. The generated spec artifacts (JSON schemas, API surface, declaration map) are identical under zod 4.6.7.
+- 1ac2bb5: perf(rest): `GET /meta/app` judges its navigation on the protocol's execution face, so it no longer schema-parses every object on each read
+  
+  Clause-②: yes (widening): the exported `RestProtocol` type gains one optional member, `getMetaItemsForExecution?`. Measured on the built `dist/index.d.ts` at `cb0a2fcf` (before) and at this head (after): the export list is unchanged (67 names), and outside doc comments the one changed line is that member. Every other member signature is byte-identical. The member is optional, so nothing a protocol must provide changes.
+  
+  Metadata-protocol: none
+  
+  - **What.** The nav-servability gate (#24031) reads each object's `enable` to prune the nav entries whose object refuses `list`. It read them through the served `getMetaItems`, which stamps `_diagnostics` on every object, so every `/meta/app` read ran a full schema parse of every object definition. `RestServer.metaListSource` now asks `getMetaItemsForExecution` for `object` when the protocol has it (the same list, without the serving decorations) and `getMetaItems` otherwise. The batch route's exposure gate and the by-name gate's list fallback read the same source. The `book` and `doc` lists stay on the served face.
+  - **Measured** on the showcase app (108 objects, local, main-thread CPU per request): `GET /meta/app` 73.25 ms → 16.75 ms.
+  - **Unchanged.** Every `/meta` answer: the same nav prune, and `GET /meta/object` still serves `_diagnostics` on every object.
+- 83a26c3: feat(plugin-auth): a signed-out invitation preview read, so the invitation landing page can name the inviting organization and the inviter
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **New route.** `GET /api/v1/auth/organization/invitation-preview?id=INVITATION_ID` answers a caller with no session. For a `pending` invitation that has not expired it returns exactly `{ success: true, data: { organizationName, inviterName, email } }`. `email` is the invited address masked to its first character and its domain (`alice@acme.com` becomes `a***@acme.com`), and `inviterName` is `null` when the inviter's account no longer exists.
+  - **One not-found.** An unknown, expired, accepted, rejected or cancelled id answers the same `404` with code `RESOURCE_NOT_FOUND` and the same body, so the answer does not tell those states apart.
+  - **The same answer for everyone.** The route never reads the session: a signed-in caller gets the identical three keys.
+  - **Rate-limited.** At most 10 previews per client address per 60 seconds, counted before the request is parsed; the 11th answers `429` `RATE_LIMIT_EXCEEDED` with `Retry-After`. The window counts in the kernel `cache` service when one is registered and per process otherwise, with a one-time warning naming the budget.
+  - **Closed query set.** `id`, once. Any other parameter, a repeated `id` and a missing `id` each answer a located `400` `VALIDATION_ERROR`.
+  - **Unchanged.** better-auth's own `GET /organization/get-invitation` still answers `401` without a session, and an invitation-link sign-up still owes the verification mail.
+  - **Governance.** ADR-0138 D2 admits the route as a class-2-shaped door (the invitation id is the capability token) by a dated note, and `auth-route-ledger.ts` books it `public`.
+  - **`@objectstack/rest`** now exports `unknownQueryParamRefusalMessage`, the pure half of the closed query-parameter rule, for a door outside the package that writes its own envelope.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- 6a2866a: feat(plugin-approvals,rest,client): a record-anchored approval lock read, `{ locked }` for every caller who can read the record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A member who could read and edit a record but was not on its approval was offered an edit the server then refused with `409 RECORD_LOCKED`. The lock's only carrier was the request row's `lock_record`, and that row is rightly not served to a non-participant unless the object turns on `approvalsVisibleToReaders`. The lock now has a carrier of its own.
+  
+  - **`@objectstack/spec`.** `IApprovalService` gains the optional member `getRecordLock(object, recordId, context)`, which answers `{ locked: boolean }`, or `null` when the caller cannot read the record. No exported schema or type is added.
+  - **`@objectstack/plugin-approvals`.** `ApprovalService.getRecordLock` reads the record as the caller. A record the caller cannot read answers `null`, the same answer as an id that does not exist. A caller with no read on the object is refused for every id, whether it exists or not. `locked` is `true` while a pending request's node has `lockRecord` other than `false`. The lock judgement is now one function, `nodeConfigLocksRecord` (not exported from the package), and the record-lock hook, the request row's `lock_record` and the new read all call it. Request content stays behind `approvalsVisibleToReaders`: the answer carries no request id, node, approvers or `pending` flag.
+  - **`@objectstack/rest`.** New route `GET /api/v1/approvals/records/:object/:recordId/lock`. It answers `{ success: true, data: { locked } }`. A `null` answers `404 RECORD_NOT_FOUND` with one body, whether the record is unreadable or missing. A service without the member answers `501`. The route's closed query-parameter set is empty, so any query parameter is refused with a `400`. The route is ledgered as `sdk`.
+  - **`@objectstack/client`.** `client.approvals.getRecordLock(object, recordId)` calls that route.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/service-package@18.2.0
+  - @objectstack/observability@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

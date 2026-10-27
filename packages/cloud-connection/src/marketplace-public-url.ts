@@ -4,7 +4,8 @@
  * Marketplace public R2 base URL — when set, points at a Cloudflare R2
  * bucket (custom domain or `pub-*.r2.dev`) that serves pre-rendered
  * marketplace browse + install JSON snapshots. The snapshots are
- * written by ObjectStack Cloud (`packages/service-cloud/src/marketplace-snapshot.ts`).
+ * written by the ObjectOS Cloud control plane
+ * (`packages/service-cloud/src/marketplace-snapshot.ts`).
  *
  * Architecture: cloud writes, tenants read directly from R2 → CDN.
  * Marketplace browse + install never touch the cloud control plane,

@@ -27,8 +27,10 @@
  *
  * ## Two halves, and why both
  *
- * 1. **The enumeration** reads `sql-driver.ts` and lists every function that
- *    builds an `INVALID_FILTER` error. Only three may call
+ * 1. **The enumeration** reads `sql-driver.ts` and its cross-field seam module
+ *    `sql-driver-cross-field-comparison.ts` (#25521 cut 13), plus the read-exit
+ *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15), and lists every
+ *    function that builds an `INVALID_FILTER` error. Only three may call
  *    `unsupportedFilterError` directly (the seam itself, the `'author'`
  *    re-issue, and the column refusal raised from a dialect error AFTER the
  *    statement ran), and every caller of `withheldFilterError` must have a row
@@ -64,7 +66,7 @@ const SECRET_NUM = 7770123;
 const UNDECLARED_KEY = '$psecret_combinator';
 
 type Door = {
-  /** The builder in `sql-driver.ts` this row drives — asserted by the error's stack. */
+  /** The builder in `sql-driver.ts` or its cross-field seam module this row drives — asserted by the error's stack. */
   readonly builder: string;
   readonly where: () => Record<string, unknown> | unknown[];
   readonly secrets: readonly string[];
@@ -174,6 +176,20 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, 'secret_undeclared_ref'],
     klass: 'cannot be compiled here',
   },
+  // ── #25808: the now-anchored comparand's two doors ─────────────────────────
+  {
+    builder: 'nowAnchorPositionError',
+    where: () => ({ [POLICY_COL]: { $contains: { $now: true, addDays: 1 } } }),
+    secrets: [POLICY_COL, '$contains'],
+    klass: 'A now-anchored comparand',
+    authorExtendsLog: true,
+  },
+  {
+    builder: 'uncompilableNowAnchorError',
+    where: () => ({ [POLICY_COL]: { $gt: { $now: true, addDays: { $field: 'secret_undeclared_ref' } } } }),
+    secrets: [POLICY_COL],
+    klass: 'A now-anchored comparison',
+  },
   {
     builder: 'jsonColumnOperatorError',
     where: () => ({ [JSON_COL]: { $in: [SECRET] } }),
@@ -257,8 +273,8 @@ const DOORS: readonly Door[] = [
 // ── Half 1: the enumeration ───────────────────────────────────────────────────
 
 /**
- * Every function in `sql-driver.ts` that builds an `INVALID_FILTER` error, by
- * the route it takes. Read with the TypeScript parser, not a regex, so a call
+ * Every function in `sql-driver.ts`, `sql-driver-cross-field-comparison.ts` and
+ * `sql-driver-read-exit-fault.ts` that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
  * split across lines, an inline `throw`, or a builder written as a method or an
  * arrow cannot slip past the count.
  */
@@ -267,8 +283,15 @@ function enumerateRefusalBuilders(): {
   seamCallers: Set<string>;
   codeWriters: Set<string>;
 } {
-  const source = readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8');
-  const sf = ts.createSourceFile('sql-driver.ts', source, ts.ScriptTarget.Latest, true);
+  // [#25521 cut 13] The cross-field and now-anchored comparison compile moved to
+  // its own seam module with two of the builders below; the scan reads both.
+  // [#25521 cut 15] The read exits' fault terminals moved to a third, with
+  // `unresolvableFilterColumnError`; the scan reads it too.
+  const sources = [
+    ['sql-driver.ts', readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8')],
+    ['sql-driver-cross-field-comparison.ts', readFileSync(new URL('./sql-driver-cross-field-comparison.ts', import.meta.url), 'utf8')],
+    ['sql-driver-read-exit-fault.ts', readFileSync(new URL('./sql-driver-read-exit-fault.ts', import.meta.url), 'utf8')],
+  ] as const;
   const directCallers = new Set<string>();
   const seamCallers = new Set<string>();
   const codeWriters = new Set<string>();
@@ -325,7 +348,7 @@ function enumerateRefusalBuilders(): {
     }
     ts.forEachChild(node, visit);
   };
-  visit(sf);
+  for (const [name, source] of sources) visit(ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true));
   return { directCallers, seamCallers, codeWriters };
 }
 

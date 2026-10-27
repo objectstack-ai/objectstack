@@ -595,7 +595,7 @@ export function readSkillFiles(root = REPO_ROOT) {
  * Every repo-relative path `--fix` may write, in the order the walk visits them.
  *
  * This is the export the post-version shape guard reads (`release.yml`'s
- * `Validate the post-version tree`, `cut-rc.yml`'s release-file allowlist), on the
+ * `Validate the post-version tree`), on the
  * terms of `stampedPaths()` in sync-template-versions.mjs and `syncedPaths()` in
  * sync-release-index-currency.mjs: the root `version` script ends with this
  * script's `--fix`, so the SKILL.md files it restamps are a version-time output,

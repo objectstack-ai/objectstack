@@ -36,6 +36,7 @@ const ERROR_CLASSES: Array<[string, ErrorClass]> = Object.entries(errorsModule)
  */
 const FLOOR = [
   'PermissionDeniedError',
+  'DelegationScopeViolationError',
   'MasterDetailRelationMissingError',
   'DetailRecordNotFoundError',
   'MasterReferenceMissingError',

@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/fields",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "description": "Field renderers and registry for Object UI",
   "license": "MIT",
   "type": "module",
@@ -59,7 +59,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3"
+    "vite-plugin-dts": "^5.0.3",
+    "vitest": "^4.1.10"
   },
   "publishConfig": {
     "access": "public"

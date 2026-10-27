@@ -16,9 +16,9 @@
  * docblocks included; no other code in `engine.ts` called them.
  *
  * What stays in `engine.ts`: `setRealtimeService` (a two-line field setter),
- * the `realtimeService` field itself and the three write-path call sites, and
+ * the `realtimeService` field itself and the three write-path call sites.
  * `accessibleOrganizationsOf`, which sat between the helpers but is read by the
- * tenant wall, not by an event.
+ * tenant wall, not by an event, now lives in `engine-driver-options.ts`.
  *
  * ## How the moved bodies reach the class
  *

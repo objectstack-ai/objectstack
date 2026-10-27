@@ -219,6 +219,20 @@ reject) — enforced before any write, with no elevation bypass, so the run
 cannot resume past the node with the key a later `expression` approver reads
 still missing.
 
+### Reading the lock
+
+A page over a record under approval must not offer an edit the server then
+refuses with `409 RECORD_LOCKED`. The request row tells only a participant,
+or any reader once the object declares `enable.approvalsVisibleToReaders`;
+everyone else is served no row. Ask the lock itself —
+`GET /api/v1/approvals/records/:object/:recordId/lock`, in the SDK
+`client.approvals.getRecordLock(object, recordId)` — answered to anyone who
+can read the record as `{ success: true, data: { locked } }`: `locked` and
+nothing else (request, approvers and history stay behind that switch), the
+same judgement the lock hook applies to an edit. The record is read as the
+caller: one they cannot read answers `404 RECORD_NOT_FOUND`, the same body
+an id that does not exist gets.
+
 ### Approver Types
 
 | `type` | Resolves to |
@@ -347,9 +361,10 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `lockRecord` | Lock the triggering record from edits while pending. Default `true` |
 | `approvalStatusField` | Business-object field to mirror `pending`/`approved`/`rejected`/`recalled` onto (should be readonly) |
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens, only a privileged admin can act via Reassign; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
+| `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry (author declares, approvers fill values). Entries are bare keys (free-text input) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }` — a typed entry renders the matching record picker in the decision dialog (`multiple` collects an id array). Accepted outputs resume the run as `<nodeId>.<key>` variables; undeclared keys reject the decision; `decision`/`requestId` reserved |
 | `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
-| `maxRevisions` | ADR-0044 — max **send-backs-for-revision** per run before auto-reject. Default `3`; `0` disables send-back. Only meaningful when the node has a `revise` out-edge |
+| `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) — see *Send-back for revision* above |
 
 ### Branching, side-effects & rejection
 
@@ -361,23 +376,17 @@ These are wired on the **graph**, not in node config:
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise (the old `back_to_previous`).
-- **Send back for revision (ADR-0044)** — distinct from a plain reject: a
-  `revise` out-edge into an **`approval_revise`** window, closed by a
-  `type: 'back'` resubmit edge. See *Send-back for revision* above.
+- **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
 - **Hard reject** — route the `reject` edge to an `end` node (the old
   `reject_process`).
 
 ### Approval Best Practices
 
-1. **Gate entry on the edge** (`condition` into the Approval node) so the flow
-   only pauses for records that actually need sign-off.
-2. **Set `approvalStatusField`** to mirror status onto the row — views and
+1. **Set `approvalStatusField`** to mirror status onto the row — views and
    formulas can then filter on it without joining `sys_approval_request`.
-3. **Keep `lockRecord: true`** unless you have a strong reason to allow
+2. **Keep `lockRecord: true`** unless you have a strong reason to allow
    edits while pending — otherwise approvers chase a moving target.
-4. **Model rejection as a visible branch** — a back-edge to revise, or an `end`
-   node to terminate. The path is on the diagram, not hidden in config.
-5. **Notify the submitter from downstream nodes** wired to the `approve` /
+3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
    (`approval.requested`); ⛔ no `notify` node for the opening: it tells
    them twice.

@@ -947,7 +947,7 @@ async function collectionOpen(engine: FileReferenceEngine): Promise<boolean> {
  * them a released file would read as one no record ever held, whose rule is
  * the organization's, which is weaker than the record's was.
  */
-async function releaseOwnership(
+export async function releaseOwnership(
   engine: FileReferenceEngine,
   logger: FileReferenceLogger,
   rows: Array<Record<string, unknown>>,
@@ -989,7 +989,7 @@ async function releaseOwnership(
 }
 
 /** Files currently owned by a specific slot. */
-async function ownedBySlot(
+export async function ownedBySlot(
   engine: FileReferenceEngine,
   object: string,
   recordId: string,

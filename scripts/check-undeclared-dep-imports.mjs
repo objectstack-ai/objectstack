@@ -334,7 +334,7 @@ const LEDGER = [
     why:
       '@object-ui/console publishes a prebuilt SPA: `files` is dist + plugin.{ts,js,d.ts} + README, '
       + 'and `exports` resolves to plugin.js, so src/** is bundled by vite into dist and never reaches '
-      + 'an installing consumer. Its only runtime dependency is @object-ui/sdui-parser; @objectstack/spec '
+      + 'an installing consumer. Its only runtime dependency is @objectstack/sdui-parser; @objectstack/spec '
       + 'is a build input, which is what devDependencies records.',
   },
   {

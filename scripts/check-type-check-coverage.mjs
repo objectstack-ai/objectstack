@@ -663,12 +663,12 @@ const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
 const TEST_ROOTDIR_PRECEDENT = '`packages/client/tsconfig.test.json` and `packages/cli/tsconfig.test.json`';
 const GENERATED_INCLUDE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/10880';
 
-// A path in the root program whose edits move the `@objectstack/spec-monorepo`
-// count below, declared as a bare, whole-literal path so the dispatch
-// derivation can read it. It accounted for 29 of that entry's 80, and is 1 of
-// the 26 standing now -- still the root script an ordinary card edits. The note on
-// that entry carries the accounting and references this constant instead of
-// spelling the path inside its sentence.
+// A path in the root program, declared as a bare, whole-literal path so the
+// dispatch derivation can read it. It accounted for 29 of the
+// `@objectstack/spec-monorepo` DEBT entry's 80 errors, and for 1 of the 26 left
+// when that entry graduated (#26236). The root program is now type-checked by the
+// root's `typecheck:root` script, which lint.yml runs, and this is still the
+// root script an ordinary card edits.
 //
 // Why the SHAPE and not just the mention: scripts/pm/dispatch-gates.mjs scans
 // each gate's own module body for path literals and accepts one only when the
@@ -832,22 +832,17 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // fixed the test config showed 4 more (TS2883 on the `vi.fn()` fields of
 // `src/__mocks__/runtime.ts`, annotated `Mock`) that the build config never shows.
 // No cast, no `@ts-expect-error`, no `src` signature widened.
-const DEBT = {
-  '@objectstack/spec-monorepo': {
-    errors: 26,
-    note: 'the workspace root itself: config-tier 18 (TS2307 x17, TS2550 x1); noise 8 (TS7006 x7, '
-      + 'TS6133 x1). The root `tsconfig.json` is the program for `scripts/` and the top-level configs and '
-      + 'declares `types:["node"]`; packages extend `tsconfig.base.json` instead. Declaring the Node types '
-      + 'moved this count by zero -- the TS2591 / TS2584 pile an older note blamed on their absence was '
-      + 'already gone. What stands: the analytics-reconcile tree imports `@objectstack/*` and example '
-      + 'sources the root program cannot resolve (the root package declares no workspace dependency), '
-      + 'which is all 17 TS2307 and the 7 TS7006 they cascade into; ' + ROOT_PROGRAM_COUPLED_SCRIPT
-      + ' calls `Object.hasOwn` under lib ES2020 (TS2550); and `exclude` only drops files from the '
-      + 'initial walk, so an example source a script imports is still compiled here -- the TS6133 is in '
-      + 'examples/app-showcase/src, and this entry moves with the showcase as well as with scripts/. '
-      + 'Graduating also needs a `typecheck:root` script and its step in .github/workflows/lint.yml.',
-  },
-};
+//
+// `@objectstack/spec-monorepo` -- the workspace ROOT itself -- GRADUATED from this
+// ledger (#26236; entry: 26 raw, repaired to 0). Its program is the root
+// `tsconfig.json`: `scripts/` and the top-level configs. 24 of the 26 were the
+// obsolete ADR-0021 analytics-reconcile harness, which was deleted (its imports hid
+// 31 more errors on keys the spec had removed). The other two were `Object.hasOwn`
+// under lib ES2020, fixed by giving the root program lib ES2022, and an unused
+// const in an example source a script imported. Graduated the root's way: a
+// `typecheck:root` script plus its step in .github/workflows/lint.yml, both of
+// which the root branch of `evaluate` requires.
+const DEBT = {};
 
 // Package name -> why running tsc over it is not applicable at all. An EXEMPT
 // entry is a statement about the package's nature, not about its debt; if the
@@ -1342,8 +1337,6 @@ const UNCHECKED_SOURCE_DEBT = {
     'objectui import: demo/main.tsx, the package\'s vite dev page. Probe: 1 x TS2882 (side-effect import of @object-ui/components/style.css).',
   'ui/packages/plugin-grid/demo':
     'objectui import: demo/main.tsx and demo/bulk-actions.tsx, vite dev pages. Probe: 2 x TS2882 (style.css side-effect imports) + 1 x TS2322 (bulk-actions i18n resources prop).',
-  'ui/packages/sdui-parser/scripts':
-    'objectui import: scripts/gen-manifest.ts, the SDUI manifest generator run with tsx. Probe: 1 x TS2591 (`node:fs`, no node types in the package program).',
 };
 // The ceiling those six set. The self-test's FLOOR battery holds the ledger at
 // or below it, so the list only shrinks from the import on.

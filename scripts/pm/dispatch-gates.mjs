@@ -473,6 +473,7 @@ import {
   RETIRED_TIER_WORDS,
   ESCAPABLE_LITERAL_LEDGER_ROWS,
   CHANGE_KIND_ROWS,
+  UI_SCRIPTS_SUITE_ROOTS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -491,6 +492,7 @@ export {
   TIER_DEFAULT,
   RETIRED_TIER_WORDS,
   GENERATED_MODULE_SOURCES,
+  UI_SCRIPTS_SUITE_ROOTS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -2223,7 +2225,10 @@ export function extractCheckInvocations(workflowText, workflowFile, { via = null
     // this card is about: a value that reaches the program only through
     // `process.env`, which no reader of the command line can see.
     const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
-    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
+    // `typecheck:root` is the one non-`check:` script read here: it is the ROOT
+    // program's only type check, and the root-program change kind names it, so it
+    // has to resolve to a family or that row renders STALE.
+    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+|typecheck:root(?![\w:-]))/g)) {
       out.push(withVia({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv }));
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
@@ -6007,7 +6012,8 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
  * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on; the two gate paths measurement-claim-triage declares it skips; and
+ * filed on; the two gate paths measurement-claim-triage declared it skips (that
+ * tool is removed from the tree, held at 7111e14ac9); and
  * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
  * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
  * actually saw when #15753 was filed: a card that has not written its
@@ -10778,8 +10784,9 @@ export function guardsADurabilityCriticalCall(path, readSource = readTrackedSour
 }
 
 /**
- * Is this path inside the ROOT package's tsc program — the population behind
- * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
+ * Is this path inside the ROOT package's tsc program — the population the
+ * root's `typecheck:root` script checks (until the root graduated, the
+ * `@objectstack/spec-monorepo` entry of `check:type-check-debt`)?
  *
  * This is the one gate population in the tree that no path literal can ever
  * describe, in principle rather than by omission. The root program is declared
@@ -11039,6 +11046,45 @@ export function reachesMetadataFormModule(path, modulePaths) {
 }
 
 /**
+ * Does this input path sit under a root the `ui/scripts/__tests__` suite reads (#26318)?
+ *
+ * The roots are `UI_SCRIPTS_SUITE_ROOTS` in the data module, and they are matched in CI's own `paths:`
+ * language through `triggerListCovers`, so a directory surface counts exactly as it counts for a workflow
+ * trigger and this file grows no second glob dialect. A leading `./` is tolerated for the reason
+ * `isGateScriptPath` tolerates one: a seat pastes paths as its shell printed them.
+ */
+export function readByUiScriptsSuite(path, roots = UI_SCRIPTS_SUITE_ROOTS) {
+  return triggerListCovers(roots, path.replace(/^\.\//, '')) !== null;
+}
+
+/**
+ * Does a live workflow still run the CI job a change-kind gate is the local SUBSET of (#26318)?
+ *
+ * Every other gate in the change-kind roster is named by an invocation the workflows run, and it resolves
+ * against the discovered families. The `ui/scripts/__tests__` suite cannot: CI runs it only inside the
+ * `Test UI` job's vitest step, which passes a shard and the affected-test selector's filter list, so that
+ * step is no family a dev can paste and the workflows spell no narrower invocation. Such a gate declares
+ * `ciJob` (the job's display-name prefix) and `ciRunner` (the command prefix that job's step spells), and
+ * its own `name` is that prefix narrowed to the subset a card owes. It resolves to that `name` while some
+ * workflow job of that name still runs a `run:` line beginning with the prefix, and to null once none
+ * does — the STALE report a renamed family gets, so the row cannot outlive the job it stands in for.
+ *
+ * ⛔ Not a second discovery. It adds nothing to the families, the residue partition or any path verdict;
+ * it answers one question for one table row, from the same `workflowEntries` the discovery read.
+ */
+export function ciJobRunsRunner({ ciJob, ciRunner }, workflowEntries) {
+  for (const { text } of workflowEntries) {
+    for (const job of extractJobBlocks(text)) {
+      if (!job.name.startsWith(ciJob)) continue;
+      for (const command of runCommandTexts(job.text)) {
+        if (joinLineContinuations(command).split('\n').some((line) => line.trim().startsWith(`${ciRunner} `))) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * The change-kind roster is data: `CHANGE_KIND_ROWS` in `dispatch-gates.data.mjs` carries each kind, the
  * NAME of the predicate that recognises it, and the gates it names — with the docblock that governs the
  * table. This binding resolves each predicate name to the function below, and refuses a name it does not
@@ -11053,6 +11099,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'error-code-literal': stampsAnErrorCodeLiteral,
   'http-status-emit': emitsAnHttpStatus,
   'durability-seam': guardsADurabilityCriticalCall,
+  'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
 });
 
 export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
@@ -11063,6 +11110,17 @@ export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
         `dispatch-gates: change-kind row '${row.kind}' names the predicate '${row.matches}', which this engine does not define — ` +
           `known: ${Object.keys(predicates).join(', ')}`,
       );
+    }
+    // A CI-job-subset gate (`ciJobRunsRunner`) carries both halves of its binding, and its name narrows
+    // the runner it stands in for — refused at load, so a half-declared row cannot resolve by accident.
+    for (const gate of row.gates) {
+      const bound = gate.ciJob !== undefined || gate.ciRunner !== undefined;
+      if (bound && !(typeof gate.ciJob === 'string' && typeof gate.ciRunner === 'string' && gate.name.startsWith(`${gate.ciRunner} `))) {
+        throw new Error(
+          `dispatch-gates: change-kind row '${row.kind}' gate '${gate.name}' declares a CI-job binding that is not whole — ` +
+            'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner',
+        );
+      }
     }
     return { ...row, matches };
   });
@@ -11098,7 +11156,14 @@ export function changeKindGates(paths, resolveInvocation, kinds = CHANGE_KIND_GA
     groups.push({
       kind,
       hits,
-      gates: gates.map(({ name, why }) => ({ name, why, command: resolveInvocation(name) })),
+      // The gate rides into the resolver beside its name: a CI-job-subset gate resolves through its
+      // binding, never through the family map (`ciJobRunsRunner`).
+      gates: gates.map((gate) => ({
+        name: gate.name,
+        why: gate.why,
+        command: resolveInvocation(gate.name, gate),
+        ...(gate.ciJob ? { ciJob: gate.ciJob, ciRunner: gate.ciRunner } : {}),
+      })),
     });
   }
   return groups;
@@ -11108,11 +11173,13 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
   const lines = [];
   for (const { kind, hits, gates } of changeKindGates(paths, resolveInvocation, kinds)) {
     lines.push(`  ${kind}: ${hits.join(', ')}`);
-    for (const { name, why, command } of gates) {
+    for (const { name, why, command, ciJob, ciRunner } of gates) {
       lines.push(
         command
           ? `    - ${command}   — ${why}`
-          : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
+          : ciJob
+            ? `    - ⚠ ${name}: STALE — no workflow job named '${ciJob}…' runs '${ciRunner}' any more. The job was renamed or retired; fix CHANGE_KIND_GATES in this script.`
+            : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
       );
     }
   }
@@ -14540,7 +14607,8 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
   // `--commands` list and the `--json` document are readings of these same
   // rows: the card this section answers is about two renderings of one
   // derivation drifting apart, so a second traversal here would reintroduce it.
-  const resolveInvocation = (name) => {
+  const resolveInvocation = (name, gate = null) => {
+    if (gate?.ciJob) return ciJobRunsRunner(gate, workflowEntries) ? name : null;
     const entry = byCheck.get(name);
     return entry ? runnableInvocation(entry) : null;
   };

@@ -57,8 +57,13 @@ function shell(title: string, body: string): string {
  * (#10749). These pages have no reader to narrow for: the bearer carries a
  * token, not a session, and the token chain reads the request under the system
  * context, which field-level security does not narrow. So no subject field is
- * shown here — the record is named the way the approval notification names it,
- * by the object's label and the record's id.
+ * shown here — the record is named by the object's label and the record's id.
+ *
+ * [#26181, 2026-10-27] The notification surfaces were re-ruled (ruling A′):
+ * an approval notification is rendered for one named recipient, so it names
+ * the record by its title as that recipient may read it, else its id
+ * (`ApprovalService.subjectNamesFor`). These pages keep the id: the reason
+ * above, no reader to narrow for, still holds here.
  */
 function summaryRows(req: ApprovalRequestRow): string {
   const rows: Array<[string, string]> = [

@@ -6,6 +6,8 @@ Scaffold a new [ObjectStack](https://objectstack.ai) project in seconds.
 npm create objectstack@latest my-app
 ```
 
+**TypeScript:** use `moduleResolution` `node16`, `nodenext` or `bundler`. The legacy `node10` resolution (`"node"`) ignores `exports`, so it cannot resolve this package's subpath imports and is not supported. See [Module resolution](https://objectstack.ai/docs/plugins/development#module-resolution).
+
 ## Usage
 
 ```bash
@@ -104,6 +106,13 @@ npm run validate   # verify metadata: schema + predicates + bindings
 
 See the docs:
 [Your First Project](https://objectstack.ai/docs/getting-started/your-first-project).
+
+## Library subpath
+
+`create-objectstack/created-summary` (the "what was written" tree summary that
+`objectstack init` reuses) is **ESM-only**: the package is `"type": "module"`
+and the subpath declares only an `import` condition. Load it with `import`;
+`require()` is refused with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 
 ## License
 

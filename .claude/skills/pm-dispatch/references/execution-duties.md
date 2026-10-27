@@ -6,6 +6,8 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
+- 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
+- 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 无分诊审计评论即非候选;例外:sub-issue 承父卡首触,main-red 锚卡见 `landing-operations.md`。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
@@ -57,7 +59,7 @@
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
-- 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
+- 同笔 `Release:` 行点名已落项与余项;余项整树归他席 ⇒ 点名该席改标,拆分加 `pm:retriage`。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
 - ② 认领评论照抄 SKILL.md 模板:`Branch:`、`Clause-②:`、`Metadata-protocol:` 各占一行且行首。
@@ -88,7 +90,6 @@
 ## 派发
 
 - 一单一次 `Agent` 调用,`subagent_type` 为 `os-dev`,后台并行;`mode:thread` 一卡一线程见 runbook。
-- 模型分档是 PM 的逐卡显式决定;档位值单源在 dispatch-gates 常量,⛔ 本文不写模型名。
 - 下限档给机械卡(正确性由门禁农场机械判定)。
 - 默认判断档给 M/L、裁决实施与任何带设计判断的卡;拿不准就升一档。
 - 上限 = 契约复审档(`CONTRACT_REVIEW_TIER`),给最重协议/流程/编排卡,按卡取用非新默认。
@@ -114,7 +115,7 @@
 - 额度墙只向下(降档或降并发)⛔ 永不向上;临时偏离记座位贴带结束条件,逐次巡检重读。
 - 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
 - effort 按卡难度定、与档位并列,写进 Container & model 行与派发令,派发显式传参,⛔ 不留空。
-- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭维护者点名。
+- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭点名或常设令。
 - 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
 - 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
@@ -137,7 +138,6 @@
 - 派发令写明 dev ⛔ 不另留认领:PM 那条即身份;核对最新一条点名本分支,不符停手回报。
 - 已认领、别动 assignee 收窄到 assignee 字段本身;认领协议已满足是另一句话且可能是假的。
 - 触 `skills/**` 的卡,派发词必带 PM 定的净增行数预算(按 feature 大小定,小功能给小数)。
-- 对外发布的技能包是平台最大的对外价值,评估恒整包整体。
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
 - 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
@@ -175,6 +175,7 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
+- 报告 `open_questions`/`out_of_scope_findings` 涉 cloud 车道者,按 `cross-repo-coordination.md` 立 cloud 卡。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。

@@ -397,6 +397,15 @@ export interface ExplainEngineDeps {
   /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
   sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
   /**
+   * [#26188 · ADR-0057] Is a hierarchy resolver mounted (the
+   * `hierarchy-scope-resolver` service the enterprise `hierarchy-security`
+   * capability registers)? Without one the sharing service evaluates a
+   * hierarchy read depth as 'own', and the depth layer's record cell says so
+   * instead of blaming the depth. Absent → not known, and the cell reads as
+   * before.
+   */
+  hierarchyResolverMounted?: () => boolean;
+  /**
    * The concrete `sys_record_share` rows attached to the record (for `rules[]`
    * attribution).
    *
@@ -410,6 +419,14 @@ export interface ExplainEngineDeps {
     recordId: string,
     context: any,
   ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
+  /**
+   * [#26180] The pending approval requests that grant the principal READ of
+   * the record while their step is pending (`SharingService.listApprovalReadGrants`,
+   * the same answer the sharing read filter ORs in). Each is attributed on the
+   * sharing layer as a read share "via approval request N". Optional: a deps
+   * bag wired without it attributes no approval, as before.
+   */
+  listApprovalReadGrants?: (object: string, recordId: string, context: any) => Promise<string[]>;
   /** The sharing service's per-record UPDATE gate (`canEdit`) — the by-construction verdict for update operations. */
   canEditRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
   /**
@@ -1839,6 +1856,22 @@ async function applyRecordAttribution(
       effect: recipMatchesUser ? 'admits' : 'neutral',
     };
   });
+  // [#26180] A pending approval step the principal is on grants READ of the
+  // one record it is about, while it is pending: named as the read share it is
+  // ("via approval request N"). It admits a read and nothing else: on a write
+  // it is evaluated and neutral, as the write gates never read it.
+  const approvalRequests = deps.listApprovalReadGrants && recordExists
+    ? await deps.listApprovalReadGrants(object, recordId, context).catch(() => [] as string[])
+    : [];
+  for (const requestId of approvalRequests ?? []) {
+    shareRules.push({
+      kind: 'record_share',
+      name: String(requestId),
+      grants: 'read',
+      via: `approval request ${requestId}`,
+      effect: isRead ? 'admits' : 'neutral',
+    });
+  }
   // A rejected read filter is not a `null` one: the matcher reads `null` as
   // "no filter" and admits the row, while the find it explains fails.
   const sharingFilterOrFault = deps.sharingReadFilter && recordExists
@@ -2027,7 +2060,10 @@ async function applyRecordAttribution(
                 ? (ownerIsMe
                     ? 'Caller owns the record — visible without a share.'
                     : anyShareAdmits
-                      ? `${shareRules.length} share(s) attached; access is granted for this record.`
+                      ? (isRead && approvalRequests.length > 0
+                          ? `Read is granted via approval request ${approvalRequests.join(', ')}: the principal is on ` +
+                            "its pending step's slate or holds the override, and the grant ends when the step resolves."
+                          : `${shareRules.length} share(s) attached; access is granted for this record.`)
                       : sharingFilter === null
                         ? `${shareRules.length} share(s) attached; none grants the caller access, but the sharing ` +
                           'service imposes no owner-match on this object (rowFilter null), so the record is admitted without one.'
@@ -2084,6 +2120,21 @@ async function applyRecordAttribution(
                             'service imposes no owner-match (ADR-0057 D1).'
                           : `The record's owner (${ownerLabel}) is inside the caller's '${depthScope}' read depth — ` +
                             "the sharing service's owner-match admits it without a share (ADR-0057 D1).")
+                      // [#26188] Ahead of the depth verdict below: with no
+                      // hierarchy resolver the sharing service evaluates a
+                      // hierarchy depth as 'own', so the owner is outside it for
+                      // that reason, not because they are outside the caller's
+                      // unit. Below 'org' and above 'own' every depth is a
+                      // hierarchy one. A row the depth did admit is reported
+                      // above as admitted, never as this.
+                      : depthScope !== 'org' && deps.hierarchyResolverMounted?.() === false
+                        ? depthRecord(sharingMatches === false ? 'excluded' : 'not_evaluated',
+                            "Hierarchy resolver absent — requires enterprise; depth evaluated as 'own'. The caller's " +
+                            `'${depthScope}' read depth reaches no owner beyond the caller on this deployment` +
+                            (sharingMatches === false
+                              ? `, and the record's owner (${ownerLabel}) is not the caller; a share may still widen ` +
+                                'access (see the sharing layer).'
+                              : '; a share admits this record (see the sharing layer).'))
                       : sharingMatches === false
                         ? depthRecord('excluded',
                             `The record's owner (${ownerLabel}) is outside the caller's '${depthScope}' read depth; ` +

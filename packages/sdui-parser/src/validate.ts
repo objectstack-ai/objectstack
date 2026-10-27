@@ -8,6 +8,13 @@
  * `requires` (plugin provenance) and binding sites the SERVER must resolve
  * against object schema (we cannot resolve objects/fields here — that check is
  * framework-side by design).
+ *
+ * The walk descends `children` on every node and, for a component the
+ * manifest knows, the NODE SLOTS its entry carries (`ManifestComponent.slots`,
+ * objectui#11170) — the positions besides `children` through which that
+ * renderer hands nodes back to `SchemaRenderer`, projected from the one
+ * declaration in `@object-ui/types` by `manifestFromConfigs`. ⛔ No slot list
+ * lives here.
  */
 
 import type {
@@ -17,11 +24,13 @@ import type {
   ManifestInput,
   ManifestInputType,
   SchemaElement,
-  SchemaNode,
-  ValidationResult,
+  ParsedSchemaNode,
+  ManifestValidationResult,
 } from './types.js';
 import { inputTypeArms } from './input-type.js';
 import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
+import { checkRetiredBodyDialect } from './body-dialect.js';
+import { checkRetiredVisibilityDialect } from './retired-visibility-dialects.js';
 
 /**
  * The protocol's ONE child-list key — `BaseSchema.children` — and therefore the
@@ -34,25 +43,23 @@ export const CHILD_LIST_KEY = 'children';
  * Does this component ACCEPT an authored child list? (objectui#9910)
  *
  * Read from exactly ONE declaration: an input named {@link CHILD_LIST_KEY} in
- * the component's `inputs`, whatever its coarse type — the page kinds publish
- * it typed `array`, the rest typed `slot`, and the NAME is the declaration.
- * objectui's registry census holds that declaration true in both directions
- * (a renderer that puts `schema.children` on the page declares it; a
- * declaration whose renderer never renders the list is red).
+ * the component's `inputs`. That is the shape ten registrations already
+ * carried when the maintainer ruled it the containment contract
+ * (2026-09-24, objectui#9910 Q1-A "declare-and-pin"), and it is held in both
+ * directions by the runtime census in
+ * `ui/packages/components/src/renderers/__tests__/container-declaration-ratchet.test.tsx`:
+ * a renderer that puts `schema.children` on the page without declaring the
+ * input is red, and a declaration whose renderer never renders the list is
+ * red too.
  *
- * ⛔ `isContainer` is NOT consulted and is NOT a fallback. The flag now means
- * LAYOUT containment only (objectui#9910 Q2-A) and it disagrees with the
- * declared input both ways in the served manifest: `badge` / `alert` /
- * `button` declare the slot with the flag off, `page:tabs` /
- * `page:accordion` carry the flag with no slot.
- *
- * LOCKSTEP: this function, {@link CHILD_LIST_KEY} and the containment branch
- * in `validateTree` are the byte-equal port of objectui's copy (objectui
- * `packages/sdui-parser/src/validate.ts`, objectui#9910 re-cut `5ea623ea`),
- * so the save gate and the renderer reach the same `not-a-container` verdict
- * on every page (#12719). `pnpm check:sdui-lockstep` compares this predicate
- * against the vendored record of objectui's and goes red when they diverge
- * (#19969) — change it only together with objectui.
+ * ⛔ `isContainer` is NOT consulted and is NOT a fallback. It used to decide
+ * this branch and it lied both ways: a hand-kept flag drifted from the code
+ * (objectui#3900 / `7c9b044f4` / #6764 / #6779 found the same drift four times),
+ * and after objectui#6771 converged a dozen registrations onto `children`
+ * the flag put a FALSE `not-a-container` on the one key they read
+ * (objectui#9910). The flag now means LAYOUT containment only — the
+ * react-page JSX scope and the public layout ledger read it; this tier does
+ * not (objectui#6804, objectui#9910 Q2-A).
  */
 export function acceptsChildren(comp: Pick<ManifestComponent, 'inputs'>): boolean {
   return comp.inputs.some((input) => input.name === CHILD_LIST_KEY);
@@ -104,12 +111,18 @@ export interface SduiBaseProp {
  * (objectui#6575) — draws nothing here either, and its render-time console
  * warning is the one signal left.
  *
- * `visibleWhen`, `hiddenOn` and `testId` are `'every-node'` for the same reason
- * (objectui#11044): no registration declares any of them, `SchemaRenderer`'s
- * hide chain reads the first two for every node, and it strips `testId` and
+ * `visibleWhen` and `testId` are `'every-node'` for the same reason
+ * (objectui#11044): no registration declares either, `SchemaRenderer`'s
+ * hide chain reads the first for every node, and it strips `testId` and
  * re-emits it as `data-testid`. `visibleWhen` is the canonical ADR-0089
- * predicate; before it joined, the deprecated `visibleOn` was silent while it
- * drew `unknown-prop`.
+ * predicate.
+ *
+ * ⛔ `visibleOn`, `hiddenOn` and `disabledOn` are NOT here and must not be
+ * added. They were `BaseSchema` dialects of `visibleWhen` / `hidden` /
+ * `disabled`, retired at both faces (a `?: never` tombstone on the
+ * declaration, an alias refusal on the zod mirror, ADR-0089 / ADR-0049).
+ * `./retired-visibility-dialects.ts` answers each by name with its canonical
+ * key, the way `./body-dialect.ts` answers `body`.
  *
  * The `'where-undeclared'` members (objectui#11044, triage ruling) are the
  * `BaseSchema` members some registrations DECLARE as typed inputs — the input
@@ -129,12 +142,6 @@ export interface SduiBaseProp {
  * second permanent spelling of one concept. `./body-dialect.ts` answers it by
  * name instead.
  *
- * LOCKSTEP: the list, its scopes and the two Sets below are the port of
- * objectui's `SDUI_BASE_PROPS` (objectui#11008, #11044, pin `db11afd4967c`).
- * Both consumers are ported too: {@link validateTree} and `codegen.ts`'s
- * `SduiBaseProps`. The list is exported for `codegen.ts` only; `index.ts` does
- * not re-export it.
- *
  * `children` IS here: the key is legal on every node, so it never draws
  * `unknown-prop` and its declared `slot` input is never type-checked. Whether
  * a given component RENDERS it is the containment question below, answered by
@@ -147,11 +154,8 @@ export const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
   { name: 'style', scope: 'every-node', tsType: 'Record<string, unknown>' },
   { name: 'visible', scope: 'every-node', tsType: 'boolean' },
   { name: 'visibleWhen', scope: 'every-node', tsType: 'string' },
-  { name: 'visibleOn', scope: 'every-node', tsType: 'string' },
   { name: 'hidden', scope: 'every-node', tsType: 'boolean' },
-  { name: 'hiddenOn', scope: 'every-node', tsType: 'string' },
   { name: 'disabled', scope: 'every-node', tsType: 'boolean' },
-  { name: 'disabledOn', scope: 'every-node', tsType: 'string' },
   { name: 'bind', scope: 'every-node', tsType: 'string' },
   { name: 'testId', scope: 'every-node', tsType: 'string' },
   { name: CHILD_LIST_KEY, scope: 'every-node', tsType: 'unknown' },
@@ -179,12 +183,53 @@ const WHERE_UNDECLARED_BASE_PROPS = basePropNames('where-undeclared');
 const isExpr = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && '$expr' in (v as Record<string, unknown>);
 
-export function validateTree(tree: SchemaElement | null, manifest: Manifest): ValidationResult {
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const isElement = (v: unknown): v is SchemaElement =>
+  isPlainObject(v) && typeof v.type === 'string';
+
+/**
+ * The element nodes a slot position holds on `node`, in document order.
+ *
+ * The position is spelled in `@object-ui/types`' key-path grammar, which that
+ * package's `nodeSlotValues` implements for the other two readers and whose
+ * header states it: keys separated by `.`, a key followed by `[]` meaning each
+ * element of the array under it, and the value at the end being one node or a
+ * list of nodes. Restated here because this package imports nothing at
+ * runtime; the components-side census for objectui#11170 holds the two walks
+ * to the same answer over the same fixtures. Only element-shaped values are
+ * returned — a string child is legal in a slot and has nothing to validate.
+ */
+function slotElements(node: SchemaElement, path: string): SchemaElement[] {
+  let holders: unknown[] = [node];
+  for (const segment of path.split('.')) {
+    const each = segment.endsWith('[]');
+    const key = each ? segment.slice(0, -2) : segment;
+    const next: unknown[] = [];
+    for (const holder of holders) {
+      if (!isPlainObject(holder)) continue;
+      const value = holder[key];
+      if (!each) next.push(value);
+      else if (Array.isArray(value)) next.push(...value);
+    }
+    holders = next;
+  }
+  const found: SchemaElement[] = [];
+  for (const holder of holders) {
+    for (const value of Array.isArray(holder) ? holder : [holder]) {
+      if (isElement(value)) found.push(value);
+    }
+  }
+  return found;
+}
+
+export function validateTree(tree: SchemaElement | null, manifest: Manifest): ManifestValidationResult {
   const diagnostics: Diagnostic[] = [];
   const requires = new Set<string>();
-  const bindings: ValidationResult['bindings'] = [];
+  const bindings: ManifestValidationResult['bindings'] = [];
 
-  const visit = (node: SchemaNode): void => {
+  const visit = (node: ParsedSchemaNode): void => {
     if (typeof node === 'string') return;
     const comp = manifest.components[node.type];
     if (!comp) {
@@ -219,12 +264,27 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
         if (WHERE_UNDECLARED_BASE_PROPS.has(key) && !byName.has(key)) continue;
         const input = byName.get(key);
         if (!input) {
-          diagnostics.push({
-            severity: 'warning',
-            code: 'unknown-prop',
-            message: `<${node.type}> has no prop "${key}"`,
-            tag: node.type,
-          });
+          // The retired `body` child-list dialect gets its replacement named
+          // rather than the bare "has no prop" every typo gets
+          // (objectui#6771). Asked INSIDE this branch, so a component that
+          // declares its own `body` input keeps its declared type check —
+          // mechanism in `./body-dialect.ts`. Its containment verdict is the
+          // SAME predicate the `children` branch below reads — the declared
+          // `children` input, never `isContainer` (objectui#9910) — so the two
+          // spellings cannot disagree about which components take a list.
+          // The retired node-level visibility dialects (`visibleOn` /
+          // `hiddenOn` / `disabledOn`) get their canonical key named the same
+          // way — mechanism in `./retired-visibility-dialects.ts`.
+          const retiredBody = checkRetiredBodyDialect(node.type, key, value, acceptsChildren(comp));
+          const retiredDialect = retiredBody ?? checkRetiredVisibilityDialect(node.type, key);
+          diagnostics.push(
+            retiredDialect ?? {
+              severity: 'warning',
+              code: 'unknown-prop',
+              message: `<${node.type}> has no prop "${key}"`,
+              tag: node.type,
+            },
+          );
           continue;
         }
         if (input.binding) {
@@ -257,14 +317,6 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
           // deliberately NOT part of this change: it belongs at the SAVE GATE,
           // once the framework wires the registry manifest into
           // `validate-jsx-pages` (#12719 records that gap).
-          //
-          // LOCKSTEP: this diagnostic is the byte-equal port of objectui's
-          // `packages/sdui-parser` copy (objectui#6613, message reworded by
-          // objectui#6614). The two copies must agree on the accepted grammar
-          // AND on diagnostic codes — if they drift, the save gate and the
-          // renderer speak different dialects and a page can save clean and
-          // render inert. Change this block only together with the objectui
-          // copy.
           diagnostics.push({
             severity: 'warning',
             code: 'inert-expression',
@@ -309,35 +361,30 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
       // `./dashboard-widget-options.ts`). Like `not-a-container`, this runs
       // only for a component the manifest knows: an unresolved tag already
       // drew `unknown-component`, and deep diagnostics on it would be noise.
-      //
-      // LOCKSTEP: this call site and the module behind it are the byte-equal
-      // port of objectui's copy (objectstack#12810). The two copies must agree
-      // on the accepted grammar AND on diagnostic codes — if they drift, the
-      // save gate and the renderer speak different dialects and a page can save
-      // clean and render inert. Change this only together with objectui.
       diagnostics.push(...checkDashboardWidgetOptions(node));
     }
 
     if (node.children) node.children.forEach(visit);
+    // The node slots this component's renderer reads besides `children`
+    // (objectui#11170), as its manifest entry declares them. An unknown
+    // component has no entry and so no slots: its `unknown-component` above is
+    // the answer, and nothing under it is judged.
+    for (const path of comp?.slots ?? []) {
+      for (const element of slotElements(node, path)) visit(element);
+    }
   };
 
   if (tree) visit(tree);
   return { diagnostics, requires: [...requires], bindings };
 }
 
-/* LOCKSTEP: everything below this line is the byte-equal port of objectui's
- * `packages/sdui-parser` coarse type check (objectui#3832 — union-typed inputs
- * are checked over their arms — and objectui#8067, the same check one level
- * down over the member kind `of` declares). The two copies must agree on the accepted
- * grammar AND on diagnostic codes/severities — if they drift, the save gate
- * and the renderer speak different dialects. Change these functions only
- * together with the objectui copy.
- *
- * Known lead: this copy grades every `type-mismatch` and `member-type-mismatch`
- * `error` (a literal's coarse type is certain; see `checkType`). objectui's
- * copy, `packages/sdui-parser/src/validate.ts` at the `.objectui-sha` pin,
- * still grades them `error` only when an `enum` arm is present. Codes and
- * messages agree; the severity differs until objectui ports the same rule. */
+/* The coarse type check: a union-typed input is checked over its arms
+ * (objectui#3832), and the same check runs one level down over the member kind
+ * `of` declares (objectui#8067). Every `type-mismatch` and `member-type-mismatch`
+ * is an `error`, because a literal's coarse type is certain (see `checkType`).
+ * The renderer's former copy of this package graded them `error` only beside an
+ * `enum` arm; this rule is the one that stayed when the two copies became one
+ * (#25712). */
 
 /** The values an `enum` arm admits, flattened from either declaration form. */
 const enumValues = (input: ManifestInput): unknown[] =>

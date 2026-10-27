@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 60 — spawns the real producer once per single-cause fixture: five CLI spawns in one beforeAll, each a distinct triple (`os build`, `os lint`, `os lint --strict` over the flip fixture; `os build`, `os lint` over the single-package control); slowest CI reading 43.77 s (run 40392443783), taken with nine spawns before the repeats were shared of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * #18778, the BEHAVIOURAL half — `os lint` and `os build` report the same
@@ -211,6 +212,17 @@ export default defineStack({
 
 const dirs = { flip: '', single: '' };
 
+/** A cold `tsx` spawn of the CLI source entry, the per-case allowance this file always gave one. */
+const SPAWN_TIMEOUT_MS = 180_000;
+
+/**
+ * One run per distinct (command, flags, fixture) triple. The cases below used
+ * to spawn `os build --json` on the flip fixture three times and `os lint
+ * --json` on it three times; every case now reads the one run of its triple,
+ * spawned in sequence in the `beforeAll` below.
+ */
+const runs = {} as Record<'buildFlip' | 'lintFlip' | 'lintStrictFlip' | 'buildSingle' | 'lintSingle', Run>;
+
 function plant(config: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-lintpp-'));
   mkdirSync(join(dir, 'src'), { recursive: true });
@@ -225,31 +237,36 @@ function plant(config: string): string {
 }
 
 describe('#18778 — `os lint` and `os build` report the same per-package finding set', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     dirs.flip = plant(CONFIG_FLIP);
     dirs.single = plant(CONFIG_SINGLE);
-  });
+    runs.buildFlip = await runCli(['build', '--json'], dirs.flip);
+    runs.lintFlip = await runCli(['lint', '--json'], dirs.flip);
+    runs.lintStrictFlip = await runCli(['lint', '--json', '--strict'], dirs.flip);
+    runs.buildSingle = await runCli(['build', '--json'], dirs.single);
+    runs.lintSingle = await runCli(['lint', '--json'], dirs.single);
+  }, 5 * SPAWN_TIMEOUT_MS);
 
   afterAll(() => {
     for (const dir of Object.values(dirs)) if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('the fixture reaches the pass at all, and the UNION sees nothing — `os build` raises exactly the survivor', async () => {
+  it('the fixture reaches the pass at all, and the UNION sees nothing — `os build` raises exactly the survivor', () => {
     // Asserted BEFORE any claim about parity: a fixture that never reaches the
     // per-package pass makes every comparison below vacuous, and a fixture whose
     // union run raises the same finding makes the comparison an echo count.
-    const build = await runCli(['build', '--json'], dirs.flip);
+    const build = runs.buildFlip;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     const warnings = payloadOf(build, 'os build --json').warnings as unknown[];
     expect(buildPerPackage(warnings).length).toBeGreaterThan(0);
     // Nothing else: every warning on this fixture is a per-package survivor.
     expect(warnings.length).toBe(buildPerPackage(warnings).length);
-  }, 180_000);
+  });
 
-  it('`os lint` reports every per-package finding `os build` does', async () => {
+  it('`os lint` reports every per-package finding `os build` does', () => {
     // The pin. On `origin/main` 7572329069 this read `build: 1, lint: 0`.
-    const build = await runCli(['build', '--json'], dirs.flip);
-    const lint = await runCli(['lint', '--json'], dirs.flip);
+    const build = runs.buildFlip;
+    const lint = runs.lintFlip;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     expect(lint.code, `os lint --json failed:\n${lint.stdout}${lint.stderr}`).toBe(0);
 
@@ -260,25 +277,25 @@ describe('#18778 — `os lint` and `os build` report the same per-package findin
       missing,
       'these per-package findings ride `os build` and `os lint` cannot see them — the #18778 false-clean set',
     ).toEqual([]);
-  }, 180_000);
+  });
 
-  it('…and nothing per-package rides `os lint` that `os build` does not report either', async () => {
+  it('…and nothing per-package rides `os lint` that `os build` does not report either', () => {
     // Parity is an equality. A lint that over-reports is its own defect — an
     // author fixing a finding the command that SHIPS never raises.
-    const build = await runCli(['build', '--json'], dirs.flip);
-    const lint = await runCli(['lint', '--json'], dirs.flip);
+    const build = runs.buildFlip;
+    const lint = runs.lintFlip;
     const inBuild = new Set(buildPerPackage(payloadOf(build, 'os build --json').warnings as unknown[]));
     expect(lintPerPackage(payloadOf(lint, 'os lint --json').issues as unknown[]).filter((w) => !inBuild.has(w))).toEqual([]);
-  }, 180_000);
+  });
 
-  it('⚠️ THE NARROWING — `os lint --strict` now EXITS 1 on a project it exited 0 for', async () => {
+  it('⚠️ THE NARROWING — `os lint --strict` now EXITS 1 on a project it exited 0 for', () => {
     // The Clause-② evidence, pinned so it can neither regress silently nor widen
     // silently. `--strict` is documented as "treat warnings as errors", and a
     // per-package advisory is a warning this door could not see before, so the
     // verdict moves with it. ⛔ The DEFAULT face is deliberately NOT asserted to
     // move: no `error`-severity per-package-only finding was exhibited on this
     // fixture, and a pin asserting one would be asserting something unmeasured.
-    const strict = await runCli(['lint', '--json', '--strict'], dirs.flip);
+    const strict = runs.lintStrictFlip;
     const payload = payloadOf(strict, 'os lint --json --strict');
     expect(payload.strict).toBe(true);
     expect(payload.failing).toBe(1);
@@ -287,21 +304,21 @@ describe('#18778 — `os lint` and `os build` report the same per-package findin
 
     // …and the same project without `--strict` still exits 0, so what moved is
     // the strict verdict and not the default one.
-    const plain = await runCli(['lint', '--json'], dirs.flip);
+    const plain = runs.lintFlip;
     expect(plain.code).toBe(0);
     expect(payloadOf(plain, 'os lint --json').passed).toBe(true);
-  }, 180_000);
+  });
 
-  it('CONTROL — a single-package project raises NO per-package finding on either door', async () => {
+  it('CONTROL — a single-package project raises NO per-package finding on either door', () => {
     // "Present" must be distinguishable from "always present": the prefix this
     // file matches on is not something either command emits unconditionally, and
     // `os lint --strict` still exits 1 there for the ORDINARY warning, which is
     // how the case above is read as a change and not as a constant.
-    const build = await runCli(['build', '--json'], dirs.single);
-    const lint = await runCli(['lint', '--json'], dirs.single);
+    const build = runs.buildSingle;
+    const lint = runs.lintSingle;
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     expect(lint.code, `os lint --json failed:\n${lint.stdout}${lint.stderr}`).toBe(0);
     expect(buildPerPackage(payloadOf(build, 'os build --json').warnings as unknown[])).toEqual([]);
     expect(lintPerPackage(payloadOf(lint, 'os lint --json').issues as unknown[])).toEqual([]);
-  }, 180_000);
+  });
 });

@@ -425,6 +425,23 @@ export interface CellRendererProps {
    * the default face that drops the current year.
    */
   alwaysShowYear?: boolean;
+  /**
+   * The cell is one of a grid COLUMN's cells, read against the cells above
+   * and below it (objectstack#25884). Read by the `date` cell only.
+   *
+   * A `date` field that declares no `format` then paints `formatDate`'s
+   * absolute default face instead of `'relative'`, and the relative phrase
+   * becomes the cell's tooltip. The relative face is absolute outside a ±7-day
+   * window, so as a column default it mixed faces in one column ("Yesterday",
+   * "Sep 25", "Sep 20, 2025"), and a sorted column did not look sorted. The
+   * ruling on the card: absolute in a sortable column, relative at most as a
+   * tooltip. A declared `format` still wins, `'relative'` included.
+   *
+   * `ObjectGrid` passes it on every column cell it builds. Absent or `false`
+   * changes nothing, so the record detail body, the highlights strip and the
+   * card surfaces keep the relative default.
+   */
+  inGridColumn?: boolean;
 }
 
 // `coerceToSafeValue` lives in `./coerceToSafeValue.ts` (objectui#8580) so
@@ -1144,7 +1161,7 @@ function isOverdueInstant(date: Date, dueLike: boolean): boolean {
 /**
  * Date field cell renderer
  */
-export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear }: CellRendererProps): React.ReactElement {
+export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn }: CellRendererProps): React.ReactElement {
   // `useDisplayLocale()`, NOT `useLocalization().locale` (objectui#4468). The
   // raw tenant locale is `undefined` on any workspace that never configured
   // one, and `Intl` reads the MACHINE's locale from `undefined` — so a `zh`
@@ -1205,19 +1222,34 @@ export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear
   const date = new Date(safe as string | number);
 
   const dateField = field as any;
-  const style = dateField.format || 'relative';
+  const declaredStyle: string | undefined = dateField.format || undefined;
+  // objectstack#25884 — in a grid column the undeclared default is the
+  // absolute face (`formatDate`'s default, `undefined`), one face per column;
+  // everywhere else it stays `'relative'`. ⚠️ `ObjectGrid`'s
+  // `temporalGroupHeading` restates this selection for its group headings,
+  // and `groupDateHeading-13234.test.tsx` holds the two equal.
+  const style = declaredStyle ?? (inGridColumn ? undefined : 'relative');
 
   // Both halves of the affordance come from the shared reads above, so the
   // `datetime` sibling one function down answers this question identically
   // instead of carrying a second copy (objectui#8958).
   const dueLike = resolveDueLike(field, deadlineSettled);
-  const formatted = formatDate(safe as string | Date, style, { dueLike, locale, t, alwaysShowYear });
+  const options = { dueLike, locale, t, alwaysShowYear };
+  const formatted = formatDate(safe as string | Date, style, options);
   const isOverdue = isOverdueInstant(displayDate, dueLike);
+
+  // The relative phrase the grid default no longer paints ("Yesterday",
+  // "Overdue 3d") is the tooltip instead. Outside the ±7-day window the phrase
+  // IS the absolute face, which says nothing new, so the ISO `title` stays.
+  const relative = inGridColumn && declaredStyle === undefined
+    ? formatDate(safe as string | Date, 'relative', options)
+    : undefined;
+  const title = relative !== undefined && relative !== formatted ? relative : date.toISOString();
 
   return (
     <span
       className={`tabular-nums${isOverdue ? ' text-red-600' : ''}`}
-      title={date.toISOString()}
+      title={title}
     >
       {formatted}
     </span>

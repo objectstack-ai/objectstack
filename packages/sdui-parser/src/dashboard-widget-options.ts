@@ -1,6 +1,5 @@
 /**
- * Unconsumed dashboard-widget `options` keys (objectui#5709), ported into this
- * copy in lockstep (objectstack#12810).
+ * Unconsumed dashboard-widget `options` keys (objectui#5709)
  *
  * `@objectstack/spec`'s `DashboardWidgetOptionsSchema` ends in `.passthrough()`
  * ("declared query keys + open renderer extras"), so ANY key parses, validates
@@ -12,91 +11,107 @@
  * renderer draws a WARNING naming the consumed set. Not an error: no gate
  * weakening and no new red gates were ruled.
  *
- * ## LOCKSTEP — what is byte-equal here and what deliberately is not
+ * ## The census (measured on objectui origin/main @ 8689166f6, spec 17.1.0)
  *
- * Two copies of this parser exist: objectui's `packages/sdui-parser` and this
- * hoisted `@objectstack/sdui-parser`. The invariant they owe each other is that
- * both agree on the accepted grammar AND on diagnostic codes — if they drift,
- * the save gate and the renderer speak different dialects and a page can save
- * clean and render inert, or the reverse (objectstack#12719, objectstack#12810).
- *
- * Everything from the `import` line below to end of file is a byte-equal port of
- * objectui's `src/dashboard-widget-options.ts` SAVE FOR ONE TOKEN, called out
- * at the site itself: the emitted `code` is spelled as an inline literal here
- * and as the constant there, because this repo runs a vocabulary gate objectui
- * does not. One census MEMBER differs too, for a bounded window: objectui's
- * copy at the pin still lists `description`, which this one dropped with the
- * retired metric sub-caption (see `CONSUMED_WIDGET_OPTION_KEYS`). The emitted `code`, `severity`, `message` and the whole census
- * scope are identical, and `__tests__/dashboard-widget-options.test.ts`
- * re-derives that rather than trusting it — including an explicit pin that the
- * literal equals `UNCONSUMED_WIDGET_OPTION`. Change these functions only
- * together with the objectui copy.
- *
- * THIS HEADER is the one deliberate divergence, and it has to be: objectui's
- * header cites the maintenance machinery that derives the census — its
- * `DatasetWidget.tsx` / `DashboardRenderer.tsx` read sites, its
- * `plugin-dashboard.mdx` claim and its two census tests. NONE of those files
- * exists in this repo (measured: no dashboard renderer package here at all), so
- * copying those sentences would ship claims this checkout cannot support and
- * nothing here would ever notice them going false. What follows instead states
- * where each half of the census is derivable, and from what.
- *
- * ## The accepted set, and where each half is authoritative
- *
- * The spec REQUIRES `dataset` on every widget (`DashboardWidgetSchema`, this
- * repo: `packages/spec/src/ui/dashboard.zod.ts`), and both of objectui's
- * dashboard surfaces route a dataset-bound widget to `DatasetWidget`. On that —
- * the only spec-legal — path the renderer-consumed `options` keys are exactly
- * the five the spec DECLARES:
+ * The spec REQUIRES `dataset` on every widget (`DashboardWidgetSchema` —
+ * re-read for objectui#7293 against the PUBLISHED `@objectstack/spec@17.4.0`,
+ * whose required keys are exactly `id` / `dataset` / `values`), and both of
+ * the renderer's dashboard surfaces route a dataset-bound widget to
+ * `DatasetWidget` (`DashboardRenderer.tsx` renders `<DatasetWidget>` when
+ * `widget.dataset` is set; `DashboardGridLayout.tsx` mirrors the fork,
+ * objectui#4614). On that —
+ * the only spec-legal — path, the renderer-consumed `options` keys are exactly
+ * the five the spec DECLARES, all read as direct `options.<key>` accesses in
+ * `ui/packages/plugin-dashboard/src/DatasetWidget.tsx`:
  *
  *   dateGranularity, sortBy, sortOrder, limit   (query-affecting, framework#3588)
- *   stageOrder                                  (funnel stage order — the only type that reads it)
+ *   stageOrder                                  (funnel/pyramid stage order)
  *
- * and nothing undeclared. `description` used to be the one undeclared member:
- * the metric-card sub-caption channel, which `translateDashboard` overlaid from
- * a `widgets.{id}.subCaption` translation (objectstack#5428 item 4,
- * objectstack#7862), so warning on it would have flagged the platform's own
- * output. Ruling C on objectui#11389 retired that channel at both ends,
- * objectstack first (objectstack#21257): the overlay is gone, the bundle key is
- * a tombstone, and a widget keeps ONE authored description, `widget.description`
- * — never `options.description`. With no writer left, `description` left this
- * census, so an `options.description` now draws the warning like any other key
- * the dataset-bound path is not meant to read.
+ * and nothing else. ⛔ Not `description`: it was the metric-card sub-caption
+ * (objectui#4032 item 4, objectui#7293), read by `DatasetWidget.tsx`'s metric
+ * branch and a resolver both dashboard surfaces called, and fed by the
+ * server's `translateDashboard` overlay of the `widgets.{id}.subCaption`
+ * translation. The spec never declared it. objectui#11389 (ruling C, which
+ * reverses objectstack#5428 item 4) retires it at both ends: objectstack
+ * first, in `@objectstack/spec` 17.7.0 (the overlay is gone and the
+ * translation key is a tombstone), then the readers here. So an authored
+ * `options.description` reaches no renderer and draws this warning like any
+ * other unconsumed key. A widget keeps one authored description,
+ * `widget.description`, the card-header subtitle, which is not an `options`
+ * key and is not judged here.
  *
  * Notably NOT consumed on the path a widget really renders through:
  * `thresholds` and `format`. Both were widely believed to work; both draw this
- * warning, which is the point. Their closure claims are objectui's to derive —
- * `thresholds` by a repo-wide read-site scan there, `format` by the bounded
- * claim that the dataset-bound path formats from the MEASURE's own metadata —
- * and they are NOT restated here as claims about this repo, which has no
- * renderer to make them about.
+ * warning, which is the point. They are NOT the same kind of claim, and since
+ * the 2026-08-25 maintainer ruling (batch adjudication close-out, decision B1 —
+ * a closure claim must be BOUNDED or DERIVABLE, and a claim written in two
+ * places is single-sourced) they are written separately (objectui#6186):
  *
- * ## The drift risk that lives on THIS side
+ *   `thresholds` — zero read sites repo-wide. This paragraph is the CANONICAL
+ *     statement of that closure claim. `ui/content/docs/plugins/plugin-dashboard.mdx`
+ *     used to assert it a second time in its own words; two copies of one
+ *     closure claim drift apart independently and neither knows when the other
+ *     stopped being true, so the page now POINTS here rather than restating it.
+ *     Single-sourcing is what makes this copy load-bearing, so it is DERIVED
+ *     rather than trusted:
+ *     `ui/scripts/__tests__/unconsumed-widget-option-claim-6186.test.ts` re-scans
+ *     every JS/TS file git tracks for an access to a key of that name and fails
+ *     if one appears. Land a renderer that reads it and this module goes red in
+ *     the same run.
+ *   `format` — not read ON THE DATASET-BOUND PATH; the value is formatted with
+ *     the MEASURE's own metadata (`measureField(...).format`, from the dataset
+ *     definition), not from the widget's bag. Deliberately a BOUNDED claim and
+ *     not a repo-wide one: `format` is a live key in other vocabularies, so a
+ *     repo-wide scan would red on a TRUE claim — and an assertion that reds on
+ *     legitimate code gets deleted by the next person who hits it, which puts
+ *     the claim back where it started. Leg 2 of
+ *     `ui/packages/plugin-dashboard/src/__tests__/dashboard-widget-options-census.test.ts`
+ *     derives exactly this bound: the DatasetWidget read set is the declared
+ *     set, and neither `format` nor `thresholds` is in it. That absence is
+ *     asserted in its OWN right rather than riding on an equality whose
+ *     right-hand side can grow.
+ *
+ * ## The drift risk that lives on the spec side
  *
  * The spec whose `.passthrough()` this reasons about ships from this repo. So
- * the one way this list can go stale HERE is a new DECLARED key landing in
+ * one way this list can go stale is a new DECLARED key landing in
  * `DashboardWidgetOptionsSchema` without landing in the array below: the key
- * would be spec-legal, renderer-consumed on the objectui side, and warned about
- * here — a false positive on legal metadata. `@objectstack/sdui-parser` takes
- * no dependency on `@objectstack/spec` (it is dependency-free and hoistable by
- * design), so that cross-check is not mechanized in this copy; the census test
- * next door pins the array and names the spec file to re-read when it moves.
+ * would be spec-legal, renderer-consumed, and warned about here — a false
+ * positive on legal metadata. `@objectstack/sdui-parser` takes no dependency on
+ * `@objectstack/spec` (it is dependency-free and hoistable by design), so that
+ * direction is held by `scripts/check-widget-option-census.mjs`, which derives
+ * the declared half from the schema source.
  *
  * ## Scope — where the warning deliberately does NOT fire
  *
  *   - Widgets WITHOUT `dataset`: the legacy inline forms (`options.data`
  *     arrays, `provider: 'object'` bags) consume a much larger, spread-shaped
- *     key set, whose true reach is each child component's prop surface. That
- *     form is spec-illegal today (`dataset` is required) and its census would be
- *     the unmaintainable one; skipping it keeps every warning this module emits
- *     a statement about the path the widget actually renders through.
+ *     key set (`{ ...options }` into `metric` / `object-metric` /
+ *     `data-table` / …), whose true reach is each child component's prop
+ *     surface. That form is spec-illegal today (`dataset` is required) and its
+ *     census would be the unmaintainable one; skipping it keeps every warning
+ *     this module emits a statement about the path the widget actually renders
+ *     through.
  *   - Widgets in the legacy COMPONENT format (`widget.component`): `options`
  *     is not part of that contract.
  *   - Widgets carrying the spec's own escape hatch
  *     `suppressWarnings: ['unconsumed-widget-option']` — the spec models
- *     per-widget diagnostic suppression (`DashboardWidgetSchema.suppressWarnings`,
- *     "Build diagnostic rule ids suppressed on this widget"), so an author with
- *     a genuine out-of-band consumer can say so in metadata.
+ *     per-widget diagnostic suppression (`DashboardWidgetSchema`), so an
+ *     author with a genuine out-of-band consumer can say so in metadata.
+ *
+ * ## Maintenance — how this list stays true
+ *
+ * `ui/packages/plugin-dashboard/src/__tests__/dashboard-widget-options-census.test.ts`
+ * re-runs the census on every test run: it re-derives the five declared keys from the installed
+ * `@objectstack/spec`, re-extracts the `options.<key>` reads from
+ * `DatasetWidget.tsx` source text (and fails loudly if that file gains a
+ * consumption shape the extractor cannot see — a spread, a destructuring, a
+ * computed access), re-checks that the retired sub-caption key has no read
+ * site left in `plugin-dashboard`, and trips on any NEW
+ * file in `ui/packages/*\/src` or `ui/apps/*\/src` that starts reading
+ * `widget.options`. A renderer change that adds or removes a consumed key
+ * fails that test until this list is updated — the cost of keeping this
+ * warning honest is editing ONE array below plus re-reading the census notes.
  */
 import type { Diagnostic, SchemaElement } from './types.js';
 
@@ -115,15 +130,9 @@ export const DASHBOARD_WIDGET_HOST_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * The accepted set: every `options` key with a renderer read site on the
- * dataset-bound path. Alphabetical; the warning message prints it verbatim.
- * Derivation and evidence: file header.
- *
- * ⚠️ One member short of objectui's copy until objectui#11389 lands: objectui's
- * renderer at the pin still reads `options.description` for the retired metric
- * sub-caption, and its census lists it; that card drops the read and the member
- * together. The window errs in the safe direction — this copy warns on a key
- * objectui's strict authoring face already refuses — and no served document
- * carries the key, because its only writer was the retired overlay.
+ * dataset-bound path, which is exactly the set the spec declares.
+ * Alphabetical; the warning message prints it verbatim. Derivation and
+ * evidence: file header.
  */
 export const CONSUMED_WIDGET_OPTION_KEYS: readonly string[] = [
   'dateGranularity',
@@ -173,8 +182,7 @@ export function checkDashboardWidgetOptions(node: SchemaElement): Diagnostic[] {
       if (CONSUMED.has(key)) continue;
       diagnostics.push({
         severity: 'warning',
-        // DIVERGENCE FROM OBJECTUI, and the only one below this file's header:
-        // objectui writes `code: UNCONSUMED_WIDGET_OPTION` here. This repo runs
+        // Spelled as a literal, not as `UNCONSUMED_WIDGET_OPTION`: this repo runs
         // `check:dispatcher-error-vocabulary`, whose `objlitconst` shape reads
         // the SCREAMING_SNAKE constant NAME at a `code:` position and then must
         // reduce it to a literal — and its literal grammar is

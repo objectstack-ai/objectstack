@@ -68,6 +68,9 @@ jobs:
   single-claim-path:
     name: No other open PR may claim the same single-writer path
     runs-on: ubuntu-latest
+    # Run wall over the 100 most recent completed runs to 2026-10-27: p99 0.8 min, max
+    # 0.9.
+    timeout-minutes: 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -83,7 +86,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # Everything reaches the script through `env:`, never through `${{ }}`
       # inside the `run:` line. Nothing here is attacker-controlled text today
