@@ -76,7 +76,7 @@
     {
       "id": 8,
       "prompt": "Add a KPI of the average days from an opportunity's created_at to its closed_at (both datetime), vs the previous period; slower is worse. Emit the metadata.",
-      "expected_output": "A dataset measure `{ aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' }, polarity: 'lower' }` (a rise draws red) under `compareTo`; no hook-kept stored number.",
+      "expected_output": "A dataset measure `{ aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' }, polarity: 'lower' }` under `compareTo`; no hook-kept stored number.",
       "files": [],
       "assertions": {
         "must_contain": ["duration", "unit: 'days'", "polarity: 'lower'"],
