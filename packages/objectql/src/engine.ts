@@ -4518,6 +4518,36 @@ interface CascadeDeleteSet {
    * read the same relations, file each record once between them.
    */
   readonly elevationsFiled: Set<string>;
+  /**
+   * [#26718] Member key ({@link cascadeMemberKey}) → the members a
+   * CASCADING relation reaches from it directly, every edge the collection
+   * walk read, a row reached by two paths included. The reach of one member
+   * inside the set ({@link cascadeReachOf}) is read from it: which rows the
+   * delete removes only BECAUSE that member goes.
+   */
+  readonly cascadeEdges: Map<string, Array<{ object: string; id: string | number }>>;
+}
+
+/** [#26718] One member of a {@link CascadeDeleteSet}, as a single key. */
+function cascadeMemberKey(object: string, id: unknown): string {
+  return JSON.stringify([object, String(id)]);
+}
+
+/**
+ * [#26718] Every member a cascade reaches from `object`/`id` through the
+ * set's own {@link CascadeDeleteSet.cascadeEdges}: its details, theirs, and so
+ * on, indexed like {@link CascadeDeleteSet.members}. The member itself is in
+ * it only when a cycle in the data leads back.
+ */
+function cascadeReachOf(set: CascadeDeleteSet, object: string, id: unknown): Map<string, Set<string>> {
+  const reach = new Map<string, Set<string>>();
+  const queue: Array<{ object: string; id: unknown }> = [{ object, id }];
+  for (const from of queue) {
+    for (const next of set.cascadeEdges.get(cascadeMemberKey(from.object, from.id)) ?? []) {
+      if (cascadeSetAdd(reach, next.object, next.id)) queue.push(next);
+    }
+  }
+  return reach;
 }
 
 /** Is `id` of `object` in this index of a {@link CascadeDeleteSet}? */
@@ -18680,6 +18710,13 @@ export class ObjectQL implements IObjectQLEngine {
    *      OUTSIDE the set. A row in the set is about to be deleted by this same
    *      cascade: it cannot be left dangling, so it refuses nothing, and
    *      clearing its reference would be a write against a row about to go.
+   * [#26718] Between the two, {@link refuseRestrictsInsideOwnCascade}, also
+   * read-only: an AUTHORED `restrict` held by a member the cascade reaches
+   * only THROUGH the record that restrict protects (a child holding a
+   * master_detail and a restrict lookup to one parent; a grandchild under it)
+   * refuses the delete before the first write. The row is in the set, so phase
+   * 2 alone would let the cascade delete it.
+   *
    * Before this, the outcome depended on registration order: with the
    * contacts registered ahead of the contracts, deleting an account refused
    * on a contract's required lookup to a contact, a contract the same delete
@@ -18727,6 +18764,9 @@ export class ObjectQL implements IObjectQLEngine {
       return;
     }
     const cascadeSet = await this.collectCascadeDeleteSet(object, id, context, objects);
+    // [#26718] Every restrict a member's own cascade would override is judged
+    // here, before the first write.
+    await this.refuseRestrictsInsideOwnCascade(cascadeSet, { object, id }, context, objects);
     await this.cascadeDeleteSets.run(cascadeSet, () =>
       this.walkReferencingRelations(object, id, context, objects, cascadeSet),
     );
@@ -18763,7 +18803,9 @@ export class ObjectQL implements IObjectQLEngine {
     objects: ServiceObject[],
     opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
-    const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
+    const set: CascadeDeleteSet = {
+      members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(),
+    };
     cascadeSetAdd(set.members, object, id);
     // The cascading relations pointing at each object, scanned once per object
     // rather than once per record: a wide cascade has many records of few
@@ -18800,7 +18842,14 @@ export class ObjectQL implements IObjectQLEngine {
         );
         for (const row of rows) {
           const depId = row?.id;
-          if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
+          if (depId == null) continue;
+          // [#26718] The edge is kept even for a row already in the set: a
+          // row reached by two paths is in the reach of both.
+          const from = cascadeMemberKey(target.object, target.id);
+          let edges = set.cascadeEdges.get(from);
+          if (!edges) { edges = []; set.cascadeEdges.set(from, edges); }
+          edges.push({ object: childName, id: depId });
+          if (cascadeSetAdd(set.members, childName, depId)) {
             queue.push({ object: childName, id: depId });
           }
         }
@@ -19204,6 +19253,11 @@ export class ObjectQL implements IObjectQLEngine {
         // is done. `cascade` keeps every row: its rows ARE the set, and the
         // walk deletes them below.
         //
+        // [#26718] …except an AUTHORED restrict held by a row the cascade reaches
+        // only through the record that restrict protects: that one was judged
+        // before the cascade wrote anything ({@link refuseRestrictsInsideOwnCascade}),
+        // so a row in the set reaching here refuses nothing.
+        //
         // After `probedIds`, on purpose: the disclosure check still compares
         // the caller's own view against every row the elevated probe read, so a
         // count is disclosed only to a caller who can see the whole relation,
@@ -19244,84 +19298,10 @@ export class ObjectQL implements IObjectQLEngine {
         }
 
         if (behavior === 'restrict') {
-          // [#7307] TWO messages, two audiences — because this error has two
-          // and they were sharing one string.
-          //
-          // `message` is what a BUSINESS USER reads: REST ships it verbatim as
-          // `body.error` in the flat 409 envelope (`mapDataError`), and Console
-          // renders that as-is in a toast. It was composed English-only with the
-          // API names concatenated in and a metadata-authoring instruction on
-          // the end, so an operator deleting a 部门 in a fully Chinese app got an
-          // English sentence naming two tables and a column they have never
-          // seen, ending in advice only a developer can act on. It is now
-          // rendered through the operation-message catalog in the caller's
-          // locale against resolved LABELS — the same fix #3957 made one layer
-          // down for field constraints, reached from the operation side.
-          //
-          // `developerMessage` is what the DEVELOPER reads, and is the previous
-          // sentence unchanged, byte for byte: English, API names, and the
-          // `deleteBehavior:'cascade'` hint — which is correct and useful, and
-          // is not lost, it is addressed. It rides the structured half of the
-          // envelope alongside `dependentObject` / `dependentCount`, which
-          // already carry API names, so it discloses nothing new; no
-          // user-facing surface reads it.
-          //
-          // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
-          // two SENTENCES, exactly as the field catalog splits a message key
-          // without splitting `FieldErrorCode`.
-          const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
-          const msgCtx = this.validationMessageContext(object, context);
-          const parent = objects.find((o) => (o as any)?.name === object);
-          // [#12166, ruling constraint 2] Whether this refusal may carry the
-          // row COUNT — see `dependentCountIsDisclosable` for why the elevation
-          // above is what makes the question exist, and why the answer is "only
-          // if the caller's own identity would have produced the same rows".
-          // The OBJECT is named either way: that half is what the ruling
-          // requires the caller to learn.
-          const discloseCount = await this.dependentCountIsDisclosable(
-            childName, probeWhere, probedIds, fieldName, multiValued, id, context,
-          );
-          const err: any = new Error(
-            renderOperationMessage(
-              {
-                messageKey: discloseCount
-                  ? (required ? 'delete_restricted_required' : 'delete_restricted')
-                  : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
-                params: {
-                  object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
-                  dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
-                  field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
-                  ...(discloseCount ? { count: dependents.length } : {}),
-                },
-              },
-              { locale: msgCtx.locale, translate: msgCtx.translate },
-            ),
-          );
-          // The DEVELOPER half is subject to the same rule, and the reason is
-          // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
-          // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
-          // `mapDataError` ships it — so a count withheld from `message` and
-          // left here would not be withheld at all.
-          err.developerMessage =
-            `Cannot delete ${object} (${id}): ` +
-            `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
-            `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
-            `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
-          err.code = 'DELETE_RESTRICTED';
-          err.status = 409;
-          err.httpStatus = 409;
-          err.object = object;
-          // Constraint 2's REQUIRED half — the referenced object is named
-          // unconditionally, because "which table is blocking me" is the one
-          // thing the reporting deployment's admins could not self-diagnose.
-          err.dependentObject = childName;
-          // …and its withheld half. Absent rather than zeroed: `0` would be a
-          // false statement about the rows (there is at least one, or this
-          // branch would not have been reached), and REST's envelope builder
-          // already omits the key for a non-number, so an absent count reaches
-          // the client as an absent key rather than as a lie.
-          if (discloseCount) err.dependentCount = dependents.length;
-          throw err;
+          throw await this.deleteRestrictedError({
+            object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued,
+            objects, context,
+          });
         }
 
         for (const dep of dependents) {
@@ -19414,6 +19394,200 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
     }
+  }
+
+  /**
+   * [#26718] Before the cascade writes anything: refuse the delete when an
+   * AUTHORED `restrict` is held by a row the cascade would remove only because
+   * the record that restrict protects is removed.
+   *
+   * The deleting walk judges a `restrict` against rows OUTSIDE the cascade set
+   * alone (#22305), and a row inside it was exempt whatever put it there. That
+   * exemption is right for a row the cascade reaches through ANOTHER record (a
+   * contract and the contact it restricts, both details of the account being
+   * deleted: the account's delete removes both, and neither is left dangling).
+   * It was wrong for a row reached THROUGH the very record it protects: a child
+   * holding a `master_detail` and a `restrict` lookup to the same parent is in
+   * that parent's set by its own master_detail, so the restrict was never
+   * asked and the cascade deleted the child — the record the author declared
+   * undeletable. A grandchild under that parent holding the restrict is the
+   * same case one level down.
+   *
+   * So for every member, every relation whose RESOLVED behaviour is `restrict`
+   * ({@link cascadeRelationBehavior}, an authored `restrict` on a lookup,
+   * tree or master_detail) is probed here when its object has a member in the
+   * reach of that member ({@link cascadeReachOf}); a referencing row in the
+   * reach refuses with the walk's own `DELETE_RESTRICTED`
+   * ({@link deleteRestrictedError}). Every restrict is judged before the
+   * first cascade, so the outcome no longer depends on the order the fields or
+   * objects are declared in, and nothing has been written when it refuses.
+   *
+   * ⛔ The required-lookup escalation (`set_null` on a required field read as
+   * `restrict`) is not judged here: it restricts because a required reference
+   * cannot be CLEARED, and a row the cascade deletes is never cleared. It keeps
+   * the #22305 rule. Neither does this replace the walk's judgement of rows
+   * outside the set, which is unchanged.
+   */
+  private async refuseRestrictsInsideOwnCascade(
+    cascadeSet: CascadeDeleteSet,
+    root: { object: string; id: string | number },
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+  ): Promise<void> {
+    // The members with the ids as the rows carried them (the set's own index
+    // holds strings), so each probe below spells its filter as the walk does.
+    const members: Array<{ object: string; id: string | number }> = [];
+    const seen = new Set<string>();
+    for (const member of [root, ...[...cascadeSet.cascadeEdges.values()].flat()]) {
+      const key = cascadeMemberKey(member.object, member.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      members.push(member);
+    }
+    // The restrict relations pointing at each object whose own object has a
+    // member, scanned once per object.
+    const restricting = new Map<string, Array<{ child: ServiceObject; childName: string; fieldName: string; fdef: any }>>();
+    const restrictingInto = (target: string) => {
+      let relations = restricting.get(target);
+      if (!relations) {
+        relations = [];
+        for (const child of objects) {
+          const childName = (child as any)?.name as string | undefined;
+          const fields = (child as any)?.fields as Record<string, any> | undefined;
+          if (!childName || !fields || !cascadeSet.members.has(childName)) continue;
+          for (const [fieldName, fdef] of Object.entries(fields)) {
+            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'restrict') {
+              relations.push({ child, childName, fieldName, fdef });
+            }
+          }
+        }
+        restricting.set(target, relations);
+      }
+      return relations;
+    };
+    for (const { object, id } of members) {
+      const relations = restrictingInto(object);
+      if (relations.length === 0) continue;
+      const reach = cascadeReachOf(cascadeSet, object, id);
+      for (const { child, childName, fieldName, fdef } of relations) {
+        if (!reach.has(childName)) continue;
+        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
+        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
+        const rows = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
+        const dependents = rows.filter((row) => cascadeSetHas(reach, childName, row?.id));
+        if (dependents.length === 0) continue;
+        throw await this.deleteRestrictedError({
+          object, id, child, childName, fieldName, fdef, dependents, probeWhere,
+          probedIds: rows.map((r: any) => String(r?.id)),
+          multiValued: declaredMultiValued(fdef),
+          objects, context,
+        });
+      }
+    }
+  }
+
+  /**
+   * The `DELETE_RESTRICTED` refusal of deleting `object`/`id` because
+   * `dependents` of `childName` reference it via `fieldName`. One builder for
+   * the deleting walk ({@link walkReferencingRelations}) and the judgement
+   * before it ({@link refuseRestrictsInsideOwnCascade}), so the two answer one
+   * envelope.
+   */
+  private async deleteRestrictedError(args: {
+    object: string;
+    id: string | number;
+    child: ServiceObject;
+    childName: string;
+    fieldName: string;
+    fdef: any;
+    dependents: readonly any[];
+    probeWhere: Record<string, unknown>;
+    probedIds: readonly string[];
+    multiValued: boolean;
+    objects: ServiceObject[];
+    context: ExecutionContext | undefined;
+  }): Promise<Error> {
+    const {
+      object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued, objects, context,
+    } = args;
+    // [#7307] TWO messages, two audiences — because this error has two
+    // and they were sharing one string.
+    //
+    // `message` is what a BUSINESS USER reads: REST ships it verbatim as
+    // `body.error` in the flat 409 envelope (`mapDataError`), and Console
+    // renders that as-is in a toast. It was composed English-only with the
+    // API names concatenated in and a metadata-authoring instruction on
+    // the end, so an operator deleting a 部门 in a fully Chinese app got an
+    // English sentence naming two tables and a column they have never
+    // seen, ending in advice only a developer can act on. It is now
+    // rendered through the operation-message catalog in the caller's
+    // locale against resolved LABELS — the same fix #3957 made one layer
+    // down for field constraints, reached from the operation side.
+    //
+    // `developerMessage` is what the DEVELOPER reads, and is the previous
+    // sentence unchanged, byte for byte: English, API names, and the
+    // `deleteBehavior:'cascade'` hint — which is correct and useful, and
+    // is not lost, it is addressed. It rides the structured half of the
+    // envelope alongside `dependentObject` / `dependentCount`, which
+    // already carry API names, so it discloses nothing new; no
+    // user-facing surface reads it.
+    //
+    // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
+    // two SENTENCES, exactly as the field catalog splits a message key
+    // without splitting `FieldErrorCode`.
+    const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
+    const msgCtx = this.validationMessageContext(object, context);
+    const parent = objects.find((o) => (o as any)?.name === object);
+    // [#12166, ruling constraint 2] Whether this refusal may carry the
+    // row COUNT — see `dependentCountIsDisclosable` for why the elevation
+    // above is what makes the question exist, and why the answer is "only
+    // if the caller's own identity would have produced the same rows".
+    // The OBJECT is named either way: that half is what the ruling
+    // requires the caller to learn.
+    const discloseCount = await this.dependentCountIsDisclosable(
+      childName, probeWhere, probedIds, fieldName, multiValued, id, context,
+    );
+    const err: any = new Error(
+      renderOperationMessage(
+        {
+          messageKey: discloseCount
+            ? (required ? 'delete_restricted_required' : 'delete_restricted')
+            : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
+          params: {
+            object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
+            dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
+            field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
+            ...(discloseCount ? { count: dependents.length } : {}),
+          },
+        },
+        { locale: msgCtx.locale, translate: msgCtx.translate },
+      ),
+    );
+    // The DEVELOPER half is subject to the same rule, and the reason is
+    // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
+    // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
+    // `mapDataError` ships it — so a count withheld from `message` and
+    // left here would not be withheld at all.
+    err.developerMessage =
+      `Cannot delete ${object} (${id}): ` +
+      `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
+      `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
+      `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
+    err.code = 'DELETE_RESTRICTED';
+    err.status = 409;
+    err.httpStatus = 409;
+    err.object = object;
+    // Constraint 2's REQUIRED half — the referenced object is named
+    // unconditionally, because "which table is blocking me" is the one
+    // thing the reporting deployment's admins could not self-diagnose.
+    err.dependentObject = childName;
+    // …and its withheld half. Absent rather than zeroed: `0` would be a
+    // false statement about the rows (there is at least one, or this
+    // branch would not have been reached), and REST's envelope builder
+    // already omits the key for a non-number, so an absent count reaches
+    // the client as an absent key rather than as a lie.
+    if (discloseCount) err.dependentCount = dependents.length;
+    return err;
   }
 
   /**

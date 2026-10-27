@@ -485,3 +485,108 @@ describe('[#22305] a cycle in the data terminates', () => {
     expect(driver.writes.filter((w: Write) => w.op === 'delete' && w.object === 'zz_item')).toHaveLength(2);
   });
 });
+
+// ── [#26718] A restrict held by a row the cascade reaches THROUGH its target ─
+//
+// The rule above exempts a member from refusing a delete of ANOTHER member.
+// It never exempted a row the cascade reaches only because the record it
+// restricts is deleted: a child holding a master_detail AND an authored
+// restrict lookup to the same parent was in the parent's set by its own
+// master_detail, so its restrict was never asked and the cascade deleted it.
+// Every such restrict is now judged before the first write (triage on
+// #26718); the real-driver, protocol-door face of the same pins is
+// `packages/runtime/src/cascade-delete-restrict-same-parent-real-driver.integration.test.ts`.
+
+/** A detail of the account that also restricts the account itself. */
+const pledge = (mdFirst: boolean) => {
+  const md = { name: 'account', type: 'master_detail' as const, reference: 'zz_account' };
+  const guard = { name: 'guard', type: 'lookup' as const, reference: 'zz_account', deleteBehavior: 'restrict' };
+  return {
+    name: 'zz_pledge',
+    label: 'Pledge',
+    fields: mdFirst ? { id, name, account: md, guard } : { id, name, guard, account: md },
+  };
+};
+/** A detail of a contact, restricting the account or the contact above it. */
+const note = {
+  name: 'zz_note',
+  label: 'Note',
+  fields: {
+    id, name,
+    contact: { name: 'contact', type: 'master_detail' as const, reference: 'zz_contact' },
+    guard_account: { name: 'guard_account', type: 'lookup' as const, reference: 'zz_account', deleteBehavior: 'restrict' },
+    guard_contact: { name: 'guard_contact', type: 'lookup' as const, reference: 'zz_contact', deleteBehavior: 'restrict' },
+  },
+};
+
+describe('[#26718] a restrict on a row the cascade reaches through the record it protects refuses', () => {
+  it.each([
+    ['master_detail declared first', true],
+    ['restrict lookup declared first', false],
+  ] as Array<[string, boolean]>)('a child restricting its own master refuses, and nothing is written (%s)', async (_l, mdFirst) => {
+    const { engine, driver } = await makeEngine([account, pledge(mdFirst)]);
+    const acc = await engine.insert('zz_account', { name: 'Acme' });
+    await engine.insert('zz_pledge', { name: 'p', account: acc.id, guard: acc.id });
+    driver.writes.length = 0;
+
+    await expect(engine.delete('zz_account', { where: { id: acc.id } } as any))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, object: 'zz_account', dependentObject: 'zz_pledge' });
+    expect(driver.writes).toEqual([]);
+    expect(driver.rowsOf('zz_account')).toHaveLength(1);
+    expect(driver.rowsOf('zz_pledge')).toHaveLength(1);
+  });
+
+  it('a grandchild restricting the root refuses the root, and nothing is written', async () => {
+    const { engine, driver } = await makeEngine([account, contact, note]);
+    const acc = await engine.insert('zz_account', { name: 'Acme' });
+    const c = await engine.insert('zz_contact', { name: 'c', account: acc.id });
+    await engine.insert('zz_note', { name: 'n', contact: c.id, guard_account: acc.id });
+    driver.writes.length = 0;
+
+    await expect(engine.delete('zz_account', { where: { id: acc.id } } as any))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, object: 'zz_account', dependentObject: 'zz_note' });
+    expect(driver.writes).toEqual([]);
+    expect(driver.rowsOf('zz_contact')).toHaveLength(1);
+    expect(driver.rowsOf('zz_note')).toHaveLength(1);
+  });
+
+  it('a grandchild restricting the member above it refuses the root delete that reaches both', async () => {
+    const { engine, driver } = await makeEngine([account, contact, note]);
+    const acc = await engine.insert('zz_account', { name: 'Acme' });
+    const c = await engine.insert('zz_contact', { name: 'c', account: acc.id });
+    await engine.insert('zz_note', { name: 'n', contact: c.id, guard_contact: c.id });
+    driver.writes.length = 0;
+
+    await expect(engine.delete('zz_account', { where: { id: acc.id } } as any))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, object: 'zz_contact', dependentObject: 'zz_note' });
+    expect(driver.writes).toEqual([]);
+    // …the same answer deleting that member directly gives.
+    await expect(engine.delete('zz_contact', { where: { id: c.id } } as any))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'zz_note' });
+    expect(driver.rowsOf('zz_note')).toHaveLength(1);
+  });
+
+  it('control: the same restrict pointing at a record the delete does not reach is not asked', async () => {
+    const { engine, driver } = await makeEngine([account, pledge(true)]);
+    const acc = await engine.insert('zz_account', { name: 'Acme' });
+    const other = await engine.insert('zz_account', { name: 'Other' });
+    await engine.insert('zz_pledge', { name: 'p', account: acc.id, guard: other.id });
+
+    await engine.delete('zz_account', { where: { id: acc.id } } as any);
+
+    expect(driver.rowsOf('zz_pledge')).toHaveLength(0);
+    expect(driver.rowsOf('zz_account').map((r) => r.id)).toEqual([other.id]);
+  });
+
+  it('control: deleting the restricted record of a pledge owned elsewhere still refuses', async () => {
+    const { engine, driver } = await makeEngine([account, pledge(true)]);
+    const owner = await engine.insert('zz_account', { name: 'Owner' });
+    const guarded = await engine.insert('zz_account', { name: 'Guarded' });
+    await engine.insert('zz_pledge', { name: 'p', account: owner.id, guard: guarded.id });
+
+    await expect(engine.delete('zz_account', { where: { id: guarded.id } } as any))
+      .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'zz_pledge' });
+    expect(driver.rowsOf('zz_account')).toHaveLength(2);
+    expect(driver.rowsOf('zz_pledge')).toHaveLength(1);
+  });
+});
