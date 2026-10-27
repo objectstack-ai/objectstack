@@ -2711,6 +2711,11 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * deliberately follows the resolution side, where the by-name collision the
  * card describes happens.)
  *
+ * Two embedded twins on ONE object never reach this walk on the strict path:
+ * the object parse refuses them first (#26725, `duplicate-action-names.ts`),
+ * because the object save door parses an object alone. This walk keeps the
+ * pairs that span two collections.
+ *
  * Every site counts, byte-identical twins included: the merge appends, so a
  * pair that is one declaration to the eye is two entries under one key in the
  * shipped artifact — `collectActionDeclarations` pushes every embedded entry,

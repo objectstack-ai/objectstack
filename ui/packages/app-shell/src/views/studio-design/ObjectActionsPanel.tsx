@@ -39,6 +39,14 @@
  * action. Same hold, and same known cost, as a new validation rule waiting for
  * its condition (objectui#11820, `ObjectValidationsPanel.tsx`): leaving the
  * view or the object first drops it, and Publish does not wait for it.
+ *
+ * ## An action name is taken once
+ *
+ * The name is the key an action runs under on its object, and the spec refuses
+ * an object that declares one name twice (the save answers 422). New derives a
+ * name no listed action holds; a rename in the editor's Name field to a name
+ * another listed action holds is written as the first free `<name>_N` instead,
+ * so the draft never carries the pair and its save is never refused for it.
  */
 
 import React from 'react';
@@ -71,6 +79,19 @@ interface ActionItem {
 function readActions(input: unknown): ActionItem[] {
   if (!Array.isArray(input)) return [];
   return input.filter((a): a is ActionItem => !!a && typeof a === 'object');
+}
+
+/**
+ * `wanted` when no other listed action holds it, else the first `<wanted>_N`
+ * (N from 2) that none holds. A rename never writes a name another action of
+ * the object already has.
+ */
+function freeActionName(wanted: string, others: string[]): string {
+  const taken = new Set(others);
+  if (!taken.has(wanted)) return wanted;
+  let i = 2;
+  while (taken.has(`${wanted}_${i}`)) i += 1;
+  return `${wanted}_${i}`;
 }
 
 /** A fresh, unique, snake_case action name scoped to the object. */
@@ -170,8 +191,20 @@ export function ObjectActionsPanel({
   // A held action (objectui#11861) is patched here instead, and written to the
   // draft by the first patch that leaves it needing no input.
   const patchSelected = React.useCallback(
-    (patch: Record<string, unknown>) => {
+    (requested: Record<string, unknown>) => {
       if (!sel) return;
+      // A rename to a name another listed action holds takes the first free
+      // `<name>_N` instead (see "An action name is taken once" above).
+      const patch =
+        typeof requested.name === 'string' && requested.name !== sel.name
+          ? {
+              ...requested,
+              name: freeActionName(
+                requested.name,
+                listed.filter((a) => a !== sel).map((a) => String(a.name ?? '')),
+              ),
+            }
+          : requested;
       if (heldNeeds.has(String(sel.name ?? ''))) {
         const next = { ...sel, ...patch };
         const mine = (h: { on: string; action: ActionItem }) => h.on === objectName && h.action.name === sel.name;
@@ -186,7 +219,7 @@ export function ObjectActionsPanel({
       }
       if (typeof patch.name === 'string' && patch.name !== sel.name) setSelected(patch.name);
     },
-    [actions, heldNeeds, objectName, sel, onPatch],
+    [actions, heldNeeds, listed, objectName, sel, onPatch],
   );
 
   /* ─── Blocking CEL verdicts → the Data pillar's Save gate (objectui#4527) ──

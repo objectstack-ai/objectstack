@@ -54,17 +54,24 @@ describe('ObjectValidationsPanel', () => {
     expect(screen.getByTestId('rule-unsaved')).toBeTruthy();
   });
 
-  it('adds a non-script rule type from the New menu with a valid skeleton', () => {
+  it('adds a non-script rule type from the New menu with a valid skeleton', async () => {
     const onPatch = vi.fn();
     render(<ObjectValidationsPanel draft={draft} onPatch={onPatch} />);
     fireEvent.click(screen.getByText('New'));
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
     fireEvent.click(screen.getByRole('button', { name: 'State machine — allowed transitions' }));
+    // objectstack#26731 — held until the author picks its field and writes its message.
+    expect(onPatch).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId('rule-field'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: /\(name\)$/ }));
+    fireEvent.change(screen.getByPlaceholderText('e.g. Completion date is required when status is Done'), {
+      target: { value: 'Bad move' },
+    });
+    expect(onPatch).toHaveBeenCalledTimes(1);
     const patch = onPatch.mock.calls[0][0];
     const added = patch.validations[patch.validations.length - 1];
-    // Seeded valid: a required `field` (first field) + an (empty) transitions map.
-    // A type with no guard has nothing to wait for, so it is written at once.
-    expect(added).toMatchObject({ type: 'state_machine', name: 'validation_3', field: 'name' });
+    // Seeded valid: the picked `field` + an (empty) transitions map.
+    expect(added).toMatchObject({ type: 'state_machine', name: 'validation_3', field: 'name', message: 'Bad move' });
     expect(added.transitions).toEqual({});
     // objectui#11820 — and it starts on Create + Update.
     expect(added.events).toEqual(['insert', 'update']);

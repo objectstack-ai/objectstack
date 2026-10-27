@@ -83,6 +83,8 @@ function expectSpecAccepts(rule: unknown, what: string) {
 
 /** The types whose new rule waits for its guard before it is written (objectui#11820). */
 const GUARDED = new Set(['script', 'cross_field', 'conditional']);
+/** The types whose new rule waits for its field and message instead (objectstack#26731). */
+const FIELD_TYPES = new Set(['state_machine', 'format', 'json_schema']);
 const GUARD = 'has(record.amount) && record.amount < 0';
 const THEN_GUARD = 'has(record.amount) && record.amount > 1000';
 
@@ -102,9 +104,10 @@ async function pickType(label: string): Promise<void> {
 /**
  * Add `label` from the New menu and return the rule the panel WROTE to the
  * draft. A guarded type is written only once the author gives it its guard —
- * and a conditional, its `then` rule's too — so those are filled in first.
+ * and a conditional, its `then` rule's too — and a field type once it has a
+ * field and a message, so those are filled in first.
  */
-function addFromMenu(label: string): Record<string, unknown> {
+async function addFromMenu(label: string): Promise<Record<string, unknown>> {
   const onPatch = vi.fn();
   render(<ObjectValidationsPanel draft={baseDraft} onPatch={onPatch} />);
   fireEvent.click(screen.getByText('New'));
@@ -123,6 +126,14 @@ function addFromMenu(label: string): Record<string, unknown> {
       fireEvent.blur(then);
     }
   }
+  if (FIELD_TYPES.has(type)) {
+    expect(onPatch).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId('rule-field'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Name (name)' }));
+    fireEvent.change(screen.getByPlaceholderText('e.g. Completion date is required when status is Done'), {
+      target: { value: 'Bad value' },
+    });
+  }
   expect(onPatch).toHaveBeenCalledTimes(1);
   const patch = onPatch.mock.calls[0][0];
   return patch.validations[patch.validations.length - 1];
@@ -130,22 +141,22 @@ function addFromMenu(label: string): Record<string, unknown> {
 
 describe('whenKeyPin — ObjectValidationsPanel emits spec-parseable metadata', () => {
   // The class, not just the instance: every type the New menu offers.
-  it.each(MENU)('the %s rule the New menu writes parses through the spec the draft save uses', (type, label) => {
-    const added = addFromMenu(label);
+  it.each(MENU)('the %s rule the New menu writes parses through the spec the draft save uses', async (type, label) => {
+    const added = await addFromMenu(label);
     expect(added.type).toBe(type);
     expectSpecAccepts(added, `${type} skeleton`);
   });
 
-  it('writes the conditional guard under `when` — the key the spec accepts', () => {
-    const added = addFromMenu('Conditional — apply a rule when a guard holds');
+  it('writes the conditional guard under `when` — the key the spec accepts', async () => {
+    const added = await addFromMenu('Conditional — apply a rule when a guard holds');
     expect(added.when).toBe(GUARD);
     expect(added).not.toHaveProperty('condition');
     // …and the nested `then` is a `script` rule, so ITS guard stays `condition`.
     expect(added.then).toMatchObject({ type: 'script', condition: THEN_GUARD });
   });
 
-  it('the spec refuses the key this panel used to write — so the pin above has teeth', () => {
-    const added = addFromMenu('Conditional — apply a rule when a guard holds');
+  it('the spec refuses the key this panel used to write — so the pin above has teeth', async () => {
+    const added = await addFromMenu('Conditional — apply a rule when a guard holds');
     // Exactly the shape the panel emitted before objectui#9802, rebuilt here by
     // moving the guard back to the old key. Same parser, one key changed.
     const { when, ...rest } = added as { when?: unknown };
