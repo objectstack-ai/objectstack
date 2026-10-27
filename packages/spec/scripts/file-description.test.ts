@@ -2225,10 +2225,11 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     // level-1 opener among the four modules that moved to `marketplace/`,
     // still counts. 31 -> 30: `kernel/package-upgrade.zod.ts` — a level-1
     // opener (`# Package Upgrade Protocol`) — was removed whole by #25608's
-    // ADR-0049 retirement.)
-    expect(shifted.length).toBe(30);
+    // ADR-0049 retirement. 30 -> 31: `data/seed-file.zod.ts` (#25779) is a new
+    // module whose header opens at level 1 (`# Seed files`).)
+    expect(shifted.length).toBe(31);
     // …and every one of them was shifted because it opened at level 1.
-    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(30);
+    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(31);
   });
 
   it('never opens a page on the `@module` marker (#13796)', () => {
