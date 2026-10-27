@@ -13,6 +13,9 @@
  * row's reads "Overdue Nd" in red (ruling D). The projection asks for the
  * `settledWhen` operand when no column shows it.
  *
+ * objectstack#25884 — a grid column paints the absolute date, so the wording
+ * half of that verdict is read from the cell's tooltip; the red is on the cell.
+ *
  * The deadline is named `deliver_by` on purpose: no retired name guess can
  * paint it, so only the declaration can.
  */
@@ -22,9 +25,9 @@ import {
   assertNoOtherNetworkEscape,
   installRecordSecurityExplainDouble,
 } from '@object-ui/test-support';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { registerAllFields } from '@object-ui/fields';
+import { registerAllFields, formatDate } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 import { ObjectGrid } from '../ObjectGrid';
 
@@ -93,17 +96,30 @@ function renderGrid(schemaOverrides: Record<string, unknown>, props: Record<stri
   return ds;
 }
 
-const isRed = (text: string) => screen.getByText(text).closest('span.tabular-nums')?.className.includes('text-red-600');
+/**
+ * The date cells whose tooltip reads `title`. objectstack#25884: a grid
+ * column paints the absolute date, and the relative phrase ("Overdue 5d",
+ * "5 days ago") the cell used to paint is its tooltip, so the per-row
+ * verdict is read there; the red stays on the cell.
+ */
+const cellsTitled = (title: string) =>
+  [...document.querySelectorAll<HTMLElement>('span.tabular-nums')].filter((el) => el.getAttribute('title') === title);
+const absolute = (day: string) => formatDate(day, undefined, { locale: 'en-US' });
 
 /** One overdue (open row) and one neutral (done row) deadline, and the undeclared control. */
 async function expectOpenOverdueDoneNeutral() {
-  await waitFor(() => expect(screen.getByText('Overdue 5d')).toBeInTheDocument());
-  expect(screen.getAllByText('Overdue 5d')).toHaveLength(1);
-  expect(isRed('Overdue 5d')).toBe(true);
-  expect(screen.getAllByText('5 days ago')).toHaveLength(1);
-  expect(isRed('5 days ago')).toBe(false);
+  await waitFor(() => expect(cellsTitled('Overdue 5d')).toHaveLength(1));
+  const [overdue] = cellsTitled('Overdue 5d');
+  expect(overdue.className).toContain('text-red-600');
+  expect(overdue.textContent).toBe(absolute(daysAgo(5)));
+  const neutral = cellsTitled('5 days ago');
+  expect(neutral).toHaveLength(1);
+  expect(neutral[0].className).not.toContain('text-red-600');
+  expect(neutral[0].textContent).toBe(absolute(daysAgo(5)));
   // CONTROL: an undeclared past date reads neutral on both rows.
-  expect(screen.getAllByText('4 days ago')).toHaveLength(2);
+  const undeclared = cellsTitled('4 days ago');
+  expect(undeclared).toHaveLength(2);
+  for (const cell of undeclared) expect(cell.className).not.toContain('text-red-600');
 }
 
 const NAMES = ['title', 'deliver_by', 'started_on'];
@@ -150,8 +166,8 @@ describe('objectui#11815 — the projection carries what settledWhen reads', () 
     const selects = ds.find.mock.calls.map(([, params]: any[]) => params?.$select);
     expect(selects.length).toBeGreaterThan(0);
     for (const sel of selects) expect(sel).toEqual(expect.arrayContaining(['id', 'title', 'deliver_by', 'status']));
-    await waitFor(() => expect(screen.getByText('Overdue 5d')).toBeInTheDocument());
-    expect(screen.getAllByText('5 days ago')).toHaveLength(1);
+    await waitFor(() => expect(cellsTitled('Overdue 5d')).toHaveLength(1));
+    expect(cellsTitled('5 days ago')).toHaveLength(1);
   });
 
   it('CONTROL — an undeclared shown date pulls nothing extra into the projection', async () => {

@@ -381,7 +381,17 @@ export const CEILINGS = new Map([
   // row this PR itself lowered by 7,006, and the entry stays 448 lines).
   // 5785 -> 5780: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-automation/SKILL.md', 5780],
+  // 5780 -> 6004 (card #26298, audit #26184 rows A1/A3/A4): three teachings an
+  // author had no row for — the fourth `notify` recipient form `{ emailField }`
+  // (an envelope over an address no user holds now fails the node), flow-level
+  // `requiredPermissions` (who may START a flow), and the screen field typed
+  // `file` (the run resumes with the `sys_file` id). Paid down first: the CRM
+  // Blueprint's approval row restated the approvals reference's config table
+  // and branching section and was cut to a pointer (~17 tokens). Landed 5771 ->
+  // 6004: +233 net, 9 absorbed by headroom, ceiling +224. Maintainer ruling
+  // 2026-10-27 on the skills-lane decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6004],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -421,7 +431,27 @@ export const CEILINGS = new Map([
   // decision tables at 487 lines.
   // 5833 -> 5828: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-platform/SKILL.md', 5828],
+  // 5828 -> 5981 (card #26302, the objectstack-platform row of the skills gap
+  // audit): the Seed Data section gains `demoStaff` against `devLogins` — a
+  // seed deals records to people and cannot create one, so the people are
+  // declared in `demoStaff` and `os dev` creates the accounts (position and
+  // permission sets from the stack's own declarations, the seed password, never
+  // in the built artifact), while `devLogins` is banner text that creates and
+  // grants nothing. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, his tap verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」. Paid down first, as the
+  // ruling asks — four restatements cut, each with a surviving home in the
+  // file: the `defineStack()` intro (the opening paragraph and the project
+  // tree say it), the "read the source for the exact shape" paragraph (the
+  // References section keeps the rule; one pointer line stays), the boot
+  // sequence's "(see Ports & networking)" aside and the two cheat-sheet port
+  // comments (the Port resolution paragraph says both). Arithmetic in bytes:
+  // on `origin/main` the priced text was 23294 bytes (5824 tokens, headroom 4);
+  // the cuts remove 309 bytes and the section adds 939, so the LANDED priced
+  // text is 23924 bytes -> 5981 tokens: the 4 tokens of headroom are absorbed
+  // and the ceiling moves 5828 -> 5981 (+153). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23924 / 4)
+  ['skills/objectstack-platform/SKILL.md', 5981],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -531,7 +561,14 @@ export const CEILINGS = new Map([
   // 3778 -> 3676: RE-LOCK at the landed count (#19715, card item 4). A 5-line
   // table of contents (+154 tokens) landed inside the row's 256 tokens of
   // headroom, so no raise; pinned AT the measurement — zero headroom.
-  ['skills/objectstack-data/rules/relationships.md', 3676],
+  // 3676 -> 3873 (#26297): `sharing.controlledByParent.ownerMayEdit` — the
+  // owner of a controlled_by_parent detail row may update it by id with read
+  // access to the master; what it does not widen; refused off a detail and
+  // one level up — which the file did not teach beside `controlled_by_parent`.
+  // +201 tokens on a landed 3672, 4 absorbed by headroom, ceiling +197. No
+  // repeated passage to cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/rules/relationships.md', 3873],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -561,7 +598,18 @@ export const CEILINGS = new Map([
   // first (measured: no sentence repeats in the file). Maintainer ruling
   // 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/security.md', 2956],
+  // 2956 -> 3693 (#26297): membership keys (`membershipKeys` on the roster
+  // object — the three members, the refusals, the once-per-request system
+  // read that fails closed, and the choice rule against owner scoping, a
+  // position and a sharing rule), the position → `permissionSets` binding
+  // (a namesake set is reported, never granted) and the `external`
+  // membership tier for portal users (no baseline, explicit grants only) —
+  // none of which the file taught, so an author wrote per-row policies and
+  // expected a position-named set to grant itself. +737 tokens on a landed
+  // 2956 at headroom 0, ceiling +737. No repeated passage in the file to
+  // cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/rules/security.md', 3693],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -580,7 +628,17 @@ export const CEILINGS = new Map([
 
   // objectstack-query
   ['skills/objectstack-query/rules/aggregation.md', 2357],
-  ['skills/objectstack-query/rules/filters.md', 2149],
+  // 2149 -> 2482: the now-anchored comparand `{ $now: true, addDays }` — the
+  // shape, the one example (overdue by each record's own grace days, the
+  // offset column holding negative days), where it is accepted (the six scalar
+  // comparisons on a date / datetime field) and what is refused — which the
+  // file did not teach, so an author reached for a stored formula field and a
+  // hook. +334 tokens on a landed 2148, 1 absorbed by headroom, ceiling +333.
+  // Nothing duplicated in the file to cut first (measured: no passage of the
+  // file restates another). Maintainer ruling 2026-10-27 on the decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-query/rules/filters.md', 2482],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-automation
@@ -611,7 +669,12 @@ export const CEILINGS = new Map([
   // deleting one from this file. Independently reproducible without running
   // this script:
   //   ceil($(wc -c < skills/objectstack-ui/evals/analytics-inline-vs-dataset.json) / 4) == ceil(4915 / 4)
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1229],
+  // 1229 -> 1348 (#26295): one eval prompt for the `duration` measure, +119 tokens in the
+  // file's shape. An eval file is fixtures — nothing in it restates anything, so there was
+  // nothing to delete to fund it; the whole addition is raised, pinned AT the measurement.
+  // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1348],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts
@@ -621,19 +684,39 @@ export const CEILINGS = new Map([
   // the reassembly exposed (plus three cross-references the move killed) and
   // added nothing but five titles and five pointers,
   // so the package nets -58 (33,957 -> 33,899).
-  ['skills/objectstack-ui/rules/actions.md', 2108],
+  // 2108 -> 2151 (#26295): the 18.2 teaching an AI author of actions was missing — the
+  // `{{ }}` copy holes with their roots and refused shapes, and a flow action's `onSuccess`
+  // reading `${result.output.NAME}` — is +141 tokens. PAID DOWN FIRST by 91 tokens of genuine
+  // deletion in this file (five restatements of this file's own prose: the `openIn`
+  // priority sentence, the print-status clause that pages.md's Print pages carries, the
+  // params-callout remedy that restates the two mechanisms above it, the hooks-parity
+  // clause the paragraph's last sentence already states, one code comment restating the
+  // prose above it), then the row's 7 tokens of headroom absorb 7; the ceiling moves by the
+  // remaining 43 and is pinned AT the measurement — zero headroom. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/rules/actions.md', 2151],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
   // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
   // 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/dashboards.md', 6252],
+  // 6252 -> 6239 (#26295): LOWERED. The `duration` measure (+66 tokens, the time between two
+  // `datetime` fields of a record, which the escalation advice sent to a hook-kept number)
+  // is paid in full by deleting 78 tokens of restatement — the example's four-line comment
+  // that restated the Dataset-Bound Widgets section — so the file nets -12 and the ceiling
+  // follows it down to the new measurement, the ratchet's ordinary direction.
+  ['skills/objectstack-ui/rules/dashboards.md', 6239],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
   // Maintainer ruling 2026-09-22 on decision batch #213 item 1, verbatim and
   // untranslated: 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/list-views.md', 3141],
+  // 3141 -> 3129 (#26295): LOWERED. List-view `grouping.fields[]` and `orderBy` (+127 tokens;
+  // grouping was untaught, 0 hits) are paid in full by deleting 131 tokens of restatement —
+  // the paragraph restating the allowed-set table above it, and the related-record search
+  // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
+  // and the ceiling follows it down to the new measurement.
+  ['skills/objectstack-ui/rules/list-views.md', 3129],
   ['skills/objectstack-ui/rules/navigation.md', 2273],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
@@ -676,7 +759,13 @@ export const CEILINGS = new Map([
   // Independently reproducible without running this script:
   //   ceil($(wc -c < skills/objectstack-api/evals/endpoints-auth-routes.json) / 4) == ceil(4936 / 4)
   ['skills/objectstack-api/evals/endpoints-auth-routes.json', 1234],
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1255],
+  // 1255 -> 1823 (card #26298): three eval prompts, one per new teaching — the
+  // applicant email over `{ emailField }`, `requiredPermissions` + `excludeSubmitter`
+  // on one approval, the screen `file` field written by a later `create_record`.
+  // +568 tokens, nothing in the file to delete, zero headroom, ceiling +568.
+  // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
+  // untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1823],
   // 894 -> 1095 (#26179): one regression case for the field permission `when`
   // (the contract prompt: lock the legal terms for finance from approval on,
   // legal keeps the edit) — expected: `when` on the finance set's entries with
@@ -685,13 +774,57 @@ export const CEILINGS = new Map([
   // ceiling +201; nothing duplicated in the file to cut first. Same ruling as
   // the `rules/security.md` row above (2026-10-27, tap A:
   // 「A:先削重复,余额按实测提高」).
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1095],
-  ['skills/objectstack-data/evals/objects-fields-relationships.json', 946],
+  // 1095 -> 1404 (#26297): one regression case for the portal membership key
+  // (a portal user reads only the rows of the accounts they belong to —
+  // expected: `membershipKeys` on the roster object, `current_user.KEY` in the
+  // policy, the set bound through a position's `permissionSets`, the
+  // `external` tier), and the seed case gains the job-owned column declared
+  // `applyOn: 'create'`. +309 tokens at headroom 0, ceiling +309; nothing
+  // duplicated in the file to cut first. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1404],
+  // 946 -> 1050 (#26297): the invoice-line case gains the owner opt-in
+  // (`ownerMayEdit` on the controlled_by_parent line) and pins `added_by` as
+  // `type: 'user'`, never a lookup to a `user` object. +104 tokens at
+  // headroom 0, ceiling +104; nothing duplicated in the file to cut first.
+  // Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/evals/objects-fields-relationships.json', 1050],
   ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1004],
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1211],
-  ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1505],
+  // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
+  // audit): two eval prompts for the teaching that card adds — the `reports`,
+  // `positions`, `permissions` and `picklists` groups; a form view `title`, a
+  // section entry's own copy, a `page:tabs` item, an approval step. Maintainer
+  // ruling on the seat thread's decision card 「skills 修复卡的教学和 eval 都撞
+  // token 天花板,怎么付?」, tap label verbatim and untranslated:
+  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: the file carried no duplicated
+  // content to delete (five prompts, five distinct surfaces), so the remainder
+  // is the whole addition; pinned AT the measurement, zero headroom. The
+  // raising PR's body carries the same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
+  // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
+  // expected: both in `demoStaff` with a declared `position` /
+  // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
+  // set such as `admin_full_access`. Same ruling as the `SKILL.md` row above
+  // (2026-10-27, tap A: 「A:先削重复,余额按实测提高」); the file's six fixtures
+  // share no sentence, so there was no duplicate to cut (0 bytes). On
+  // `origin/main` the file was 4842 bytes (1211 tokens, headroom 0); the
+  // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
+  // ceiling +247, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1458],
+  // 955 -> 1175: one regression case for the now-anchored comparand (the
+  // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
+  // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored
+  // formula field or `subDays`. +220 tokens, zero headroom to absorb any of
+  // it, ceiling +220; nothing duplicated in the file to cut first. Same ruling
+  // as the `rules/filters.md` row above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  ['skills/objectstack-query/evals/filters-pagination-search.json', 1175],
+  // 1505 -> 1789 (#26295): two eval prompts — list grouping with `orderBy`, and the copy hole
+  // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the
+  // whole addition raised and pinned AT the measurement. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
+  // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1789],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes
@@ -706,10 +839,29 @@ export const CEILINGS = new Map([
   // because a split that arrives with budget is a raise wearing a new path.
   // The package deltas are the pointer lines and the four new file titles only.
   ['skills/objectstack-automation/references/examples-flows.md', 1436],
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5569],
-  ['skills/objectstack-data/references/examples-objects.md', 1779],
+  // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
+  // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
+  // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
+  // section's "Conditional step" and "Roll back on reject" / "Hard reject"
+  // bullets and were deleted (~73 tokens). Landed 5555 -> 5587: +32 net, 14
+  // absorbed by headroom, ceiling +18. Same maintainer ruling as the SKILL.md
+  // row above (2026-10-27, verbatim and untranslated): 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5587],
+  // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
+  // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
+  // not exist) became `type: 'user'`; -10 tokens, the row follows the
+  // measurement down, zero headroom.
+  ['skills/objectstack-data/references/examples-objects.md', 1769],
   ['skills/objectstack-data/references/lint-rules.md', 970],
-  ['skills/objectstack-data/references/seeds.md', 1299],
+  // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
+  // — a column a job or an admin owns after the first load is written on
+  // create and left alone on every `upsert` replay; which modes it touches,
+  // the refused key, the cross-link to the import door's `applyOn` — which
+  // the option table lacked, so a replay reverted the app's own writes. +267
+  // tokens at headroom 0, ceiling +267. No repeated passage to cut first
+  // (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
+  // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
   ['skills/objectstack-platform/references/operations.md', 3125],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],

@@ -148,7 +148,7 @@ required" refusal below rather than a map.
 | `descriptionField` | Field shown under the title in the marker popup. |
 | `zoom` | Zoom level. Declaring it opts this view out of the auto-fit (see below). |
 | `center` | `[latitude, longitude]` — a two-number **tuple**, latitude first. Declaring it opts this view out of the auto-fit. |
-| `style` | MapLibre style URL/spec, replacing the default public demo style. The node-level `mapStyle` is read before it, so it applies when `mapStyle` is absent. |
+| `style` | MapLibre style URL/spec, replacing the deployment's default style and the public demo style (see "Which style draws"). The node-level `mapStyle` is read before it, so it applies when `mapStyle` is absent. |
 
 **Nothing is guessed — an unbound map REFUSES.** A map with no coordinate binding
 renders
@@ -173,9 +173,26 @@ takes its title from the record-title precedence above.
 
 | Key | Description |
 | --- | --- |
-| `mapStyle` | MapLibre style URL or spec, replacing the demo tiles. Read before `map.style`, so it wins when both are written. Not the node's base `style`, which is an inline CSS record. |
+| `mapStyle` | MapLibre style URL or spec, replacing the deployment's default style and the demo tiles. Read before `map.style`, so it wins when both are written. Not the node's base `style`, which is an inline CSS record. |
 | `enableClustering` | `true` groups nearby markers into numbered clusters. Absent, the map clusters only above 100 markers; `false` turns clustering off at any count. |
 | `navigation` | What a marker click opens — the spec's `NavigationConfig`. `drawer`, `modal` and `popover` open the marker's record; `new_window` (or `openNewTab: true`, which outranks every mode except `none`) opens the record page in a new tab; `preventNavigation: true` opens nothing. An absent key, `none` and `split` open nothing (the map hands the split shell no main panel). `page`, and a block without `mode` (the spec's `page` default), open the record page of the map's `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, or on a map that names no `objectName`, the click opens nothing. A parent view's click handler outranks the whole key. |
+
+## Which style draws
+
+A map draws the first style it finds, in this order:
+
+1. the view's own style: the node-level `mapStyle`, then `map.style`;
+2. the deployment's default style, which the host hands down through
+   `HostMapStyleProvider` from `@object-ui/react`. The Console supplies the
+   operator's `OS_CONSOLE_MAP_STYLE_URL`, served as `mapStyleUrl` on
+   `GET /api/v1/runtime/config`;
+3. the public MapLibre demo style (`https://demotiles.maplibre.org/style.json`),
+   which is rate-limited and not meant for production traffic.
+
+A host that provides no style, such as an embedded renderer or a Console whose
+operator set none, keeps the demo style. When the style that drew fails to load,
+the map is replaced by its record list, and the notice names that style: the
+view's own, the deployment's or the public default.
 
 ## Initial camera
 

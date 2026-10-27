@@ -130,18 +130,17 @@ jobs:
             .github
 
       # Pinned to the same major and spelling as every other setup-node in this
-      # repo, and it keeps its literal `node-version` (rather than
-      # `node-version-file`) for the measured reason the Part-of Closing-Keyword
-      # Guard records: `actions/setup-node@v5`+ defaults
-      # `package-manager-cache: true`, which shells out to pnpm and hard-errors
-      # before any `run:` line when pnpm is not yet on PATH. This job now DOES
-      # acquire pnpm, but strictly after this step — the same order lint.yml has
-      # been green on for months — so nothing here may start depending on pnpm
-      # existing yet.
+      # repo, reading `.nvmrc` like `.github/actions/setup-workspace` does. The
+      # Part-of Closing-Keyword Guard records why `node-version-file` once died
+      # here: `actions/setup-node@v5` defaulted `package-manager-cache: true`,
+      # which shells out to pnpm and hard-errors when pnpm is not yet on PATH.
+      # That guard runs this same v7 with `node-version-file` and no pnpm at
+      # all, green. This job DOES acquire pnpm, but strictly after this step,
+      # so nothing here may start depending on pnpm existing yet.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # The self-test runs FIRST and in its own step, because it is the
       # precondition for trusting the run after it: this guard's predicates
@@ -232,11 +231,16 @@ jobs:
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
-      # Deliberately the same key as lint.yml's: one store, one entry, and this
-      # job is a cache READER in the steady state rather than a second writer.
-      - name: Setup pnpm cache
+      # Deliberately the same key as `.github/actions/setup-workspace`'s: one
+      # store, one entry. This job only READS it -- it runs on `pull_request`
+      # and `merge_group` alone, and no run on either event saves the store.
+      # The chain stays spelled out here rather than calling that composite:
+      # `check-governed-queue-guard.mjs --self-test` pins every toolchain step
+      # one by one, each gated on the question above and each degrading on
+      # its own.
+      - name: Restore pnpm cache
         if: steps.toolchain.outputs.needed != 'false'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         continue-on-error: true
         with:
           path: ${{ env.STORE_PATH }}

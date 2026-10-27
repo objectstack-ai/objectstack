@@ -255,6 +255,7 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
         "$TURBO_ROOT$/scripts/nightly-tiers.d.mts",
+        "$TURBO_ROOT$/tsconfig.base.json",
         "$TURBO_ROOT$/packages/verify/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
         "$TURBO_ROOT$/packages/services/service-cluster/src/**",

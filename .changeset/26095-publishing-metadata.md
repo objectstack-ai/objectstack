@@ -71,7 +71,8 @@
 '@objectstack/trigger-schedule': patch
 '@objectstack/types': patch
 '@objectstack/verify': patch
-'create-objectstack': patch---
+'create-objectstack': patch
+---
 
 chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
 

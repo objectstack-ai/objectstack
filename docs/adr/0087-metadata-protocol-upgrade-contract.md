@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-26, #25767 ruling D2 = A — a retirement kit (tombstone, `RETIRED_KEYS`/`RETIRED_DEFS` rows, semantic entry, conversion) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide, and the chain's support floor rises to match; see the 2026-10-26 addendum, which also amends the "never deleted" / "permanent" / "forever" wording in D2, D3, the consequences and the 2026-07-31, 2026-08-01 and 2026-09-13 addenda)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A — a retirement kit (tombstone, `RETIRED_KEYS`/`RETIRED_DEFS` rows, semantic entry, conversion) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide, and the chain's support floor rises to match; see the 2026-10-26 addendum, which also amends the "never deleted" / "permanent" / "forever" wording in D2, D3, the consequences and the 2026-07-31, 2026-08-01 and 2026-09-13 addenda)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -944,6 +944,45 @@ checks all four by name (`published`, `no-spec-diff`, `no-metadata-surface-diff`
    never guessed at: a reference that silently landed on the wrong same-named member
    would be writable but wrong, which is worse than the refusal it replaces.
 
+   > **Amended 2026-10-27 (#26220) — predicate 4 reads an `any` INDEX SIGNATURE.**
+   > Provenance: the maintainer's decision A on the combined D8 + D9 question of
+   > #26220, recorded on the card as claim amendment `6433464805` (2026-10-27T04:03Z).
+   > The class it admits: a published interface whose declared members stay as they
+   > were while its index signature moves off `any`. Measured on #26293:
+   > `ui/packages/types/src/base.ts#ComponentRendererProps` is
+   > `{ schema: TSchema; [key: string]: any; }` at the merge base and
+   > `{ schema: TSchema; [key: string]: unknown; }` at HEAD. Every forwarded key was
+   > readable as anything and now has to be narrowed first, so a consumer's code can stop
+   > compiling, and nothing reaches `objectstack migrate meta`. Read as written above,
+   > predicate 4 refuses it twice over: the interface is a named structural declaration,
+   > concrete at base by construction, and `unknown` at HEAD counts as erased.
+   >
+   > For a bare `<path>#<Symbol>` naming an exported `interface`, or an exported `type`
+   > alias whose right-hand side is an object type literal, predicate 4 **also** holds
+   > when all three of these hold:
+   >
+   > 1. at the merge base the declared member surface carries at least one index
+   >    signature whose value type is `any`;
+   > 2. at HEAD at least one of those index signatures carries a value type other than
+   >    `any`. Here `unknown` **counts as narrowed**: through an index signature `any`
+   >    admits every read and `unknown` admits none, which is exactly the break this
+   >    category exists for. The whole-symbol reading above is unchanged, and there
+   >    `unknown` stays erased;
+   > 3. everything else is identical at both revs: the declaration's heritage (its
+   >    `extends` clause, its type parameters) and every member, compared member by
+   >    member on the comment-masked, whitespace-normalised surface, with only the value
+   >    types of the index signatures set aside. A member added, removed, renamed,
+   >    re-typed or made optional fails this limb.
+   >
+   > **Why this is not a weakening.** The #6048 shape, a concretely typed interface that
+   > LOST a member, fails condition 3 and is refused by predicate 4 exactly as before,
+   > with the same founding-case refusal. The regression pin below keeps asserting it.
+   > The limb admits only a surface whose sole change is that an index signature moved
+   > off `any`. That is the same base-side reading predicate 4 always made, applied to the
+   > one member that can be erased while the declaration around it is concrete. A dotted
+   > member path keeps reading a member's return annotation alone; the limb does not
+   > apply to it.
+
 ### ⭐ Predicate 4 is what makes this a narrowing rather than a hole
 
 This is the **only** category exempt from the `no-migration-prescription` refusal.
@@ -1078,6 +1117,29 @@ not assumed, the same way: an `export *` the reader cannot follow refuses an abs
 claim at HEAD (a name could sit behind it), and so does a type whose member set at
 HEAD depends on something the reader cannot resolve. A re-export of another workspace
 package's root entry is followed through the same mapping.
+
+> **Amended 2026-10-27 (#26220) — the source entry may be `src/index.tsx`.**
+> Provenance: the maintainer's decision A on the combined D8 + D9 question of #26220,
+> recorded on the card as claim amendment `6433464805` (2026-10-27T04:03Z). The mapping
+> pinned above reads only `src/index.ts`. The `ui/` packages build their declaration
+> entry with vite-plugin-dts (`insertTypesEntry`, `include: ['src']`) from
+> `src/index.tsx`. Measured at `83e9d718`, 21 of the 38 published `ui/` packages have that
+> entry, and all 21 name `./dist/index.d.ts` as their types entry, so a
+> `runtime-export-retired` operand on any of them was refused at predicate 1 as
+> unmappable. The plugin-ai retirement of #25921 (PR #26365) is the first such case.
+> `@objectstack/client-react`, named above as unmappable, is the same shape under tsup
+> (`tsup src/index.tsx`).
+>
+> The mapping is now: the declaration entry the `exports` map names (`dist/index.d.ts`, or
+> its `.d.mts` / `.d.cts` twin) is generated from the package's **one** source entry,
+> `src/index.ts` **or** `src/index.tsx`. A package carrying both is refused as ambiguous
+> (none does at `83e9d718`), and a package carrying neither is refused as unmappable,
+> loudly and by name as before. Nothing else about predicate 1 changes. The compiler
+> reads the `.tsx` entry and every `.tsx` module behind it with JSX enabled. #26319 made
+> the reader resolve `.tsx` modules for predicate 2, and an entry that is itself `.tsx` is
+> read the same way. The build tool is never asked: the source file's name is the
+> fact the gate reads, and a build that generates `dist/index.d.ts` from some other file
+> stays unmappable.
 
 **The deviation accepted with the ruling.** A merge base has no build output (`dist/`
 is gitignored), so predicate 1 compiles the **source** entry that generates the

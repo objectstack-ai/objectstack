@@ -9,10 +9,10 @@
  * computed by the reader the authorization resolver enforces with. This file
  * renders them and computes neither.
  *
- *  - `_grantedPermissionSets` is `[{ name, via }]`. `via: 'name'` is the set
- *    that shares the position's name, which the position-name fold grants
- *    though the definition does not list it (objectstack#24757). It is marked,
- *    never hidden: it is in force.
+ *  - `_grantedPermissionSets` is `[{ name, via }]`, each `via: 'definition'`:
+ *    the sets the position's definition names. A set that only shares the
+ *    position's name is not granted, so the server never lists it
+ *    (objectstack#24757, objectstack#26022).
  *  - `_holderCount` is a number, or `null` when the server serves no count
  *    (no active organization, a caller who may not read the assignments, a
  *    derived position). `null` and an absent key both read "—", ⛔ never 0: a
@@ -26,7 +26,7 @@ import { t, useMetadataLocale } from './i18n.js';
 /** One entry of the served `_grantedPermissionSets`. */
 export interface PositionGrantedSet {
   name: string;
-  via: 'definition' | 'name';
+  via: 'definition';
 }
 
 function readGrantedSets(value: unknown): PositionGrantedSet[] | undefined {
@@ -34,7 +34,7 @@ function readGrantedSets(value: unknown): PositionGrantedSet[] | undefined {
   return value.filter(
     (v): v is PositionGrantedSet =>
       !!v && typeof v === 'object' && typeof (v as PositionGrantedSet).name === 'string'
-      && ((v as PositionGrantedSet).via === 'definition' || (v as PositionGrantedSet).via === 'name'),
+      && (v as PositionGrantedSet).via === 'definition',
   );
 }
 
@@ -75,14 +75,8 @@ export function PositionGrantedSetsCell({ value }: { value: unknown }): React.Re
           variant="outline"
           className="font-mono text-[11px] font-normal"
           data-via={set.via}
-          title={set.via === 'name' ? t('engine.position.grants.byNameHint', locale) : undefined}
         >
           {set.name}
-          {set.via === 'name' && (
-            <span className="ml-1 font-sans text-muted-foreground">
-              {t('engine.position.grants.byName', locale)}
-            </span>
-          )}
         </Badge>
       ))}
     </span>
