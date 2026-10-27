@@ -104,7 +104,7 @@
           "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveHookRefusal (the refusal carries the declared `status`, else 400; the status the body set on its own throw is not read)"
         }
       },
-      "note": "[#26170, maintainer ruling 6431311681 letter A] Seeded `live` together with its reader: the key, the body runner that answers it, the translation group and the coverage count land in one change (Prime Directive 10). Read on the sandboxed `body` path only; an in-process `handler` is answered as before (the build lowers an inline handler to a `body`, which is the path a served runtime runs). An error a host call raised and the body let through unchanged, a nested hook's refusal, a crash and a sandbox fault pass through untouched. DRILLED to the entry's two keys: the entry face is closed (`.strict()`)."
+      "note": "[#26170, maintainer ruling 6431311681 letter A] Seeded `live` together with its reader: the key, the body runner that answers it, the translation group and the coverage count land in one change (Prime Directive 10). Read on the sandboxed `body` path only, so the schema refuses `refusals` on a hook with no `js` body (an in-process `handler`, an expression body): a catalogue nothing would answer is never saved. An error a host call raised and the body let through unchanged, a nested hook's refusal, a crash and a sandbox fault pass through untouched. DRILLED to the entry's two keys: the entry face is closed (`.strict()`)."
     },
     "label": {
       "status": "live",

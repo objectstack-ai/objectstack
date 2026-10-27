@@ -181,6 +181,33 @@ export function undeclaredHookRefusalCodeAtSave(code: string, declared: readonly
 }
 
 /**
+ * A refusal message with no `{{ … }}` hole. Nothing fills one today (a declared
+ * message is plain text, translated whole), so a hole is refused at save: a
+ * later params slot then stays a widening instead of re-reading text authors
+ * already saved with braces in it. A pattern, not a refinement, so the
+ * published JSON Schema refuses the same text.
+ */
+export const HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE = /^(?![\s\S]*\{\{[^{}]*\}\})[\s\S]*$/;
+
+/** The save-time refusal for a `{{ … }}` hole in a refusal message. */
+export const HOOK_REFUSAL_MESSAGE_HOLE_REFUSED =
+  'A hook refusal `message` is plain text and nothing fills a `{{ }}` hole: the caller would read the braces as '
+  + 'written. Write the sentence without the hole (a refusal carries no parameters yet).';
+
+/**
+ * The save-time refusal for a catalogue on a hook with no sandboxed `js` body:
+ * the catalogue is answered only on that path.
+ */
+export function hookRefusalsWithoutSandboxedBody(language: string | undefined): string {
+  const has = language === undefined ? 'no `body`' : `a \`${language}\` body`;
+  return (
+    `\`refusals\` is answered only for a sandboxed \`body\` (\`language: 'js'\`), and this hook has ${has}: `
+    + 'an in-process `handler` or an expression body would never serve the catalogue, while `os i18n` still '
+    + 'demanded its translations. Give the hook a `js` body that throws the declared codes, or drop `refusals`.'
+  );
+}
+
+/**
  * The run-time refusal for a body throw the catalogue cannot answer: a code it
  * does not declare, or no code at all. Fault text, for the server log and the
  * author: it names the hook and the code and says how to fix it.

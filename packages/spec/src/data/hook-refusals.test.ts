@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { HookSchema, HookRefusalSchema, HookContextSchema } from './hook.zod';
 import {
   HOOK_REFUSAL_CODE_PATTERN,
+  HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
   hookRefusalCodesThrownIn,
+  hookRefusalsWithoutSandboxedBody,
   undeclaredHookRefusalAtRun,
   undeclaredHookRefusalCodeAtSave,
 } from './hook-refusal-codes';
@@ -36,13 +38,40 @@ describe('Hook.refusals — the declared catalogue', () => {
   });
 
   it('refuses a code that is not SCREAMING_SNAKE', () => {
-    const r = HookSchema.safeParse({ ...base, handler: 'h', refusals: { creditLimit: { message: 'x' } } });
+    const r = HookSchema.safeParse({ ...base, body: body('return;'), refusals: { creditLimit: { message: 'x' } } });
     expect(r.success).toBe(false);
     expect(r.error!.issues.some((i) => i.path[0] === 'refusals')).toBe(true);
   });
 
   it('refuses an empty message', () => {
-    expect(HookSchema.safeParse({ ...base, handler: 'h', refusals: { NO: { message: '  ' } } }).success).toBe(false);
+    expect(HookSchema.safeParse({ ...base, body: body('return;'), refusals: { NO: { message: '  ' } } }).success).toBe(false);
+  });
+
+  it.each([
+    ['an in-process `handler`', { handler: 'creditGuard' }, 'no `body`'],
+    ['an expression body', { body: { language: 'expression', source: 'record.amount > 0' } }, 'a `expression` body'],
+  ])('refuses a catalogue on a hook with %s — nothing would answer it', (_label, rest, has) => {
+    const r = HookSchema.safeParse({ ...base, ...rest, refusals: { CREDIT_LIMIT: { message: 'x' } } });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'refusals')!;
+    expect(issue.message).toBe(hookRefusalsWithoutSandboxedBody(has === 'no `body`' ? undefined : 'expression'));
+    expect(issue.message).toContain(has);
+  });
+
+  it.each(['Over the limit of {{limit}}.', 'Hi {{ user.name }}, no.', 'Line one.\nOver {{limit}}.'])(
+    'refuses a `{{ }}` hole in %j — nothing fills it, and a params slot stays additive',
+    (message) => {
+      const r = HookSchema.safeParse({ ...base, body: body('return;'), refusals: { CREDIT_LIMIT: { message } } });
+      expect(r.success).toBe(false);
+      const issue = r.error!.issues.find((i) => i.path.join('.') === 'refusals.CREDIT_LIMIT.message')!;
+      expect(issue.message).toBe(HOOK_REFUSAL_MESSAGE_HOLE_REFUSED);
+    },
+  );
+
+  it('accepts single braces and an unclosed pair as plain text', () => {
+    for (const message of ['Use {x} here.', 'An open {{ brace.']) {
+      expect(HookRefusalSchema.safeParse({ message }).success, message).toBe(true);
+    }
   });
 
   it.each([399, 500, 503, 404.5])('refuses status %s — a refusal is a 4xx', (status) => {

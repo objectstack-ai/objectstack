@@ -953,11 +953,12 @@ body: { language: 'js', source: `
 ` },
 ```
 
-- Codes are SCREAMING_SNAKE; the error envelope carries one as `declaredCode`.
-- The plain-text message is translated via `hooks.<hook>.refusals.<CODE>.message`
-  in the caller's locale; the body's own error text and `status` are not used.
+- Codes are SCREAMING_SNAKE; the envelope carries one as `declaredCode`.
+- Refused at save without a `js` body (e.g. a bare `handler`).
+- The message is plain text (a `{{ }}` hole is refused), translated via
+  `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
 - An undeclared code, or none, is refused: at save if thrown literally, else as
-  a `500` fault. Unchanged `ctx.api` errors and crashes pass through.
+  a `500`. Unchanged `ctx.api` errors and crashes pass through.
 
 ---
 

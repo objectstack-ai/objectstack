@@ -30,7 +30,10 @@ import type { IScopedContext } from '../contracts/scoped-context';
 // reads too, so this schema's import graph is unchanged.
 import {
   HOOK_REFUSAL_CODE_PATTERN,
+  HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
+  HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
   hookRefusalCodesThrownIn,
+  hookRefusalsWithoutSandboxedBody,
   undeclaredHookRefusalCodeAtSave,
 } from './hook-refusal-codes';
 
@@ -208,19 +211,30 @@ function refuseElevatedIdentityAssignmentBodyWrite(
  * author meets the refusal before any write does. One issue per code, at
  * `body.source`. A code that arrives any other way is the run-time refusal's.
  *
+ * A catalogue is answered only on the sandboxed `body` path, so `refusals` on
+ * a hook with no `js` body — an in-process `handler`, or an `expression` body
+ * that cannot throw a code — is refused at `refusals`: the catalogue would be
+ * demanded by `os i18n` and served by nobody.
+ *
  * A hook that declares no `refusals` is untouched: its body's throws are
  * answered as they always were.
  */
 
 /**
- * The object-level check that refuses a code a hook's sandboxed body throws
- * literally and its `refusals` does not declare. See the block above.
+ * The object-level check that refuses a catalogue nothing would answer, and a
+ * code a hook's sandboxed body throws literally that its `refusals` does not
+ * declare. See the block above.
  */
 function refuseUndeclaredLiteralRefusalCode(
   hook: { refusals?: Record<string, unknown>; body?: { language?: string; source?: unknown } },
   ctx: z.RefinementCtx,
 ): void {
-  if (!hook.refusals || hook.body?.language !== 'js' || typeof hook.body.source !== 'string') return;
+  if (!hook.refusals) return;
+  if (hook.body?.language !== 'js') {
+    ctx.addIssue({ code: 'custom', path: ['refusals'], message: hookRefusalsWithoutSandboxedBody(hook.body?.language) });
+    return;
+  }
+  if (typeof hook.body.source !== 'string') return;
   const declared = Object.keys(hook.refusals);
   for (const code of hookRefusalCodesThrownIn(hook.body.source)) {
     if (Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
@@ -240,7 +254,7 @@ function refuseUndeclaredLiteralRefusalCode(
  * The message is plain text, handed over verbatim in the source locale and
  * replaced whole by its translation, `hooks.<hook>.refusals.<CODE>.message` —
  * the validation-rule message's posture (`objects.<object>._validations.<rule>.message`):
- * an authored refusal has no parameter contract, so no `{{ }}` hole is filled.
+ * an authored refusal has no parameter contract, so a `{{ }}` hole is refused at save.
  */
 export const HookRefusalSchema = lazySchema(() => strictObject(
   {
@@ -256,9 +270,9 @@ export const HookRefusalSchema = lazySchema(() => strictObject(
     },
   },
   {
-    message: z.string().trim().min(1).describe(
+    message: z.string().trim().min(1).regex(HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE, HOOK_REFUSAL_MESSAGE_HOLE_REFUSED).describe(
       'The sentence the user reads when the body throws this code — plain text in the source locale, translated '
-      + 'whole through hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; no {{ }} holes are filled',
+      + 'whole through hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; a {{ }} hole is refused',
     ),
     status: z.number().int().min(400).max(499).optional().describe(
       'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
@@ -598,7 +612,7 @@ export const HookSchema = lazySchema(() => strictObject(
    *
    * Keyed by hook name, not by object: one hook bound to several objects, or
    * to `'*'`, owns one catalogue and one translation per code. Read by the
-   * sandboxed `body` runner; an in-process `handler` is answered as before.
+   * sandboxed `body` runner only, so it is refused on a hook with no `js` body.
    * Absent: the hook's throws are answered as they always were.
    */
   refusals: z.record(

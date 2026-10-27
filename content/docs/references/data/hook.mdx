@@ -84,7 +84,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; no `{{ }}` holes are filled |
+| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
 | **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
 
 
@@ -179,7 +179,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; no `{{ }}` holes are filled |
+| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
 | **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
 
 
