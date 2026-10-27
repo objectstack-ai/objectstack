@@ -420,7 +420,28 @@ export const CEILINGS = new Map([
   // the measurement. Maintainer ruling 2026-10-27 on the seat's decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/SKILL.md', 6358],
+  // 25429 -> 25864 (#26756): the `screen` node row says Next / Submit and
+  // "Step N of M" are engine-served, never authored — when a screen pauses
+  // the engine reads the graph and serves `progress` (`nextScreen` `none` /
+  // `possible` / `certain`; `step` / `stepCount` only when every path
+  // agrees), a `decision`, `fault` edge, loop back, non-screen pause or
+  // `subflow` after a screen answers `possible` ("Next", no count), a
+  // `progress` key in the node config is refused, and a hand-rolled label or
+  // counter in `fields` is wrong. Paid down first, three restatements each
+  // with a surviving home: the Filter-operands bullet's "every other `{…}`
+  // token is refused" (Valid-but-silently-wrong item 1 lists every CRUD
+  // `filter` operand, -42 bytes); the Trigger Configuration lead-in "The
+  // binding is the START NODE" (the Triggers intro says the binding lives on
+  // the start node `config`, -23 bytes); item 3's "; flow functions don't"
+  // (its own bold lead says a flow function does not read or write the
+  // database, -22 bytes), plus the trimmed bullet's re-wrap indentation (-2
+  // bytes of whitespace). Arithmetic in priced bytes (stamp line excluded):
+  // 25429 -> 25864 (+524 added, -89 cut, +435 net) -> ceil(25864 / 4) =
+  // 6466; headroom was 3 bytes, 0 tokens, so the ceiling moves +108, pinned
+  // AT the measurement. Maintainer ruling 2026-10-27 on the seat's decision
+  // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6466],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -882,7 +903,18 @@ export const CEILINGS = new Map([
   // Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/evals/objects-fields-relationships.json', 1050],
-  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1046],
+  // 1046 -> 1352 (card #26760): two eval cases for the `label(record.FIELD)`
+  // teaching — case 6 asks for a record name built from a select field and
+  // expects `label(record.kind)`, never a hard-coded label ternary; case 7
+  // asks for a validation and a `visibleWhen` and refuses `label(` there,
+  // where it faults and aborts the write. Maintainer ruling 2026-10-27 on the
+  // decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A,
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST:
+  // four sentences in cases 1, 2, 3 and 5 that restated their own
+  // `must_not_contain` assertions, 212 bytes = 53 units (1046 -> 993); the two
+  // cases add 1438 bytes = 359 units (993 -> 1352); pinned AT the measurement,
+  // zero headroom. The raising PR's body carries the same arithmetic.
+  ['skills/objectstack-formula/evals/cel-predicates-formulas.json', 1352],
   // 1004 -> 1451 (2026-10-27, the objectstack-i18n fix card of the skills gap
   // audit): two eval prompts for the teaching that card adds — the `reports`,
   // `positions`, `permissions` and `picklists` groups; a form view `title`, a

@@ -26,6 +26,7 @@
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   recordCarriesDesignJudgment  whether a face's record carries item ④, the full review's design judgment
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
+ *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
@@ -796,6 +797,103 @@ export function localRunsStand(reading) {
   return reading?.state === 'missing' || reading?.state === 'read';
 }
 
+/**
+ * The `Contract-review-handoff:` key line -- the ONE way a dispatching seat
+ * hands its contract review to the triage seat, read with `Reviewed-by:`'s own
+ * key discipline.
+ *
+ * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
+ * 〈复核归属与资格〉, and the triage duties' round step): the seat that
+ * dispatched the work runs the review at the contract-review tier. ONLY when
+ * that tier's call is quota-refused does the seat hand the review over -- it
+ * never reviews at a lower tier -- and the hand-off is one PR comment carrying
+ * this line beside the existing `needs:contract-review` label:
+ *
+ *   Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
+ *
+ * Three facts, each required: the TARGET (`triage`, the closed set of one), the
+ * TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
+ * spells it, ⛔ never a model id -- with its reason and UTC time in the
+ * parentheses, and the HEAD the hand-off is for, 7 to 40 hex. A line missing
+ * any of them is started-and-unreadable: a hand-off nobody can date, or one
+ * that names no head, is the ambiguity this line exists to remove.
+ *
+ * ⛔ No gate reads it. The queue guard keeps reading the ONE `## Contract
+ * review` record; this line decides only WHO renders that record, and the
+ * triage seat's record is the same shape, `Reviewed-by:` naming the triage
+ * seat. `contractReviewHandoff` below is the reading a seat or patrol takes.
+ */
+export const CONTRACT_REVIEW_HANDOFF_KEY = 'Contract-review-handoff';
+const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
+/** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
+const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
+/** `triage`, a separator (an em dash, a hyphen pair, a hyphen or a colon), then the rest. */
+const HANDOFF_TARGET = /^triage\b[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+/** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
+const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
+
+/**
+ * What one comment declares as a hand-off of its contract review.
+ *
+ * @returns {{ state: 'missing' }
+ *          | { state: 'unreadable', line: string }
+ *          | { state: 'read', to: 'triage', tier: string, reason: string, at: string, head: string }}
+ */
+export function readContractReviewHandoff(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = CONTRACT_REVIEW_HANDOFF_LINE.exec(line);
+    if (!m) continue;
+    const unreadable = { state: 'unreadable', line: quoteLine(line) };
+    const target = HANDOFF_TARGET.exec(stripValueDecoration(m[1]).replace(/(?:[ \t]|\*\*|`)+$/, ''));
+    if (!target) return unreadable;
+    // The tier is read by NAME, through the one token reader `Served-tier:` uses, so a model id
+    // written here is refused for the same reason it is refused there.
+    const named = stripValueDecoration(target[1]);
+    const tier = TIER_TOKEN.exec(named);
+    if (!tier || tier[1] !== CONTRACT_REVIEW_TIER_NAME) return unreadable;
+    const rest = stripValueDecoration(named.slice(tier[0].length));
+    const tail = /^unavailable\b[ \t]*(.*)$/i.exec(rest);
+    const parts = tail ? HANDOFF_TAIL.exec(tail[1].trim()) : null;
+    if (!parts || parts[1].trim() === '') return unreadable;
+    return { state: 'read', to: 'triage', tier: tier[1], reason: parts[1].trim(), at: parts[2].trim(), head: parts[3] };
+  }
+  return { state: 'missing' };
+}
+
+/**
+ * Whose review this pull request's contract review is, read off its comment thread:
+ *
+ *   absent    no hand-off line on any comment -- the dispatching seat's own review; a
+ *             `needs:contract-review` label alone changes nothing here, and triage does not touch it
+ *   triage    the NEWEST hand-off line names the current head -- the triage seat renders the record
+ *   stale     the newest hand-off line names an earlier head -- the head moved past the hand-off, so
+ *             it needs a fresh line or the seat's own review; triage does not act on it
+ *   unreadable  the thread or the head could not be read, or the newest hand-off line cannot be graded
+ *
+ * Newest governs, chosen by `latestMarkedComment` -- the one resolution this file's locator uses --
+ * and the head is matched by PREFIX, as `contractReviewHeadMatch` matches a record's span, so the
+ * abbreviated and the full spelling answer alike.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
+ * @param {string} headSha  the pull request's current head
+ */
+export function contractReviewHandoff(rows, headSha) {
+  const gaps = [];
+  if (!Array.isArray(rows)) gaps.push("the pull request's comment thread");
+  const head = String(headSha ?? '').toLowerCase();
+  if (head.length < H51_SHA_MIN_HEX) gaps.push("the pull request's head sha");
+  if (gaps.length > 0) return { state: 'unreadable', gaps };
+  const newest = latestMarkedComment(rows, CONTRACT_REVIEW_HANDOFF_MARKER);
+  if (!newest) return { state: 'absent', read: rows.length };
+  const row = rows[newest.index];
+  const line = readContractReviewHandoff(row?.body);
+  const stamp = { id: row?.id ?? null, at: row?.created_at ?? null };
+  if (line.state !== 'read') return { state: 'unreadable', gaps: [`the newest hand-off line (comment ${stamp.id ?? '?'}) cannot be read: ${line.line ?? 'no line'}`], ...stamp };
+  // PREFIX either way, as `regenChainToHead` meets two spellings of one commit: the line may abbreviate the head.
+  const current = shaMeets(head, line.head.toLowerCase());
+  return { state: current ? 'triage' : 'stale', head: line.head, reason: line.reason, handedAt: line.at, ...stamp };
+}
+
 // ---------------------------------------------------------------------------
 // The record TEMPLATE — the one machine-read artefact with nothing to copy (#18042)
 // ---------------------------------------------------------------------------
@@ -1446,6 +1544,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
+  '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1458,7 +1557,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // registering reds here instead of leaving the ④ lines unmeasured. The per-surface scenario lines
 // and the governed-register wording added one pin to each: 27 → 28 and 16 → 17. Hanging ④ on the narrowing
 // face (ruling record 6442046166, letter A) flipped three pins and added one to each: 28 → 29 and 17 → 18.
-const SELF_TEST_BATTERY_FLOOR = 12;
+// Raised 12 → 13 with the hand-off battery (the maintainer's exhausted-tier rule): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1819,6 +1919,30 @@ export async function selfTest() {
   t('the unreadable line is quoted back through the shared quoting helper, key included', readLocalRuns(LR('maybe')).line.includes('Local-runs') && readLocalRuns(LR('maybe')).line.includes('maybe'));
   t('the key is ONE regex, built by the one key-line convention — never a second spelling', LOCAL_RUNS_LINE.source === keyLineRegex('Local-runs').source);
   t('prose naming the key mid-sentence is not the line — the declaration is line-initial', readLocalRuns('the Local-runs: line goes here').state === 'missing');
+
+  // -- the `Contract-review-handoff:` line --------------------------------------
+  //
+  // The maintainer's rule: a seat with a working contract-review tier reviews
+  // its own dispatches; only an exhausted tier hands the review to triage, and
+  // triage must be able to TELL that case apart from a label alone. The line is
+  // the telling; these cases pin the three readings a seat or patrol takes.
+  battery('⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own');
+  const HO_HEAD = '1b03a9c36be249502c1160b1f262f835f7ccaf02';
+  const HO_LINE = (head = HO_HEAD, reason = 'HTTP 429', at = '2026-10-27T13:00Z') => `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (${reason}, ${at}) · head ${head}`;
+  const HO_ROW = (line, id = 4401, at = '2026-10-27T13:01:00Z') => ({ id, created_at: at, body: `Seat note — the review tier was refused this round.\n\n${line}\n\nLabel kept.` });
+  t('⭐ the line names the CURRENT head ⇒ the review is triage\'s, with the reason, the time and the comment that handed it off', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); return r.state === 'triage' && r.head === HO_HEAD && r.reason === 'HTTP 429' && r.handedAt === '2026-10-27T13:00Z' && r.id === 4401; })());
+  t('⭐ the head MOVED past the line ⇒ stale, naming the head the hand-off was for — a fresh line or the seat\'s own review', (() => { const r = contractReviewHandoff([HO_ROW(HO_LINE())], 'c260fddc'.padEnd(40, '0')); return r.state === 'stale' && r.head === HO_HEAD; })());
+  t('⭐ NO hand-off line on any comment ⇒ absent, the seat\'s own review — a record, a seat note, a label mention change nothing', (() => { const r = contractReviewHandoff([RECORD_ON_9AF9, { id: 4402, created_at: '2026-10-27T13:02:00Z', body: 'ACCEPT — `needs:contract-review` stays until the seat reviews.' }], HO_HEAD); return r.state === 'absent' && r.read === 2; })());
+  t('the head is matched by PREFIX, as a record\'s span is: an abbreviated head on the line names the full head, and the reverse', contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD.slice(0, 7)))], HO_HEAD).state === 'triage' && contractReviewHandoff([HO_ROW(HO_LINE(HO_HEAD))], HO_HEAD.slice(0, 8)).state === 'triage');
+  t('NEWEST governs — an older line on an old head under a newer one on the current head reads triage\'s, and the reverse reads stale', contractReviewHandoff([HO_ROW(HO_LINE('deadbeef1'), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE(), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'triage' && contractReviewHandoff([HO_ROW(HO_LINE(), 4403, '2026-10-27T12:00:00Z'), HO_ROW(HO_LINE('deadbeef1'), 4404, '2026-10-27T13:30:00Z')], HO_HEAD).state === 'stale');
+  t('decoration reads: a bulleted bolded key, a backticked tier name, a backticked head, a blockquoted line', (() => { const dec = `> - **${CONTRACT_REVIEW_HANDOFF_KEY}:** triage — \`${CONTRACT_REVIEW_TIER_NAME}\` unavailable (quota exhausted, 2026-10-27T13:00Z) · head \`${HO_HEAD.slice(0, 12)}\``; const r = readContractReviewHandoff(dec); return r.state === 'read' && r.head === HO_HEAD.slice(0, 12) && r.reason === 'quota exhausted' && contractReviewHandoff([HO_ROW(dec)], HO_HEAD).state === 'triage'; })());
+  t('the separator is any of the four spellings, and the reason may itself carry a comma — the time is the LAST item in the parentheses', ['—', '--', '-', ':'].every((sep) => readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage ${sep} ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, quota exhausted, 2026-10-27T13:00Z) · head ${HO_HEAD}`).reason === 'HTTP 429, quota exhausted'));
+  t('⛔ a line with no reason, no time or no head is started-and-unreadable, never a reading — the ambiguity the line exists to remove', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z)`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a`, `${CONTRACT_REVIEW_HANDOFF_KEY}:`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
+  t('⛔ the target is the closed set of one and the tier is the constant\'s NAME — another seat, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
+  t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
+  t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
+  t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_HANDOFF_LINE.source === keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY).source && readContractReviewHandoff(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`).state === 'missing' && contractReviewHandoff([HO_ROW(`the ${CONTRACT_REVIEW_HANDOFF_KEY}: line goes on the PR`)], HO_HEAD).state === 'absent');
+  t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a hand-off line beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, HO_ROW(HO_LINE(HEAD_9AF9))] })); return r.state === 'found' && r.id === 3301; })());
 
   // -- #18042: the copyable record TEMPLATE ----------------------------------
   //

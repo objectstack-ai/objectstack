@@ -1789,9 +1789,10 @@ export class LifecycleService {
         });
         if (confirmed.length === 0) break;
       }
-      // Per-id deletes (NOT a `{$in}` filter): the engine's delete path reads
-      // `where.id` as a scalar target, and by-id deletes get referential
-      // cascade handling a filter-delete would bypass.
+      // Per-id deletes (NOT a `{$in}` filter): the engine reads a scalar
+      // `where.id` as a by-id target even beside `multi: true`, so each
+      // confirmed row is deleted on its own, with its own pre-image read,
+      // hooks and referential walk.
       for (const row of confirmed) {
         await engine.delete(object, {
           where: { id: row.id },
