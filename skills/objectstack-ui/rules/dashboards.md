@@ -245,12 +245,10 @@ compareTo: { kind: 'previousPeriod' }                            // one dated di
 compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
 ```
 
-* **Metric widgets** — the prior-period value renders as a small caption
-  beneath the headline number, alongside a green/red delta arrow and an
-  i18n trend label resolved from the comparison kind (e.g. `vs previous
-  period`, `vs previous year`). Authors do *not*
-  hand-author a trend: `options.trend` reaches no renderer on a
-  dataset-bound widget; `compareTo` is the trend.
+* **Metric widgets** — a delta arrow plus a trend label from the kind (`vs
+  previous period`). Its colour follows the measure's `polarity`: `'lower'`
+  (turnaround, cost) draws a rise red, `'neutral'` uncoloured; undeclared =
+  rise green. `options.trend` reaches no renderer; `compareTo` is the trend.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
@@ -336,7 +334,7 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 
 `options` is an open bag, but a dataset-bound widget reads no other key: `icon`,
 `trend`, `format`, `color` style nothing, and `os validate` warns on each (`unconsumed-widget-option`).
-Presentation lives on the measure (`format` / `currency`), `colorVariant` and `chartConfig`.
+Presentation lives on the measure (`format` / `currency` / `polarity`), `colorVariant` and `chartConfig`.
 These five change the dataset SQL; a typo (`sortDirection`) parses too, and draws that warning.
 
 | Key | Value | Effect |

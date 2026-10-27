@@ -16,7 +16,7 @@
       "id": 2,
       "prompt": "Add a dashboard chart showing 30-day rolling revenue (a moving average / running total over time). Model the data need.",
       "expected_output": "Recognizes a rolling window as BEYOND the dataset envelope (no window/having grammar; compareTo only shifts a period/year): escalates to a stored rolling field or app code, not a Cube, and never passes off a date bucket or a plain measure as a moving window.",
-      "note": "'dateGranularity' in must_not_contain is deliberately strict (date bucketing is the classic wrong answer); it can flag a correct answer that merely mentions the key — a review cue, not an automatic fail.",
+      "note": "'dateGranularity' in must_not_contain is deliberately strict; it can flag a correct answer that merely mentions the key — a review cue, not an automatic fail.",
       "files": [],
       "assertions": {
         "must_contain": ["window"],
@@ -75,11 +75,11 @@
     },
     {
       "id": 8,
-      "prompt": "Add a KPI of the average days from an opportunity's created_at to its closed_at (both datetime). Emit the metadata.",
-      "expected_output": "A dataset measure `{ aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' } }`; no hook-kept stored number.",
+      "prompt": "Add a KPI of the average days from an opportunity's created_at to its closed_at (both datetime), vs the previous period; slower is worse. Emit the metadata.",
+      "expected_output": "A dataset measure `{ aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' }, polarity: 'lower' }` (a rise draws red) under `compareTo`; no hook-kept stored number.",
       "files": [],
       "assertions": {
-        "must_contain": ["duration", "unit: 'days'"],
+        "must_contain": ["duration", "unit: 'days'", "polarity: 'lower'"],
         "must_not_contain": ["beforeUpdate"]
       }
     }

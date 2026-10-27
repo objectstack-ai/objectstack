@@ -709,7 +709,10 @@ export const CEILINGS = new Map([
   // nothing to delete to fund it; the whole addition is raised, pinned AT the measurement.
   // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1348],
+  // 1348 -> 1366 (#26602), under the same ruling: the `duration` prompt also asks for the
+  // measure's `polarity` (+29 tokens), part funded by deleting a parenthetical that restated
+  // its own expected output (-11); the balance is raised, pinned AT the measurement (5462 bytes).
+  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1366],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts
@@ -740,7 +743,7 @@ export const CEILINGS = new Map([
   // is paid in full by deleting 78 tokens of restatement — the example's four-line comment
   // that restated the Dataset-Bound Widgets section — so the file nets -12 and the ceiling
   // follows it down to the new measurement, the ratchet's ordinary direction.
-  ['skills/objectstack-ui/rules/dashboards.md', 6239],
+  ['skills/objectstack-ui/rules/dashboards.md', 6224],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
