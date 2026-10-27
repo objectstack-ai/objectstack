@@ -3026,12 +3026,17 @@ const en = {
       welcomeDescription: 'Sign in to continue your work',
       // The same card's header when the visitor arrived signed out from an
       // invitation link (`?redirect=/accept-invitation/ID`), and the
-      // register-first action above the form. The copy names no organization
-      // or inviter: a signed-out page has no read of the invitation (#25886).
+      // register-first action above the form (#25886). The generic copy names
+      // no organization or inviter; the `invitationPreview*` lines below do,
+      // once the signed-out invitation preview answers for the link's id
+      // (#26473). `{{email}}` is the MASKED address the preview returns.
       invitationTitle: 'Accept your invitation',
       invitationDescription: 'Use the email address the invitation was sent to.',
       invitationSignUpButton: 'Create an account and join',
       invitationSignInDivider: 'or sign in to an existing account',
+      invitationPreviewTitle: '{{inviter}} invited you to join {{organization}}',
+      invitationPreviewTitleNoInviter: 'You are invited to join {{organization}}',
+      invitationPreviewDescription: 'Use the email address the invitation was sent to ({{email}}).',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3053,6 +3058,7 @@ const en = {
       description: 'Create your account to start building.',
       invitationTitle: 'Create an account to join',
       invitationDescription: 'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
+      invitationPreviewDescription: 'Register with the email address the invitation was sent to ({{email}}). The invitation can only be accepted with that address.',
       nameLabel: 'Name',
       namePlaceholder: 'John Doe',
       emailLabel: 'Email',
