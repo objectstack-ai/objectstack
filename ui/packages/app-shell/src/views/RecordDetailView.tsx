@@ -845,9 +845,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // their own decision answers 404. That 404 is the read ENDING, not a lost
   // record, and the load below draws `accessEnded` for it, not "Record not
   // found". Only `handleApprovalActionDone` sets it, so any 404 that does not
-  // follow this viewer's decision on THIS record is still `missing`. Cleared
-  // when the page moves to another record, and by a read that answers the
-  // record (a viewer with standing access keeps reading it).
+  // follow this viewer's decision on THIS record is still `missing`: the load
+  // compares it with the record it reads, so a move to another record never
+  // inherits it. Cleared by a read that answers the record (a viewer with
+  // standing access keeps reading it).
   const decidedRecordRef = useRef<string | null>(null);
 
   // Permissions context.
@@ -933,7 +934,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       return;
     }
     const decidedKey = `${objectName}:${pureRecordId}`;
-    if (decidedRecordRef.current !== decidedKey) decidedRecordRef.current = null;
     const expandFields: string[] = JSON.parse(pageRecordExpand);
     const params = expandFields.length > 0 ? { $expand: expandFields } : undefined;
     const loadRecord = () => {
