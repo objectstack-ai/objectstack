@@ -17,8 +17,8 @@ import {
 import { renderChildren } from '../../lib/utils';
 
 ComponentRegistry.register('collapsible', 
-  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled` /
-  // `disabledOn`, not the raw authored key — which may be a predicate STRING,
+  // `hostDisabled` is `SchemaRenderer`'s EVALUATED verdict on `disabled`,
+  // not the raw authored key — which may be a predicate STRING,
   // truthy however it evaluates (objectui#7238, precedent objectui#6169).
   //
   // `open: _open` is a NAMED EXCLUSION, not an unused parameter (objectui#8236,
