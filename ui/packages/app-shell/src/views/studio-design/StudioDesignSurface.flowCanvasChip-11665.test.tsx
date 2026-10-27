@@ -21,7 +21,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 
@@ -145,7 +145,10 @@ describe('the automation canvas header names the open flow by its label (objectu
     const { chip, header } = await caption();
 
     expect(chip).toHaveTextContent(/^每日摘要$/);
-    expect(chip).toHaveAttribute('title', `API 名称: ${API_NAME}`);
+    // `designer.field.apiName` lives in the lazily fetched `studio` namespace,
+    // which answers from `en` until its zh catalogue lands and then re-renders
+    // the pillar (`useStudioCatalogue`): the zh title is the answer after that.
+    await waitFor(() => expect(chip).toHaveAttribute('title', `API 名称: ${API_NAME}`));
     // The neighbouring chip is the real zh `canvasHint`, so the header read is the whole strip.
     expect(header).toHaveTextContent('点选画布上的节点即可配置');
     expect(header.textContent ?? '').not.toMatch(TYPE_WORD);
