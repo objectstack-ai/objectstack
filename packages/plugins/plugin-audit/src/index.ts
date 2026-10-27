@@ -103,7 +103,6 @@ export {
   planKeyMaterialAuditRowPatch,
   planKeyMaterialActivityRowPatch,
   KEY_MATERIAL_COPY_TABLES,
-  KEY_MATERIAL_MIGRATION_PAGE_SIZE,
 } from './key-material-copy-migration.js';
 export type {
   KeyMaterialArchiveDriver,
