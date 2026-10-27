@@ -521,13 +521,20 @@ async function refuseWalledCatalogPackageWrite(
  * registry too (`POST /packages`, and `service-package` at boot), so a Studio
  * app is never "unknown" here.
  *
- * Read by `publish-drafts`, `discard-drafts` and `GET /:id/commits` only
- * AFTER the protocol has answered, and only when that answer is empty: drafts
- * or commits the protocol does hold for an id the registry lacks are still
- * published, discarded or listed exactly as before. What changes is the one
- * answer that lied — `200` "nothing to publish" / "nothing discarded" / "no
- * commits" for a package that is not there, which an SDK or AI caller cannot
- * tell apart from a real, empty package.
+ * Read by `discard-drafts` and `GET /:id/commits` only AFTER the protocol has
+ * answered, and only when that answer is empty: drafts or commits the
+ * protocol does hold for an id the registry lacks are still discarded or
+ * listed exactly as before. What changes is the one answer that lied — `200`
+ * "nothing discarded" / "no commits" for a package that is not there, which an
+ * SDK or AI caller cannot tell apart from a real, empty package.
+ *
+ * [#26708] `publish-drafts` reads it FIRST, before anything is published, and
+ * refuses an unknown id whatever drafts are stored under it. Such drafts are
+ * bound to a package that does not exist (saved before the save door's
+ * named-base rule covered every type), and publishing them served them live,
+ * owned by nothing: no manifest, so no namespace and no uninstall or export.
+ * They are not migrated or deleted; `discard-drafts` on the same id still
+ * removes them.
  *
  * A registry without `getPackage` cannot be asked, so this answers `false`
  * ("no evidence of absence") rather than invent a 404.
@@ -1699,6 +1706,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing the drafts of package "${id}"`);
             if (walled) return walled;
+            // [#26708] An id no installed package has is refused BEFORE
+            // anything is published — see `packageIsUnknown`.
+            if (packageIsUnknown(registry, id)) {
+                return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            }
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
@@ -1955,19 +1967,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // something did not, which is the honest report. It must
                     // stay ABOVE the announce block, which reads this field.
                     if (flipped.length > 0) (result as any).unhiddenApps = flipped;
-                    // A request that touched nothing about a package this
-                    // registry does not hold is `404`, never `200
-                    // nothing_to_publish` — see `packageIsUnknown`. A flip that
-                    // FAILED did not establish that nothing is bound to the id,
-                    // so its recorded `unhideError` is answered, never hidden.
-                    if (
-                        (result as any)?.outcome === 'nothing_to_publish'
-                        && flipped.length === 0
-                        && (result as any)?.unhideError === undefined
-                        && packageIsUnknown(registry, id)
-                    ) {
-                        return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
-                    }
                     // A publish promoted drafts to active (or published an additive
                     // app) at RUNTIME — but boot-cached consumers still hold the
                     // pre-publish view. The load-bearing one is the automation
