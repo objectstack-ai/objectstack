@@ -419,7 +419,7 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   errors: z.array(ValidateDataIssueSchema).optional().describe(
     'Every cell error of a failed row, one element per failed cell, in the validate verdict\'s issue shape '
     + '(`field`, `code`, `message`). Present only on a failed row that has at least one cell error, so a row '
-    + 'that failed for another reason (a match-key conflict, a write refusal) omits it. The first-error keys '
+    + 'that failed for another reason (a duplicate or ambiguous match key, say) omits it. The first-error keys '
     + '`field`, `code` and `error` stay and name element 0, so a reader of those keys sees the same answer '
     + 'as before. A server that does not produce this list omits the key, and the row then reports its first '
     + 'error only.',
