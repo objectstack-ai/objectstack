@@ -3947,6 +3947,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       description: { kind: 'leaf-copy', why: 'prose' },
       confirmText: { kind: 'leaf-copy', why: 'prose' },
       successMessage: { kind: 'leaf-copy', why: 'prose' },
+      disabledReason: { kind: 'leaf-copy', why: 'prose' },
       outcomeMessages: {
         kind: 'reference-checked',
         host: 'outcome',

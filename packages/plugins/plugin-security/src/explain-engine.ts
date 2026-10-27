@@ -791,6 +791,24 @@ export async function buildContextForUser(
 }
 
 /**
+ * [#26641] The `sys_user` row a user id names, read under the system context,
+ * or `null` when no row has that id. The one existence read of a user the
+ * explainer makes: {@link resolveDelegatorContext} asks it of a delegator, and
+ * the explain API (`explainAccessForCaller`) asks it of the user it was asked
+ * to explain. Each needs it for the same reason: {@link buildContextForUser}
+ * resolves a principal for ANY id, because the resolver synthesises the
+ * baseline anchor and sets for an id no row has.
+ *
+ * A read that throws is not absence, so this function does not catch: each
+ * caller decides what a failed read means. The delegator path fails closed and
+ * reads it as `missing`; the explain API lets it propagate as a fault rather
+ * than answer that the user does not exist.
+ */
+export async function readSysUserRow(ql: any, userId: string): Promise<any | null> {
+  return (await ql.findOne('sys_user', { where: { id: userId }, context: SYSTEM_CTX })) ?? null;
+}
+
+/**
  * [ADR-0090 D10] Result of resolving the delegator behind an on-behalf-of
  * principal. `none` = no delegation link; `missing` = the link names a user that
  * does not exist (the caller must fail CLOSED — see {@link resolveDelegatorContext});
@@ -864,7 +882,7 @@ export async function resolveDelegatorContext(
   if (!oboId) return { kind: 'none' };
   let user: any = null;
   try {
-    user = await ql.findOne('sys_user', { where: { id: oboId }, context: SYSTEM_CTX });
+    user = await readSysUserRow(ql, oboId);
   } catch {
     user = null;
   }

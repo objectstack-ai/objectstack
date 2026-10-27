@@ -194,9 +194,10 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                     bodyMd = rendered.text;
                 } catch (err) {
                     // renderTemplate's failure vocabulary (TEMPLATE_NOT_FOUND /
-                    // TEMPLATE_INACTIVE / MISSING_VARIABLES) arrives as a thrown
-                    // Error — keep the code at the front of the row's error so
-                    // classifyError() below can grade it permanent.
+                    // TEMPLATE_INACTIVE / MISSING_VARIABLES / TEMPLATE_INVALID)
+                    // arrives as a thrown Error — keep the code at the front of
+                    // the row's error so classifyError() below can grade it
+                    // permanent.
                     return { ok: false, error: (err as Error)?.message ?? String(err) };
                 }
             }
@@ -245,9 +246,12 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
             // edits the template/node, so grade it permanent instead of
             // burning the retry schedule. These are
             // `IEmailService.renderTemplate`'s own error codes plus this
-            // channel's missing-capability refusal above.
+            // channel's missing-capability refusal above. `TEMPLATE_INVALID`
+            // is a template whose hole the mail grammar refuses: stored before
+            // the authoring rule existed, it fails every attempt until it is
+            // republished.
             const msg = typeof err === 'string' ? err : String((err as Error)?.message ?? err ?? '');
-            if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
+            if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_INVALID|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
                 return 'permanent';
             }
             // A failed local insert is almost always transient (lock/timeout).
