@@ -2129,7 +2129,7 @@
       "title": "CEL formula stdlib: all 29 registered functions give known answers against the BUILT package — calendar-day timezone contract, addMonths month-end clamp, floor(-1.2)==-2, null-dropping joins, mixed int/double arithmetic, isoDate/isoDatetime text — and a formula calling an unregistered function is REFUSED at the authoring door (422), never stored to read null",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2153,7 +2153,7 @@
         "calendar-day timezone contract (ADR-0053 Phase 2 D1): pin now to an instant whose calendar day DIFFERS between UTC and the reference zone (e.g. 2026-08-30T22:00:00Z with timezone Asia/Shanghai — locally already 08-31) and assert today() == 2026-08-31T00:00:00Z (the reference-tz calendar day expressed as UTC MIDNIGHT — never an instant carrying wall-clock time), daysFromNow/daysAgo offset from that same day; an unknown zone falls back to the UTC calendar day, never throws",
         "mixed-arithmetic overloads (registerNumericCoercions, stdlib.ts): a double-typed record field divided/multiplied by an int literal (record.amount / 100) evaluates to the promoted double instead of faulting 'no such overload' to silent null (#1928), while pure int 7/2 == 3 keeps integer-division semantics untouched",
         "live-door parity: GET a showcase_project row and confirm budget_remaining materializes (read-path evaluation); author a scratch object through the metadata channel, declaring its sharingModel (fixtures.requires[1]), whose formula field composes two stdlib calls (e.g. joinNonEmpty + upper) and read back the known answer — the stdlib reaching the LIVE read path, not just the harness",
-        "the unregistered-function probe: on a scratch object, PUT /api/v1/meta/object/NAME at the ACTIVE door (no ?mode=draft) with a formula field calling an UNregistered function (e.g. bad_f = sqrt(4)), its body declaring a sharingModel (fixtures.requires[1]) — without one the 422 is security-owd-unset's refusal, not the expression's. Capture the 422 INVALID_METADATA and its expression-invalid issue, then GET the object and confirm the field was not stored. A ?mode=draft save of the same body is admitted (draft saves defer the gate to promotion, #4463 D1), and its draft→active promotion is refused the same way. What the door cannot see is unchanged underneath: a formula that compiles but faults at EVALUATE time, or a row stored before the gate, still reads null (applyFormulaPlan's `r.ok ? … : null`, packages/objectql/src/engine.ts), now with one warn line per (object, field) (#22031)"
+        "the unregistered-function probe: on a scratch object, PUT /api/v1/meta/object/NAME at the ACTIVE door (no ?mode=draft) with a formula field calling an UNregistered function (e.g. bad_f = sqrt(4)), its body declaring a sharingModel (fixtures.requires[1]) — without one the 422 is security-owd-unset's refusal, not the expression's. Capture the 422 INVALID_METADATA and its expression-invalid issue, then GET the object and confirm the field was not stored. A ?mode=draft save of the same body is admitted (draft saves defer the gate to promotion, #4463 D1), and its draft→active promotion is refused with the same expression-invalid finding. Promoted through POST /api/v1/packages/PACKAGE/publish-drafts, that refusal is an entry with outcome 'refused' inside the batch envelope, not the request's own 422 (packages/metadata-protocol/src/protocol.ts, the publish-drafts outcome union). What the door cannot see is unchanged underneath: a formula that compiles but faults at EVALUATE time, or a row stored before the gate, still reads null (applyFormulaPlan's `r.ok ? … : null`, packages/objectql/src/engine.ts), now with one warn line per (object, field) (#22031)"
       ],
       "acceptance": [
         {
@@ -2187,7 +2187,7 @@
           "evidence": "the responses vs the expectation"
         },
         {
-          "clause": "a formula calling an UNREGISTERED function is refused at the authoring door, before it is stored: an active-state object save (PUT /api/v1/meta/object/NAME, no ?mode=draft) whose formula field calls sqrt(...) answers 422 INVALID_METADATA carrying the build's located finding (rule expression-invalid, at that field's expression, naming `sqrt` as a NAME fault), and nothing lands; a ?mode=draft save is admitted (#4463 D1) and its promotion is refused the same way. This is the loud refusal the earlier EXPECTED-FAIL wording waited for (#22031, fixing #22019)",
+          "clause": "a formula calling an UNREGISTERED function is refused at the authoring door, before it is stored: an active-state object save (PUT /api/v1/meta/object/NAME, no ?mode=draft) whose formula field calls sqrt(...) answers 422 INVALID_METADATA carrying the build's located finding (rule expression-invalid, at that field's expression, naming `sqrt` as a NAME fault), and nothing lands; a ?mode=draft save is admitted (#4463 D1) and its promotion is refused with the same finding (through publish-drafts, as an outcome 'refused' entry of the batch envelope, steps[6]). This is the loud refusal the earlier EXPECTED-FAIL wording waited for (#22031, fixing #22019)",
           "oracle": "api",
           "verify": "the PUT answers 422 with code INVALID_METADATA and an issue whose rule is expression-invalid, located at the field's expression and naming the function; a follow-up GET /api/v1/meta/object/NAME shows the field was not stored. Pinned through the real saveMetaItem / publishMetaItem by packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts (the 'runtime authoring gate on OBJECT writes — the formula field verdict (#22019)' block: sqrt(record.amount) refused 422 on an active save and on a draft's promotion, nothing lands, floor(record.amount) still saves), and at the rule layer by packages/lint/src/runtime-gate.object-formula-writes.test.ts. A row stored BEFORE the gate still reads null on the read path, now with one warn line per (object, field) (packages/objectql/src/engine-formula-fault-log.test.ts). That is the residual, not this clause",
           "evidence": "the 422 response (code + the expression-invalid issue) + the post-refusal metadata read"
@@ -2238,6 +2238,12 @@
           "date": "2026-10-26",
           "change": "fixtures.requires[1], steps[5] and steps[6] say a scratch object declares its sharingModel, from QA run #25817 (release-18.2.0-manual-set, at 6679644a): a scratch object without `sharingModel` gets 422 security-owd-unset. Re-read at base f6c61932: the runtime authoring lint refuses an unset sharingModel on every active-state object publish (plugin-security's object-posture-gate.ts docblock records the order), so steps[6]'s probe, which reads a 422 too, would capture the wrong refusal without it. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "steps[6] and acceptance[5] say how the draft's promotion is refused. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the run promoted through publish-drafts and met the refusal as an outcome:'refused' entry inside the batch envelope, while 'refused the same way' read as a second HTTP 422. Re-read at base e4ba846f (metadata-protocol protocol.ts: outcome 'published' | 'refused' | 'nothing_to_publish'). The clause's assertion (refused, nothing lands) is unchanged",
+          "ref": "#25807"
         }
       ]
     },
