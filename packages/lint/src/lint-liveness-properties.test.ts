@@ -1673,9 +1673,12 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
     // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
     // field, declared ahead of the mailbox ingest that reads it — and left this
     // set when that reader landed and the row flipped `live` (#22871): a
-    // verdict that moved, so it was never a stable subject either. The
-    // synthetic slot below is warned by nothing shipped.
-    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
+    // verdict that moved, so it was never a stable subject either.
+    // `externalId` joined the set when #25753 graded it `dead` (no upsert reads
+    // it). It parses, so it is a stable subject the block above could take
+    // back; it keeps the synthetic slot so that block does not move with one
+    // more verdict. The synthetic slot below is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired', 'externalId']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
