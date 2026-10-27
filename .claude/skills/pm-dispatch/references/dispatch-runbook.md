@@ -135,7 +135,8 @@
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
 - coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
-- 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
+- 常设档位令 = 维护者在席位线程或决策卡一次明言:卡线程按 `--tier` 的 MANDATORY 档跑。
+- 令可同定 p1/`security` 的 effort;席位引令 id 与时刻作 `reason:`,⛔ 不逐卡附原话;无令才附。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
@@ -143,7 +144,6 @@
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
 - worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
-- 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
 
 ## 派发前置:前提核实,再把本地检出钉到 main
 

@@ -30,7 +30,7 @@
 
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
 - 改技能(协议语义面)的卡恒契约复审档 `CONTRACT_REVIEW_TIER`;⛔ 不抄模型名。
-- 席位请线程附维护者原话,coordinator 开线程那一笔同设 model 与 effort(`dispatch-runbook.md`)。
+- 常设档位令 ⇒ 开线程即设 model 与 effort,席位引令 id 与时刻作 `reason:`;⛔ 不逐卡问。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
 

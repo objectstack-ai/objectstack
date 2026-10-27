@@ -115,7 +115,7 @@
 - 额度墙只向下(降档或降并发)⛔ 永不向上;临时偏离记座位贴带结束条件,逐次巡检重读。
 - 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
 - effort 按卡难度定、与档位并列,写进 Container & model 行与派发令,派发显式传参,⛔ 不留空。
-- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭维护者点名。
+- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭点名或常设令。
 - 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
 - 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
