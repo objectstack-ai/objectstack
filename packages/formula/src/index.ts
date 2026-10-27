@@ -170,4 +170,4 @@ export type {
   ExpressionSourceKind,
 } from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels } from './types';

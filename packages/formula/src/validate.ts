@@ -1290,6 +1290,8 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
   // Collections / null-ish (registered stdlib)
   'isBlank', 'isEmpty', 'coalesce', 'len',
+  // Options (registered stdlib) — `label(record.<field>)`, a select value's label
+  'label',
   // cel-js built-ins (verified to resolve)
   'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];
