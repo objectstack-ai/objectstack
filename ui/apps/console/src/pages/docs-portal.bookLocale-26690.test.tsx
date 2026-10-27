@@ -23,6 +23,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+// Paid at collection, not inside the adapter's clocked `getItems` call.
+import '@objectstack/spec/system';
 
 const { ADAPTER, REQUEST } = vi.hoisted(() => {
   const REQUEST = { locale: 'en-US' };
