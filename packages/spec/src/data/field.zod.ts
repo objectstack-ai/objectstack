@@ -2305,7 +2305,7 @@ export const FieldSchema = lazySchema(() => {
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
-  externalId: z.boolean().default(false).describe('Is external ID for upsert operations'),
+  externalId: z.boolean().default(false).describe('Not read: no upsert, import or seed matches on this flag. A seed dataset names its match field in its own `externalId`; an import names it in the mapping\'s `upsertKey`.'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps

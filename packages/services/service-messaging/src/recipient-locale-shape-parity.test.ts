@@ -57,7 +57,7 @@ describe('recipient locale shape ↔ sys_user.locale write rule', () => {
 
   it.each([
     'zh', 'zh-CN', 'zh-Hans-CN', 'es-419', 'en-US', 'yue-HK',
-    'Chinese (Simplified)', 'zh_CN', '-CN', 'zh-Hansumlaut', '1zh', 'zh CN',
+    'Chinese (Simplified)', 'Chinese', 'Japanese', 'null', 'zh_CN', '-CN', 'zh-Hansumlaut', '1zh', 'zh CN',
     '../../etc/passwd', '',
   ])('agrees with the compiled write-side pattern on %j', (value) => {
     // The behavioural half. Redundant while the sources are equal — and that
@@ -69,17 +69,15 @@ describe('recipient locale shape ↔ sys_user.locale write rule', () => {
     expect(LOCALE_TAG_SHAPE.test(value)).toBe(writeSide);
   });
 
-  it('the read side is deliberately STRICTER on the stringified-nothing literals', () => {
-    // `"null"` is four letters, so it is shape-legal on both sides — the write
-    // rule accepts it and only `NOTHING_LITERALS` in this module stops it
-    // reaching a template lookup. Pinned as intended asymmetry so a future
-    // reader does not "fix" the shared regex to close it: a lossy producer's
-    // stringified nothing arrives below the data API, where the write rule
-    // never runs, so tightening the shape would cost real tags (`null` is not
-    // a language, but neither is it reachable by a user picking one from a
-    // list) without closing the path it arrived by.
-    expect(new RegExp(SYS_USER_LOCALE_TAG_PATTERN).test('null')).toBe(true);
-    expect(LOCALE_TAG_SHAPE.test('null')).toBe(true);
+  it('the stringified-nothing literals fail the shape on both sides, and the read side refuses them anyway', () => {
+    // Since #26463 the primary subtag is 2–3 letters, so `"null"` (four
+    // letters) is shape-refused on both sides, like any language name.
+    // `NOTHING_LITERALS` in this module still refuses it on its own: a lossy
+    // producer's stringified nothing arrives below the data API, where the
+    // write rule never runs, so the read side keeps that floor rather than
+    // depending on the shared shape staying this narrow.
+    expect(new RegExp(SYS_USER_LOCALE_TAG_PATTERN).test('null')).toBe(false);
+    expect(LOCALE_TAG_SHAPE.test('null')).toBe(false);
     expect(normalizeRecipientLocale('null')).toBeUndefined();
     // `"undefined"` is nine letters and fails the shape on both sides — it
     // never depended on the literal list.

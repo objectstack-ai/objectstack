@@ -520,7 +520,7 @@ describe('the refusal is legible', () => {
 // contexts whose workflow IS path-filtered` retired with objectstack#25712,
 // together with the exemption control in the counterfactual describe. They
 // partitioned the three buckets against the check names objectui's
-// `pull_request` workflows produce, read through `./workflow-checks.ts` from
+// `pull_request` workflows produce, read through the since-deleted `workflow-checks.ts` from
 // `ui/.github/workflows/`. That directory runs nowhere under the monorepo:
 // GitHub runs the root `.github/workflows/` alone, and those produce other
 // names (`Lint UI`, `Test UI (n/16)`). The buckets still hold objectui's names
