@@ -801,6 +801,39 @@ shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
 - 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
 - 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
 
+## One record page at two widths
+
+The synthesized default record page (`buildDefaultPageSchema`, and a slotted
+page that keeps the default tab strip) is laid out by the width of the view it
+occupies — the drawer, the split pane or the full page — never by the
+viewport:
+
+| Container width | Layout |
+|---|---|
+| 1280 px and up | Three resident columns: details · timeline (the discussion composer on top, then Activity and History) · related (each related list as a card, the reference rail and `rightRail` slot folded in, Approvals, Attachments, the provenance footer) |
+| 1024 – 1279 px | Details · timeline; the related column folds into a rail opened from a **Related (N)** toggle above the columns |
+| below 1024 px, or embedded (drawer / split pane) | The tab strip, exactly as before |
+
+One header (title, actions, highlights, stage path) serves every tier, and
+the page description stays the tabbed one: the columns are read off it by
+each tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
+seed, a slotted page and the running page never disagree, and no metadata key
+or node type says "columns". `?tab=` addresses the strip, so it is honoured
+in the tabbed tier and ignored in the column tiers. An authored record page
+(`kind: 'full'`) and an authored `slots.tabs` strip are drawn as authored at
+every width.
+
+A host wires it with three exports:
+
+```tsx
+import { RecordPageColumns, buildDefaultPageColumns, useRecordPageTier } from '@object-ui/plugin-detail';
+
+// `root` is the element the record page occupies; `null` until measured.
+const tier = useRecordPageTier(root, { embedded, enabled: !authoredPage });
+const columns = tier === 'two-column' || tier === 'three-column' ? buildDefaultPageColumns(page) : null;
+// columns ? <RecordPageColumns tier={tier} columns={columns} footer={…} /> : <SchemaRenderer schema={page} />
+```
+
 ## Reference Rail decision matrix
 
 The "Reference Rail" is the right-hand column on the record detail page
@@ -816,7 +849,10 @@ opts in with `showReferenceRail: true`, and then only when:
 2. That same synth call passes **≥2 entries** in its `related` option —
    the count is read off the caller's option, **not** off the objectDef.
 3. The viewport is **≥ xl (1280 px)** — below that the rail collapses and
-   the **Related** tab keeps full coverage.
+   the **Related** tab keeps full coverage. This condition holds in the
+   tabbed tier only: in the column tiers (see *One record page at two widths*
+   above) the rail is folded into the related column at any viewport — one
+   rail, not two.
 4. The synth call does **not** opt out via `hideReferenceRail`.
 
 Conditions 1, 2 and 4 are one conjunction inside `buildDefaultPageSchema`,
