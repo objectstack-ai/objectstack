@@ -349,6 +349,7 @@ import {
     objectsBoundExternallyTo,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
+    unknownDatasourceSaveRefusal,
 } from './protocol-save-door-refusals.js';
 // [#25467 cut 7] Package install and update.
 import {
@@ -6999,6 +7000,9 @@ export class ObjectStackProtocolImplementation implements
      *    while objects bind it `external` is refused naming them, and an
      *    object restored `external` on a datasource that is managed now is
      *    refused at `external`;
+     *  - [#26724] an object restored with a `datasource` that names no
+     *    datasource here, when that is not the binding it holds now
+     *    ({@link unknownDatasourceSaveRefusal});
      *  - a `runAs: 'system'` flow an anonymous endpoint names
      *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
      *    row, the case the save door asks it of;
@@ -7053,6 +7057,7 @@ export class ObjectStackProtocolImplementation implements
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
+            unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
         };
         return refuseRestoredBodyTheSaveDoorRefuses.call(host, type, name, body, binding, source);
     }
@@ -19536,6 +19541,56 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#26724] The save doors refuse an `object` whose `datasource` names a
+     * datasource that does not exist here. Before this, such an object was
+     * stored and published ("published"), and then never registered: the
+     * engine routes an explicit `datasource` to the driver of that name only
+     * (`resolveDatasourceBinding` step 1), so every data call on it answered
+     * 404 "not registered", and nothing told the author why.
+     *
+     * A name exists when any of these holds, and the refusal fires on none:
+     *  - it is absent, empty or `'default'` (the primary datasource);
+     *  - the engine has a driver registered under it
+     *    (`IDataEngine.getDriverByName`): one a host or plugin registers at
+     *    run time with no datasource item (a `driver.*` service, an `onEnable`
+     *    `drivers.register`). An engine without that member cannot say a name
+     *    is unknown, so nothing is refused on it;
+     *  - a datasource item of that name resolves through this door's by-name
+     *    read ({@link readMetaItem}: the environment's stored row, else the
+     *    code layer's definition), connected or not;
+     *  - it is still pending: on a draft save, any datasource draft of that
+     *    name; on a package publish, a datasource draft of the same batch
+     *    (`pending` as a set), since the batch promotes as one unit in no
+     *    type order;
+     *  - the object's current definition already names it: the binding is not
+     *    this write's. A re-save, a stored-row migration or a restore that
+     *    keeps it is not judged; a declaration boot (`os migrate`) never runs
+     *    `onEnable`, so a driver registered there is absent from it.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem} after the
+     * schema gate, again by {@link promoteDraftForPublish} on the draft body
+     * (the datasource can go between a draft's save and its publish), and by
+     * the restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}).
+     * Answered as the schema gate answers: `422 INVALID_METADATA`, one finding
+     * at `datasource` naming the datasource.
+     */
+    private unknownDatasourceSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        pending?: 'drafts' | ReadonlySet<string>,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof unknownDatasourceSaveRefusal> = {
+            get engine() { return readEngine(); },
+            listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return unknownDatasourceSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+    }
+
+    /**
      * [#25211] Every object this environment holds that binds `datasource`
      * with `external`, for {@link externalBindingSaveRefusal}'s datasource
      * half: the environment's stored active rows ({@link readActiveOverlayRows},
@@ -21007,6 +21062,18 @@ export class ObjectStackProtocolImplementation implements
         {
             const bindingRefusal = await this.externalBindingSaveRefusal(singularType, request.item, request.name, request.writeFace);
             if (bindingRefusal) throw bindingRefusal;
+        }
+
+        // [#26724] An `object` whose `datasource` names no datasource here is
+        // refused, in draft and in publish mode, after the schema and before
+        // the authoring gate and every write: stored, it never registers. A
+        // draft may name a datasource that is itself still a draft. See
+        // {@link unknownDatasourceSaveRefusal}.
+        {
+            const datasourceRefusal = await this.unknownDatasourceSaveRefusal(
+                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+            );
+            if (datasourceRefusal) throw datasourceRefusal;
         }
 
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
@@ -22517,6 +22584,13 @@ export class ObjectStackProtocolImplementation implements
          */
         pending?: RuntimePendingDeclarations;
         /**
+         * [#26724] The names of the datasource drafts this promotion's batch
+         * publishes with it, for {@link unknownDatasourceSaveRefusal}: an
+         * object draft may name one. Stated by `publishPackageDrafts`; absent
+         * on the `publishMetaItem` path, where the datasource must be live.
+         */
+        batchDatasources?: ReadonlySet<string>;
+        /**
          * [#22877] The bundle member whose draft to promote; omitted, the
          * canonical one. The draft read, the gate's read and the promotion
          * all address it, so the body judged is the body that goes live.
@@ -22756,6 +22830,19 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const bindingRefusal = await this.externalBindingSaveRefusal(singularType, draftForGate.body, request.name);
             if (bindingRefusal) throw bindingRefusal;
+        }
+        // [#26724] …and an object draft whose `datasource` names no datasource
+        // by the time it is published, or never did: a draft save accepts a
+        // datasource that is itself a draft, and that draft may not be
+        // published with it. Judged on the draft body, before
+        // `repo.promoteDraft` writes, so a batch publish aborts on it too; a
+        // datasource draft of the same batch counts. See
+        // {@link unknownDatasourceSaveRefusal}.
+        if (draftForGate) {
+            const datasourceRefusal = await this.unknownDatasourceSaveRefusal(
+                singularType, draftForGate.body, request.name, request.batchDatasources,
+            );
+            if (datasourceRefusal) throw datasourceRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
@@ -23676,6 +23763,9 @@ export class ObjectStackProtocolImplementation implements
         // publishable in either order — see
         // {@link collectBatchPendingDeclarations}.
         const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+        const batchDatasources: ReadonlySet<string> = new Set(
+            drafts.filter((d) => canonicalMetaType(d.type) === 'datasource').map((d) => d.name),
+        );
 
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
@@ -23864,6 +23954,9 @@ export class ObjectStackProtocolImplementation implements
                             // universe as it stood before the publish started.
                             ...(pendingDeclarations !== undefined
                                 ? { pending: pendingDeclarations } : {}),
+                            // [#26724] …and the datasources it drafts, which
+                            // an object draft beside them may name.
+                            batchDatasources,
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });

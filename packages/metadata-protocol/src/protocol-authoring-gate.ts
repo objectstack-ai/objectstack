@@ -82,6 +82,7 @@ export interface AuthoringGateHost {
     rlsMembershipResolverKeys: ObjectStackProtocolImplementation['rlsMembershipResolverKeys'];
     runAuthoringGate: ObjectStackProtocolImplementation['runAuthoringGate'];
     tenancyPostureInForce: ObjectStackProtocolImplementation['tenancyPostureInForce'];
+    unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -109,7 +110,7 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'runAuthoringGate'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
@@ -122,6 +123,8 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (defaultPageRefusal) throw defaultPageRefusal;
     const bindingRefusal = await this.externalBindingSaveRefusal(type, body, name);
     if (bindingRefusal) throw bindingRefusal;
+    const datasourceRefusal = await this.unknownDatasourceSaveRefusal(type, body, name);
+    if (datasourceRefusal) throw datasourceRefusal;
     const elevatedRefusal = await this.anonymousElevatedFlowRefusal(type, body, name);
     if (elevatedRefusal) throw elevatedRefusal;
     const channel = this.credentialChannelFor(type);
