@@ -270,6 +270,10 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)
     runs-on: ubuntu-latest
+    # Run wall of the 23 schedule and dispatch runs among the 400 most recent
+    # (2026-10-22..27), the only events this job runs on: p99 2.4 min, max 2.4. The bound
+    # leaves room for a cold pnpm store on the install step.
+    timeout-minutes: 20
     # Serialise against itself so two refreshes cannot race the force-push to
     # `changeset-release/main`; never cancel in progress. The races it covers
     # changed with the trigger (#11233) but did not go away: a scheduled tick can
@@ -978,6 +982,10 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)
     runs-on: ubuntu-latest
+    # Run wall of the 376 push runs among the 400 most recent (2026-10-22..27), an upper
+    # bound for this job: p99 4.6 min, max 6.9. The bound leaves room for the backfill
+    # path (install plus Release writes), which none of them took.
+    timeout-minutes: 20
     # Serialised: its backfills create GitHub Releases and push a runtime image,
     # and two runs doing that at once is not a state worth reasoning about.
     #
@@ -1474,6 +1482,10 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)
     runs-on: ubuntu-latest
+    # Run wall of the 376 push runs among the 400 most recent (2026-10-22..27), an upper
+    # bound for this job: p99 4.6 min, max 6.9; its own job reading on 18.1.0 (run
+    # 40078805767) is 1.0 min.
+    timeout-minutes: 10
     permissions:
       # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
       # covers the reads (the waiting-runs list, the runs at each version
@@ -1620,6 +1632,14 @@ jobs:
        (github.event_name == 'workflow_dispatch' && inputs.force &&
         !inputs.refresh_version_pr))
     runs-on: ubuntu-latest
+    # ⛔ A timeout here cancels mid-`changeset publish`, the half-published state the
+    # concurrency note below exists to prevent, so this bound is set from the steps' own
+    # ceilings, not from the one reading: 18.1.0's job (run 40078805767) took 32.6 min,
+    # the publish step 15.5 of it. Ceilings: build + Console build about 15 min cold,
+    # `release-verify-npm.mjs` up to 35 min after `changeset publish`, the dist-tags
+    # step's own 15 min; about 80 min in all, plus half again. The approval wait at the
+    # `release` environment is not job time.
+    timeout-minutes: 120
     # One publish at a time per ref, and never cancelled — a run cancelled
     # mid-`changeset publish` is the state that leaves a fixed group half on npm.
     #
