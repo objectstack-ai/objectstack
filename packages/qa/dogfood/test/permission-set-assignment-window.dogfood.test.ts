@@ -176,6 +176,17 @@ describe('a permission-set assignment grants only inside its validity window (AD
     const body = (await res.json()) as any;
     expect([res.status, body?.code]).toEqual([400, 'VALIDATION_FAILED']);
     expect((body?.fields ?? []).map((f: any) => [f.field, f.code])).toEqual([['valid_until', 'rule_violation']]);
+    // [#26571] access-security.grant-table-write-contract acceptance[2]: the
+    // rule's VIOLATION, in its authored words — never the unevaluable branch,
+    // which also answers 400 but attaches `constraint.reason: 'unevaluable'`.
+    expect(String(body.fields[0].message)).toMatch(/^Valid Until must be later than Valid From/);
+    expect(body.fields[0].constraint?.reason, 'a plain violation, not an unevaluable predicate').not.toBe('unevaluable');
     expect(await ql.find(GRANTS, { where: { user_id: uid.bare }, context: SYS })).toEqual([]);
+
+    // The control: the same door takes a window whose end IS after its start.
+    const ok = await stack.apiAs(adminTok, 'POST', `/data/${GRANTS}`, {
+      user_id: uid.bare, permission_set: SET, valid_from: iso(at), valid_until: iso(at + HOUR),
+    });
+    expect(ok.status, await ok.clone().text()).toBe(201);
   });
 });
